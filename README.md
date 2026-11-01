@@ -31,6 +31,11 @@ python tools/package.py leva         # ../Releases/leva-<version>.zip, ready for
 - `tools/deploy.py`, `tools/package.py`, `tools/inigen.py`: above.
 - `tools/hotreload/`: an experimental hot-reload host (a fixed "socket" mod that reloads a mod's logic DLL while the game runs). Untested in game.
 
+## Docs and probes
+
+- [`docs/`](docs/README.md): research notes (game addresses, damage events, arcs, explosions, HellForge's rules for mods, AI modding, teleporting, the IAS stutter) and design notes.
+- [`probes/`](probes/README.md): research code kept for what it found, such as the Warp Probe mod that traced the Warp Pack's teleport.
+
 ## Credits
 
 Hit, entity, scene-graph and raycast research from **Helldiver Survival Rework** by enochlophobianumerophobia (MIT) and **HD2Runtime** by SkyeShade; settings rows through **Mod Options Menu** by CowboyBingus. Each mod that uses it carries `THIRD_PARTY_NOTICES.md` and the MIT licence text.

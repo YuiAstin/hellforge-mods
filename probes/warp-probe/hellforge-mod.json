@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.warp-probe",
+  "name": "Warp Probe (research)",
+  "version": "0.1.0",
+  "description": "Research only, no gameplay effect: logs how the game moves a Helldiver when the LIFT-182 Warp Pack warps, for Lenna's teleport. Addresses from HD2Runtime by SkyeShade's research and ConsistentVaulting. Turn off when done.",
+  "gameplay": false,
+  "code": {
+    "dll": "warp_probe.dll",
+    "sdk": 13
+  }
+}
