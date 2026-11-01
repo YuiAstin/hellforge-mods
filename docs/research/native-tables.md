@@ -57,6 +57,23 @@ They also re-set their projectiles' impact explosion at mission start and on eac
 - arc list: at `0x37C5F90`, 17 slots, 20 sites, **no bound found**; her arc 17 (a copy of the burst's arc 15) fires and deals its own damage type (0 at `rs_damage` 0). The game evidently does not bound-check arc types on this path.
 - the GL-52 burst's blast deals damage 366; its arc 15 deals damage 201.
 
+**But her own arc misbehaves (0.5.2 → off in 0.5.3).** With arc 17 live, the lockdown's lightning ran to and from the player, as the G-31 Arc grenade's arcs did. With `native_arc = 0` (arc 15 kept, its hits cut as they land) it stops. So the arc system keeps more per-type data than the pointer list, and arc 17 reads past it. Not found yet.
+
+What the 20 arc-list sites are (code dumped by Leva 0.5.3, decoded with capstone):
+
+| Sites | RVA | What |
+|---|---|---|
+| 0 | `0x80DC04` | `lea r9, [list]; mov r9, [r9 + type*8]` (type 0: a default row) |
+| 1 | `0x11B3C43` | `mov r9, [slot 0]` |
+| 2–9 | `0x11D7B48`–`0x129C37E` | **the loader's clears**: `cmp [slot 1], 0`, then `movups [slot 0..15], xmm0` (16-byte stores) and `mov [slot 16], rax`. Only the `mov`/`cmp`/`lea` forms are re-pointed; the `movups` stores are not REX.W `8b/89/8d`, so the method neither re-points nor refuses them (their displacement is rip-relative, so the raw-address check misses them too). After a data reload the game would clear the old list's slots 0–15 and the new list's slot 16. The explosion list may have the same pattern; More Plasma Stratagems carries the same blind spot. |
+| 6 | `0x11D7D6E` | the getter: `test ecx, ecx; jne; lea rax, [default]; ret; lea rcx, [list]; mov rax, [rcx + type*8]; ret` |
+| 10, 11 | `0x13B46CF`, `0x13B4BEF` | per arc instance: its type at `[instance + slot*4 + 0x15130]`, then the row's `+0x38` |
+| 12–14 | `0x13B4F29`–`0x13B55F5` | the arc update loop: 0x100 instances, 0x118 bytes each; also reads globals at `[manager] + 0x799AB58` and `+0x793A600` (**the likeliest place for per-type data**) |
+| 15 | `0x13C10C0` | an explosion's arc (`[explosion + 0x78]`) → its row copied whole |
+| 16–19 | `0x176A629`, `0x176D1A0` | explosion → arc (`+0x78`) → its damage (`+0x24`) → the damage row through HellForge's moved damage list (`+0x9192000`) |
+
+The list is 17 slots (0–16): the loader clears exactly that. Next step would be dumping the whole update loop (`0x13B4EE0`–`0x13B5700`) to find what else it indexes by arc type.
+
 ## Other patterns worth reusing from More Plasma Stratagems
 
 - **Typed field writes:** `hf_set(mod, id, ProjectileSettings, velocity, HF_F32(…))`, `HF_FIELD(Bombardment, scatter)`, the `HfDamageInfo` struct (armour penetration ×4, demolition, stagger, push, status slots) instead of raw offsets.

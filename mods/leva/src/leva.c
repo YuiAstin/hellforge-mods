@@ -42,7 +42,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.5.2"
+#define VERSION "0.5.3"
 #define BUILD "25480438"
 #define AVATAR UINT64_C(0x4D1C334D294DFA97)
 #define NODE_HEAD 90u
@@ -58,7 +58,7 @@ static uintptr_t game, exe;
 #define KM_ALT 4
 typedef struct Key { int vk, mods; char label[24]; } Key;
 static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
-static int s_nativeRows = 1;
+static int s_nativeRows = 1, s_nativeArc = 0;
 static int s_arcMode = 1, s_arcShell = 222, s_arcRow = 157, s_rsColumns = 7, s_rsRows = 3, s_ultArcsMax = 24, s_fsMax = 2, s_codeMax = 4, s_steady = 0;
 static int s_rsArcs = 2;
 static float s_rsCd = 14, s_rsDistance = 12, s_rsWidth = 18, s_rsDepth = 6, s_rsParalysis = 4, s_rsSweep = 0.05f, s_rsSeconds = 10, s_rsPulse = 0.5f, s_rsDamage = 0.067f, s_rsHold = 1.0f;
@@ -85,7 +85,7 @@ static void Setting(const char* key, double v)
 #define F(name, var, lo, hi) else if (!strcmp(key, name)) var = (float)CL(v, lo, hi)
 #define I(name, var, lo, hi) else if (!strcmp(key, name)) var = (int)CL(v, lo, hi)
     if (0) {}
-    I("arc_mode", s_arcMode, 0, 3); F("arc_rate", s_arcRate, 1, 100); F("arc_reach", s_arcReach, 1, 30); F("arc_burst", s_arcBurst, 0, 100); I("arc_chain", s_arcChain, -1, 8); I("arc_shape", s_arcStyle, 0, 2); F("arc_range", s_arcRange, 0, 100); F("aim_smooth", s_aimSmooth, 0, 2); I("arc_grenade", s_arcGrenade, 0, 1); I("arc_split", s_arcSplit, -1, 8); I("arc_empty", s_arcEmpty, 0, 1); I("arc_shell", s_arcShell, 0, 100000); I("arc_explosion", s_arcRow, 0, 100000); I("steady", s_steady, 0, 1); I("native_rows", s_nativeRows, 0, 1);
+    I("arc_mode", s_arcMode, 0, 3); F("arc_rate", s_arcRate, 1, 100); F("arc_reach", s_arcReach, 1, 30); F("arc_burst", s_arcBurst, 0, 100); I("arc_chain", s_arcChain, -1, 8); I("arc_shape", s_arcStyle, 0, 2); F("arc_range", s_arcRange, 0, 100); F("aim_smooth", s_aimSmooth, 0, 2); I("arc_grenade", s_arcGrenade, 0, 1); I("arc_split", s_arcSplit, -1, 8); I("arc_empty", s_arcEmpty, 0, 1); I("arc_shell", s_arcShell, 0, 100000); I("arc_explosion", s_arcRow, 0, 100000); I("steady", s_steady, 0, 1); I("native_rows", s_nativeRows, 0, 1); I("native_arc", s_nativeArc, 0, 1);
     F("rs_cooldown", s_rsCd, 0, 600); F("rs_distance", s_rsDistance, 2, 60); F("rs_width", s_rsWidth, 2, 60); F("rs_depth", s_rsDepth, 0, 30);
     I("rs_columns", s_rsColumns, 1, 15); I("rs_rows", s_rsRows, 1, 5); F("rs_paralysis", s_rsParalysis, 0, 30); F("rs_sweep", s_rsSweep, 0, 0.5);
     F("rs_seconds", s_rsSeconds, 0, 60); F("rs_pulse", s_rsPulse, 0.1, 5); F("rs_damage", s_rsDamage, 0, 5); F("rs_hold", s_rsHold, 0, 5); I("rs_arcs", s_rsArcs, 0, 20);
@@ -189,7 +189,8 @@ static void LoadSettings(void)
                        "arc_mode = %d\narc_shell = %d\narc_explosion = %d\nsteady = %d\n"
                        "; native_rows 1: the lockdown bursts as an explosion and arc of her own (copies of the GL-52 burst's, added to the\n"
                        "; game's lists), so rs_damage sets its damage in the game's data; 0: the GL-52 burst, its damage cut as it lands.\n"
-                       "native_rows = %d\n"
+                       "; native_arc 1: its arc too (off: in testing the lightning then ran to and from her; the arc's hits are cut as they land).\n"
+                       "native_rows = %d\nnative_arc = %d\n"
                        "; Too many arcs at once leave their lightning on the field for good: at most arc_rate arcs a second. Points with an\n"
                        "; enemy within arc_reach m come first (the rest of them wait their turn); with arc_empty = 1 the empty points get\n"
                        "; what the rate leaves over (showing her reach), else none (their charge, paralysis and Voltage still apply).\n"
@@ -228,7 +229,7 @@ static void LoadSettings(void)
                        "; If her stamina ever runs out, hellbomb_on_exhaustion (1) sets off hellbomb_explosion (125: the B-100 Portable\n"
                        "; Hellbomb's) on her, once the bar has stayed empty hellbomb_hold s (it flickers to 0 at times).\n"
                        "hellbomb_on_exhaustion = %d\nhellbomb_explosion = %d\nhellbomb_hold = %g\n",
-                VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_aimSmooth, s_arcGrenade, s_arcMode, s_arcShell, s_arcRow, s_steady, s_nativeRows, (double)s_arcRate, (double)s_arcReach, s_arcEmpty, (double)s_arcBurst, s_arcStyle, (double)s_arcRange, s_arcChain, s_arcSplit,
+                VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_aimSmooth, s_arcGrenade, s_arcMode, s_arcShell, s_arcRow, s_steady, s_nativeRows, s_nativeArc, (double)s_arcRate, (double)s_arcReach, s_arcEmpty, (double)s_arcBurst, s_arcStyle, (double)s_arcRange, s_arcChain, s_arcSplit,
                 (double)s_rsCd, (double)s_rsDistance, (double)s_rsWidth, (double)s_rsDepth, s_rsColumns, s_rsRows, (double)s_rsParalysis, (double)s_rsSweep,
                 (double)s_rsSeconds, (double)s_rsPulse, (double)s_rsDamage, (double)s_rsHold, s_rsArcs,
                 (double)s_odCd, (double)s_odSeconds, (double)s_odStep, (double)s_odCharged,
@@ -941,9 +942,24 @@ static int NtInstall(void)
     if (ok && (!reader1 || !bound1 || !g_ntExp.refs)) ok = NtFail("the explosion list's reader was not among the sites found", NT_EXP_READER);
     if (arcs && !g_ntArc.refs) { arcs = 0; arcWhy = "no instruction addresses the arc list"; }
     if (!ok) { VirtualFree(block, 0, MEM_RELEASE); g_ntExp.block = g_ntArc.block = NULL; return 0; }
-    /* her rows: the arc first (her explosion names it), then the explosion */
+    /* for research: the game's code around each arc-list site, once (to find other lists the arc code indexes by type) */
+    static int dumped;
+    if (arcs && !dumped++)
+        for (unsigned i = 0; i < g_ntArc.npatch; i++)
+        {
+            uint8_t code[112];
+            char hex[2 * sizeof code + 1];
+            uintptr_t from = g_ntArc.patch[i].at - 64;
+            if (!NtRead(from, code, sizeof code)) continue;
+            for (unsigned k = 0; k < sizeof code; k++) snprintf(hex + 2 * k, 3, "%02x", code[k]);
+            Log("arc site %u at +0x%llx (code from +0x%llx): %s", i, (unsigned long long)(g_ntArc.patch[i].at - g_ntBase),
+                (unsigned long long)(from - g_ntBase), hex);
+        }
+    /* her rows: the arc first (her explosion names it), then the explosion; her own arc only with native_arc 1 (it
+     * misbehaved in game: lightning ran to and from her, so the game keeps more per-arc data than the list extended) */
     g_ntArcId = 0;
-    if (arcs)
+    if (arcs && !s_nativeArc) arcWhy = "native_arc is 0 (her own arc misbehaves: see leva.ini)";
+    if (arcs && s_nativeArc)
     {
         g_ntArcId = g_ntArc.native;
         memcpy(g_ntArcRow, &g_ntArcId, 4);
