@@ -42,7 +42,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.5.0"
+#define VERSION "0.5.2"
 #define BUILD "25480438"
 #define AVATAR UINT64_C(0x4D1C334D294DFA97)
 #define NODE_HEAD 90u
@@ -540,7 +540,7 @@ static void Own(const float at[3], uint32_t tag)
  * (read from a copy of the shell's row once the projectile rows are ready) */
 static uint32_t g_shellCopy, g_bolt, g_glBurst, g_boltDamage, g_fieldBolt;
 static int g_ntState;   /* her own lockdown explosion: 1 live (parts_native) */
-static uint32_t g_ntExpId;
+static uint32_t g_ntExpId, g_ntArcId;
 static int Fire(int mode, const float at[3], uint32_t tag)
 {
     float from[3] = {at[0], at[1], at[2] + 3.0f}, down[3] = {0, 0, -1};
@@ -605,7 +605,7 @@ static NtList g_ntExp = {"explosion", NT_EXP_TABLE, NT_EXP_NATIVE, NT_EXP_NATIVE
 static NtList g_ntArc = {"arc", 0, 0, 0, 0};
 static uint8_t g_ntExpRow[152] __attribute__((aligned(16)));
 static uint8_t g_ntArcRow[104] __attribute__((aligned(16)));
-static uint32_t g_ntArcId, g_ntBaseArc;            /* her explosion, her arc (0: none), the burst's own arc */
+static uint32_t g_ntBaseArc;            /* her explosion, her arc (0: none), the burst's own arc */
 static uint32_t g_ntBlastDamage, g_ntArcDamage;               /* her damage types (add_damage) */
 static uint8_t g_ntBlastVanilla[76], g_ntArcVanilla[76];      /* the burst's and its arc's damage rows as the game has them */
 static double g_ntNext, g_ntApplied = -1;
@@ -770,31 +770,52 @@ static int NtApply(NtList* L)
     return NtFail("a site could not be written (all put back)", L->patch[done].at - g_ntBase);
 }
 
-/* The ArcType list: a run of row pointers whose rows carry their own index at +0 and lie 104 bytes apart, in the data
- * beside the other settings lists; exactly one such run, or none is used */
-static int NtFindArcs(void)
+/* The ArcType list: an array of row pointers whose row n carries n at +0, found by the ARC-3's arc (row 7: velocity 300,
+ * range 55) at slot 7. Searched beside the other settings lists first, then through the whole data section. Gaps
+ * (empty slots) are allowed; its rows need not lie in order in memory. */
+static int NtArcsIn(uint32_t from, uint32_t to, uint32_t need, uint32_t* found, uint32_t* slots, unsigned* seen)
 {
-    enum { FROM = 0x37C0000u, TO = 0x37D7000u };
-    static uintptr_t q[(TO - FROM) / 8];
-    if (!NtRead(g_ntBase + FROM, q, sizeof q)) return NtFail("the settings lists cannot be read", FROM);
-    uint32_t found = 0, slots = 0;
-    for (uint32_t i = 0; i + 4 < (TO - FROM) / 8; i++)
+    enum { CHUNK = 65536 };
+    static uintptr_t q[CHUNK / 8 + 72];
+    for (uint32_t at = from; at < to; at += CHUNK)
     {
-        if (!AddressOk(q[i + 1], 104) || q[i + 2] - q[i + 1] != 104 || q[i + 3] - q[i + 2] != 104) continue;
-        uint32_t n = 1;
-        for (; i + n < (TO - FROM) / 8; n++)
+        uint32_t n = to - at < CHUNK + 72 * 8 ? to - at : CHUNK + 72 * 8;
+        if (!NtRead(g_ntBase + at, q, n)) continue;
+        uint32_t words = n / 8;
+        for (uint32_t i = 0; i < CHUNK / 8 && i + 64 < words; i++)
         {
-            uint32_t id;
-            if (!AddressOk(q[i + n], 104) || !NtRead(q[i + n], &id, 4) || id != n) break;
-            if (n > 1 && q[i + n] - q[i + n - 1] != 104) break;
+            uintptr_t p = q[i + 7];
+            if (!AddressOk(p, 104)) continue;
+            uint32_t head[3];
+            if (!NtRead(p, head, 12) || head[0] != 7) continue;
+            float vel, range;
+            memcpy(&vel, &head[1], 4); memcpy(&range, &head[2], 4);
+            if (vel != 300.0f || range != 55.0f) continue;
+            (*seen)++;
+            uint32_t last = 0, matched = 0, gaps = 0;
+            for (uint32_t k = 1; k < 64; k++)
+            {
+                uint32_t id;
+                if (!q[i + k]) { if (++gaps > 4) break; continue; }
+                if (!AddressOk(q[i + k], 104) || !NtRead(q[i + k], &id, 4) || id != k) break;
+                last = k; matched++;
+            }
+            if (matched < 8 || last < need) continue;
+            uint32_t rva = at + i * 8;
+            if (*found && *found != rva) return NtFail("more than one list looks like the arcs'", rva);
+            *found = rva;
+            *slots = last + 1;
         }
-        if (n < 8) continue;
-        if (found) return NtFail("more than one list looks like the arcs'", FROM + i * 8);
-        found = FROM + i * 8;
-        slots = n;
-        i += n;
     }
-    if (!found) return NtFail("the arc list was not found", 0);
+    return 1;
+}
+static int NtFindArcs(uint32_t need)
+{
+    uint32_t found = 0, slots = 0;
+    unsigned seen = 0;
+    if (!NtArcsIn(0x3700000u, 0x37D7000u, need, &found, &slots, &seen)) return 0;
+    if (!found && !NtArcsIn(0x263C000u, 0x3700000u, need, &found, &slots, &seen)) return 0;
+    if (!found) return NtFail(seen ? "the ARC-3's arc row was seen, but in no list that holds the burst's arc" : "the arc list was not found", seen);
     g_ntArc.rva = found;
     g_ntArc.native = slots;
     g_ntArc.count = slots + 1;
@@ -859,7 +880,7 @@ static int NtInstall(void)
     memcpy(&arcType, g_ntExpRow + 120, 4);
     if (!NtDamageRow(blastDamage, g_ntBlastVanilla)) return NtFail("the burst's damage row cannot be read", blastDamage);
     /* the arc list (optional: without it her explosion keeps the burst's arc and its damage) */
-    int arcs = NtFindArcs();
+    int arcs = NtFindArcs(arcType);
     uintptr_t arcRow = 0;
     if (arcs && (arcType == 0 || arcType >= g_ntArc.native || !NtRead(g_ntBase + g_ntArc.rva + 8u * arcType, &arcRow, 8) ||
                  !NtRead(arcRow, g_ntArcRow, 104)))
@@ -1576,7 +1597,7 @@ static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
     /* an arc jumps on from its first target (chain and split), so a hit can land 20-30 m from the burst that started it:
      * an electric hit within 35 m of one of her bursts in the last 1.5 s is hers (the nearest burst names its skill); a
      * plain blast counts only right at a lockdown point */
-    int arc = 0;
+    int arc = 0, fromWise = 0;
     /* the burst's blast is element 3; its arcs land as projectile hits of element 2 (the probe in 0.3.10 showed it) */
     int electric = d->element == 3 || (d->element == 2 && (d->kind == 0 || d->kind == 1 || d->kind == 3 || d->kind == 4));
     if (electric && d->kind != 2) arc = NearOwnTag(d->position, 1.5, 35, &tag);
@@ -1584,7 +1605,7 @@ static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
     /* a Wise Support arc inside a lockdown: only its first strike (on the enemy it was sent at) is its own; the chain
      * hits around it there are the lockdown's (both are the same lightning, so a lockdown point close by takes them) */
     if (arc && tag == TAG_WISE && !NearOwnTagOnly(d->position, 0.2, 2.5f, TAG_WISE) && NearOwnTagOnly(d->position, 1.0, 12, TAG_FIELD))
-    { tag = TAG_FIELD; g_wiseToField++; }
+    { tag = TAG_FIELD; g_wiseToField++; fromWise = 1; }
     else if (d->kind == 4) { uint32_t t2 = TAG_ARC; if (NearOwnTag(d->position, 1.0, 4, &t2) && t2 == TAG_FIELD) { arc = 1; tag = t2; } }
     /* Voltage: an enemy in a zone takes explosive damage, the zone bursts (next frame); the lockdown's own light arcs
      * leave its zones alone */
@@ -1617,7 +1638,9 @@ static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
         g_lastAt = g_now;
     }
     if (!arc && !shot) return;
-    if (arc && tag == TAG_FIELD && g_ntState == 1)   /* her own lockdown burst: its damage is already rs_damage of it */
+    /* her own lockdown burst: its blast is already rs_damage of the burst's, and its arcs too once they are her own arc
+     * (her arcs land as element-2 projectile hits; without her own arc row they are the burst's, cut below) */
+    if (arc && tag == TAG_FIELD && g_ntState == 1 && (g_ntArcId || d->kind == 4) && !fromWise)
     {
         g_tagDamage[TAG_FIELD] += d->amount;
         g_fieldHits++;

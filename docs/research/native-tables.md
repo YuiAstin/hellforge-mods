@@ -13,7 +13,7 @@ Each settings type has a list of 8-byte pointers in `game.dll`'s data, indexed b
 | Projectile | `0x37C7670` | 351 | 272 | HellForge `projectiles.c` (moved for `add_projectile`) |
 | Stratagem | `0x37CB600` | 150 | 400 | HellForge `stratagems.c` |
 | Explosion | `0x37CC920` | 423 | 152 | HD2Runtime `research_event_actions`; More Plasma Stratagems |
-| Arc | found at run time | ~16 | 104 | Leva 0.5.0 (a run of row pointers 104 bytes apart, each row's `+0` its index) |
+| Arc | `0x37C5F90` | 17 | 104 | Leva 0.5.1 (found at run time: the list holding the ARC-3's arc, row 7 with velocity 300 and range 55, at slot 7; the rows are **not** 104 bytes apart in memory) |
 
 Links between them (HD2Runtime's `attack-outputs.md` and `player_weapon_writes.lua`):
 
@@ -50,9 +50,12 @@ They also re-set their projectiles' impact explosion at mission start and on eac
 - **Arc:** a copy of the burst's arc under the arc list's next id, dealing `yui/leva/lockdown_arc_damage` (`+36`).
 - **Damage:** both damage types are copies of the vanilla rows (read through the damage list as HellForge has moved it: the displacement at its first site, `0x694E4E + 4`) with standard and durable damage scaled by `rs_damage`, armour penetration and statuses kept. They are rewritten when `rs_damage` changes and at each mission start.
 - **Firing:** the lockdown fires its own carrier bullet (`yui/leva/lockdown_bullet`, a Liberator copy with zero damage) whose impact explosion is 423. `HF_ON_EXPLOSION` with type 423 marks exactly where each lockdown burst lands.
-- **Arc extension is optional:** if the arc list is not found or cannot be extended, explosion 423 keeps the burst's own arc (full arc damage) and the log says why. If the explosion list cannot be extended, the lockdown falls back to the GL-52 burst with its damage cut as it lands (0.4.x behaviour). `native_rows = 0` in `leva.ini` turns it off.
+- **Arc extension is optional:** if the arc list is not found or cannot be extended, explosion 423 keeps the burst's own arc and Leva cuts those arc hits as they land (0.5.1), and the log says why. If the explosion list cannot be extended, the lockdown falls back to the GL-52 burst with its damage cut as it lands (0.4.x behaviour). `native_rows = 0` in `leva.ini` turns it off.
 
-**Untested in game when written.** The arc list's bound check, if the game has one, was not seen: the scan raises `cmp …, <slots>` (imm8 or imm32) within 128 bytes before an arc site, and logs how many it found.
+**Tested in game (Leva 0.5.1/0.5.2, 2026-11-01):**
+- explosion list: 47 sites and 36 bounds re-pointed; explosion 423 fires from the lockdown's bullet and its blast deals the scaled damage
+- arc list: at `0x37C5F90`, 17 slots, 20 sites, **no bound found**; her arc 17 (a copy of the burst's arc 15) fires and deals its own damage type (0 at `rs_damage` 0). The game evidently does not bound-check arc types on this path.
+- the GL-52 burst's blast deals damage 366; its arc 15 deals damage 201.
 
 ## Other patterns worth reusing from More Plasma Stratagems
 
