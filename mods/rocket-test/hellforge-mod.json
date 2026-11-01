@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "id": "yui.rocket-test",
+  "name": "Rocket Sentry Test (Veterancy research)",
+  "version": "0.3.2",
+  "description": "Test build, not for release: logs the P-33 Missile Pistol's and A/MLS-4X Rocket Sentry's weapon fields and gives the Rocket Sentry's rocket the P-33's warhead (settings in rocket-test.ini), so Veterancy System's Rocket Sentry levels can be planned. Solo or host.",
+  "gameplay": true,
+  "code": { "dll": "rocket_test.dll", "sdk": 11 }
+}

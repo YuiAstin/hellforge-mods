@@ -1,6 +1,6 @@
 /* Veterancy System (yui.field-promotions): gear that levels up during one mission and resets at its end.
  *
- * v0.1: the A/M-12 Mortar Sentry only.
+ * The A/M-12 Mortar Sentry:
  *   Level 1  vanilla.
  *   Level 2  (after `level2_kills` mortar kills this mission) each salvo opens with an EMS shell and gets a 4th shell.
  *   Level 3  (after `level3_kills`) when a salvo's last shell lands, a square pattern centred on it follows: its 4
@@ -19,8 +19,11 @@
  * Everything the mod sees and does is written to its log, so the first sessions show which way it went.
  *
  * Gas armaments (gas_doctrine.c): at level 3 enemies confused by gas take and deal more damage.
+ * The Gatling, Machine Gun, Laser and Rocket Sentries (gatling.c, mg_sentry.c, laser_sentry.c, rocket_sentry.c) and the
+ * M-1000 Maxigun (maxigun.c) level from their own kills.
  *
- * Settings: field-promotions.ini in this folder (written with the defaults on first start). */
+ * Settings: field-promotions.ini in the mod folder, read at game start. HellForge holds mod folders read-only while the game
+ * runs, so the mod never writes it: the release ships it with the defaults, made from fp_write_defaults by tools/inigen.py. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +32,8 @@
 #include "hellforge_mod.h"
 #include "hellforge_content.h"
 #include "field_promotions.h"
+
+#define VERSION "0.19.0"
 
 #define MORTAR_SENTRY HF_ENTITY_AM12_MORTAR_SENTRY
 #define MORTAR_SHELL HF_PROJECTILE_AM12_MORTAR_SENTRY
@@ -41,7 +46,8 @@
 static HfMod* g_mod;
 static const HfApi* g_hf;
 
-/* settings */
+/* settings: the defaults (field-promotions.ini changes them) */
+/* inigen:begin */
 static int g_level2Kills = 30, g_level3Kills = 125, g_forceLevel = 0, g_ems = 1, g_extra = 1;
 static float g_height = 40.0f, g_extraDelay = 0.6f, g_emsSpeed = 2.0f;
 static float g_half = 8.0f, g_step = 1.0f, g_l3FireRate = 1.0f;
@@ -59,17 +65,19 @@ static float g_gatL3Rpm = 0;
 static float g_gatRamp = 0.04f, g_gatRampMax = 1.0f, g_gatHe = 0, g_gatHeRate = 8;
 static int g_gatSelfImmune = 1;
 static float g_gmStackSeconds = 0.7f, g_gmPopDamage = 60, g_gmPopRadius = 2, g_gmPopRadiusStep = 0.6f;
-
-/* state for one mission */
-static double g_clock;                          /* seconds of game updates since the mod started */
-static int g_inMission, g_kills, g_level = 1;
 static int g_hudToasts = 1;  /* level-up banners for the HUD addon */
 static int g_hudBadges = 1;  /* rank badges on the stratagem list (the HUD addon) */
+static float g_hudSeconds = 5;  /* seconds a banner stays (a Maxigun's 2 more) */
 static float g_safeRadius = 12;  /* no bonus shell this near one of your sentries */
 static int g_mgL2 = 30, g_mgL3 = 180, g_mgFriendly = 1;
 static int g_mgHits = 40, g_mgMinHit = 0;
 static float g_mgRecharge = 1.5f;
-static float g_mgTaken = 0.5f, g_mgShield = 600, g_mgRegen = 150, g_mgDelay = 4, g_mgLife = 1.5f;
+static float g_mgTaken = 0.5f, g_mgDelay = 4, g_mgLife = 1.5f;
+/* inigen:end */
+
+/* state for one mission */
+static double g_clock;                          /* seconds of game updates since the mod started */
+static int g_inMission, g_kills, g_level = 1;
 typedef struct Guarded { float p[3]; double until; } Guarded;  /* your sentries' beacons */
 static Guarded g_guarded[12];
 static unsigned g_skipped;
@@ -91,12 +99,14 @@ static int g_logged;                            /* stat sources logged (diagnost
 
 /* ---- settings file ----------------------------------------------------------------------------------------- */
 static void IniPath(char* out, size_t n) { snprintf(out, n, "%s\\field-promotions.ini", g_hf->mod_folder(g_mod)); }
+/* The settings file, opened by its UTF-8 path as Windows reads it (plain fopen reads the path in the ANSI code page). */
 static FILE* OpenUtf8(const char* path, const wchar_t* mode)
 {
     wchar_t wide[MAX_PATH * 2];
     if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wide, (int)(sizeof wide / sizeof wide[0]))) return NULL;
     return _wfopen(wide, mode);
 }
+/* inigen:begin */
 #define IMMUNE_HELP "; Extra enemies gas never confuses (no level 3 boost), as hex resources split by commas. Built in: Bile Titans, Factory and\n" \
     "; War Striders, tanks, Harvesters. The log lists each mission's gassed enemy types with their resources at its end.\n"
 #define GM_HELP "; Gas Mortar Sentry level 2: 1 it takes no damage while it stands in gas; its magazine gains a round per this many\n" \
@@ -122,40 +132,74 @@ static FILE* OpenUtf8(const char* path, const wchar_t* mode)
     "; gm_pop_radius + gm_pop_radius_step per stack metres (gm_pop_explosion: the ExplosionSettings row it borrows).\n" \
     "gm_stack_seconds = %g\ngm_stack_cap = %d\ngm_pop_damage = %g\ngm_pop_radius = %g\ngm_pop_radius_step = %g\ngm_pop_explosion = %d\n" \
     STEP_HELP
+/* Every setting with its default, as field-promotions.ini ships. Never called by the mod (its folder is read-only in a
+ * session): tools/inigen.py builds this, with the settings above and ls_write_defaults, to write the release's .ini. */
+void fp_write_defaults(FILE* f)
+{
+    fprintf(f, "; Veterancy System %s settings, read at game start. Edit them with the game closed: HellForge holds the mod\n"
+               "; folder read-only while it runs. A setting left out keeps its default.\n\n", VERSION);
+    fprintf(f, "; Mortar kills this mission for level 2 and level 3.\nlevel2_kills = %d\nlevel3_kills = %d\n"
+               "; 0: earn levels; 1, 2 or 3: always this level (for testing).\nforce_level = %d\n"
+               "; Level 2: the EMS opener (1 on, 0 off) and its speed (times the EMS shell's).\nems_opener = %d\nems_speed = %g\n"
+               "; Level 2: the 4th shell: 2 the sentry fires it (a 4-round salvo, from its next call-in), 1 dropped in by the mod, 0 off; and the dropped one's delay.\nextra_round = %d\nextra_delay = %g\n"
+               "; Metres above the aim point the bonus rounds start from.\ndrop_height = %g\n"
+               "; Level 3: the pattern's half size (metres from the centre to a side) and the seconds between corners and edges.\npattern_half = %g\npattern_step = %g\n"
+               "; Level 3: the sentry's fire rate, times its own (1: unchanged, the default; below 1 slows its salvos, but a sentry called in\n"
+               "; that way fires a late shell into its own barrel and destroys itself).\nl3_fire_rate = %g\n"
+               "; No bonus shell (EMS opener, dropped 4th round, pattern) falls within this many metres of one of your\n"
+               "; sentries, and a shell going off there is not taken as the salvo's impact (0: off).\nsafe_radius = %g\n",
+        g_level2Kills, g_level3Kills, g_forceLevel, g_ems, (double)g_emsSpeed, g_extra, (double)g_extraDelay, (double)g_height,
+        (double)g_half, (double)g_step, (double)g_l3FireRate, (double)g_safeRadius);
+    fprintf(f, "\n; The gas doctrine: kills by every gas armament together, for its level 2 and level 3.\ngas_level2_kills = %d\ngas_level3_kills = %d\n"
+               "; Gas doctrine level 2: the gas stratagems' cooldowns, times their own.\ngas_cooldown_mult = %g\n"
+               "; Gas doctrine level 3: confused enemies take and deal more damage. Confusion lasts this long after the last gas hit.\n"
+               "gas_taken_mult = %g\ngas_dealt_mult = %g\nconfusion_seconds = %g\n"
+               "; 1: confused enemies also deal more to Helldivers; 0: only to other enemies.\ngas_dealt_vs_players = %d\n"
+               "; The gas damage element: -1 learns it from the first gas armament hit.\ngas_element = %d\n"
+               IMMUNE_HELP "gas_immune = \n",
+        g_gasLevel2, g_gasLevel3, (double)g_gasCooldown, (double)g_gasTaken, (double)g_gasDealt, (double)g_confusion, g_gasVsPlayers, g_gasElement);
+    fprintf(f, "\n; Gas Mortar Sentry (and each other gas armament): its own kills this mission for level 2 and level 3 (gas\n"
+               "; kills are slower than the Mortar Sentry's).\ngm_level2_kills = %d\ngm_level3_kills = %d\n" GM_HELP STACK_HELP,
+        g_gmL2, g_gmL3, g_gmShield, (double)g_gmAmmoSeconds, (double)g_cloudRadius, (double)g_cloudSeconds,
+        (double)g_gmStackSeconds, g_gmStackCap, (double)g_gmPopDamage, (double)g_gmPopRadius, (double)g_gmPopRadiusStep, g_gmPopRow,
+        (double)g_gmPopStep, (double)g_gmStackDecay);
+    fprintf(f, "\n" GAT_HELP MIX_HELP
+               "; Gatling Sentry level 3: 1: its own high-explosive blasts (any Gatling Sentry's) do not hurt Gatling Sentries;\n"
+               "; 0: they do.\ngat_self_immune = %d\n",
+        g_gatL2, g_gatL3, (double)g_gatRamp, (double)g_gatRampMax, g_gatAp, (double)g_gatHe, g_gatHeRow, g_gatHeEvery, (double)g_gatL3Rpm,
+        g_gatSelfImmune);
+    fprintf(f, "\n; Machine Gun Sentry: its kills this mission for level 2 and level 3.\nmg_level2_kills = %d\nmg_level3_kills = %d\n"
+               "; Level 2: damage it takes, times (0.5: half); 1: Helldivers' hits (grenades, strikes, stray fire) do nothing to it.\n"
+               "mg_damage_taken = %g\nmg_friendly_immune = %d\n"
+               "; Level 3: its shield stops this many hits, whatever they deal (a Charger's ram too), and gets one back every\n"
+               "; mg_shield_recharge seconds once mg_shield_delay seconds pass without a hit. Hits under mg_shield_min_hit damage\n"
+               "; pass the shield (halved as at level 2) and do not use it (0: every hit uses it).\n"
+               "mg_shield_hits = %d\nmg_shield_recharge = %g\nmg_shield_delay = %g\nmg_shield_min_hit = %d\n"
+               "; Level 3: its lifetime, times its own (from its next call-in).\nmg_lifetime_mult = %g\n",
+        g_mgL2, g_mgL3, (double)g_mgTaken, g_mgFriendly, g_mgHits, (double)g_mgRecharge, (double)g_mgDelay, g_mgMinHit, (double)g_mgLife);
+    ls_write_defaults(f);
+    mx_write_defaults(f);
+    rs_write_defaults(f);
+    fprintf(f, "\n; 1: a banner on screen for each level earned in a mission; 0: off. Also on the MODS tab (Mod Options Menu).\n"
+               "hud_toasts = %d\n; Seconds a banner stays on screen (the Maxigun's: 2 more, for its call-in box). Also on the MODS tab.\n"
+               "hud_toast_seconds = %g\n"
+               "; 1: a rank badge (one chevron: level 2, two: level 3) on each promoted stratagem in the mission's stratagem\n"
+               "; list; 0: off. Both need the Veterancy System HUD addon, HD2Runtime and Bingus Shared Loader.\nhud_badges = %d\n",
+        g_hudToasts, (double)g_hudSeconds, g_hudBadges);
+}
+/* inigen:end */
+
 static void LoadSettings(void)
 {
     char path[MAX_PATH * 2], line[2048];
-    int sawImmune = 0, sawGm = 0, sawStack = 0, sawStep = 0, sawDecay = 0, sawGat = 0, sawMix = 0, sawHud = 0, sawSafe = 0, sawMg = 0, sawSelf = 0, sawBadges = 0, sawLs = 0, sawVent = 0, sawHits = 0, sawGmKills = 0;
     IniPath(path, sizeof path);
     FILE* f = OpenUtf8(path, L"r");
     if (!f)
     {
-        f = OpenUtf8(path, L"w");
-        if (!f) return;
-        fprintf(f, "; Veterancy System settings (read at game start).\n"
-                   "; Mortar kills this mission for level 2 and level 3.\nlevel2_kills = %d\nlevel3_kills = %d\n"
-                   "; 0: earn levels; 1, 2 or 3: always this level (for testing).\nforce_level = %d\n"
-                   "; Level 2: the EMS opener (1 on, 0 off) and its speed (times the EMS shell's).\nems_opener = %d\nems_speed = %g\n"
-                   "; Level 2: the 4th shell: 2 the sentry fires it (a 4-round salvo, from its next call-in), 1 dropped in by the mod, 0 off; and the dropped one's delay.\nextra_round = %d\nextra_delay = %g\n"
-                   "; Metres above the aim point the bonus rounds start from.\ndrop_height = %g\n"
-                   "; Level 3: the pattern's half size (metres from the centre to a side) and the seconds between corners and edges.\npattern_half = %g\npattern_step = %g\n"
-                   "; Level 3: the sentry's fire rate, times its own (1: unchanged, the default; below 1 slows its salvos, but a sentry called in\n"
-                   "; that way fires a late shell into its own barrel and destroys itself).\nl3_fire_rate = %g\n"
-                   "; The gas doctrine: kills by every gas armament together, for its level 2 and level 3.\ngas_level2_kills = %d\ngas_level3_kills = %d\n"
-                   "; Gas doctrine level 2: the gas stratagems' cooldowns, times their own.\ngas_cooldown_mult = %g\n"
-                   "; Gas doctrine level 3: confused enemies take and deal more damage. Confusion lasts this long after the last gas hit.\n"
-                   "gas_taken_mult = %g\ngas_dealt_mult = %g\nconfusion_seconds = %g\n"
-                   "; 1: confused enemies also deal more to Helldivers; 0: only to other enemies.\ngas_dealt_vs_players = %d\n"
-                   "; The gas damage element: -1 learns it from the first gas armament hit.\ngas_element = %d\n"
-                   IMMUNE_HELP "gas_immune = \n" GM_HELP STACK_HELP GAT_HELP MIX_HELP,
-            g_level2Kills, g_level3Kills, g_forceLevel, g_ems, (double)g_emsSpeed, g_extra, (double)g_extraDelay, (double)g_height, (double)g_half, (double)g_step, (double)g_l3FireRate,
-            g_gasLevel2, g_gasLevel3, (double)g_gasCooldown, (double)g_gasTaken, (double)g_gasDealt, (double)g_confusion, g_gasVsPlayers, g_gasElement, g_gmShield, (double)g_gmAmmoSeconds, (double)g_cloudRadius, (double)g_cloudSeconds,
-            (double)g_gmStackSeconds, g_gmStackCap, (double)g_gmPopDamage, (double)g_gmPopRadius, (double)g_gmPopRadiusStep, g_gmPopRow, (double)g_gmPopStep, (double)g_gmStackDecay,
-            g_gatL2, g_gatL3, (double)g_gatRamp, (double)g_gatRampMax, g_gatAp, (double)g_gatHe, g_gatHeRow,
-            g_gatHeEvery, (double)g_gatL3Rpm);
-        fclose(f);
+        g_hf->log(g_mod, "settings: no field-promotions.ini in %s (it ships with the mod), so the built-in defaults", g_hf->mod_folder(g_mod));
         return;
     }
+    g_hf->log(g_mod, "settings: read %s", path);
     while (fgets(line, sizeof line, f))
     {
         char* eq = strchr(line, '=');
@@ -178,48 +222,49 @@ static void LoadSettings(void)
         else if (!strcmp(line, "gas_dealt_mult")) g_gasDealt = (float)(v < 0.1 ? 0.1 : v > 10 ? 10 : v);
         else if (!strcmp(line, "confusion_seconds")) g_confusion = (float)(v < 0.5 ? 0.5 : v > 60 ? 60 : v);
         else if (!strcmp(line, "gas_dealt_vs_players")) g_gasVsPlayers = v != 0;
-        else if (!strcmp(line, "gm_level2_kills")) { sawGmKills = 1; g_gmL2 = v < 0 ? 0 : (int)v; }
+        else if (!strcmp(line, "gm_level2_kills")) g_gmL2 = v < 0 ? 0 : (int)v;
         else if (!strcmp(line, "gm_level3_kills")) g_gmL3 = v < 0 ? 0 : (int)v;
-        else if (!strcmp(line, "gm_shield_in_gas")) { sawGm = 1; g_gmShield = v != 0; }
+        else if (!strcmp(line, "gm_shield_in_gas")) g_gmShield = v != 0;
         else if (!strcmp(line, "gm_ammo_seconds")) g_gmAmmoSeconds = (float)(v <= 0 ? 0 : v < 0.2 ? 0.2 : v > 60 ? 60 : v);
-        else if (!strcmp(line, "gm_stack_seconds")) { sawStack = 1; g_gmStackSeconds = (float)(v < 0.1 ? 0.1 : v > 30 ? 30 : v); }
+        else if (!strcmp(line, "gm_stack_seconds")) g_gmStackSeconds = (float)(v < 0.1 ? 0.1 : v > 30 ? 30 : v);
         else if (!strcmp(line, "gm_stack_cap")) g_gmStackCap = v < 1 ? 1 : v > 100 ? 100 : (int)v;
         else if (!strcmp(line, "gm_pop_damage")) g_gmPopDamage = (float)(v < 0 ? 0 : v > 5000 ? 5000 : v);
         else if (!strcmp(line, "gm_pop_radius")) g_gmPopRadius = (float)(v < 0.5 ? 0.5 : v > 30 ? 30 : v);
         else if (!strcmp(line, "gm_pop_radius_step")) g_gmPopRadiusStep = (float)(v < 0 ? 0 : v > 10 ? 10 : v);
-        else if (!strcmp(line, "gat_level2_kills")) { sawGat = 1; g_gatL2 = v < 0 ? 0 : (int)v; }
+        else if (!strcmp(line, "gat_level2_kills")) g_gatL2 = v < 0 ? 0 : (int)v;
         else if (!strcmp(line, "gat_level3_kills")) g_gatL3 = v < 0 ? 0 : (int)v;
         else if (!strcmp(line, "gat_ramp_per_hit")) g_gatRamp = (float)(v < 0 ? 0 : v > 1 ? 1 : v);
         else if (!strcmp(line, "gat_ramp_max")) g_gatRampMax = (float)(v < 0 ? 0 : v > 10 ? 10 : v);
         else if (!strcmp(line, "gat_ap")) g_gatAp = v < 1 ? 1 : v > 10 ? 10 : (int)v;
         else if (!strcmp(line, "gat_he_damage")) g_gatHe = (float)(v < 0 ? 0 : v > 10000 ? 10000 : v);
-        else if (!strncmp(line, "ls_", 3) && ls_setting(line, v)) { sawLs = 1; if (!strcmp(line, "ls_heat_mult")) sawVent = 1; }
-        else if (!strcmp(line, "mg_level2_kills")) { sawMg = 1; g_mgL2 = v < 0 ? 0 : (int)v; }
+        else if (!strncmp(line, "ls_", 3)) ls_setting(line, v);
+        else if (!strncmp(line, "mx_", 3)) mx_setting(line, v);
+        else if (!strncmp(line, "rs_", 3)) rs_setting(line, v);
+        else if (!strcmp(line, "mg_level2_kills")) g_mgL2 = v < 0 ? 0 : (int)v;
         else if (!strcmp(line, "mg_level3_kills")) g_mgL3 = v < 0 ? 0 : (int)v;
         else if (!strcmp(line, "mg_damage_taken")) g_mgTaken = (float)(v < 0 ? 0 : v > 1 ? 1 : v);
         else if (!strcmp(line, "mg_friendly_immune")) g_mgFriendly = v != 0;
-        else if (!strcmp(line, "mg_shield")) g_mgShield = (float)(v < 0 ? 0 : v > 100000 ? 100000 : v);
-        else if (!strcmp(line, "mg_shield_regen")) g_mgRegen = (float)(v < 0 ? 0 : v > 100000 ? 100000 : v);
-        else if (!strcmp(line, "mg_shield_hits")) { sawHits = 1; g_mgHits = v < 0 ? 0 : v > 1000 ? 1000 : (int)v; }
+        else if (!strcmp(line, "mg_shield_hits")) g_mgHits = v < 0 ? 0 : v > 1000 ? 1000 : (int)v;
         else if (!strcmp(line, "mg_shield_recharge")) g_mgRecharge = (float)(v < 0.05 ? 0.05 : v > 120 ? 120 : v);
         else if (!strcmp(line, "mg_shield_min_hit")) g_mgMinHit = v < 0 ? 0 : v > 100000 ? 100000 : (int)v;
         else if (!strcmp(line, "mg_shield_delay")) g_mgDelay = (float)(v < 0 ? 0 : v > 60 ? 60 : v);
         else if (!strcmp(line, "mg_lifetime_mult")) g_mgLife = (float)(v < 0.2 ? 0.2 : v > 10 ? 10 : v);
-        else if (!strcmp(line, "safe_radius")) { sawSafe = 1; g_safeRadius = (float)(v < 0 ? 0 : v > 50 ? 50 : v); }
-        else if (!strcmp(line, "hud_toasts")) { sawHud = 1; g_hudToasts = v != 0; }
-        else if (!strcmp(line, "hud_badges")) { sawBadges = 1; g_hudBadges = v != 0; }
-        else if (!strcmp(line, "gat_he_every")) { sawMix = 1; g_gatHeEvery = v < 1 ? 1 : v > 32 ? 32 : (int)v; }
+        else if (!strcmp(line, "safe_radius")) g_safeRadius = (float)(v < 0 ? 0 : v > 50 ? 50 : v);
+        else if (!strcmp(line, "hud_toasts")) g_hudToasts = v != 0;
+        else if (!strcmp(line, "hud_badges")) g_hudBadges = v != 0;
+        else if (!strcmp(line, "hud_toast_seconds")) g_hudSeconds = (float)(v < 1 ? 1 : v > 30 ? 30 : v);
+        else if (!strcmp(line, "gat_he_every")) g_gatHeEvery = v < 1 ? 1 : v > 32 ? 32 : (int)v;
         else if (!strcmp(line, "gat_l3_rpm")) g_gatL3Rpm = (float)(v <= 0 ? 0 : v < 100 ? 100 : v > 6000 ? 6000 : v);
         else if (!strcmp(line, "gat_round_base")) g_gatRoundBase = (v == 77) ? 77 : 148;
-        else if (!strcmp(line, "gat_self_immune")) { sawSelf = 1; g_gatSelfImmune = v != 0; }
+        else if (!strcmp(line, "gat_self_immune")) g_gatSelfImmune = v != 0;
         else if (!strcmp(line, "gat_he_rate")) g_gatHeRate = (float)(v < 0.5 ? 0.5 : v > 30 ? 30 : v);
         else if (!strcmp(line, "gat_he_explosion")) g_gatHeRow = v < 0 ? 0 : (int)v;
-        else if (!strcmp(line, "gm_stack_decay")) { sawDecay = 1; g_gmStackDecay = (float)(v < 0.2 ? 0.2 : v > 60 ? 60 : v); }
-        else if (!strcmp(line, "gm_pop_step")) { sawStep = 1; g_gmPopStep = (float)(v < 0 ? 0 : v > 2 ? 2 : v); }
+        else if (!strcmp(line, "gm_stack_decay")) g_gmStackDecay = (float)(v < 0.2 ? 0.2 : v > 60 ? 60 : v);
+        else if (!strcmp(line, "gm_pop_step")) g_gmPopStep = (float)(v < 0 ? 0 : v > 2 ? 2 : v);
         else if (!strcmp(line, "gm_pop_explosion")) g_gmPopRow = v < 0 ? 0 : (int)v;
         else if (!strcmp(line, "gas_cloud_radius")) g_cloudRadius = (float)(v < 1 ? 1 : v > 40 ? 40 : v);
         else if (!strcmp(line, "gas_cloud_seconds")) g_cloudSeconds = (float)(v < 1 ? 1 : v > 60 ? 60 : v);
-        else if (!strcmp(line, "gas_immune")) { sawImmune = 1; gas_set_immune(eq + 1); }
+        else if (!strcmp(line, "gas_immune")) gas_set_immune(eq + 1);
         else if (!strcmp(line, "gas_element")) g_gasElement = v < 0 ? -1 : (int)v;
         else if (!strcmp(line, "l3_fire_rate")) g_l3FireRate = (float)(v < 0.1 ? 0.1 : v > 3 ? 3 : v);
         else if (!strcmp(line, "ems_opener")) g_ems = v != 0;
@@ -229,128 +274,66 @@ static void LoadSettings(void)
         else if (!strcmp(line, "drop_height")) g_height = (float)(v < 5 ? 5 : v > 150 ? 150 : v);
     }
     fclose(f);
-    if (!sawImmune && (f = OpenUtf8(path, L"a")) != NULL)  /* an ini from before gas_immune: add it */
-    {
-        fprintf(f, "\n" IMMUNE_HELP "gas_immune = \n");
-        fclose(f);
-    }
-    if (!sawGm && (f = OpenUtf8(path, L"a")) != NULL)  /* an ini from before the Gas Mortar levels */
-    {
-        fprintf(f, "\n" GM_HELP, g_gmShield, (double)g_gmAmmoSeconds, (double)g_cloudRadius, (double)g_cloudSeconds);
-        fclose(f);
-    }
-    if (!sawGmKills && (f = OpenUtf8(path, L"a")) != NULL)  /* the Gas Mortar's own kill counts */
-    {
-        fprintf(f, "\n; Gas Mortar Sentry (and each other gas armament): its own kills this mission for level 2 and level 3 (gas\n"
-                   "; kills are slower than the Mortar Sentry's).\ngm_level2_kills = %d\ngm_level3_kills = %d\n", g_gmL2, g_gmL3);
-        fclose(f);
-    }
-    if (!sawHits && (f = OpenUtf8(path, L"a")) != NULL)  /* the Machine Gun Sentry's hit-counting shield */
-    {
-        fprintf(f, "\n; Machine Gun Sentry level 3: its shield stops this many hits, whatever they deal (a Charger's ram too), and\n"
-                   "; gets one back every mg_shield_recharge seconds once mg_shield_delay seconds pass without a hit. Hits under\n"
-                   "; mg_shield_min_hit damage pass the shield (halved as at level 2) and do not use it (0: every hit uses it).\n"
-                   "; (mg_shield and mg_shield_regen, from the damage shield before it, are no longer used.)\n"
-                   "mg_shield_hits = %d\nmg_shield_recharge = %g\nmg_shield_min_hit = %d\n", g_mgHits, (double)g_mgRecharge, g_mgMinHit);
-        fclose(f);
-    }
-    if (!sawMg && (f = OpenUtf8(path, L"a")) != NULL)  /* the Machine Gun Sentry */
-    {
-        fprintf(f, "\n; Machine Gun Sentry: its kills this mission for level 2 and level 3.\nmg_level2_kills = %d\nmg_level3_kills = %d\n"
-                   "; Level 2: damage it takes, times (0.5: half); 1: Helldivers' hits (grenades, strikes, stray fire) do nothing to it.\n"
-                   "mg_damage_taken = %g\nmg_friendly_immune = %d\n"
-                   "; Level 3: a shield soaking this much damage, refilling this much a second once this many seconds pass without a hit;\n"
-                   "; and its lifetime, times its own (from its next call-in).\nmg_shield = %g\nmg_shield_regen = %g\nmg_shield_delay = %g\nmg_lifetime_mult = %g\n",
-            g_mgL2, g_mgL3, (double)g_mgTaken, g_mgFriendly, (double)g_mgShield, (double)g_mgRegen, (double)g_mgDelay, (double)g_mgLife);
-        fclose(f);
-    }
-    if (!sawSafe && (f = OpenUtf8(path, L"a")) != NULL)  /* the sentry safety radius */
-    {
-        fprintf(f, "\n; No bonus shell (EMS opener, dropped 4th round, pattern) falls within this many metres of one of your\n"
-                   "; sentries, and a shell going off there is not taken as the salvo's impact (0: off).\nsafe_radius = %g\n",
-            (double)g_safeRadius);
-        fclose(f);
-    }
-    if (!sawHud && (f = OpenUtf8(path, L"a")) != NULL)  /* the HUD toasts (needs the Veterancy System HUD addon) */
-    {
-        fprintf(f, "\n; 1: a banner on screen for each level earned in a mission (needs the Veterancy System HUD addon,\n"
-                   "; HD2Runtime and Bingus Shared Loader); 0: off.\nhud_toasts = %d\n", g_hudToasts);
-        fclose(f);
-    }
-    if (sawLs && !sawVent && (f = OpenUtf8(path, L"a")) != NULL)  /* an ini from before the Laser Sentry's heat sink */
-    {
-        ls_write_vent(f);
-        fclose(f);
-    }
-    if (!sawLs && (f = OpenUtf8(path, L"a")) != NULL)  /* an ini from before the Laser Sentry */
-    {
-        ls_write_defaults(f);
-        fclose(f);
-    }
-    if (!sawBadges && (f = OpenUtf8(path, L"a")) != NULL)  /* an ini from before the rank badges */
-    {
-        fprintf(f, "\n; 1: a rank badge (one chevron: level 2, two: level 3) on each promoted stratagem in the mission's stratagem\n"
-                   "; list (needs the same addons as the banners); 0: off.\nhud_badges = %d\n", g_hudBadges);
-        fclose(f);
-    }
-    if (!sawSelf && (f = OpenUtf8(path, L"a")) != NULL)  /* an ini from before the Gatling's blast guard */
-    {
-        fprintf(f, "\n; Gatling Sentry level 3: 1: its own high-explosive blasts (any Gatling Sentry's) do not hurt Gatling Sentries;\n"
-                   "; 0: they do.\ngat_self_immune = %d\n", g_gatSelfImmune);
-        fclose(f);
-    }
-    if (sawGat && !sawMix && (f = OpenUtf8(path, L"a")) != NULL)  /* an ini from before the Gatling's belt */
-    {
-        fprintf(f, "\n" MIX_HELP, g_gatHeEvery, (double)g_gatL3Rpm);
-        fclose(f);
-    }
-    if (!sawGat && (f = OpenUtf8(path, L"a")) != NULL)  /* an ini from before the Gatling Sentry */
-    {
-        fprintf(f, "\n" GAT_HELP MIX_HELP, g_gatL2, g_gatL3, (double)g_gatRamp, (double)g_gatRampMax, g_gatAp, (double)g_gatHe, g_gatHeRow,
-            g_gatHeEvery, (double)g_gatL3Rpm);
-        fclose(f);
-    }
-    if (sawStep && !sawDecay && (f = OpenUtf8(path, L"a")) != NULL)  /* an ini from before the slow stack loss */
-    {
-        fprintf(f, "\n" DECAY_HELP, (double)g_gmStackDecay);
-        fclose(f);
-    }
-    if (sawStack && !sawStep && (f = OpenUtf8(path, L"a")) != NULL)  /* an ini from before the chained detonation */
-    {
-        fprintf(f, "\n" STEP_HELP, (double)g_gmPopStep, (double)g_gmStackDecay);
-        fclose(f);
-    }
-    if (!sawStack && (f = OpenUtf8(path, L"a")) != NULL)  /* an ini from before the Gas Mortar's stacks */
-    {
-        fprintf(f, "\n" STACK_HELP, (double)g_gmStackSeconds, g_gmStackCap, (double)g_gmPopDamage, (double)g_gmPopRadius, (double)g_gmPopRadiusStep, g_gmPopRow, (double)g_gmPopStep, (double)g_gmStackDecay);
-        fclose(f);
-    }
 }
 
 /* ---- HUD: level-up toasts for the Lua overlay (mods/yui/field_promotions_hud, through HD2Runtime) ----------------
  * The addon finds field_promotions.dll and calls fp_hud_state() through LuaJIT's ffi, every frame, on the game thread
  * (the same thread these events run on). A toast is written whole before `seq` counts it. Layout version 1. */
 typedef struct FpToast { uint32_t level; char title[64]; char line[160]; } FpToast;
-/* Layout version 2 adds the rank badges (gear: each promotable stratagem's level now) after version 1's fields. */
-typedef struct FpHud { uint32_t version, seq, in_mission, toasts_on; FpToast toasts[8]; uint32_t badges_on, gear_count; FpGear gear[16]; } FpHud;
-static FpHud g_hud = {2, 0, 0, 1, {{0}}, 1, 0, {{0}}};
+/* Layout version 2 adds the rank badges (gear: each promotable stratagem's level now) after version 1's fields;
+ * version 3 the seconds a banner stays (hud_toast_seconds) after version 2's. */
+typedef struct FpHud { uint32_t version, seq, in_mission, toasts_on; FpToast toasts[8]; uint32_t badges_on, gear_count; FpGear gear[16];
+    float toast_seconds; } FpHud;
+static FpHud g_hud = {3, 0, 0, 1, {{0}}, 1, 0, {{0}}, 5.0f};
 static int Level(void);
 HF_MOD_EXPORT FpHud* fp_hud_state(void)
 {
     g_hud.in_mission = (uint32_t)g_inMission;
     g_hud.toasts_on = (uint32_t)g_hudToasts;
     g_hud.badges_on = (uint32_t)g_hudBadges;
+    g_hud.toast_seconds = g_hudSeconds;
     int n = 0;
     g_hud.gear[n++] = (FpGear){HF_STRATAGEM_AM12_MORTAR_SENTRY, (uint32_t)Level()};
     g_hud.gear[n++] = (FpGear){HF_STRATAGEM_AG16_GATLING_SENTRY, (uint32_t)gat_level()};
     g_hud.gear[n++] = (FpGear){HF_STRATAGEM_AMG43_MACHINE_GUN_SENTRY, (uint32_t)mg_level()};
     g_hud.gear[n++] = (FpGear){HF_STRATAGEM_ALAS98_LASER_SENTRY, (uint32_t)ls_level()};
+    g_hud.gear[n++] = (FpGear){HF_STRATAGEM_M1000_MAXIGUN, (uint32_t)mx_level()};
+    g_hud.gear[n++] = (FpGear){HF_STRATAGEM_AMLS4X_ROCKET_SENTRY, (uint32_t)rs_level()};
     n += gas_hud_gear(g_hud.gear + n, 16 - n);
     g_hud.gear_count = (uint32_t)n;
     return &g_hud;
 }
+/* The banner settings for the HUD addon's rows on the MODS tab (Mod Options Menu): read and set by their ini names.
+ * 1 done, 0 not one of these. The menu keeps what the player applies; field-promotions.ini stays as it was. */
+HF_MOD_EXPORT int fp_option_get(const char* name, double* out)
+{
+    if (!name || !out) return 0;
+    if (!strcmp(name, "hud_toasts")) *out = g_hudToasts;
+    else if (!strcmp(name, "hud_toast_seconds")) *out = g_hudSeconds;
+    else return 0;
+    return 1;
+}
+HF_MOD_EXPORT int fp_option_set(const char* name, double value)
+{
+    if (!name || !isfinite(value)) return 0;
+    if (!strcmp(name, "hud_toasts"))
+    {
+        if ((value != 0) != g_hudToasts) g_hf->log(g_mod, "option hud_toasts: %d (Mod Options Menu)", value != 0);
+        g_hudToasts = value != 0;
+    }
+    else if (!strcmp(name, "hud_toast_seconds"))
+    {
+        float v = (float)(value < 1 ? 1 : value > 30 ? 30 : value);
+        if (v != g_hudSeconds) g_hf->log(g_mod, "option hud_toast_seconds: %g (Mod Options Menu)", (double)v);
+        g_hudSeconds = v;
+    }
+    else return 0;
+    return 1;
+}
+
 /* An earned level-up (not a forced level), in a mission */
-void fp_toast(const char* gear, int level)
+void fp_toast(const char* gear, int level) { fp_toast_line(gear, level, NULL); }
+void fp_toast_line(const char* gear, int level, const char* line)
 {
     if (!g_hudToasts || !g_inMission || g_forceLevel || level < 2) return;
     static const char* kLines[2][2] = {
@@ -363,7 +346,7 @@ void fp_toast(const char* gear, int level)
     t->level = (uint32_t)level;
     snprintf(t->title, sizeof t->title, "%s", gear);
     for (char* c = t->title; *c; c++) if (*c >= 'a' && *c <= 'z') *c -= 32;
-    snprintf(t->line, sizeof t->line, "%s", kLines[doctrine][level >= 3]);
+    snprintf(t->line, sizeof t->line, "%s", line ? line : kLines[doctrine][level >= 3]);
     g_hud.seq++;
     g_hf->log(g_mod, "HUD toast %u: %s level %d", g_hud.seq, t->title, level);
 }
@@ -395,8 +378,6 @@ int fp_mg_level2_kills(void) { return g_mgL2; }
 int fp_mg_level3_kills(void) { return g_mgL3; }
 float fp_mg_damage_taken(void) { return g_mgTaken; }
 int fp_mg_friendly_immune(void) { return g_mgFriendly; }
-float fp_mg_shield(void) { return g_mgShield; }
-float fp_mg_shield_regen(void) { return g_mgRegen; }
 float fp_mg_shield_delay(void) { return g_mgDelay; }
 int fp_mg_shield_hits(void) { return g_mgHits; }
 float fp_mg_shield_recharge(void) { return g_mgRecharge; }
@@ -495,13 +476,15 @@ static void ResetMission(const char* why)
     g_patternBusyUntil = -100;
     memset(g_guarded, 0, sizeof g_guarded);
     g_skipped = 0;
-    /* the sentries' records go back at the next mission start, when none are out: put back at the end, a sentry still
-     * on the field can hold more rounds than its magazine (the game crashed after missions that did) */
+    /* the sentries' records go back at the next mission start, when none are out (a sentry still on the field at the end
+     * keeps what it was called in with) */
     if (g_inMission) { SetSlow(0); SetBurst(0); }
     gas_reset();
     gat_reset();
     mg_reset();
     ls_reset();
+    mx_reset();
+    rs_reset();
     g_hf->log(g_mod, "%s: Mortar Sentry back to level %d", why, g_level);
 }
 
@@ -632,7 +615,8 @@ static void OnStat(HfMod* mod, const HfEventInfo* info, void* user)
                 : e->stat == HF_STAT_HITS ? "hits" : "damage", s->added, (unsigned long long)s->resource,
                 s->resource == MORTAR_SENTRY ? " (Mortar Sentry)" : "");
         }
-        if (e->stat == HF_STAT_KILLS && g_inMission) { gas_kills(s->resource, s->added); gat_kills(s->resource, s->added); mg_kills(s->resource, s->added); ls_kills(s->resource, s->added); }
+        if (e->stat == HF_STAT_KILLS && g_inMission) { gas_kills(s->resource, s->added); gat_kills(s->resource, s->added); mg_kills(s->resource, s->added); ls_kills(s->resource, s->added); mx_kills(s->resource, s->added); rs_kills(s->resource, s->added); }
+        if (e->stat == HF_STAT_SHOTS && g_inMission) { mx_shots(s->resource, s->added); rs_shots(s->resource, s->added); }
         if (s->resource != MORTAR_SENTRY) continue;
         if (e->stat == HF_STAT_KILLS && g_inMission)
         {
@@ -697,6 +681,8 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (g_ndrops) RunDrops();
     gas_tick(g_clock);
     ls_tick(g_clock);
+    mx_tick(g_clock);
+    rs_tick(g_clock);
 }
 
 /* Diagnostics: the sentry's burst size and its three fire rate slots, the candidates for "shots per salvo" and "time
@@ -748,10 +734,10 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* hf, HfMod* mod)
     int ok = hf->subscribe(mod, HF_ON_STAT, OnStat, NULL, 0) & hf->subscribe(mod, HF_ON_EXPLOSION, OnExplosion, NULL, 0) &
              hf->subscribe(mod, HF_ON_STRATAGEM, OnSentryBeacon, NULL, 0) &
              hf->subscribe(mod, HF_ON_MISSION_START, OnMission, NULL, 0) & hf->subscribe(mod, HF_ON_MISSION_END, OnMission, NULL, 0);
-    ok = ok && gas_init(hf, mod, g_gasElement, g_orbitalGas, g_eagleGas) && gat_init(hf, mod) && mg_init(hf, mod) && ls_init(hf, mod);
+    ok = ok && gas_init(hf, mod, g_gasElement, g_orbitalGas, g_eagleGas) && gat_init(hf, mod) && mg_init(hf, mod) && ls_init(hf, mod) && mx_init(hf, mod) && rs_init(hf, mod);
     if (!ok || !hf->on_game_thread(mod, Tick, NULL)) { hf->log(mod, "Veterancy System: events or the game thread unavailable"); return 1; }
     g_inMission = hf->game_state(mod) == HF_STATE_MISSION;
-    hf->log(mod, "Veterancy System 0.17.0: Mortar Sentry level 2 at %d kills, level 3 at %d%s; EMS opener %s (x%.1f speed), 4th shell %s",
-        g_level2Kills, g_level3Kills, g_forceLevel ? " (forced level in the ini)" : "", g_ems ? "on" : "off", (double)g_emsSpeed, g_extra == 2 ? "fired by the sentry" : g_extra ? "dropped in" : "off");
+    hf->log(mod, "Veterancy System %s: Mortar Sentry level 2 at %d kills, level 3 at %d%s; EMS opener %s (x%.1f speed), 4th shell %s",
+        VERSION, g_level2Kills, g_level3Kills, g_forceLevel ? " (forced level in the ini)" : "", g_ems ? "on" : "off", (double)g_emsSpeed, g_extra == 2 ? "fired by the sentry" : g_extra ? "dropped in" : "off");
     return 0;
 }

@@ -7,7 +7,7 @@ Code mods for HellForge (offline Helldivers 2). Each folder under `mods/` is one
 | Lenna | `mods/lenna` | Lenna's kit from Girls' Frontline 2: Wild Extinction, Leaping Pursuit, Hunting Strategy. T-Doll body. |
 | Faelynn | `mods/faelynn` | Faelynn's gas kit from GFL2: Triple Maul, Knife-Eared Hunt, Loyal Dash and Pursuit chains, Corrosion armour-piercing. T-Doll body. |
 | Leva | `mods/leva` | Leva's arc / area-lockdown kit from GFL2: Rational Suppression, Orderly Disruption, Quantum Calculation, Superconduct Blitz. T-Doll body. |
-| Veterancy System | `mods/field-promotions` | Per-mission gear progression: your gear levels up as you use it, for that mission only. |
+| Veterancy System | `mods/field-promotions` | Per-mission gear progression: your sentries and Maxigun level up as you use them, for that mission only. |
 | Fire Mission | `mods/fire-mission` | A stratagem that calls mortar sentries onto a spot. |
 | Primed Sure Footed | `mods/primed-sure-footed` | No knockdown or ragdoll on your Helldiver; flinch and push stay. |
 | Stat Tuner | `mods/stat-tuner` | Per-item stat sliders on the in-game MODS tab, with presets. |
@@ -29,6 +29,7 @@ python tools/package.py leva         # ../Releases/leva-<version>.zip, ready for
 ## Tools
 
 - `tools/deploy.py`, `tools/package.py`, `tools/inigen.py`: above.
+- `tools/hudpatch.py`: builds a HUD's Lua into its `data/9ba626afa44a3aa3.patch_0` (and unpacks one), the Bingus Shared Loader addon archive format.
 - `tools/hotreload/`: an experimental hot-reload host (a fixed "socket" mod that reloads a mod's logic DLL while the game runs). Untested in game.
 
 ## Docs and probes

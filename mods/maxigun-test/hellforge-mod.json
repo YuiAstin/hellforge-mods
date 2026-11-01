@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "id": "yui.maxigun-test",
+  "name": "Maxigun Test (Veterancy research)",
+  "version": "0.4.0",
+  "description": "Test build, not for release: logs the M-1000 Maxigun's fire rates, spin-up, backpack and kill credit, and applies the test values in maxigun-test.ini (fire rate slots, spin-up and spin-down, firing on the move, recoil, backpack size) so Veterancy System's Maxigun levels can be planned. Solo or host.",
+  "gameplay": true,
+  "code": { "dll": "maxigun_test.dll", "sdk": 13 }
+}

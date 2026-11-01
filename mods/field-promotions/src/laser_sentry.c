@@ -30,11 +30,13 @@ static HfMod* g_mod;
 static int g_kills, g_level = 1;
 
 /* settings */
+/* inigen:begin */
 static int s_l2 = 30, s_l3 = 180, s_damageId = 507;
 static float s_rampSeconds = 5, s_grace = 0.6f, s_decay = 2;
 static float s_l2Damage = 2, s_l3Damage = 3;
 static float s_heatMult = 0.5f, s_coolMult = 3;
 static int s_l2Ap = 5, s_l3Ap = 6, s_l2Demo = 40, s_l3Demo = 60, s_l3Stagger = 30, s_l3Push = 30;
+/* inigen:end */
 
 int ls_setting(const char* key, double v)
 {
@@ -61,6 +63,7 @@ int ls_setting(const char* key, double v)
 #undef CL
 }
 
+/* inigen:begin */
 void ls_write_defaults(FILE* f)
 {
     fprintf(f, "\n; Laser Sentry: its kills this mission for level 2 and level 3.\nls_level2_kills = %d\nls_level3_kills = %d\n"
@@ -76,13 +79,8 @@ void ls_write_defaults(FILE* f)
         s_l2, s_l3, (double)s_rampSeconds, (double)s_grace, (double)s_decay, (double)s_l2Damage, s_l2Ap, s_l2Demo,
         (double)s_l3Damage, s_l3Ap, s_l3Demo, s_l3Stagger, s_l3Push, s_damageId, (double)s_heatMult, (double)s_coolMult);
 }
+/* inigen:end */
 
-void ls_write_vent(FILE* f)
-{
-    fprintf(f, "\n; Laser Sentry level 2 and 3, heat sink (from its next call-in): its beam's heat and its cooling, times the\n"
-               "; game's. (The ls_vent_ lines above are no longer used: the game takes heat changes only at a call-in.)\n"
-               "ls_heat_mult = %g\nls_cool_mult = %g\n", (double)s_heatMult, (double)s_coolMult);
-}
 
 static int Level(void)
 {

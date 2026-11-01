@@ -58,6 +58,8 @@ int fp_gat_he_explosion(void);
 
 /* field_promotions.c: an earned level-up's banner for the HUD addon */
 void fp_toast(const char* gear, int level);
+/* ... with its own line (NULL: the usual one) */
+void fp_toast_line(const char* gear, int level, const char* line);
 /* the HUD's rank badges: each promotable stratagem's level now */
 typedef struct FpGear { uint32_t stratagem, level; } FpGear;
 int gas_hud_gear(FpGear* out, int max);
@@ -73,7 +75,28 @@ void ls_tick(double now);
 int ls_level(void);
 int ls_setting(const char* key, double v);
 void ls_write_defaults(FILE* f);
-void ls_write_vent(FILE* f);
+/* field_promotions.c: every setting's default, as the shipped .ini (tools/inigen.py) */
+void fp_write_defaults(FILE* f);
+
+/* maxigun.c */
+int mx_init(const HfApi* hf, HfMod* mod);
+void mx_kills(uint64_t resource, int added);
+void mx_shots(uint64_t resource, int added);
+void mx_reset(void);
+void mx_tick(double now);
+int mx_level(void);
+int mx_setting(const char* key, double v);
+void mx_write_defaults(FILE* f);
+
+/* rocket_sentry.c */
+int rs_init(const HfApi* hf, HfMod* mod);
+void rs_kills(uint64_t resource, int added);
+void rs_shots(uint64_t resource, int added);
+void rs_reset(void);
+void rs_tick(double now);
+int rs_level(void);
+int rs_setting(const char* key, double v);
+void rs_write_defaults(FILE* f);
 
 /* mg_sentry.c */
 int mg_init(const HfApi* hf, HfMod* mod);
@@ -83,8 +106,6 @@ int fp_mg_level2_kills(void);
 int fp_mg_level3_kills(void);
 float fp_mg_damage_taken(void);
 int fp_mg_friendly_immune(void);
-float fp_mg_shield(void);
-float fp_mg_shield_regen(void);
 float fp_mg_shield_delay(void);
 int fp_mg_shield_hits(void);
 float fp_mg_shield_recharge(void);
