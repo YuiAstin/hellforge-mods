@@ -2,8 +2,8 @@
   "format": 1,
   "id": "yui.leva",
   "name": "Leva",
-  "version": "0.4.2",
-  "description": "Leva's kit from Girls' Frontline 2 for your Helldiver, built on arcs and area lockdown: Rational Suppression (a lockdown zone ahead of her that keeps arcing, charging and paralysing for 10 s), Orderly Disruption (Arc Rounds: her bullets set off arcs where they hit) and Quantum Calculation (four rings of arcs expanding around her) followed by Superconduct Blitz (arcs at the end of a line that chain back to her, then Stealth). Negative Charge, Voltage zones, Wise Support arcs and Positive Charge heals. T-Doll body: more health and stamina, and a Hellbomb if she ever runs dry. Solo or host. Keys in leva.ini (default Z, X, C); numbers also on the MODS tab (Mod Options Menu). HUD needs Bingus Shared Loader and HD2Runtime. Research from Helldiver Survival Rework by enochlophobianumerophobia (MIT) and HD2Runtime by SkyeShade. No character model included.",
+  "version": "0.5.0",
+  "description": "Leva's kit from Girls' Frontline 2 for your Helldiver, built on arcs and area lockdown: Rational Suppression (a lockdown zone ahead of her that keeps arcing, charging and paralysing for 10 s), Orderly Disruption (Arc Rounds: her bullets set off arcs where they hit) and Quantum Calculation (four rings of arcs expanding around her) followed by Superconduct Blitz (arcs at the end of a line that chain back to her, then Stealth). Negative Charge, Voltage zones, Wise Support arcs and Positive Charge heals. T-Doll body: more health and stamina, and a Hellbomb if she ever runs dry. Solo or host. Keys in leva.ini (default Z, X, C); numbers also on the MODS tab (Mod Options Menu). HUD needs Bingus Shared Loader and HD2Runtime. Research from Helldiver Survival Rework by enochlophobianumerophobia (MIT), More Plasma Stratagems by HadePasianax (MIT) and HD2Runtime by SkyeShade. No character model included.",
   "icon": "icon.png",
   "gameplay": true,
   "code": {

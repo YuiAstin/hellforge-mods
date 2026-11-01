@@ -58,6 +58,8 @@ Hit record: `+0x20` target entity, `+0x80` dealer, `+0x100` owner, `+0x9C/+0xA0/
 
 ## Explosions and packages
 
+To give a skill an explosion or arc of its own (own damage, own arc), see [native-tables.md](native-tables.md).
+
 | Explosion | What | Package (load at mission start) |
 |---|---|---|
 | 41 | GL-52 De-Escalator impact burst (element 3, releases arcs; 300 direct / 146 jumps) | `0x4FEE9CC13C0B4CEC` |
