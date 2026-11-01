@@ -17,3 +17,9 @@ Her stamina is read from the game's action manager ([game.dll+0x3326D20] + 0x547
 Cheat Engine for this mod; the per-Helldiver index comes from HellForge's own action-record lookup. The settings rows use
 **Mod Options Menu** by CowboyBingus (0BSD) through its public API. The HUD's skill panel follows the stratagem list
 through **HD2Runtime**'s slot overlay (internal modules), and its icons are built with HD2Runtime's SDK.
+
+Her arc blast (`arc_blast`) is an explosion of her own added to the game's explosion list the way **More Plasma
+Stratagems 1.1.0 by HadePasianax** (https://hf-mod.com/Mods/Details/114, MIT licensed as its mod page states) extends
+it: the list's address, size and reader guards, and its method of copying the list near game.dll and re-pointing every
+decoded site and bound (its `native_plasma_explosions.h`). Its licence is kept in LICENSE-More-Plasma-Stratagems.txt.
+The explosion-to-arc link (ExplosionInfo +120) is from HD2Runtime's research.

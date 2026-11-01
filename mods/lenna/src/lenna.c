@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.7"
+#define VERSION "0.2.9"
 #define BUILD "25480438"
 #define AVATAR UINT64_C(0x4D1C334D294DFA97)
 #define NODE_HEAD 90u
@@ -60,11 +60,14 @@ static float s_lpCd = 12, s_lpUp = 8, s_lpForward = 10, s_lpDistance = 10, s_lpW
              s_lpSpeedSeconds = 4, s_lpLand = 1.0f, s_lpReach = 20;
 static float s_hsCd = 40, s_hsPulseStep = 2, s_hsRadius = 20, s_hsArc = 8, s_hsStealth = 10, s_hsStun = 10, s_hsStunEvery = 1.5f, s_lpLift = 1.5f, s_lpClimb = 6, s_lpDrop = 12, s_lpBurstRadius = 6, s_lpStun = 3;
 static int s_hsArcsMax = 24;
+static float s_arcRate = 10;
+static double g_arcBudget = 5, g_arcBudgetAt;
+static unsigned g_arcsSkipped;
 static float s_markMult = 1.3f, s_markSeconds = 6;
 static float s_hpMult = 1.5f, s_staminaMult = 2.0f;
 static int s_hellbomb = 1, s_hellbombRow = 125;
 static float s_hellbombHold = 0.5f;
-static int s_ems = 0, s_arcRow = 157;  /* 157: the G-31 Arc grenade's detonation */  /* the EMS explosion row: 0 = the EMS Mortar Sentry shell's own (read at game start) */
+static int s_ems = 0, s_arcRow = 157, s_arcBlast = 41;  /* 157: the G-31 Arc grenade's detonation (her arcs); 41: the GL-52 De-Escalator's burst (their blast) */  /* the EMS explosion row: 0 = the EMS Mortar Sentry shell's own (read at game start) */
 
 static int s_badKey;
 static void Setting(const char* key, double v)
@@ -88,7 +91,7 @@ static void Setting(const char* key, double v)
     F("mark_mult", s_markMult, 1, 10); F("mark_seconds", s_markSeconds, 0.5, 60);
     F("hp_mult", s_hpMult, 0.1, 10); F("stamina_mult", s_staminaMult, 0.1, 20); I("hellbomb_on_exhaustion", s_hellbomb, 0, 1);
     I("hellbomb_explosion", s_hellbombRow, 0, 100000); F("hellbomb_hold", s_hellbombHold, 0, 10);
-    I("ems_explosion", s_ems, 0, 100000); I("arc_explosion", s_arcRow, 0, 100000); F("arc_step", s_arcStep, 0.05, 5);
+    I("ems_explosion", s_ems, 0, 100000); I("arc_explosion", s_arcRow, 0, 100000); F("arc_step", s_arcStep, 0.05, 5); F("arc_rate", s_arcRate, 1, 100); I("arc_blast", s_arcBlast, 0, 100000);
 #undef F
 #undef I
 #undef CL
@@ -169,7 +172,10 @@ static void LoadSettings(void)
                        "; combo (Shift+Q). The game still sees the keys too (Shift sprints, R reloads), so pick ones it leaves alone.\n"
                        "key_wild = %s\nkey_leap = %s\nkey_ult = %s\n; CI: most she holds (enhanced abilities spend 3).\nci_max = %d\n"
                        "; Wild Extinction: cooldown; for we_window s her hits (at most we_hits) deal we_mult times their damage and\n"
-                       "; each sets off an arc where it lands (at most one every arc_step s; arc_explosion: 157, the G-31 Arc's).\n"
+                       "; each sets off an arc where it lands (at most one every arc_step s; arc_explosion: 157, the G-31 Arc's, whose arcs she\n"
+                       "; uses; arc_blast: 41, the GL-52 De-Escalator burst whose blast and sound they get, 0 none). arc_rate: at most that many\n"
+                       "; of her arcs a second, half a second's"
+                       " worth at once (too many at once leave their lightning on the field); the rest are skipped.\n"
                        "we_cooldown = %g\nwe_window = %g\nwe_hits = %d\nwe_mult = %g\nwe_mult_enhanced = %g\n"
                        "; Leaping Pursuit: cooldown, a teleport lp_distance m along her aim onto the ground there (at most lp_climb m\n"
                        "; higher or lp_drop m lower; short of walls, shorter when there is no ground); an arc burst where she left and a stun of lp_stun s\n"
@@ -185,7 +191,7 @@ static void LoadSettings(void)
                        "hs_arcs_max = %d\nhs_ci_cap = %d\nhs_arc = %g\nhs_stealth = %g\n"
                        "; Conductivity: marked enemies take this times the damage, this long.\nmark_mult = %g\nmark_seconds = %g\n"
                        "; An EMS blast under her zaps too (0: none; 180: the EMS Mortar Sentry shell's field; its stun reaches her).\nems_explosion = %d\n"
-                       "arc_explosion = %d\narc_step = %g\n"
+                       "arc_explosion = %d\narc_blast = %d\narc_step = %g\narc_rate = %g\n"
                        "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties. If her\n"
                        "; stamina ever runs out, hellbomb_on_exhaustion (1) sets off hellbomb_explosion (125: the B-100 Portable\n"
                        "; Hellbomb's) on her.\n"
@@ -195,7 +201,7 @@ static void LoadSettings(void)
                 (double)s_weMultEnh, (double)s_lpCd, (double)s_lpDistance, (double)s_lpClimb, (double)s_lpDrop, (double)s_lpBurstRadius, (double)s_lpStun, (double)s_lpWindow, (double)s_lpTaken,
                 (double)s_lpHeal, (double)s_lpSpeed, (double)s_lpSpeedSeconds, (double)s_lpLand, (double)s_lpReach, (double)s_hsCd,
                 s_hsPulses, (double)s_hsPulseStep, (double)s_hsRadius, (double)s_hsStun, (double)s_hsStunEvery, s_hsArcsMax, s_hsCiCap, (double)s_hsArc, (double)s_hsStealth,
-                (double)s_markMult, (double)s_markSeconds, s_ems, s_arcRow, (double)s_arcStep,
+                (double)s_markMult, (double)s_markSeconds, s_ems, s_arcRow, s_arcBlast, (double)s_arcStep, (double)s_arcRate,
                 (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
             fclose(f);
         }
@@ -639,12 +645,306 @@ static void LeapFrame(void)
         enhanced ? "; enhanced: Wild Extinction ready" : "");
 }
 
+/* ---- her arc blast: an explosion of her own --------------------------------------------------------------------- *
+ * The G-31 Arc grenade's detonation (157) carries her arcs but no blast; the GL-52 De-Escalator's burst (41) has the
+ * blast and sound. Her own explosion is a copy of the burst's row (its blast, sound and effects) whose damage (+4) and
+ * arc (+120) are the G-31's: the blast with the G-31's arcs. The SDK cannot add explosions, so the game's explosion list
+ * is extended here, the way More Plasma Stratagems 1.1.0 by HadePasianax (MIT) does (its native_plasma_explosions.h):
+ *   game.dll + 0x37CC920  ExplosionType -> 152-byte row, 423 slots; reader 0x13C0DC0 and bound 0x13C0DB5 checked first.
+ * The list's pointers go to a block within 2 GB of game.dll with her row after them, every instruction that addresses
+ * the list is pointed at the block (each read back; a failed write puts back all), and the bounds beside its readers
+ * are raised. It cannot be set off directly (HellForge finds explosions in the game's data): a bullet of hers carries it.
+ * Leva's lockdown burst extends the same list: only one of the two mods can (the other keeps its fallback). */
+#define NT_IMAGE 0x4744000u
+#define NT_EXP_TABLE 0x37CC920u
+#define NT_EXP_READER 0x13C0DC0u
+#define NT_EXP_BOUND 0x13C0DB5u
+#define NT_EXP_NATIVE 423u
+#define NT_MAX_PATCHES 256u
+typedef struct NtPatch { uintptr_t at; uint32_t before, after; } NtPatch;
+typedef struct NtList
+{
+    const char* name;
+    uint32_t rva, native, count;  /* the list's RVA, its slots, its slots with ours */
+    int boundRequired;
+    NtPatch patch[NT_MAX_PATCHES];
+    unsigned npatch, refs, bounds;
+    uintptr_t* block;
+} NtList;
+static NtList g_ntExp = {"explosion", NT_EXP_TABLE, NT_EXP_NATIVE, NT_EXP_NATIVE + 1, 1};
+static uint8_t g_ntExpRow[152] __attribute__((aligned(16)));
+static uint32_t g_ntExpId;
+static int g_ntState;            /* 0 not yet, 1 live, -1 given up */
+static int g_boltReady;
+static double g_ntNext;
+static unsigned g_ntTries;
+static const char* g_ntWhy = "not tried yet";
+static uintptr_t g_ntWhere;
+static uintptr_t g_ntBase;
+static uint32_t g_blastBolt, g_blastBoltDamage;   /* her bullet that carries it, and its own (zeroed) damage */
+static int NtFail(const char* why, uintptr_t where) { g_ntWhy = why; g_ntWhere = where; return 0; }
+static int NtRead(uintptr_t at, void* out, size_t n) { return !hf->read(at, out, n); }
+
+static int NtAdd(NtList* L, uintptr_t at, uint32_t before, uint32_t after)
+{
+    for (unsigned i = 0; i < L->npatch; i++)
+        if (L->patch[i].at == at) return L->patch[i].before == before && L->patch[i].after == after;
+    if (L->npatch >= NT_MAX_PATCHES) return NtFail("too many sites address the list", at - g_ntBase);
+    L->patch[L->npatch++] = (NtPatch){at, before, after};
+    return 1;
+}
+
+/* One code section's sites for a list: [image base + index*8 + list], rip-relative loads of a slot, and fixed slots
+ * through an image-base register; then the bounds (cmp with the slot count) within 128 bytes before a site */
+static int NtScan(NtList* L, const uint8_t* code, uint32_t first, uint32_t size, uintptr_t block)
+{
+    static uintptr_t sites[NT_MAX_PATCHES];
+    unsigned count = 0;
+    const uint32_t lo = L->rva, hi = L->rva + L->native * 8;
+    for (uint32_t i = 0; i + 8 <= size; i++)
+    {
+        const uint8_t* p = code + i;
+        if ((p[0] & 0xf8) != 0x48) continue;
+        unsigned imm = 0;
+        if (p[1] == 0x83 && (p[2] & 0x38) == 0x38) imm = 1;
+        else if ((p[1] == 0x81 && (p[2] & 0x38) == 0x38) || (p[1] == 0xc7 && !(p[2] & 0x38))) imm = 4;
+        else if (p[1] != 0x8b && p[1] != 0x8d && p[1] != 0x89) continue;
+        unsigned dispAt = 0, length = 0;
+        uint32_t disp = 0;
+        uintptr_t target = 0;
+        int rip = 0;
+        if ((p[2] & 0xc7) == 0x84 || ((p[2] & 0xc7) == 0x04 && (p[3] & 7) == 5))
+        {
+            if ((p[3] >> 6) != 3 && !((p[3] & 0x38) == 0x20 && !(p[0] & 2))) continue;
+            memcpy(&disp, p + 4, 4);
+            if (disp < lo || disp >= hi || (disp - lo) % 8) continue;
+            dispAt = 4; length = 8 + imm;
+            target = block + (disp - lo);
+        }
+        else if ((p[2] & 0xc7) == 0x05)
+        {
+            memcpy(&disp, p + 3, 4);
+            length = 7 + imm;
+            uintptr_t old = g_ntBase + first + i + length + (int32_t)disp;
+            if (old < g_ntBase + lo || old >= g_ntBase + hi || (old - g_ntBase - lo) % 8) continue;
+            dispAt = 3; rip = 1;
+            target = block + (old - g_ntBase - lo);
+        }
+        else if ((p[2] & 0xc0) == 0x80 && (p[2] & 7) != 4)
+        {
+            memcpy(&disp, p + 3, 4);
+            if (disp < lo || disp >= hi || (disp - lo) % 8) continue;
+            dispAt = 3; length = 7 + imm;
+            target = block + (disp - lo);
+        }
+        if (!dispAt || i + length > size) continue;
+        if (count >= NT_MAX_PATCHES) return NtFail("too many sites address the list", first + i);
+        sites[count++] = g_ntBase + first + i;
+        int64_t adjusted = rip ? (int64_t)target - (int64_t)(g_ntBase + first + i + length) : (int64_t)target - (int64_t)g_ntBase;
+        if (adjusted < INT32_MIN || adjusted > INT32_MAX || !NtAdd(L, g_ntBase + first + i + dispAt, disp, (uint32_t)(int32_t)adjusted)) return 0;
+    }
+    /* the bounds: cmp eax, imm32 / cmp r32, imm32 / cmp r32, imm8 (an optional REX before), with the slot count */
+    for (uint32_t i = 0; i + 7 <= size; i++)
+    {
+        const uint8_t* p = code + i;
+        unsigned rex = (p[0] & 0xf0) == 0x40 && !(p[0] & 8) ? 1 : 0;
+        const uint8_t* q = p + rex;
+        unsigned off = 0, wide = 4;
+        if (q[0] == 0x3d) off = 1;
+        else if (q[0] == 0x81 && (q[1] & 0xf8) == 0xf8) off = 2;
+        else if (q[0] == 0x83 && (q[1] & 0xf8) == 0xf8) { off = 2; wide = 1; }
+        if (!off) continue;
+        uint32_t value = 0;
+        memcpy(&value, q + off, wide);
+        if (value != L->native) continue;
+        uintptr_t at = g_ntBase + first + i;
+        int close = 0;
+        for (unsigned k = 0; k < count; k++)
+            if (at <= sites[k] && sites[k] - at <= 128) { close = 1; break; }
+        if (!close) continue;
+        uint32_t before, after;
+        memcpy(&before, q + off, 4);
+        after = before;
+        if (wide == 4) after = L->count;
+        else after = (before & 0xFFFFFF00u) | (L->count & 0xFF);
+        if (wide == 1 && L->count > 0x7F) continue;
+        if (!NtAdd(L, at + rex + off, before, after)) return 0;
+        L->bounds++;
+        i += rex + off + wide - 1;
+    }
+    /* the list's address in a form not understood: change nothing */
+    for (uint32_t i = 0; i + 4 <= size; i++)
+    {
+        uint32_t value;
+        memcpy(&value, code + i, 4);
+        if (value < lo || value >= hi || (value - lo) % 8) continue;
+        int found = 0;
+        for (unsigned k = 0; k < L->npatch; k++)
+            if (L->patch[k].at == g_ntBase + first + i) { found = 1; break; }
+        if (!found) return NtFail("an instruction names the list in a form not understood", first + i);
+    }
+    L->refs += count;
+    return 1;
+}
+
+static uint8_t* NtNear(size_t size)
+{
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    uintptr_t step = si.dwAllocationGranularity;
+    for (uintptr_t at = (g_ntBase + NT_IMAGE + step - 1) & ~(step - 1); at < g_ntBase + 0x70000000u; at += step)
+    {
+        void* p = VirtualAlloc((void*)at, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+        if (p) return (uint8_t*)p;
+    }
+    return NULL;
+}
+
+/* The game's code, read in pieces (a read across a protected page can fail where its pages read one by one) */
+static int NtCode(uintptr_t at, uint8_t* copy, uint32_t length)
+{
+    for (uint32_t off = 0; off < length;)
+    {
+        uint32_t n = length - off < 32768 ? length - off : 32768;
+        if (!NtRead(at + off, copy + off, n))
+            for (uint32_t page = 0; page < n;)
+            {
+                uint32_t m = n - page < 4096 ? n - page : 4096;
+                if (!NtRead(at + off + page, copy + off + page, m)) return NtFail("a code page cannot be read", at + off + page - g_ntBase);
+                page += m;
+            }
+        off += n;
+    }
+    return 1;
+}
+
+/* Writes a list's sites, reading each back; on a failure puts back every one written (the failed one too) */
+static int NtApply(NtList* L)
+{
+    unsigned done = 0;
+    for (; done < L->npatch; done++)
+    {
+        uint32_t check = 0;
+        if (hf->write(L->patch[done].at, &L->patch[done].after, 4) || !NtRead(L->patch[done].at, &check, 4) || check != L->patch[done].after) break;
+        FlushInstructionCache(GetCurrentProcess(), (void*)L->patch[done].at, 4);
+    }
+    if (done == L->npatch) return 1;
+    for (unsigned k = done + 1; k-- > 0;)
+    {
+        hf->write(L->patch[k].at, &L->patch[k].before, 4);
+        FlushInstructionCache(GetCurrentProcess(), (void*)L->patch[k].at, 4);
+    }
+    return NtFail("a site could not be written (all put back)", L->patch[done].at - g_ntBase);
+}
+
+static void NtBolt(void)
+{
+    HfProjectileSettings* row = g_blastBolt ? (HfProjectileSettings*)hf->projectile_row(g_blastBolt) : NULL;
+    if (row) row->impact_explosion = g_ntState == 1 ? g_ntExpId : (uint32_t)s_arcRow;
+}
+static int NtInstall(void)
+{
+    size_t image = 0;
+    g_ntBase = hf->module_base("game.dll", &image);
+    if (!g_ntBase || image != NT_IMAGE) return NtFail("not the supported game.dll", 0);
+    static const uint8_t reader[8] = {0x4c, 0x8b, 0xb4, 0xc1, 0x20, 0xc9, 0x7c, 0x03}, bound[5] = {0x3d, 0xa7, 0x01, 0, 0};
+    uint8_t got[8];
+    if (!NtRead(g_ntBase + NT_EXP_READER, got, 8) || memcmp(got, reader, 8))
+        return NtFail("the explosion list's reader is not the game's (another mod, such as Leva or More Plasma Stratagems, moved the list)", NT_EXP_READER);
+    if (!NtRead(g_ntBase + NT_EXP_BOUND, got, 5) || memcmp(got, bound, 5)) return NtFail("the explosion list's bound is not the game's", NT_EXP_BOUND);
+    static uintptr_t exp[NT_EXP_NATIVE];
+    if (!NtRead(g_ntBase + NT_EXP_TABLE, exp, sizeof exp)) return NtFail("the explosion list cannot be read", NT_EXP_TABLE);
+    for (uint32_t i = 1; i < NT_EXP_NATIVE; i++)
+    {
+        uint32_t id;
+        if (!AddressOk(exp[i], 152) || !NtRead(exp[i], &id, 4) || id != i) return NtFail("the explosion rows are not loaded yet", i);
+    }
+    uint32_t look = (uint32_t)s_arcBlast, arcs = (uint32_t)s_arcRow;
+    uint8_t logic[152];
+    if (!look || look >= NT_EXP_NATIVE || !NtRead(exp[look], g_ntExpRow, 152)) return NtFail("the blast's row cannot be read", look);
+    if (!arcs || arcs >= NT_EXP_NATIVE || !NtRead(exp[arcs], logic, 152)) return NtFail("the arcs' row cannot be read", arcs);
+    IMAGE_DOS_HEADER dos;
+    IMAGE_NT_HEADERS64 nt;
+    if (!NtRead(g_ntBase, &dos, sizeof dos) || dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew < 0 ||
+        !NtRead(g_ntBase + (uint32_t)dos.e_lfanew, &nt, sizeof nt) || nt.Signature != IMAGE_NT_SIGNATURE || nt.FileHeader.NumberOfSections > 32)
+        return NtFail("the game's headers cannot be read", 0);
+    uint8_t* block = NtNear(65536);
+    if (!block) return NtFail("no memory near the game for the list", 0);
+    g_ntExp.block = (uintptr_t*)block;
+    memcpy(g_ntExp.block, exp, sizeof exp);
+    g_ntExp.npatch = g_ntExp.refs = g_ntExp.bounds = 0;
+    uintptr_t sections = g_ntBase + (uint32_t)dos.e_lfanew + 24 + nt.FileHeader.SizeOfOptionalHeader;
+    int ok = 1;
+    for (unsigned s = 0; s < nt.FileHeader.NumberOfSections && ok; s++)
+    {
+        IMAGE_SECTION_HEADER sh;
+        if (!NtRead(sections + s * sizeof sh, &sh, sizeof sh)) { ok = NtFail("a section header cannot be read", 0); break; }
+        if (!(sh.Characteristics & IMAGE_SCN_MEM_EXECUTE) || sh.VirtualAddress >= 0x2111000u) continue;
+        uint32_t length = sh.Misc.VirtualSize;
+        if (!length || sh.VirtualAddress >= NT_IMAGE || length > NT_IMAGE - sh.VirtualAddress) { ok = NtFail("a code section is out of range", sh.VirtualAddress); break; }
+        uint8_t* copy = (uint8_t*)VirtualAlloc(NULL, length, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+        if (!copy) { ok = NtFail("no memory to read the game's code", 0); break; }
+        if (!NtCode(g_ntBase + sh.VirtualAddress, copy, length) || !NtScan(&g_ntExp, copy, sh.VirtualAddress, length, (uintptr_t)g_ntExp.block)) ok = 0;
+        VirtualFree(copy, 0, MEM_RELEASE);
+    }
+    int reader1 = 0, bound1 = 0;
+    for (unsigned i = 0; i < g_ntExp.npatch; i++)
+    {
+        reader1 |= g_ntExp.patch[i].at == g_ntBase + NT_EXP_READER + 4;
+        bound1 |= g_ntExp.patch[i].at == g_ntBase + NT_EXP_BOUND + 1;
+    }
+    if (ok && (!reader1 || !bound1 || !g_ntExp.refs)) ok = NtFail("the explosion list's reader was not among the sites found", NT_EXP_READER);
+    if (!ok) { VirtualFree(block, 0, MEM_RELEASE); g_ntExp.block = NULL; return 0; }
+    /* her row: the blast's look, the arcs' damage and arc */
+    g_ntExpId = NT_EXP_NATIVE;
+    memcpy(g_ntExpRow, &g_ntExpId, 4);
+    memcpy(g_ntExpRow + 4, logic + 4, 4);
+    memcpy(g_ntExpRow + 120, logic + 120, 4);
+    g_ntExp.block[g_ntExpId] = (uintptr_t)g_ntExpRow;
+    if (!NtApply(&g_ntExp)) return 0;
+    g_ntState = 1;
+    uint32_t dmg, arc;
+    memcpy(&dmg, logic + 4, 4); memcpy(&arc, logic + 120, 4);
+    Log("arc blast: explosion %u (the look of %u, the damage %u and arc %u of %u: %u sites, %u bounds)", g_ntExpId, look, dmg, arc, arcs,
+        g_ntExp.refs, g_ntExp.bounds);
+    NtBolt();
+    return 1;
+}
+static void NtTick(void)
+{
+    if (g_ntState == 1)
+    {
+        static int told;
+        if (g_ntExp.block[g_ntExpId] != (uintptr_t)g_ntExpRow)
+        {
+            g_ntExp.block[g_ntExpId] = (uintptr_t)g_ntExpRow;
+            if (!told++) Log("arc blast: the game rewrote the explosion list; her row is back");
+        }
+        return;
+    }
+    if (!s_arcBlast || g_ntState || !g_blastBolt || !g_boltReady || g_now < g_ntNext) return;
+    g_ntNext = g_now + 1;
+    if (NtInstall()) return;
+    if (++g_ntTries == 1 || g_ntTries % 10 == 0) Log("arc blast: not yet (%s at +0x%llx); try %u", g_ntWhy, (unsigned long long)g_ntWhere, g_ntTries);
+    if (g_ntTries >= 60) { g_ntState = -1; Log("arc blast: given up; her arcs stay the G-31's without the blast"); }
+}
+
 static Pulse g_retry[6];  /* blasts waiting for their packages (at: give up then) */
 static int g_retryCount;
 /* One of her blasts (an EMS pulse, an arc): it never touches or throws her, and the enemies it hits are marked */
 static void Blast_(uint32_t row, const float at[3], const char* what)
 {
     if (!row) return;
+    /* her arcs: at most arc_rate a second, half a second's worth at once */
+    if (row == (uint32_t)s_arcRow)
+    {
+        double cap = s_arcRate * 0.5 > 1 ? s_arcRate * 0.5 : 1;
+        g_arcBudget += (g_now - g_arcBudgetAt) * s_arcRate;
+        g_arcBudgetAt = g_now;
+        if (g_arcBudget > cap) g_arcBudget = cap;
+        if (g_arcBudget < 1) { g_arcsSkipped++; return; }
+        g_arcBudget -= 1;
+    }
     Pulse* p = &g_pulses[g_npulse++ % 12];
     memcpy(p->p, at, sizeof p->p);
     p->at = g_now;
@@ -652,6 +952,16 @@ static void Blast_(uint32_t row, const float at[3], const char* what)
     unsigned slot = g_ownNext++ % 8;
     memcpy(g_ownPos[slot], at, sizeof g_ownPos[slot]);
     atomic_store(&g_ownMs[slot], GetTickCount64());
+    /* her arcs with the blast: her bullet, fired down from 3 m, bursts as her own explosion where it lands */
+    if (row == (uint32_t)s_arcRow && g_ntState == 1 && g_blastBolt)
+    {
+        float from[3] = {at[0], at[1], at[2] + 3.0f}, down[3] = {0, 0, -1};
+        int b = hf->spawn_projectile(self, g_blastBolt, from, down);
+        static unsigned told;
+        if (told++ < 3) Log("%s with the blast: answer %d", what, b);
+        Act(what, b);
+        return;
+    }
     int r = hf->spawn_explosion(self, row, at);
     if (r == HF_ACT_WAITING && g_retryCount < 6)  /* its packages are loading: again next frames */
     {
@@ -824,6 +1134,12 @@ static int MineHit(const HfDamageEvent* d)
     }
     return match || hooked;
 }
+static int NearPulseR(const float at[3], double within, float radius)
+{
+    for (int i = 0; i < 12; i++)
+        if (g_pulses[i].at > 0 && g_now - g_pulses[i].at <= within && Dist2(at, g_pulses[i].p) <= radius * radius) return 1;
+    return 0;
+}
 static int NearPulse(const float at[3], double within)
 {
     for (int i = 0; i < 12; i++)
@@ -841,6 +1157,9 @@ static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
     {
         /* King's Authority: her own blasts spare her (the EMS field deals no damage: its stun rides on the hit) */
         if (d->kind == 4 && NearPulse(d->position, 0.6)) { e->cancel = 1; g_selfSpared++; return; }
+        /* her arcs land as element-2 (or 3) hits of kind 0, 1 or 3, a little later and further out than the burst */
+        if ((d->element == 2 || d->element == 3) && (d->kind == 0 || d->kind == 1 || d->kind == 3) && NearPulseR(d->position, 1.5, 35))
+        { e->cancel = 1; g_selfSpared++; return; }
         if (d->amount == 0) return;
         /* Leaping Pursuit's window: no fall or landing damage (impact or flat, from nothing) */
         if (g_now < g_drUntil && (d->kind == 5 || d->kind == 7) && !NetOk(d->dealer) && !NetOk(d->owner)) { e->cancel = 1; return; }
@@ -1040,6 +1359,12 @@ static void Reset(const char* why)
     /* the G-31 Arc grenade's package: its detonation (157) plays its blast and sound only once that is in */
     if (!strcmp(why, "mission start") && s_arcRow == 157 && !hf->load_package(self, UINT64_C(0xDDCEA5FDD4071767)))
         Log("the G-31 Arc grenade's package could not be loaded ahead: its arcs may stay silent");
+    /* the GL-52 De-Escalator's package: its burst (41) plays its blast and sound only once that is in */
+    if (!strcmp(why, "mission start") && (s_arcRow == 41 || s_arcBlast == 41) && !hf->load_package(self, UINT64_C(0x4FEE9CC13C0B4CEC)))
+        Log("the GL-52 De-Escalator's package could not be loaded ahead: its bursts may stay silent");
+    if (g_arcsSkipped) Log("%s: %u arcs skipped over arc_rate", why, g_arcsSkipped);
+    if (!strcmp(why, "mission start")) NtBolt();
+    g_arcsSkipped = 0;
     if (!strcmp(why, "mission start") && s_hellbomb && s_hellbombRow == 125)
         if (!hf->load_package(self, UINT64_C(0x346D785D6CA13FF4))) Log("the Hellbomb's package could not be loaded ahead");  /* loadout/hellbomb_backpack */
     g_boomPending = 0;
@@ -1158,6 +1483,16 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     Log(g_staminaOk ? "stamina readable (the game's stamina write is the reviewed code)" : "stamina off: its code is not the reviewed one");
 }
 
+/* her blast bullet: its own hit deals nothing; it bursts as the G-31's detonation until her explosion is in */
+static void ProjectilesReady(HfMod* mod, HfEvent event, void* user)
+{
+    HfDamageInfo* dmg = g_blastBoltDamage ? (HfDamageInfo*)hf->damage_row(g_blastBoltDamage) : NULL;
+    if (dmg) { dmg->standard_damage = 0; dmg->durable_damage = 0; dmg->demolition = 0; dmg->stagger = 0; dmg->push_force = 0; }
+    else g_blastBolt = 0;
+    g_boltReady = 1;
+    NtBolt();
+    Log("arc blast: her bullet %u %s", g_blastBolt, g_blastBolt ? "is ready (its own hit deals nothing)" : "is unavailable: her arcs stay without the blast");
+}
 static void EntitiesReady(HfMod* mod, HfEvent event, void* user)
 {
     if (s_ems) Log("EMS explosion row %d under her zaps (from the ini)", s_ems);
@@ -1217,6 +1552,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     g_now += dt > 0 && dt < 1 ? dt : 0;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
+    NtTick();
     if (!g_inMission) return;
     /* keys (edges) */
     static int prev[3];
@@ -1340,6 +1676,21 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         s_keys[1].label, s_keys[2].label, s_ciMax);
     if (s_badKey) api->log(mod, "lenna.ini: a key could not be read (bits %d: wild, leap, ult); its default stays", s_badKey);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL) || api->on(mod, HF_EVENT_ENTITIES_READY, EntitiesReady, NULL)) return 1;
+    if (s_arcBlast && api->size >= offsetof(HfApi, projectile_row) + sizeof api->projectile_row)
+    {
+        HfDamage nothing = {sizeof nothing};
+        nothing.base = 108;
+        nothing.name = "yui/lenna/blast_bullet_damage";
+        nothing.scale = 1;
+        g_blastBoltDamage = api->add_damage(mod, &nothing);
+        HfProjectile bolt = {sizeof bolt};
+        bolt.base = HF_PROJECTILE_AR23_LIBERATOR;
+        bolt.name = "yui/lenna/blast_bullet";
+        bolt.damage = g_blastBoltDamage;
+        g_blastBolt = g_blastBoltDamage ? api->add_projectile(mod, &bolt) : 0;
+        if (!g_blastBolt || api->on(mod, HF_EVENT_PROJECTILES_READY, ProjectilesReady, NULL))
+        { g_blastBolt = 0; api->log(mod, "arc blast: her bullet could not be added: her arcs stay without the blast"); }
+    }
     /* registered: from here the DLL stays loaded; a failure below leaves it inert */
     int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
              api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
