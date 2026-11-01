@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "name": "Lenna HUD",
+  "resource": "mods/yui/lenna_hud",
+  "guid": "4b118dfd-5312-4956-bd7a-49db42161de6",
+  "requires": {
+    "bingus": {"min_release": 15, "api": 1},
+    "hd2runtime": {"min_version": "0.30.0", "api": 1, "module": "mods/skyeshade/hd2runtime"}
+  }
+}

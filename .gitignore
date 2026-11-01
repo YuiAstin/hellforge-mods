@@ -1,0 +1,12 @@
+# build output and editor leftovers
+build/
+__pycache__/
+*.dll
+*.lib
+*.pdb
+*.obj
+*.exp
+.vs/
+.idea/
+*.user
+*.bak

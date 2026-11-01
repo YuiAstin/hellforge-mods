@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "patches": [
+    {
+      "archives": [
+        "007e093ca718ca1a"
+      ],
+      "resources": [
+        {
+          "icon": "images/fire_mission.png",
+          "name": "yui/fire_mission/icons/fire_mission"
+        }
+      ]
+    }
+  ]
+}

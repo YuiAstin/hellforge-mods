@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "id": "yui.fire-mission",
+  "name": "Fire Mission",
+  "version": "0.1.3",
+  "description": "A Fire Mission stratagem (a copy of the Orbital Smoke Strike): throw it and every Mortar, EMS Mortar and Gas Mortar Sentry of yours in range shells the marked spot with its own rounds, whether or not it can see it. Settings in fire-mission.ini.",
+  "gameplay": true,
+  "code": { "dll": "fire_mission.dll", "sdk": 11 }
+}

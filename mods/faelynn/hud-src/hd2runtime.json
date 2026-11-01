@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "name": "Faelynn HUD",
+  "resource": "mods/yui/faelynn_hud",
+  "guid": "cddd6e3e-c347-4936-b981-4db90d164242",
+  "requires": {
+    "bingus": {"min_release": 15, "api": 1},
+    "hd2runtime": {"min_version": "0.30.0", "api": 1, "module": "mods/skyeshade/hd2runtime"}
+  }
+}

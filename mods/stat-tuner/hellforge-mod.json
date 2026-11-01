@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "id": "yui.stat-tuner",
+  "name": "Stat Tuner",
+  "version": "0.2.1",
+  "description": "Per-item stat sliders for weapons, grenades, stratagems, backpacks, vehicles, the Helldiver and boosters on the MODS tab, with 8 preset slots. Needs the Universal Mod Menu (Bingus Vanilla Megapack REFORGED).",
+  "gameplay": true,
+  "code": { "dll": "stat_tuner.dll", "sdk": 6 }
+}

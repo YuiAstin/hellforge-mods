@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "Leva HUD",
+  "resource": "mods/yui/leva_hud",
+  "guid": "bc14ebb6-0457-4d6b-b6bd-388459eb9cbb",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.30.0",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}

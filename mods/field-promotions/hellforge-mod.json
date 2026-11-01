@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.field-promotions",
+  "name": "Veterancy System",
+  "version": "0.17.0",
+  "description": "Red Alert-style veterancy for your gear: sentries rank up from kills during a mission (Veteran, then Elite) and reset at its end: the Mortar, Gas Mortar, Gatling, Machine Gun and Laser Sentries, and a shared gas doctrine fed by every gas kill. Settings in field-promotions.ini. Includes promotion banners and rank badges on the stratagem list (needs Bingus Shared Loader and HD2Runtime; the mod works without them). Rank badges use code / research from HD2Runtime by SkyeShade: https://github.com/SkyeShade/HD2Runtime",
+  "gameplay": true,
+  "code": {
+    "dll": "field_promotions.dll",
+    "sdk": 11
+  }
+}

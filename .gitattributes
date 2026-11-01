@@ -1,0 +1,6 @@
+* text=auto
+*.png binary
+*.patch_0 binary
+*.gpu_resources binary
+*.stream binary
+*.zip binary

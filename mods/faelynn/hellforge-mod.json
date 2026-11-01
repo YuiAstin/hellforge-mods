@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "id": "yui.faelynn",
+  "name": "Faelynn",
+  "version": "0.3.4",
+  "description": "Faelynn's kit from Girls' Frontline 2 for your Helldiver, built on gas: Triple Maul (a gas blast on the enemy you aim at), Knife-Eared Hunt (speed, endless stamina, extra damage) and Loyal Dash (a teleport that leaves a strip of gas) chaining into Pursuit Instinct I-III. Corrosion stacks build while enemies sit in her gas: more gas damage and armour pierce for everyone's hits. She is gas immune, never knocked down, takes 90% less damage in her own gas, and goes out with Last Bark. T-Doll body: more health and stamina, and a Hellbomb if she ever runs dry. Solo or host. Keys in faelynn.ini (default Z, X, C); numbers also on the MODS tab (Mod Options Menu). HUD needs Bingus Shared Loader and HD2Runtime. Research from Helldiver Survival Rework by enochlophobianumerophobia (MIT) and HD2Runtime by SkyeShade. No character model included.",
+  "icon": "icon.png",
+  "gameplay": true,
+  "code": {
+    "dll": "faelynn.dll",
+    "sdk": 13
+  }
+}
