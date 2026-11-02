@@ -23,7 +23,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.1"
+#define VERSION "0.1.2"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -246,18 +246,31 @@ static void Closest(const char* what, const float at[3], float radius)
         what, at[0], at[1], at[2], (double)radius, world, r, out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7],
         sqrtf(dx * dx + dy * dy + dz * dz), dz, changed, U32(extra), U32(extra + 4));
 }
+/* 0.1.1 found no navmesh anywhere with the stratagem ball's own arguments (0.5, 15, its agent hash 0x49B287D9): 0.1.2
+ * tries four variants, without the agent filter and with a 5 m first float, and logs the third argument's data */
 static void OnMesh(const char* what, const float at[3])
 {
     uint32_t world;
     float a, b;
     if (!World(&world)) { Log("Alt+F8 %s: no nav world id", what); return; }
     if (!RD(game + 0x23C6AD0, &a, 4) || !RD(game + 0x23C75B0, &b, 4)) { Log("Alt+F8: the deploy check's constants are unreadable"); return; }
-    _Alignas(16) float pos[4] = {at[0], at[1], at[2], 0}, out[8];
-    for (int i = 0; i < 8; i++) out[i] = -12345.0f;
-    uint32_t r = fn.on_mesh(world, pos, (const void*)(game + 0x3290530), a, b, out, 0x49B287D9u);
-    float dx = out[0] - at[0], dy = out[1] - at[1];
-    Log("Alt+F8 %s (world %u, constants %.2f %.2f): %s; nearest %.2f %.2f %.2f, %.2f m across, %.2f up", what, world, (double)a, (double)b,
-        r ? "on the navmesh" : "no navmesh", out[0], out[1], out[2], sqrtf(dx * dx + dy * dy), out[2] - at[2]);
+    static int toldArg;
+    float third[8] = {0};
+    if (!toldArg++ && RD(game + 0x3290530, third, sizeof third))
+        Log("Alt+F8: the third argument (game+0x3290530) holds %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f (as hex %08x %08x)", third[0], third[1], third[2],
+            third[3], third[4], third[5], third[6], third[7], U32((const uint8_t*)third), U32((const uint8_t*)third + 4));
+    const struct { float a, b; uint32_t mask; const char* label; } v[4] = {
+        {a, b, 0x49B287D9u, "as the game calls it"}, {a, b, 0, "no agent filter"}, {5.0f, b, 0, "5 m, no filter"}, {5.0f, b, 0x49B287D9u, "5 m, ball's agent"}};
+    for (int k = 0; k < 4; k++)
+    {
+        _Alignas(16) float pos[4] = {at[0], at[1], at[2], 0}, out[8];
+        for (int i = 0; i < 8; i++) out[i] = -12345.0f;
+        uint32_t r = fn.on_mesh(world, pos, (const void*)(game + 0x3290530), v[k].a, v[k].b, out, v[k].mask);
+        float dx = out[0] - at[0], dy = out[1] - at[1];
+        Log("Alt+F8 %s, %s (world %u, %.2f %.2f, agent %08x): returned %u; nearest %.2f %.2f %.2f, %.2f m across, %.2f up", what, v[k].label, world,
+            (double)v[k].a, (double)v[k].b, v[k].mask, r, out[0], out[1], out[2], out[0] == -12345.0f ? -1.0f : sqrtf(dx * dx + dy * dy),
+            out[0] == -12345.0f ? 0.0f : out[2] - at[2]);
+    }
 }
 static int g_f8Pending, g_f8Mode;
 static void F8Frame(void)
