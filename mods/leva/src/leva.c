@@ -42,7 +42,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.5.4"
+#define VERSION "0.5.5"
 #define BUILD "25480438"
 #define AVATAR UINT64_C(0x4D1C334D294DFA97)
 #define NODE_HEAD 90u
@@ -72,6 +72,7 @@ static float s_vzRadius = 3.5f, s_vzSeconds = 9, s_vzArm = 1.0f;
 static float s_arcRate = 10, s_arcReach = 8, s_arcBurst = 0;
 static int s_arcChain = -1, s_arcSplit = -1, s_arcStyle = 0;
 static float s_arcRange = 0, s_aimSmooth = 0.2f;
+static int s_aimCamera = 1;   /* 1: her lines and fields follow the game camera (the reticle); 0: her head, averaged */
 static int s_arcGrenade = 0;
 static int s_arcEmpty = 1;
 static float s_lpClimb = 6, s_lpDrop = 12;
@@ -85,7 +86,7 @@ static void Setting(const char* key, double v)
 #define F(name, var, lo, hi) else if (!strcmp(key, name)) var = (float)CL(v, lo, hi)
 #define I(name, var, lo, hi) else if (!strcmp(key, name)) var = (int)CL(v, lo, hi)
     if (0) {}
-    I("arc_mode", s_arcMode, 0, 3); F("arc_rate", s_arcRate, 1, 100); F("arc_reach", s_arcReach, 1, 30); F("arc_burst", s_arcBurst, 0, 100); I("arc_chain", s_arcChain, -1, 8); I("arc_shape", s_arcStyle, 0, 2); F("arc_range", s_arcRange, 0, 100); F("aim_smooth", s_aimSmooth, 0, 2); I("arc_grenade", s_arcGrenade, 0, 1); I("arc_split", s_arcSplit, -1, 8); I("arc_empty", s_arcEmpty, 0, 1); I("arc_shell", s_arcShell, 0, 100000); I("arc_explosion", s_arcRow, 0, 100000); I("steady", s_steady, 0, 1); I("native_rows", s_nativeRows, 0, 1); I("native_arc", s_nativeArc, 0, 1);
+    I("arc_mode", s_arcMode, 0, 3); F("arc_rate", s_arcRate, 1, 100); F("arc_reach", s_arcReach, 1, 30); F("arc_burst", s_arcBurst, 0, 100); I("arc_chain", s_arcChain, -1, 8); I("arc_shape", s_arcStyle, 0, 2); F("arc_range", s_arcRange, 0, 100); F("aim_smooth", s_aimSmooth, 0, 2); I("aim_camera", s_aimCamera, 0, 1); I("arc_grenade", s_arcGrenade, 0, 1); I("arc_split", s_arcSplit, -1, 8); I("arc_empty", s_arcEmpty, 0, 1); I("arc_shell", s_arcShell, 0, 100000); I("arc_explosion", s_arcRow, 0, 100000); I("steady", s_steady, 0, 1); I("native_rows", s_nativeRows, 0, 1); I("native_arc", s_nativeArc, 0, 1);
     F("rs_cooldown", s_rsCd, 0, 600); F("rs_distance", s_rsDistance, 2, 60); F("rs_width", s_rsWidth, 2, 60); F("rs_depth", s_rsDepth, 0, 30);
     I("rs_columns", s_rsColumns, 1, 15); I("rs_rows", s_rsRows, 1, 5); F("rs_paralysis", s_rsParalysis, 0, 30); F("rs_sweep", s_rsSweep, 0, 0.5);
     F("rs_seconds", s_rsSeconds, 0, 60); F("rs_pulse", s_rsPulse, 0.1, 5); F("rs_damage", s_rsDamage, 0, 5); F("rs_hold", s_rsHold, 0, 5); I("rs_arcs", s_rsArcs, 0, 20);
@@ -180,6 +181,8 @@ static void LoadSettings(void)
                        "key_suppress = %s\nkey_disrupt = %s\nkey_ult = %s\n"
                        "; aim_smooth: seconds her aim is averaged over for her lines and fields (her head sways; 0: the raw aim).\n"
                        "aim_smooth = %g\n"
+                       "; aim_camera: 1 her lines and fields follow the game camera, where the reticle is (no sway); 0 her head, averaged.\n"
+                       "aim_camera = %d\n"
                        "; arc_grenade 1: her arcs are the G-31 Arc grenade's detonation (arc_explosion) set off at each point; 0: arc_mode.\n"
                        "arc_grenade = %d\n"
                        "; arc_mode, how her arcs are made at each point: 1 a bullet fired down from 3 m that bursts like the GL-52\n"
@@ -229,7 +232,7 @@ static void LoadSettings(void)
                        "; If her stamina ever runs out, hellbomb_on_exhaustion (1) sets off hellbomb_explosion (125: the B-100 Portable\n"
                        "; Hellbomb's) on her, once the bar has stayed empty hellbomb_hold s (it flickers to 0 at times).\n"
                        "hellbomb_on_exhaustion = %d\nhellbomb_explosion = %d\nhellbomb_hold = %g\n",
-                VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_aimSmooth, s_arcGrenade, s_arcMode, s_arcShell, s_arcRow, s_steady, s_nativeRows, s_nativeArc, (double)s_arcRate, (double)s_arcReach, s_arcEmpty, (double)s_arcBurst, s_arcStyle, (double)s_arcRange, s_arcChain, s_arcSplit,
+                VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_aimSmooth, s_aimCamera, s_arcGrenade, s_arcMode, s_arcShell, s_arcRow, s_steady, s_nativeRows, s_nativeArc, (double)s_arcRate, (double)s_arcReach, s_arcEmpty, (double)s_arcBurst, s_arcStyle, (double)s_arcRange, s_arcChain, s_arcSplit,
                 (double)s_rsCd, (double)s_rsDistance, (double)s_rsWidth, (double)s_rsDepth, s_rsColumns, s_rsRows, (double)s_rsParalysis, (double)s_rsSweep,
                 (double)s_rsSeconds, (double)s_rsPulse, (double)s_rsDamage, (double)s_rsHold, s_rsArcs,
                 (double)s_odCd, (double)s_odSeconds, (double)s_odStep, (double)s_odCharged,
@@ -1341,10 +1344,83 @@ static void AimTrack(float dt)
     }
     g_aimAt = g_now;
 }
+/* Where the reticle points: the game camera's pose (as Apache - Rise Above's gunner turret reads it, after Khi's
+ * World.debug_camera_pose: the 4x4 matrix at World + 0x230920, rows right, forward, up, position). The World is her unit
+ * object's +0x18 (EXO Beacon Launcher's layout), else the first of its pointers (one level deep) that holds a camera
+ * matrix within 300 m of her (the Apache's search). Read-only. 1 with the camera's position and forward */
+static uintptr_t g_camWorld;
+static double g_camRetry;
+static int CameraAt(uintptr_t w, const float near_[3], float m[16])
+{
+    if (!AddressOk(w, 8) || !ReadAt(w + 0x230920, m, 64)) return 0;
+    for (int k = 0; k < 16; k++) if (!isfinite(m[k])) return 0;
+    if (fabsf(m[3]) > 1e-3f || fabsf(m[7]) > 1e-3f || fabsf(m[11]) > 1e-3f || fabsf(m[15] - 1) > 1e-3f) return 0;
+    for (int r = 0; r < 3; r++)
+        if (fabsf(m[4 * r] * m[4 * r] + m[4 * r + 1] * m[4 * r + 1] + m[4 * r + 2] * m[4 * r + 2] - 1) > 0.02f) return 0;
+    float dx = m[12] - near_[0], dy = m[13] - near_[1], dz = m[14] - near_[2];
+    return dx * dx + dy * dy + dz * dz < 300.0f * 300.0f;
+}
+static uintptr_t UnitObject(uint32_t unit)
+{
+    uintptr_t registry = Pointer(exe + 0x1A100F0), generations, objects, object;
+    uint32_t count, id, slot = unit & 0x3FFFFF;
+    uint8_t generation;
+    if (!registry || !ReadAt(registry + 0x98, &count, 4) || count > 0x400000 || slot >= count ||
+        !(generations = Pointer(registry + 0xA0)) || !ReadAt(generations + slot, &generation, 1) || generation != (uint8_t)(unit >> 22) ||
+        !(objects = Pointer(registry + 0x88)) || !(object = Pointer(objects + 8u * slot)) || !ReadAt(object + 8, &id, 4) || id != unit)
+        return 0;
+    return object;
+}
+static int Camera(float pos[3], float fwd[3])
+{
+    float me[3], m[16];
+    if (!exe || !PlayerPose(me, NULL)) return 0;
+    if (!g_camWorld || !CameraAt(g_camWorld, me, m))
+    {
+        g_camWorld = 0;
+        if (g_now < g_camRetry) return 0;
+        g_camRetry = g_now + 10;
+        uint8_t d[24];
+        uintptr_t obj = Descriptor(atomic_load(&g_avatar), d) ? UnitObject(Word(d + 12)) : 0, a[256];
+        if (!obj) return 0;
+        uintptr_t w = Pointer(obj + 0x18);
+        if (w && CameraAt(w, me, m)) g_camWorld = w;
+        else if (ReadAt(obj, a, sizeof a))
+            for (int i = 0; i < 256 && !g_camWorld; i++)
+            {
+                if (CameraAt(a[i], me, m)) { g_camWorld = a[i]; break; }
+                uintptr_t b[64];
+                if (!AddressOk(a[i], sizeof b) || !ReadAt(a[i], b, sizeof b)) continue;
+                for (int j = 0; j < 64 && !g_camWorld; j++) if (CameraAt(b[j], me, m)) g_camWorld = b[j];
+            }
+        static int told;
+        if (told++ < 3) Log("aim: %s", g_camWorld ? "the game camera (its pose at World + 0x230920)" : "the game camera was not found: her head's aim instead");
+        if (!g_camWorld) return 0;
+        CameraAt(g_camWorld, me, m);
+    }
+    memcpy(fwd, m + 4, 12);
+    memcpy(pos, m + 12, 12);
+    return 1;
+}
 static int AimFlat(float pos[3], float dir[2])
 {
     float aim[3];
     if (!PlayerPose(pos, aim)) return 0;
+    /* the reticle: the camera's forward (no sway to average) */
+    float cp[3], cf[3];
+    if (s_aimCamera && Camera(cp, cf))
+    {
+        float n = sqrtf(cf[0] * cf[0] + cf[1] * cf[1]);
+        if (n > 0.05f)
+        {
+            dir[0] = cf[0] / n; dir[1] = cf[1] / n;
+            static int told;
+            float h = sqrtf(aim[0] * aim[0] + aim[1] * aim[1]);
+            if (told < 4 && h > 0.05f)
+            { told++; Log("aim: the camera's, %.1f degrees from her head's", acos(fmax(-1.0, fmin(1.0, (dir[0] * aim[0] + dir[1] * aim[1]) / h))) * 57.2958); }
+            return 1;
+        }
+    }
     if (g_aimHave && g_now - g_aimAt < 0.3 && s_aimSmooth > 0) { dir[0] = g_aimAvg[0]; dir[1] = g_aimAvg[1]; return 1; }
     float n = sqrtf(aim[0] * aim[0] + aim[1] * aim[1]);
     if (!(n > 0.05f)) return 0;
