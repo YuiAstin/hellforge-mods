@@ -42,7 +42,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.5.5"
+#define VERSION "0.5.6"
 #define BUILD "25480438"
 #define AVATAR UINT64_C(0x4D1C334D294DFA97)
 #define NODE_HEAD 90u
@@ -58,7 +58,7 @@ static uintptr_t game, exe;
 #define KM_ALT 4
 typedef struct Key { int vk, mods; char label[24]; } Key;
 static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
-static int s_nativeRows = 1, s_nativeArc = 0;
+static int s_nativeRows = 1, s_nativeArc = 1, s_burstRequest = 1;
 static int s_arcMode = 1, s_arcShell = 222, s_arcRow = 157, s_rsColumns = 7, s_rsRows = 3, s_ultArcsMax = 24, s_fsMax = 2, s_codeMax = 4, s_steady = 0;
 static int s_rsArcs = 2;
 static float s_rsCd = 14, s_rsDistance = 12, s_rsWidth = 18, s_rsDepth = 6, s_rsParalysis = 4, s_rsSweep = 0.05f, s_rsSeconds = 10, s_rsPulse = 0.5f, s_rsDamage = 0.067f, s_rsHold = 1.0f;
@@ -86,7 +86,7 @@ static void Setting(const char* key, double v)
 #define F(name, var, lo, hi) else if (!strcmp(key, name)) var = (float)CL(v, lo, hi)
 #define I(name, var, lo, hi) else if (!strcmp(key, name)) var = (int)CL(v, lo, hi)
     if (0) {}
-    I("arc_mode", s_arcMode, 0, 3); F("arc_rate", s_arcRate, 1, 100); F("arc_reach", s_arcReach, 1, 30); F("arc_burst", s_arcBurst, 0, 100); I("arc_chain", s_arcChain, -1, 8); I("arc_shape", s_arcStyle, 0, 2); F("arc_range", s_arcRange, 0, 100); F("aim_smooth", s_aimSmooth, 0, 2); I("aim_camera", s_aimCamera, 0, 1); I("arc_grenade", s_arcGrenade, 0, 1); I("arc_split", s_arcSplit, -1, 8); I("arc_empty", s_arcEmpty, 0, 1); I("arc_shell", s_arcShell, 0, 100000); I("arc_explosion", s_arcRow, 0, 100000); I("steady", s_steady, 0, 1); I("native_rows", s_nativeRows, 0, 1); I("native_arc", s_nativeArc, 0, 1);
+    I("arc_mode", s_arcMode, 0, 3); F("arc_rate", s_arcRate, 1, 100); F("arc_reach", s_arcReach, 1, 30); F("arc_burst", s_arcBurst, 0, 100); I("arc_chain", s_arcChain, -1, 8); I("arc_shape", s_arcStyle, 0, 2); F("arc_range", s_arcRange, 0, 100); F("aim_smooth", s_aimSmooth, 0, 2); I("aim_camera", s_aimCamera, 0, 1); I("arc_grenade", s_arcGrenade, 0, 1); I("arc_split", s_arcSplit, -1, 8); I("arc_empty", s_arcEmpty, 0, 1); I("arc_shell", s_arcShell, 0, 100000); I("arc_explosion", s_arcRow, 0, 100000); I("steady", s_steady, 0, 1); I("native_rows", s_nativeRows, 0, 1); I("native_arc", s_nativeArc, 0, 1); I("burst_request", s_burstRequest, 0, 1);
     F("rs_cooldown", s_rsCd, 0, 600); F("rs_distance", s_rsDistance, 2, 60); F("rs_width", s_rsWidth, 2, 60); F("rs_depth", s_rsDepth, 0, 30);
     I("rs_columns", s_rsColumns, 1, 15); I("rs_rows", s_rsRows, 1, 5); F("rs_paralysis", s_rsParalysis, 0, 30); F("rs_sweep", s_rsSweep, 0, 0.5);
     F("rs_seconds", s_rsSeconds, 0, 60); F("rs_pulse", s_rsPulse, 0.1, 5); F("rs_damage", s_rsDamage, 0, 5); F("rs_hold", s_rsHold, 0, 5); I("rs_arcs", s_rsArcs, 0, 20);
@@ -192,8 +192,10 @@ static void LoadSettings(void)
                        "arc_mode = %d\narc_shell = %d\narc_explosion = %d\nsteady = %d\n"
                        "; native_rows 1: the lockdown bursts as an explosion and arc of her own (copies of the GL-52 burst's, added to the\n"
                        "; game's lists), so rs_damage sets its damage in the game's data; 0: the GL-52 burst, its damage cut as it lands.\n"
-                       "; native_arc 1: its arc too (off: in testing the lightning then ran to and from her; the arc's hits are cut as they land).\n"
-                       "native_rows = %d\nnative_arc = %d\n"
+                       "; native_arc 1: its arc too (0.5.2: the lightning ran to and from her while her bullet was the burst's source;\n"
+                       ";   0.5.5 requests the burst with no source: set 0 if it still does; 0: the arc's hits are cut as they land).\n"
+                       "; burst_request 1: the burst is requested from the game directly (no source, credited to her); 0: her bullet carries it.\n"
+                       "native_rows = %d\nnative_arc = %d\nburst_request = %d\n"
                        "; Too many arcs at once leave their lightning on the field for good: at most arc_rate arcs a second. Points with an\n"
                        "; enemy within arc_reach m come first (the rest of them wait their turn); with arc_empty = 1 the empty points get\n"
                        "; what the rate leaves over (showing her reach), else none (their charge, paralysis and Voltage still apply).\n"
@@ -232,7 +234,7 @@ static void LoadSettings(void)
                        "; If her stamina ever runs out, hellbomb_on_exhaustion (1) sets off hellbomb_explosion (125: the B-100 Portable\n"
                        "; Hellbomb's) on her, once the bar has stayed empty hellbomb_hold s (it flickers to 0 at times).\n"
                        "hellbomb_on_exhaustion = %d\nhellbomb_explosion = %d\nhellbomb_hold = %g\n",
-                VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_aimSmooth, s_aimCamera, s_arcGrenade, s_arcMode, s_arcShell, s_arcRow, s_steady, s_nativeRows, s_nativeArc, (double)s_arcRate, (double)s_arcReach, s_arcEmpty, (double)s_arcBurst, s_arcStyle, (double)s_arcRange, s_arcChain, s_arcSplit,
+                VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_aimSmooth, s_aimCamera, s_arcGrenade, s_arcMode, s_arcShell, s_arcRow, s_steady, s_nativeRows, s_nativeArc, s_burstRequest, (double)s_arcRate, (double)s_arcReach, s_arcEmpty, (double)s_arcBurst, s_arcStyle, (double)s_arcRange, s_arcChain, s_arcSplit,
                 (double)s_rsCd, (double)s_rsDistance, (double)s_rsWidth, (double)s_rsDepth, s_rsColumns, s_rsRows, (double)s_rsParalysis, (double)s_rsSweep,
                 (double)s_rsSeconds, (double)s_rsPulse, (double)s_rsDamage, (double)s_rsHold, s_rsArcs,
                 (double)s_odCd, (double)s_odSeconds, (double)s_odStep, (double)s_odCharged,
@@ -545,11 +547,28 @@ static void Own(const float at[3], uint32_t tag)
 static uint32_t g_shellCopy, g_bolt, g_glBurst, g_boltDamage, g_fieldBolt;
 static int g_ntState;   /* her own lockdown explosion: 1 live (parts_native) */
 static uint32_t g_ntExpId, g_ntArcId;
+static int XqRequest(uint32_t type, const float at[3], uint32_t source, uint32_t owner, uint64_t peer);
+static uint64_t g_myPeer;
+static const char* g_xqWhy;
 static int Fire(int mode, const float at[3], uint32_t tag)
 {
     float from[3] = {at[0], at[1], at[2] + 3.0f}, down[3] = {0, 0, -1};
     /* the lockdown's own burst rides its own bullet whatever arc_mode says (it cannot be set off directly) */
-    if (tag == TAG_FIELD && g_ntState == 1 && g_fieldBolt && !s_arcGrenade) return hf->spawn_projectile(self, g_fieldBolt, from, down);
+    if (tag == TAG_FIELD && g_ntState == 1 && g_fieldBolt && !s_arcGrenade)
+    {
+        /* burst_request: her burst requested from the game directly, with no source (its lightning starts at the burst),
+         * owned by her Helldiver and credited to her */
+        if (s_burstRequest && XqRequest(g_ntExpId, at, 0, atomic_load(&g_avatar), g_myPeer))
+        {
+            static unsigned told;
+            if (told++ < 3) Log("lockdown burst: explosion %u requested at the point, no source (owner %u, creditor %llx)", g_ntExpId,
+                                atomic_load(&g_avatar), (unsigned long long)g_myPeer);
+            return HF_ACT_REQUESTED;
+        }
+        static int toldWhy;
+        if (s_burstRequest && !toldWhy++) Log("lockdown burst: the game's explosion request is unavailable (%s): her bullet instead", g_xqWhy);
+        return hf->spawn_projectile(self, g_fieldBolt, from, down);
+    }
     if (s_arcGrenade && s_arcRow && mode != 2) return hf->spawn_explosion(self, (uint32_t)s_arcRow, at);   /* the G-31's own blast */
     if (mode == 1 && g_bolt && g_glBurst) return hf->spawn_projectile(self, g_bolt, from, down);
     if (mode == 1 || mode == 3) { if (g_glBurst) return hf->spawn_explosion(self, g_glBurst, at); mode = 2; }
@@ -570,6 +589,68 @@ static int Zap(const float at[3], const char* what, uint32_t tag)
     }
     if (r != HF_ACT_WAITING) Act(what, r);
     return r;
+}
+/* ---- the game's own explosion request (adapted from Beelzebub's Strat Pack 1.8.3, explosion_request.c, by Beelzebub,
+ * reused with his permission, 2026-11-02): any explosion row at any point, with the source, owner and creditor chosen.
+ * Her lockdown bursts go through it with no source, so their lightning starts at the burst (with her own bullet as
+ * the source, it ran to and from her). Every pinned instruction is checked once before the first request (read_code:
+ * the code as shipped, before HellForge's own HF_ON_EXPLOSION hook); 8 of the queue's 256 places are always left free. */
+#define XQ_GLOBAL 54973784u       /* game.dll: the explosion system (its queue) */
+#define XQ_COUNT 32u
+#define XQ_CAPACITY 256u
+#define XQ_REQUEST 20712064u      /* RequestExplosion */
+typedef void (*XqRequestFn)(void* queue, const float* position, uint32_t type, uint32_t source, uint32_t owner, uint64_t peer,
+    uint32_t a7, const float* a8, uint8_t a9, uint32_t a10, const uint32_t* a11, const float* a12, const float* a13,
+    uint8_t a14, uint32_t a15);
+static const struct { uint32_t rva; const char* hex; } kXqPins[] = {
+    {20712064, "40534883ec308b41204c8bda488bd93d000100000f8369020000"},   /* RequestExplosion's prologue */
+    {20712079, "3d00010000"},       /* the queue holds 256 */
+    {20712128, "4969fa98000000"},   /* entry stride 0x98 */
+    {20712145, "f20f11440f28"},     /* entries from +0x28: position */
+    {20712155, "4489440f34"},       /* +0x0C type */
+    {20712207, "4889441f40"},       /* +0x18 creditor */
+    {20712229, "44894c1f38"},       /* +0x10 source */
+    {20712244, "894c1f3c"},         /* +0x14 owner */
+    {9220491, "488b0dc623ba02"},    /* the queue global */
+    {20936322, "e9593afbff"},       /* impacts queue after the explosion kick */
+};
+static int g_xqState;             /* 0 not checked, 1 ready, -1 off */
+static const char* g_xqWhy = "not checked yet";
+static XqRequestFn g_xqRequest;
+static uint64_t g_myPeer;         /* her player's peer (HF_ON_PLAYER_SPAWN): the creditor of her requested bursts */
+static int XqOpen(void)
+{
+    if (g_xqState) return g_xqState > 0;
+    g_xqState = -1;
+    size_t size = 0;
+    uintptr_t base = hf->module_base("game.dll", &size);
+    if (!base || size != 74727424u) { g_xqWhy = "another game build"; return 0; }
+    int preHook = hf->size >= offsetof(HfApi, read_code) + sizeof hf->read_code && hf->read_code != NULL;
+    for (size_t i = 0; i < sizeof kXqPins / sizeof kXqPins[0]; i++)
+    {
+        uint8_t want[32], got[32];
+        int n = 0, from = 0;
+        for (const char* h = kXqPins[i].hex; h[0] && h[1]; h += 2) { unsigned v; sscanf(h, "%2x", &v); want[n++] = (uint8_t)v; }
+        if ((preHook ? hf->read_code(base + kXqPins[i].rva, got, n) : hf->read(base + kXqPins[i].rva, got, n)) != 0)
+        { g_xqWhy = "the game's explosion request could not be read"; return 0; }
+        if (!preHook && i == 0 && (got[0] == 0xE9 || (got[0] == 0xFF && got[1] == 0x25))) from = 15;
+        if (memcmp(got + from, want + from, n - from)) { static char t[64]; snprintf(t, sizeof t, "the explosion request changed (+%X)", kXqPins[i].rva); g_xqWhy = t; return 0; }
+    }
+    g_xqRequest = (XqRequestFn)(base + XQ_REQUEST);
+    g_xqState = 1;
+    g_xqWhy = "ready";
+    return 1;
+}
+/* 1 queued, 0 not (not open, or the queue nearly full); on the game thread only */
+static int XqRequest(uint32_t type, const float at[3], uint32_t source, uint32_t owner, uint64_t peer)
+{
+    uint64_t queue = 0;
+    uint32_t n = 0;
+    if (!XqOpen() || !game || hf->read(game + XQ_GLOBAL, &queue, 8) || queue < 0x10000 || hf->read(queue + XQ_COUNT, &n, 4) ||
+        n >= XQ_CAPACITY - 8)
+        return 0;
+    g_xqRequest((void*)queue, at, type, source, owner, peer, 0, NULL, 1, 0, NULL, NULL, NULL, 0, 0);
+    return 1;
 }
 /* ---- private explosion and arc rows ------------------------------------------------------------------------------ *
  * The lockdown's burst as an explosion of her own: a copy of the GL-52 De-Escalator's burst (explosion 41) under a new
@@ -984,6 +1065,18 @@ static int NtInstall(void)
         return 0;
     }
     g_ntState = 1;
+    /* the explosion kick's own guard (found by HadePasianax's Explosives Library, MIT): its cmp eax,423 at 0x13C551E comes
+     * after its table load (0x13C54DF: lea rdx,[list]), so the scan for bounds before a reader misses it */
+    {
+        static const uint8_t tail[] = {0x73, 0x08, 0x85, 0xc0, 0x74, 0x04, 0x4c, 0x8b, 0x34, 0xc2};
+        uint8_t op = 0, got[sizeof tail];
+        uint32_t count = 0, raised = NT_EXP_NATIVE + 1, check = 0;
+        uintptr_t at = g_ntBase + 0x13C551Eu;
+        if (NtRead(at, &op, 1) && op == 0x3d && NtRead(at + 1, &count, 4) && NtRead(at + 5, got, sizeof got) && !memcmp(got, tail, sizeof tail) &&
+            count == NT_EXP_NATIVE && !hf->write(at + 1, &raised, 4) && NtRead(at + 1, &check, 4) && check == raised)
+            Log("lockdown burst: the explosion kick's guard raised to %u", raised);
+        else Log("lockdown burst: the explosion kick's guard at +0x13C551E is not as expected (left as it is)");
+    }
     Log("lockdown burst: explosion %u (a copy of %u: %u sites, %u bounds) dealing damage %u (a copy of %u)", g_ntExpId, g_glBurst,
         g_ntExp.refs, g_ntExp.bounds, g_ntBlastDamage, blastDamage);
     if (g_ntArcId)
@@ -1823,6 +1916,7 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
     if (info->kind == HF_ON_PLAYER_SPAWN)
     {
         if (p->entity && p->entity != atomic_load(&g_avatar)) { atomic_store(&g_avatar, p->entity); g_avatarNet = 0; }
+        if (p->peer) g_myPeer = p->peer;
         g_alive = 1;
         LearnNet();
     }
