@@ -195,6 +195,10 @@ typedef struct { uint32_t entity; uint64_t resource; double at; } Spawned;
 static Spawned g_spawn[256];
 static unsigned g_nspawn;
 static double g_now;
+#define SEEN 2048
+static uint32_t g_seenEnt[SEEN];
+static uint64_t g_seenRes[SEEN];
+static unsigned g_nseen;
 static uint32_t g_mech, g_mechUnit, g_actor, g_children[8];
 static int g_nchildren;
 static uint64_t g_mechRes;
@@ -428,6 +432,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     const HfSpawnEvent* e = (const HfSpawnEvent*)info;
     Spawned* s = &g_spawn[g_nspawn++ % 256];
     s->entity = e->entity; s->resource = e->resource; s->at = g_now;
+    g_seenEnt[g_nseen % SEEN] = e->entity; g_seenRes[g_nseen % SEEN] = e->resource; g_nseen++;
     if (MechName(e->resource)) Log("spawn: %s, entity %u network %u (simulated here: %s)", MechName(e->resource), e->entity, e->network, e->authority ? "yes" : "no");
 }
 static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
@@ -469,6 +474,159 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     exe = hf->module_base("helldivers2.exe", &xs);
     if (!game || !exe || gs != 74727424u || xs != 60719104u) { g_ready = -1; Log("REFUSED: not build " BUILD "'s modules"); return; }
     g_ready = 0;   /* bound in the first mission: the engine tables are filled after game load */
+}
+
+/* ---- the Pile Bunker follow-up's drag, tested on foot or in a suit: Ctrl+F10 drags the nearest live enemy 10 m toward
+ * you (the stepped move, as F9 moves the suit), Ctrl+F11 pushes the nearest corpse toward you (physics impulses on
+ * every body of its ragdoll) */
+static uint32_t g_dead[256];
+static unsigned g_ndead;
+static int HealthOf(uint32_t entity, int32_t* health)
+{
+    uintptr_t m = P(game + 53634696u);
+    uint8_t h[88];
+    if (!entity || !m || !RD(m + 4112, h, sizeof h)) return 0;
+    uint32_t live = U32(h + 16), cap = U32(h + 40), empty = U32(h + 44), mult = U32(h + 48);
+    uintptr_t buckets, records;
+    memcpy(&buckets, h + 32, 8); memcpy(&records, h + 72, 8);
+    if (!buckets || !records || !cap || cap > 65536 || (cap & (cap - 1)) || live > 4096) return 0;
+    for (uint32_t k = 0; k < cap; k++)
+    {
+        uint8_t b[8];
+        if (!RD(buckets + 8u * ((entity * mult + k) & (cap - 1)), b, 8)) return 0;
+        uint32_t key = U32(b), index = U32(b + 4);
+        if (key == empty) return 0;
+        if (key != entity) continue;
+        if (index >= live) return 0;
+        uint8_t r[24];
+        if (!RD(records + 440u * index, r, sizeof r)) return 0;
+        memcpy(health, r + 20, 4);
+        return 1;
+    }
+    return 0;
+}
+static int Hostile(uint64_t res)
+{
+    uint32_t stride;
+    return res && hf->component_record("BehaviorComponentData", res, &stride) && !hf->component_record("AvatarComponentData", res, &stride) &&
+           !hf->component_record("TurretComponentData", res, &stride) && !MechName(res) && res != 0x75BE82ED8592A6B3ull;
+}
+static uint32_t g_dragEnt, g_dragUnit;
+static float g_dragDir[2], g_dragLeft;
+static double g_dragUntil, g_dragLast;
+static uint32_t g_pushActors[64];
+static int g_npush;
+static float g_pushDir[3];
+static double g_pushUntil;
+static void Drag(void)
+{
+    Ent me, e;
+    float mp[3], best[3];
+    if (!Resolve(atomic_load(&g_avatar), &me) || !RootOf(me.unit, mp)) { Log("Ctrl+F10: your position is unknown"); return; }
+    uint32_t pick = 0, unit = 0;
+    float bd = 1e30f;
+    unsigned n = g_nseen < SEEN ? g_nseen : SEEN;
+    for (unsigned i = 0; i < n; i++)
+    {
+        int32_t hp;
+        float p[3];
+        if (!Hostile(g_seenRes[i]) || !HealthOf(g_seenEnt[i], &hp) || hp <= 0 || !Resolve(g_seenEnt[i], &e) || !RootOf(e.unit, p)) continue;
+        float d = (p[0] - mp[0]) * (p[0] - mp[0]) + (p[1] - mp[1]) * (p[1] - mp[1]);
+        if (d < bd && d > 9.0f) { bd = d; pick = g_seenEnt[i]; unit = e.unit; memcpy(best, p, sizeof best); }
+    }
+    if (!pick) { Log("Ctrl+F10: no live enemy found (more than 3 m away)"); return; }
+    float dx = mp[0] - best[0], dy = mp[1] - best[1], h = sqrtf(dx * dx + dy * dy);
+    g_dragDir[0] = dx / h; g_dragDir[1] = dy / h;
+    g_dragLeft = h - 3 < 10 ? h - 3 : 10;
+    g_dragEnt = pick; g_dragUnit = unit; g_dragUntil = g_now + 0.5; g_dragLast = g_now;
+    Log("Ctrl+F10: dragging enemy %u (%.1f m away) %.1f m toward you", pick, (double)h, (double)g_dragLeft);
+}
+static void DragFrame(void)
+{
+    if (!g_dragUntil) return;
+    float p[3];
+    double dt = g_now - g_dragLast;
+    g_dragLast = g_now;
+    if (!RootOf(g_dragUnit, p)) { g_dragUntil = 0; Log("Ctrl+F10: the enemy is gone"); return; }
+    if (g_now >= g_dragUntil || g_dragLeft <= 0) { g_dragUntil = 0; Log("Ctrl+F10: done, the enemy is at %.1f %.1f %.1f", p[0], p[1], p[2]); return; }
+    if (dt <= 0 || dt > 0.1) return;
+    float step = (float)(20.0 * dt);
+    if (step > g_dragLeft) step = g_dragLeft;
+    float dest[3] = {p[0] + g_dragDir[0] * step, p[1] + g_dragDir[1] * step, p[2]}, top[3] = {dest[0], dest[1], p[2] + 2.0f}, down[3] = {0, 0, -1};
+    float g = Ray(g_dragUnit, top, down, 4.0f);
+    if (g < 0) return;
+    if (g <= 4.0f) dest[2] = top[2] - g;
+    fn.set_position(NULL, g_dragEnt, dest);
+    g_dragLeft -= step;
+}
+static void Push(void)
+{
+    Ent me, e;
+    float mp[3];
+    if (!Resolve(atomic_load(&g_avatar), &me) || !RootOf(me.unit, mp)) { Log("Ctrl+F11: your position is unknown"); return; }
+    uint32_t pick = 0, unit = 0;
+    float bd = 1e30f, cp[3] = {0};
+    for (unsigned i = 0; i < (g_ndead < 256 ? g_ndead : 256); i++)
+    {
+        float p[3];
+        if (!Resolve(g_dead[i], &e) || !RootOf(e.unit, p)) continue;
+        float d = (p[0] - mp[0]) * (p[0] - mp[0]) + (p[1] - mp[1]) * (p[1] - mp[1]);
+        if (d < bd) { bd = d; pick = g_dead[i]; unit = e.unit; memcpy(cp, p, sizeof cp); }
+    }
+    if (!pick) { Log("Ctrl+F11: no corpse found (kill something first)"); return; }
+    g_npush = 0;
+    _Alignas(8) uint8_t buf[128] = {0};
+    if (fn.unit_resolve(unit) && fn.components(unit, 127, buf) > 0)
+        for (int list = 0; list < 7; list++)
+        {
+            uint32_t count = U32(buf + 56 + list * 4);
+            uintptr_t ids; memcpy(&ids, buf + list * 8, 8);
+            for (uint32_t k = 0; k < count && k < 64 && ids && g_npush < 64; k++)
+            {
+                uint32_t id;
+                if (!RD(ids + k * 4ull, &id, 4)) break;
+                if ((id & 0x20000000u) && fn.valid(id) && fn.owner(id) == unit && fn.physical(id)) g_pushActors[g_npush++] = id;
+            }
+        }
+    float dx = mp[0] - cp[0], dy = mp[1] - cp[1], h = sqrtf(dx * dx + dy * dy);
+    if (h < 0.1f) h = 0.1f;
+    g_pushDir[0] = dx / h; g_pushDir[1] = dy / h; g_pushDir[2] = 0.3f;
+    g_pushUntil = g_now + 0.3;
+    Log("Ctrl+F11: pushing corpse %u (%.1f m away) toward you: %d physics bodies", pick, (double)sqrtf(bd), g_npush);
+    for (int i = 0; i < g_npush && i < 4; i++)
+    {
+        float pp[4] = {0}, lv[4] = {0}, av[4] = {0};
+        fn.position(g_pushActors[i], pp);
+        fn.velocities(g_pushActors[i], lv, av);
+        Log("  body %08x at %.1f %.1f %.1f, moving %.1f %.1f %.1f", g_pushActors[i], pp[0], pp[1], pp[2], lv[0], lv[1], lv[2]);
+    }
+}
+static void PushFrame(void)
+{
+    if (!g_pushUntil) return;
+    if (g_now >= g_pushUntil)
+    {
+        g_pushUntil = 0;
+        if (g_npush)
+        {
+            float pp[4] = {0}, lv[4] = {0}, av[4] = {0};
+            fn.position(g_pushActors[0], pp);
+            fn.velocities(g_pushActors[0], lv, av);
+            Log("Ctrl+F11: done; its first body at %.1f %.1f %.1f, moving %.1f %.1f %.1f", pp[0], pp[1], pp[2], lv[0], lv[1], lv[2]);
+        }
+        return;
+    }
+    for (int i = 0; i < g_npush; i++)
+    {
+        if (!fn.valid(g_pushActors[i])) continue;
+        float j[4] = {g_pushDir[0] * 6, g_pushDir[1] * 6, g_pushDir[2] * 6, 0};   /* per body per update: a gentle shove to measure, not a launch */
+        fn.impulse(g_pushActors[i], j, NULL);
+    }
+}
+static void OnKill(HfMod* mod, const HfEventInfo* info, void* user)
+{
+    const HfKillEvent* k = (const HfKillEvent*)info;
+    g_dead[g_ndead++ % 256] = k->victim;
 }
 
 static int Down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
@@ -592,12 +750,15 @@ static void Tick(HfMod* mod, float dt, void* user)
     }
     ChargeFrame();
     ThrustFrame();
+    DragFrame();
+    PushFrame();
     static int prev[3];
     int keys[3] = {VK_F9, VK_F10, VK_F11};
     for (int k = 0; k < 3; k++)
     {
         int d = Down(keys[k]);
-        if (d && !prev[k])
+        if (d && !prev[k] && k > 0 && Down(VK_CONTROL)) { if (k == 1) Drag(); else Push(); }
+        else if (d && !prev[k])
         {
             if (!g_mech) Log("F%d: you are not piloting an exosuit", 9 + k);
             else if (k == 0)
@@ -624,10 +785,10 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     hf = api;
     self = mod;
     if (!api || api->version < 15 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
-    Log("Mech Probe 0.1.6: research only; logs a movement-input lead; F9 stepped charge (Shift: velocity, Ctrl: jump), F10 warp, F11 arm node nudge while you pilot an exosuit");
+    Log("Mech Probe 0.1.7: research only; logs a movement-input lead; F9 stepped charge (Shift: velocity, Ctrl: jump), F10 warp, F11 arm node nudge while you pilot an exosuit; Ctrl+F10 drags the nearest enemy, Ctrl+F11 pushes the nearest corpse");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
-             api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_DAMAGE, OnDamage, NULL, 0) &&
+             api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_DAMAGE, OnDamage, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
              api->on_game_thread(mod, Tick, NULL);
     if (!ok) Log("events or the game thread are unavailable");
     return 0;
