@@ -287,3 +287,52 @@ notice and names the files adapted.
     ride that node.
   - **The lunge:** still open. Options are the warp setter on the vehicle, or `set_local_position` on the unit's root
     node. Probe both.
+
+## Apache - Rise Above 1.1.0: moving a vehicle, seats, spinning parts (2026-11-02)
+
+The mod is by RSNLRiggs (Nexus 18115), with the first integration by Khi. The package has no licence file; the author
+told Yui that reusing his code is fine. Credit Riggs, and Khi for the signatures from Khi's Lua 1.2.75.
+
+- **What it is built on:** a copy of the M-102 Gunner FRV (`register_entity`, `own_all`, turret mount removed). The
+  Apache model is **rigged onto the FRV's skeleton** with HD2 SDK 3.11 and shipped as patches of the FRV archive (about
+  47 MB). Skinned models are therefore possible with HD2SDK, as long as they ride an existing skeleton.
+- **How it moves (the way to take for the mech's charge):**
+  - **No direct writes:** it never writes position, velocity or rotation. Each frame it applies an **impulse and a
+    torque to the vehicle's physics actor**, and the engine's rigid-body simulation does the moving.
+  - **The physics calls** (helldivers2.exe), each pinned by 32 bytes and also matched to the engine's physics table
+    (`[game + 0x3326338]` == exe+0x27CD910):
+    - impulse `0x797CF0 (actor, j[4], point)`
+    - torque `0x797E40`
+    - velocities `0x799540 (actor, v[4], w[4])`
+    - position `0x7999A0`, rotation `0x799A90`
+    - valid `0x7972F0`, physical `0x797310`, owner `0x799980`
+  - **Finding the actor:** `components(unit, 127, buf)` (exe+0x7E1C20). The actor is the id with bit 0x20000000 set
+    that passes `valid`, `owner == unit` and `physical`.
+  - **Who moves it:** only the authority machine (entity object `+20` bit 0); replication carries the body to the other
+    players.
+  - **Collisions:** collision damage (kind 5) is cancelled. The game's 64-entry vehicle contact list (game+0x6F7820,
+    record 0x26D0, list `+0xD28`, count `+0x1528`) is reset at 40 entries to avoid an overflow crash.
+  - **For the Sinbreaker's Pile Bunker charge** (untested): each frame for about 1 s, read `velocities` and apply
+    `impulse(actor, (v_target − v_now) × m)`, then one impulse to stop. Unknowns:
+    - whether the exosuit's legged controller (VehicleLocomotion) fights the push;
+    - its mass (learn it as the Apache does);
+    - the contact-list crash on hard hits.
+- **Seats:**
+  - **The path:** `[game + 0x3326E68]` is a bus. Its entry of type 117 is the seat manager: count `+12`, seater
+    pointers `+56`, 64-byte seat entries at `+72`.
+  - **Seater:** `+8` the avatar, `+20` bit 0 set if this machine's.
+  - **Seat entry:** `+0` the vehicle, `+8` the **role** (1 pilot, 3 gunner), `+20` the seat node, byte `+48` set while
+    a seat change is in progress.
+
+  This is consistent with EXO Beacon Launcher's reading, where role 4 is an exosuit's.
+- **Spinning parts (the rotor and the turret):** the native behind `Unit.set_local_rotation`, exe+0x1FC7A0
+  `(unit, node, xyzw[4])`, pinned through the Lua binding at exe+0x406740.
+  - **Before each call:** check that the world exists and that `unit_resolve(unit)` (exe+0x9D8C0) succeeds. Without
+    this the game crashed on quit.
+  - **For the pile driver:** a code-driven thrust can rotate or translate the shield arm's node the same way
+    (`set_local_position` from EXO Beacon Launcher).
+- **Firing with credit in co-op:** it calls the game's own projectile factory (game+0x13A9830). Its descriptor is
+  48 bytes: `+24` the weapon entity, `+28` the shooter, `+32` the credit peer.
+- **Vehicle damage:** HF_ON_DAMAGE_PRE's `cancel` only; the mod never scales `amount`. A mech damage reduction should go
+  through the hit hook's result, as Mastiff's Pledge already does on foot.
+- **Skins:** `Unit.set_material` (exe+0x4146C0 → 0x414490) swaps a material slot at run time.
