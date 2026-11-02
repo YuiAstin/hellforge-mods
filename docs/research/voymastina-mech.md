@@ -156,3 +156,22 @@ All of this needs one live run, logged in the mod (no game changes):
 - **Pile Bunker in the mech:** a real mech lunge (if it can be moved), or strikes from where it stands?
 - **Stratagem limits:** keep the vanilla 420 s cooldown / 3 uses, or make it hers (one call per mission with a shorter
   cooldown)?
+
+## A pile bunker on the suit (2026-11-02)
+
+- **No exosuit has a melee move.** HD2Runtime's melee catalogue (112 weapons with melee sources) has no exosuit
+  entry. The build has four exosuits:
+  - EXO-45 Patriot
+  - EXO-49 Emancipator
+  - EXO-51 Lumberer (anti-tank cannon and flamethrower)
+  - EXO-55 Breakthrough (flak cannon and ballistic shield; stratagem 88, entity `0x35DBF54F016F3624`)
+- **Community exosuit mods are cosmetic:** liveries, and model or texture swaps of the existing suit. None found adds a
+  move or an animation.
+- **Ways to give the Sinbreaker a pile bunker without a new animation:**
+  - **The arm itself:** swap one arm's projectile for a short-lived heavy round. It expires about 4–5 m out and goes off
+    as the Railcannon blast. Slow fire rate, a handful of drives. Arm projectile swaps are proven live (the Patriot
+    minigun). The suit's own firing animation and recoil become the punch.
+  - **A skill strike:** Pile Bunker (C) while piloting fires the same blast from the suit, along its facing, using the
+    fist's bullet trick. Add a short lunge if the probe shows a suit can be moved.
+  - **Looks:** a pile-bunker arm model would need a mesh someone provides, packed in the mod's data. HellForge's
+    `add_entity` takes a `unit` / `model_from`.
