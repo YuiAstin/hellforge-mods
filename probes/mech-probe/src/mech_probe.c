@@ -573,50 +573,51 @@ static void DragFrame(void)
     fn.set_position(NULL, g_dragEnt, dest);
     g_dragLeft -= step;
 }
+static int Bodies(uint32_t unit, uint32_t* out, int max)
+{
+    int n = 0;
+    _Alignas(8) uint8_t buf[128] = {0};
+    if (!fn.unit_resolve(unit) || fn.components(unit, 127, buf) <= 0) return 0;
+    for (int list = 0; list < 7; list++)
+    {
+        uint32_t count = U32(buf + 56 + list * 4);
+        uintptr_t ids; memcpy(&ids, buf + list * 8, 8);
+        for (uint32_t k = 0; k < count && k < 64 && ids && n < max; k++)
+        {
+            uint32_t id;
+            if (!RD(ids + k * 4ull, &id, 4)) break;
+            if ((id & 0x20000000u) && fn.valid(id) && fn.owner(id) == unit && fn.physical(id)) out[n++] = id;
+        }
+    }
+    return n;
+}
+/* the nearest corpse within 30 m that still has a ragdoll (bodies far away or long dead have none) */
 static void Push(void)
 {
     Ent me, e;
     float mp[3];
     if (!Resolve(atomic_load(&g_avatar), &me) || !RootOf(me.unit, mp)) { Log("Ctrl+F11: your position is unknown"); return; }
     uint32_t pick = 0, unit = 0;
-    float bd = 1e30f, cp[3] = {0};
-    unsigned n = g_nseen < SEEN ? g_nseen : SEEN;
+    float bd = 30.0f * 30.0f, cp[3] = {0};
+    unsigned n = g_nseen < SEEN ? g_nseen : SEEN, skipped = 0;
+    uint32_t tmp[64];
     for (unsigned i = 0; i < n; i++)
     {
         float p[3];
         int32_t hp = 1;
         if (!Hostile(g_seenRes[i]) || (HealthOf(g_seenEnt[i], &hp) && hp > 0) || !Resolve(g_seenEnt[i], &e) || !RootOf(e.unit, p)) continue;
-        uint32_t id = g_seenEnt[i];
         float d = (p[0] - mp[0]) * (p[0] - mp[0]) + (p[1] - mp[1]) * (p[1] - mp[1]);
-        if (d < bd) { bd = d; pick = id; unit = e.unit; memcpy(cp, p, sizeof cp); }
+        if (d >= bd) continue;
+        if (!Bodies(e.unit, tmp, 64)) { skipped++; continue; }
+        bd = d; pick = g_seenEnt[i]; unit = e.unit; memcpy(cp, p, sizeof cp);
     }
-    if (!pick) { Log("Ctrl+F11: no corpse found (kill something first)"); return; }
-    g_npush = 0;
-    _Alignas(8) uint8_t buf[128] = {0};
-    if (fn.unit_resolve(unit) && fn.components(unit, 127, buf) > 0)
-        for (int list = 0; list < 7; list++)
-        {
-            uint32_t count = U32(buf + 56 + list * 4);
-            uintptr_t ids; memcpy(&ids, buf + list * 8, 8);
-            for (uint32_t k = 0; k < count && k < 64 && ids && g_npush < 64; k++)
-            {
-                uint32_t id;
-                if (!RD(ids + k * 4ull, &id, 4)) break;
-                if ((id & 0x20000000u) && fn.valid(id) && fn.owner(id) == unit && fn.physical(id)) g_pushActors[g_npush++] = id;
-            }
-        }
+    if (!pick) { Log("Ctrl+F11: no corpse with a ragdoll within 30 m (%u without one)", skipped); return; }
+    g_npush = Bodies(unit, g_pushActors, 64);
     float dx = mp[0] - cp[0], dy = mp[1] - cp[1], h = sqrtf(dx * dx + dy * dy);
     if (h < 0.1f) h = 0.1f;
     g_pushDir[0] = dx / h; g_pushDir[1] = dy / h; g_pushDir[2] = 0.3f;
     g_pushUntil = g_now + 0.3;
-    Log("Ctrl+F11: pushing corpse %u (%.1f m away) toward you: %d physics bodies", pick, (double)sqrtf(bd), g_npush);
-    for (int i = 0; i < g_npush && i < 4; i++)
-    {
-        float pp[4] = {0}, lv[4] = {0}, av[4] = {0};
-        fn.position(g_pushActors[i], pp);
-        fn.velocities(g_pushActors[i], lv, av);
-        Log("  body %08x at %.1f %.1f %.1f, moving %.1f %.1f %.1f", g_pushActors[i], pp[0], pp[1], pp[2], lv[0], lv[1], lv[2]);
-    }
+    Log("Ctrl+F11: pushing corpse %u (%.1f m away) toward you: %d physics bodies (%u nearer ones had none)", pick, (double)sqrtf(bd), g_npush, skipped);
 }
 static void PushFrame(void)
 {
@@ -636,7 +637,7 @@ static void PushFrame(void)
     for (int i = 0; i < g_npush; i++)
     {
         if (!fn.valid(g_pushActors[i])) continue;
-        float j[4] = {g_pushDir[0] * 6, g_pushDir[1] * 6, g_pushDir[2] * 6, 0};   /* per body per update: a gentle shove to measure, not a launch */
+        float j[4] = {g_pushDir[0] * 30, g_pushDir[1] * 30, g_pushDir[2] * 30, 0};   /* per body per update (6 gave 1 m/s after 0.3 s) */
         fn.impulse(g_pushActors[i], j, NULL);
     }
 }
@@ -802,7 +803,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     hf = api;
     self = mod;
     if (!api || api->version < 15 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
-    Log("Mech Probe 0.1.8: research only; logs a movement-input lead; F9 stepped charge (Shift: velocity, Ctrl: jump), F10 warp, F11 arm node nudge while you pilot an exosuit; Ctrl+F10 drags the nearest enemy, Ctrl+F11 pushes the nearest corpse");
+    Log("Mech Probe 0.1.9: research only; logs a movement-input lead; F9 stepped charge (Shift: velocity, Ctrl: jump), F10 warp, F11 arm node nudge while you pilot an exosuit; Ctrl+F10 drags the nearest enemy, Ctrl+F11 pushes the nearest corpse");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_DAMAGE, OnDamage, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
