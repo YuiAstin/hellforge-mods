@@ -83,3 +83,42 @@ The list is 17 slots (0–16): the loader clears exactly that. Next step would b
 - **Mod options from Lua:** a Lua addon registers with the shared `ModOptionsMenu` (`register_option(id, {type='choice', …})`, `get`, `on_change`); the DLL exports only versioned `get(version)` / `set(version, choice)`, queues the choice with an atomic exchange and applies it in its game-thread tick.
 - **Icons without HD2Runtime:** `hellforge-data.json` resources with `"icon": "images/x.png", "prepare": "raw"` are built by HellForge's own data builder.
 - **Settings file:** it saves to `%LOCALAPPDATA%\Hade\MorePlasmaStratagems\settings.ini`. In HellForge builds since late October 2026 the game's LOCALAPPDATA is a per-session folder under `logs/sessions/<id>/game/environment`, so that save does not last past the session.
+
+## Explosives Library 0.1.0 (HadePasianax, MIT): one shared explosion registry (2026-11-02)
+
+hf-mod.com/Mods/Details/118. Source: https://github.com/HadePasianax/hd2-explosives-library. This is the fix for
+"two mods cannot both extend the same list".
+
+- **One provider:** the library extends the explosion list once, adding **64 private slots from id 423**. Other mods
+  register rows through its API instead of patching the list themselves:
+  - `explosives_library_get_api(EL_ABI = 1)` returns `ElApi`, with `register_explosion(const ElExplosion*)`,
+    `copy_explosion` and `status`.
+  - The provider is found by that exported name in any loaded module (`ElFind` in `include/explosives_library.h`),
+    not by the DLL's file name.
+- **A registration (`ElExplosion`):**
+  - `base`: the donor row, below 423. The new row is a copy of it, so the donor's effects, sound, aux list and arc
+    come with it.
+  - `damage`: a private type from `add_damage`.
+  - `name`: a globally namespaced key. Registering the same name with the same spec returns the same id.
+  - `package`: optional; loaded first.
+  - `flags`: `EL_RADII` (inner, outer, shockwave) and `EL_SHRAPNEL` (shrapnel count).
+  - Call it on the game thread, after the library reports `ready`. Rows are immutable.
+- **What a row cannot set:** the arc type (+120) and the shrapnel projectile (+84). A row keeps its donor's arc.
+  Lenna's private row (41's look with 157's arc) cannot be made through ABI 1: the arc field would have to be added to
+  the API, or Lenna would need another donor.
+- **Install:**
+  - **Waiting:** it waits for `HF_EVENT_PROJECTILES_READY`, then loads package 0xA7B23B55209766AE, then patches.
+  - **The patch:** every executable section below RVA 0x2111000 is scanned.
+  - **One new find:** an explicit **kick-stage guard**, a `cmp eax,423` at **0x13c551e** that comes *after* its
+    table load at 0x13c54df. A scan for bounds before a reader misses it, so Leva's own extension and More Plasma
+    Stratagems both left it at 423.
+  - **Safety:** any image-relative table reference it does not recognise refuses the install. Writes are read back,
+    with full rollback.
+- **Firing a registered row:** as before, a carrier projectile whose `impact_explosion` is the registered id.
+  HellForge's `spawn_explosion` still finds only the game's own rows.
+- **For the GFL2 kits:** Leva's and Lenna's own list extensions (`native_rows`) make them incompatible with each other
+  and with the library.
+  - **Plan:** register through the library when it is installed, and fall back to their own extension only when it
+    is absent.
+  - **Leva:** her burst copies 41 (whose own arc is kept), so it fits ABI 1 as it is.
+  - **Lenna:** needs the arc field.
