@@ -58,7 +58,7 @@ static struct {
     ActorVecFn position;
     ActorVelFn velocities;
     ActorPushFn impulse;
-    SetVecFn set_position;
+    SetVecFn set_position, set_velocity;
     LocalPosFn local_position;
     SetLocalPosFn set_local_position;
 } fn;
@@ -94,6 +94,8 @@ static int Bind(void)
     }
     if (hf->code_matches(game + 0x5A2BB0, "48 89 5c 24 08 48 89 6c 24 10 56 57 41 54 41 56 41 57 48 83 ec 40"))
         fn.set_position = (SetVecFn)(game + 0x5A2BB0);
+    if (hf->code_matches(game + 0x4A7550, "48 89 5c 24 18 57 48 83 ec 20 3b 15 ?? ?? ?? ?? 48 8b 1d"))
+        fn.set_velocity = (SetVecFn)(game + 0x4A7550);   /* the motion record's velocity (as Exo Dodge drives an exosuit) */
     else Log("the warp pack's position setter is not the reviewed code: F10 is off");
     uintptr_t script = P(game + 0x3326308), units = script ? P(script + 0x18) : 0;
     if (units && P(units + 0x00) == exe + 0x1fc450 && P(units + 0x38) == exe + 0x1fc720)
@@ -266,6 +268,7 @@ static int CameraForward(uint32_t unit, float f[3])
 
 /* ---- the tests ------------------------------------------------------------------------------------------------------ */
 static double g_chargeUntil, g_chargeLog;
+static int g_chargeMode;   /* 0 velocity, 1 stepped, 2 jump */
 static float g_chargeDir[2], g_massGuess = 8000;
 static float g_lastV[3], g_lastJ[3];
 static int g_lastHave;
@@ -279,7 +282,16 @@ static void ChargeFrame(void)
     if (!fn.set_position || !RootOf(g_mechUnit, p)) { g_chargeUntil = 0; Log("F9 charge: the suit's position is unknown"); return; }
     double dt = last > 0 ? g_now - last : 0;
     last = g_now;
-    if (g_now >= g_chargeUntil) { g_chargeUntil = 0; last = 0; Log("F9 charge: done at %.1f %.1f %.1f", p[0], p[1], p[2]); return; }
+    if (g_now >= g_chargeUntil) { g_chargeUntil = 0; last = 0; Log("F9 %s: done at %.1f %.1f %.1f", g_chargeMode == 2 ? "jump" : "charge", p[0], p[1], p[2]); return; }
+    if (g_chargeMode != 1)
+    {
+        if (!fn.set_velocity) { g_chargeUntil = 0; Log("F9: the velocity setter is not the reviewed code"); return; }
+        float v[3] = {g_chargeMode == 2 ? 0 : g_chargeDir[0] * 20, g_chargeMode == 2 ? 0 : g_chargeDir[1] * 20, g_chargeMode == 2 ? 9.0f : 0};
+        fn.set_velocity(NULL, g_mech, v);
+        if (g_now >= g_chargeLog) { g_chargeLog = g_now + 0.1; Log("F9 %s: velocity %.1f %.1f %.1f set; the suit at %.1f %.1f %.1f", g_chargeMode == 2 ? "jump" : "charge", v[0], v[1], v[2], p[0], p[1], p[2]); }
+        if (g_chargeMode == 2) g_chargeUntil = g_now;   /* one kick upward */
+        return;
+    }
     if (dt <= 0 || dt > 0.1) return;
     float step = (float)(20.0 * dt);   /* 20 m/s */
     float dest[3] = {p[0] + g_chargeDir[0] * step, p[1] + g_chargeDir[1] * step, p[2]};
@@ -544,8 +556,10 @@ static void Tick(HfMod* mod, float dt, void* user)
                 float h = sqrtf(f[0] * f[0] + f[1] * f[1]);
                 if (h < 0.05f) { f[0] = 1; f[1] = 0; h = 1; }
                 g_chargeDir[0] = f[0] / h; g_chargeDir[1] = f[1] / h;
-                g_chargeUntil = g_now + 0.5; g_chargeLog = 0;
-                Log("F9 charge: 0.5 s at 20 m/s toward %.2f %.2f", g_chargeDir[0], g_chargeDir[1]);
+                g_chargeMode = Down(VK_CONTROL) ? 2 : Down(VK_SHIFT) ? 1 : 0;
+                g_chargeUntil = g_now + (g_chargeMode == 2 ? 0.05 : 0.5); g_chargeLog = 0;
+                Log("F9 %s toward %.2f %.2f", g_chargeMode == 2 ? "jump (Ctrl: 9 m/s up)" : g_chargeMode == 1 ? "stepped charge (Shift: positions, 20 m/s, 0.5 s)" :
+                    "velocity charge (20 m/s for 0.5 s through the motion record)", g_chargeDir[0], g_chargeDir[1]);
             }
             else if (k == 1) Warp();
             else ThrustStart();
@@ -559,7 +573,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     hf = api;
     self = mod;
     if (!api || api->version < 15 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
-    Log("Mech Probe 0.1.3: research only; logs a movement-input lead; F9 stepped charge, F10 warp, F11 arm node nudge while you pilot an exosuit");
+    Log("Mech Probe 0.1.4: research only; logs a movement-input lead; F9 velocity charge (Shift: stepped, Ctrl: jump), F10 warp, F11 arm node nudge while you pilot an exosuit");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_DAMAGE, OnDamage, NULL, 0) &&
