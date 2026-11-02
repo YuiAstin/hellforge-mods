@@ -29,7 +29,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -66,11 +66,26 @@ static int ParseKey(const char* text, Key* k)
 static void Settings(void)
 {
     char path[MAX_PATH] = "", text[64];
-    HMODULE m = NULL;
-    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)(void*)Settings, &m))
-        GetModuleFileNameA(m, path, MAX_PATH);
-    char* slash = strrchr(path, '\\');
-    if (slash) strcpy(slash + 1, "voymastina-ak15.ini");
+    /* the mod's own folder (HellForge builds the DLL in a temp folder): the session's mod list names it */
+    for (uint32_t i = 0; hf->size >= offsetof(HfApi, mods) + sizeof(void*) && hf->mods; i++)
+    {
+        HfModInfo m = {0};
+        m.size = sizeof m;
+        if (!hf->mods(self, i, &m)) break;
+        if (m.id && !strcmp(m.id, "yui.voymastina-ak15") && m.folder && m.folder[0])
+        {
+            snprintf(path, sizeof path, "%s\\voymastina-ak15.ini", m.folder);
+            break;
+        }
+    }
+    if (!path[0])
+    {
+        HMODULE m = NULL;
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)(void*)Settings, &m))
+            GetModuleFileNameA(m, path, MAX_PATH);
+        char* slash = strrchr(path, '\\');
+        if (slash) strcpy(slash + 1, "voymastina-ak15.ini");
+    }
     DWORD found = GetFileAttributesA(path);
 #define F(name, var, lo, hi) do { GetPrivateProfileStringA("ak15", name, "", text, sizeof text, path); \
         if (text[0]) { float v_ = (float)atof(text); if (v_ >= lo && v_ <= hi) var = v_; } } while (0)
@@ -106,6 +121,11 @@ static ResolveFn g_resolve;
 static LocalPosFn g_localPos;
 static int PosOf(uint32_t entity, float out[3])
 {
+    if (!g_localPos && game)
+    {
+        uintptr_t script = P(game + 0x3326308), units = script ? P(script + 0x18) : 0;
+        if (units && P(units) == exe + 0x1fc450) { g_localPos = (LocalPosFn)(exe + 0x1fc450); Log("positions: ready"); }
+    }
     if (!g_resolve || !g_localPos || !entity || entity == UINT32_MAX) return 0;
     void* o = g_resolve(entity);
     uint8_t h[24];
@@ -348,8 +368,10 @@ static void Tick(HfMod* mod, float dt, void* user)
     EyeFrame();
     static int prevEye, prevEject;
     int focus = Focused(), eye = focus && Held(&s_keyEye), eject = focus && Held(&s_keyEject);
-    if (eye && !prevEye) Eye();
-    if (eject && !prevEject) Howl("test ejection key");
+    static ULONGLONG lastPress;
+    ULONGLONG t = GetTickCount64();
+    if (eye && !prevEye && t - lastPress > 300) { lastPress = t; Eye(); }
+    if (eject && !prevEject && t - lastPress > 300) { lastPress = t; Howl("test ejection key"); }
     prevEye = eye; prevEject = eject;
     static int wasImmune;
     int immune = g_now < g_immuneUntil;
@@ -364,9 +386,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     exe = hf->module_base("helldivers2.exe", &xs);
     if (!game || !exe || gs != 74727424u || xs != 60719104u) { Log("REFUSED: not build " BUILD "'s modules: positions off"); return; }
     if (hf->code_matches(game + 0xFD9D40, "48 83 ec 08 3b 0d 02 9f 4a 02 0f 84 9b 00 00 00")) g_resolve = (ResolveFn)(game + 0xFD9D40);
-    uintptr_t script = P(game + 0x3326308), units = script ? P(script + 0x18) : 0;
-    if (units && P(units) == exe + 0x1fc450) g_localPos = (LocalPosFn)(exe + 0x1fc450);
-    Log("positions %s", g_resolve && g_localPos ? "ready" : "NOT found: Eye and Howl can't find enemies");
+    Settings();
 }
 
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
@@ -376,7 +396,6 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 15 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
     Log("Voymastina: AK-15 on foot " VERSION " (test build of her GFL1 kit; run it with Voymastina for her fists)");
     srand(GetTickCount());
-    Settings();
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 10) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_DAMAGE, OnDamage, NULL, 0) && api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) &&

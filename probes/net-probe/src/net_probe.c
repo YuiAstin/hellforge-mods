@@ -56,6 +56,11 @@ static int Hex(const char* h, uint8_t* out)
 }
 static int MyPosition(float out[3])
 {
+    if (!g_localPos && game)
+    {
+        uintptr_t script = P(game + 0x3326308), units = script ? P(script + 0x18) : 0;
+        if (units && P(units + 0x00) == exe + 0x1fc450) { g_localPos = (LocalPosFn)(exe + 0x1fc450); Log("positions: ready"); }
+    }
     uint32_t me = atomic_load(&g_avatar);
     if (!me || !g_resolve || !g_localPos) return 0;
     void* o = g_resolve(me);
@@ -507,8 +512,6 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     uint8_t want[32], got[32];
     int n = Hex("4883ec083b0d029f4a020f849b0000004c8b15412249024533c048895c241048", want);
     if (!hf->read_code(game + 0xfd9d40u, got, n) && !memcmp(got, want, n)) g_resolve = (ResolveFn)(game + 0xfd9d40u);
-    uintptr_t script = P(game + 0x3326308), units = script ? P(script + 0x18) : 0;
-    if (units && P(units + 0x00) == exe + 0x1fc450) g_localPos = (LocalPosFn)(exe + 0x1fc450);
     int xq = XqBind();
     Log("bound: position %s, explosion request %s, spawn_explosion %s", g_resolve && g_localPos ? "yes" : "NO (F6/F7 off)", xq ? "yes" : "NO",
         HAS(spawn_explosion) ? "yes" : "no");

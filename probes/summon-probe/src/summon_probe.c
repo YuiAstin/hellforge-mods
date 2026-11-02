@@ -362,8 +362,49 @@ static void NearCheck(uint32_t e, uint64_t res, uint32_t network, uint32_t autho
     }
 }
 
+static void LateBind(void)
+{
+    static int dumped;
+    uintptr_t script = P(game + 0x3326308), units = script ? P(script + 0x18) : 0;
+    if (!units) return;
+    if (dumped) { if (P(units) == exe + 0x1fc450) { g_localPos = (LocalPosFn)(exe + 0x1fc450); Log("positions: ready"); } return; }
+    dumped = 1;
+    {
+        char w[48];
+        Log("the unit function table at %s (EXO Beacon: +0x00 local_position, +0x38 set_local_position):", Where(units, w, sizeof w));
+        for (int i = 0; i < 160; i++)
+        {
+            uintptr_t f = P(units + 8u * i);
+            if (!f || f < exe || f >= exe + exeSize) { Log("  +0x%03X ends the table (%s)", i * 8, Where(f, w, sizeof w)); break; }
+            uint8_t b[16];
+            char hex[40] = "";
+            if (!hf->read_code(f, b, 16)) for (int k = 0; k < 16; k++) snprintf(hex + 2 * k, 3, "%02x", b[k]);
+            Log("  +0x%03X %s %s", i * 8, Where(f, w, sizeof w), hex);
+        }
+        if (P(units) == exe + 0x1fc450) { g_localPos = (LocalPosFn)(exe + 0x1fc450); Log("positions: ready"); }
+    }
+    uintptr_t worldApi = script ? P(script + 0x08) : 0;
+    if (worldApi)
+    {
+        char w[48];
+        Log("the world function table at %s (EXO Beacon: +0x280 create particles, +0x2A0 destroy them; a spawn_unit would be here):",
+            Where(worldApi, w, sizeof w));
+        for (int i = 0; i < 160; i++)
+        {
+            uintptr_t f = P(worldApi + 8u * i);
+            if (!f || f < exe || f >= exe + exeSize) { Log("  +0x%03X ends the table (%s)", i * 8, Where(f, w, sizeof w)); break; }
+            uint8_t b[16];
+            char hex[40] = "";
+            if (!hf->read_code(f, b, 16)) for (int k = 0; k < 16; k++) snprintf(hex + 2 * k, 3, "%02x", b[k]);
+            Log("  +0x%03X %s %s", i * 8, Where(f, w, sizeof w), hex);
+        }
+    }
+}
+
 static void Tick(HfMod* mod, float dt, void* user)
 {
+    static double lateTry;
+    if (!g_localPos && game && GetTickCount64() / 1000.0 >= lateTry) { lateTry = GetTickCount64() / 1000.0 + 2; LateBind(); }
     static LARGE_INTEGER q0, qf;
     static uint64_t t0;
     if (!qf.QuadPart) { QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&q0); t0 = __rdtsc(); }
@@ -405,38 +446,6 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     /* summon */
     Dump("the entity spawn (HD2Runtime's 0xFDC140)", game, 0xFDC140, 0x400);
     Dump("the entity destroy (HD2Runtime's 0xFDC820)", game, 0xFDC820, 0x200);
-    uintptr_t script = P(game + 0x3326308), units = script ? P(script + 0x18) : 0;
-    if (units)
-    {
-        char w[48];
-        Log("the unit function table at %s (EXO Beacon: +0x00 local_position, +0x38 set_local_position):", Where(units, w, sizeof w));
-        for (int i = 0; i < 160; i++)
-        {
-            uintptr_t f = P(units + 8u * i);
-            if (!f || f < exe || f >= exe + exeSize) { Log("  +0x%03X ends the table (%s)", i * 8, Where(f, w, sizeof w)); break; }
-            uint8_t b[16];
-            char hex[40] = "";
-            if (!hf->read_code(f, b, 16)) for (int k = 0; k < 16; k++) snprintf(hex + 2 * k, 3, "%02x", b[k]);
-            Log("  +0x%03X %s %s", i * 8, Where(f, w, sizeof w), hex);
-        }
-        if (P(units) == exe + 0x1fc450) g_localPos = (LocalPosFn)(exe + 0x1fc450);
-    }
-    uintptr_t worldApi = script ? P(script + 0x08) : 0;
-    if (worldApi)
-    {
-        char w[48];
-        Log("the world function table at %s (EXO Beacon: +0x280 create particles, +0x2A0 destroy them; a spawn_unit would be here):",
-            Where(worldApi, w, sizeof w));
-        for (int i = 0; i < 160; i++)
-        {
-            uintptr_t f = P(worldApi + 8u * i);
-            if (!f || f < exe || f >= exe + exeSize) { Log("  +0x%03X ends the table (%s)", i * 8, Where(f, w, sizeof w)); break; }
-            uint8_t b[16];
-            char hex[40] = "";
-            if (!hf->read_code(f, b, 16)) for (int k = 0; k < 16; k++) snprintf(hex + 2 * k, 3, "%02x", b[k]);
-            Log("  +0x%03X %s %s", i * 8, Where(f, w, sizeof w), hex);
-        }
-    }
     if (hf->code_matches(game + 0xFD9D40, "48 83 ec 08 3b 0d 02 9f 4a 02 0f 84 9b 00 00 00")) g_resolve = (ResolveFn)(game + 0xFD9D40);
     /* hooks */
     if (hf->hook(self, game + 0x5A2BB0, (void*)SetDetour, (void**)&original_set)) { original_set = NULL; Log("SetPosition: hook refused"); }

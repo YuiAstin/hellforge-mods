@@ -369,7 +369,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     game = hf->module_base("game.dll", &gs);
     exe = hf->module_base("helldivers2.exe", &xs);
     if (!game || !exe || gs != 74727424u || xs != 60719104u) { g_ready = -1; Log("REFUSED: not build " BUILD "'s modules"); return; }
-    g_ready = Bind() ? 1 : -1;
+    g_ready = 0;   /* bound in the first mission: the engine tables are filled after game load */
 }
 
 static int Down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
@@ -414,7 +414,17 @@ static void InputProbe(void)
 static void Tick(HfMod* mod, float dt, void* user)
 {
     g_now += dt > 0 && dt < 1 ? dt : 0;
-    if (g_ready != 1 || hf->game_state(self) != HF_STATE_MISSION) return;
+    if (g_ready < 0 || hf->game_state(self) != HF_STATE_MISSION) return;
+    if (g_ready == 0)
+    {
+        static double nextTry;
+        static int tries;
+        if (g_now < nextTry) return;
+        nextTry = g_now + 3;
+        if (Bind()) g_ready = 1;
+        else if (++tries >= 5) { g_ready = -1; Log("REFUSED after 5 tries in a mission"); }
+        if (g_ready != 1) return;
+    }
     InputProbe();
     static double next;
     if (g_now >= next)
