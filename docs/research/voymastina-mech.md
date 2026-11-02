@@ -163,8 +163,10 @@ All of this needs one live run, logged in the mod (no game changes):
     every 2 s, +1 per monitored enemy; at 24 it ends, resets, and she is slowed for 5 s (-20% rate of fire and accuracy:
     here slower punches), and can't use it again until that ends. Many enemies overload it fast.
   - **Blood-Curdling Howl** (Mod II): when she monitors more than 5 enemies, or loses a Dummy-link (here: when her
-    Sinbreaker is destroyed and she is thrown out), 2 s immune to all damage, then a guaranteed hit on the strongest
-    enemy near, ignoring armour (25x, doubled while raging).
+    Sinbreaker is destroyed and she is thrown out), immune to all damage, then a guaranteed hit on the strongest
+    enemy near, ignoring armour (25x, doubled while raging). The immunity is a setting (`howl_immune`, GFL1's 2 s;
+    tuned in game since Helldivers 2 holds players in animations): it covers the ejection and any fall or get-up
+    animation, and counts its seconds from when she can act again (`howl_from_control`, on by default).
   - **DEFY bonus** (optional): with only DEFY members in the squad (for example a Koleda kit), Eye of the White Mastiff
     also taunts enemies and cuts her damage taken by 90% for 6 s.
 - **Starting in the mech:** HellForge has no "call a stratagem" action, so the start is the Sinbreaker stratagem with
