@@ -295,6 +295,22 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         }
         if (P(units) == exe + 0x1fc450) g_localPos = (LocalPosFn)(exe + 0x1fc450);
     }
+    uintptr_t worldApi = script ? P(script + 0x08) : 0;
+    if (worldApi)
+    {
+        char w[48];
+        Log("the world function table at %s (EXO Beacon: +0x280 create particles, +0x2A0 destroy them; a spawn_unit would be here):",
+            Where(worldApi, w, sizeof w));
+        for (int i = 0; i < 160; i++)
+        {
+            uintptr_t f = P(worldApi + 8u * i);
+            if (!f || f < exe || f >= exe + exeSize) { Log("  +0x%03X ends the table (%s)", i * 8, Where(f, w, sizeof w)); break; }
+            uint8_t b[16];
+            char hex[40] = "";
+            if (!hf->read_code(f, b, 16)) for (int k = 0; k < 16; k++) snprintf(hex + 2 * k, 3, "%02x", b[k]);
+            Log("  +0x%03X %s %s", i * 8, Where(f, w, sizeof w), hex);
+        }
+    }
     if (hf->code_matches(game + 0xFD9D40, "48 83 ec 08 3b 0d 02 9f 4a 02 0f 84 9b 00 00 00")) g_resolve = (ResolveFn)(game + 0xFD9D40);
     /* hooks */
     if (hf->hook(self, game + 0x5A2BB0, (void*)SetDetour, (void**)&original_set)) { original_set = NULL; Log("SetPosition: hook refused"); }
