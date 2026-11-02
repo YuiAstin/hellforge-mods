@@ -302,6 +302,9 @@ static int AbilityOf(uint32_t e, uint32_t* id, int* active)
     memcpy(id, r, 4); *active = r[16] != 0;
     return 1;
 }
+typedef struct { uint32_t e, network, authority; uint64_t res; double at; } Pending;
+static Pending g_pend[64];
+static unsigned g_npend;
 typedef struct { uint32_t entity, ability; int active; double changed; } Commander;
 static Commander g_cmd[16];
 static int g_ncmd;
@@ -337,9 +340,6 @@ static void CommanderFrame(void)
 }
 /* a spawn within 20 m of a commander: what appeared, and how long after that commander's ability last changed (checked
  * 0.3 s after the spawn event, once the new unit has a position) */
-typedef struct { uint32_t e, network, authority; uint64_t res; double at; } Pending;
-static Pending g_pend[64];
-static unsigned g_npend;
 static void NearCommander(uint32_t e, uint64_t res, uint32_t network, uint32_t authority)
 {
     if (!g_ncmd) return;
