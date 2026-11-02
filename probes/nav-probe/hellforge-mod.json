@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.nav-probe",
+  "name": "Nav Probe (research)",
+  "version": "0.1.0",
+  "description": "Research for Koleda's Sinner: tries the navigation queries CowboyBingus recorded. F8 finds the closest navmesh point where you stand and ahead of you, Ctrl+F8 sends the nearest enemy to where you stand, Shift+F8 logs the code and which enemies have a navigation record. Each address is checked before use. Turn off when done.",
+  "gameplay": false,
+  "code": {
+    "dll": "nav_probe.dll",
+    "sdk": 15
+  }
+}
