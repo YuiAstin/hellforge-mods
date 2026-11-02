@@ -190,6 +190,11 @@ All of this needs one live run, logged in the mod (no game changes):
   a separate external-velocity field, not yet identified.
 - **Animation:** none new for now; the Breakthrough's shield bash (suit ability 570, shield arm ability 56) is the
   piston. A custom one may come later from Blender or a stock animation.
+- **Decided (2026-11-02):**
+  - the follow-up fires on her next shield bash while it is ready (not the ult key, not automatically);
+  - the line runs 30 m by default, adjustable (`mpb_length`), so the whole blast is in view;
+  - the drag takes up to 10 enemies (adjustable), live ones first (small ones mostly die to the strikes); when fewer
+    than 10 are alive, corpses the line hit fill the rest, picked at random.
 - **Safety, already in Voymastina 0.2.18:** her blasts spare her exosuit and its arms; vehicles, exosuits, the
   Pelican and anything a Helldiver holds are never her enemies.
 
