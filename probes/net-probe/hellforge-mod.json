@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.net-probe",
+  "name": "Net Probe (research)",
+  "version": "0.1.0",
+  "description": "Multiplayer research: can a joined player's mod ask the host's mod to spawn something? Both players run it and send their logs. It logs the session, every player's peer id against their SteamID, and explosions and stratagems by other players. F5: ping the other players over Steam's own peer-to-peer messages. F6: ask the host over Steam to set off your last explosion 15 m above you. F7: try it straight from this machine (the game's explosion request and HellForge's spawn_explosion). Turn off when done.",
+  "gameplay": true,
+  "code": {
+    "dll": "net_probe.dll",
+    "sdk": 15
+  }
+}
