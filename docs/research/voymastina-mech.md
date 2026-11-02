@@ -238,3 +238,52 @@ All of this needs one live run, logged in the mod (no game changes):
   - **Logic HellForge does not lock:** her code's effects are not locked by HellForge. Tie the pile driver to the
     Sinbreaker entity, which is locked, rather than to every Breakthrough. Or declare `"premium"` for the warbond in the
     manifest.
+
+## EXO Beacon Launcher's source: pilot detection and moving a part (2026-11-02)
+
+**EXO Beacon Launcher 0.2.1** is by enochlophobianumerophobia (hf-mod.com/Mods/Details/84), MIT, "Copyright (c) 2026
+enochlophobianumerophobia". The MIT licence covers its own code only. Read for research. Code reused from it keeps the
+notice and names the files adapted.
+
+- **How it gates itself:** SDK ≥ 15, build 25480438, and game.dll SizeOfImage 74727424 with PE stamp 1790161983. On
+  top of that it checks 26 masked byte contracts. Its root pointers are read from RIP-relative operands inside pinned
+  functions, each cross-checked against a second contract.
+- **Pilot detection, solved by this mod:**
+  - **The local player:** the player manager (root at 0x3a4bde + 3) gives the goid at `+0x3a8`. The goid maps to the
+    owner record (resource `0x4d1c334d294dfa97`, the avatar).
+  - **The seat:** the **seat manager** (root at 0x549aff + 3) has its map at `+0x20`, count `+0xc` and owner pointers
+    at `+0x38`, with 0x40-byte rows from `+0x48`. A seat row holds `u32 @0` = the vehicle's entity id, and `u32 @8 == 4`
+    while mounted (probably the pilot role).
+  - **From the vehicle id to the mech:** the vehicle id resolves through the entity owner map (`em + 0xf1aeb0`, owner
+    records of 24 bytes at `em + 0xf32f18`) to its resource and **unit**. The resource tells which mech it is:
+    - Patriot `0x79E4B3D2DA5E45E3`
+    - Emancipator `0xC2D449ECF7FACAB1`
+    - Lumberer `0x7B2326F6FD9C8069`
+    - Breakthrough `0x35DBF54F016F3624`
+  - **Stock or Concept Mech:** both share these resource ids. The stock suit and the Concept Mech are told apart by
+    their meshes' material slots.
+- **Moving a part of the mech (its "animation"), done in code:**
+  - **The calls:** the engine's unit API is at `script = *(game + 0x3326308)`, `units = *(script + 0x18)`:
+    - `+0x00` local_position(unit, node)
+    - `+0x38` **set_local_position(unit, node, float4)** (exe+0x1fc720)
+    - `+0x90` world_pose(unit, node)
+    - `+0x6d8` find_node(unit, hash)
+  - **How it animates:** each frame it sets the launcher node's local position: its base position plus an offset on a
+    0.4 s smoothstep curve. The engine queues the write and propagates it to the render.
+  - **Its hooks:** one on the queue's consumer (exe+0x12ea20) to count writes applied, and one on world_pose
+    (exe+0x1fd220) so the beacon spawns from the unmoved muzzle.
+  - **A safety check:** the queue must hold fewer than 8192 commands (`world + 0x170038`).
+- **No vehicle teleport here:** the one write to the vehicle row copies a vector from the pilot's avatar block into the
+  vehicle row `+0x00`, and sets `+0x2c`, only while the stratagem menu is open. What that field means is not certain.
+- **Beacons and input:** it lets the game's own launcher fire by writing permission `5` into the vehicle's authored
+  table (`*(em + 0xf12750)`, rows of 0xe78 bytes, permissions at `+0xd90`). It reads the avatar block's loaded
+  stratagem (`+0x8fc`) and menu bit (`+0xfd8` & 512). It reads no keys.
+- **Particles:** `start_effect` (game+0x1779a10). `world_api` `+0x2f8` emits, `+0x330` sets the pose, `+0x2a0`
+  destroys.
+- **What this means for the Sinbreaker:**
+  - **Detecting the pilot:** use its seat manager method. This replaces probe step 1.
+  - **The pile driver's thrust:** the Breakthrough's shield or arm node can be pushed forward and back on the same
+    kind of curve, as code-driven motion on the bash, with no animation asset shipped. A mesh, if one appears, would
+    ride that node.
+  - **The lunge:** still open. Options are the warp setter on the vehicle, or `set_local_position` on the unit's root
+    node. Probe both.
