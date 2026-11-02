@@ -172,6 +172,27 @@ All of this needs one live run, logged in the mod (no game changes):
 - **Starting in the mech:** HellForge has no "call a stratagem" action, so the start is the Sinbreaker stratagem with
   one use and no wait, thrown at the drop.
 
+## Pile Bunker in the mech (Yui, 2026-11-02)
+
+- **Earned follow-up:** the charge passive no longer fires on any ally hit while she pilots. It unlocks only when Pile
+  Bunker (the ult) kills a heavily armoured enemy (armour 4 and up: Charger, Bile Titan, Hulk, Tank, Harvester,
+  Impaler and the like), and then grants one follow-up.
+- **The follow-up:** the precision-strike line ripples out from the suit (0.3 s apart) and ends in a Hellbomb blast
+  (ExplosionSettings 242) at its far end.
+- **The pull:** enemies and corpses caught by the line's strikes are dragged along it to that end point before the
+  Hellbomb goes off:
+  - living enemies with the stepped move the Mech Probe's F9 proved (the warp's position setter a little each
+    update, stopping at walls, following the ground);
+  - corpses are ragdolls, which are physics bodies, so the physics impulse (Apache - Rise Above / Khi) that could
+    not move the exosuit should move them.
+- **Movement:** the suit's own charge is the stepped move with wall, ground and edge checks (Mech Probe 0.1.6:
+  works). Velocity through the motion record does not move an exosuit (its walker overwrites it); Exo Dodge writes
+  a separate external-velocity field, not yet identified.
+- **Animation:** none new for now; the Breakthrough's shield bash (suit ability 570, shield arm ability 56) is the
+  piston. A custom one may come later from Blender or a stock animation.
+- **Safety, already in Voymastina 0.2.18:** her blasts spare her exosuit and its arms; vehicles, exosuits, the
+  Pelican and anything a Helldiver holds are never her enemies.
+
 ## Decisions for Yui
 
 - **Mech mode:** any exosuit, or only the Sinbreaker?
