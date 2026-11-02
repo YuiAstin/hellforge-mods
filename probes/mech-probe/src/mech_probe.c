@@ -340,6 +340,7 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 static void OnWeapon(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfWeaponEvent* w = (const HfWeaponEvent*)info;
+    if (w->avatar) atomic_store(&g_avatar, w->avatar);   /* the Helldiver (a player-spawn entity may not be) */
     static unsigned told;
     if (g_mech && told++ < 30)
         Log("weapon event: avatar %u holds entity %u (%016llx, selection %u), was %u (%016llx)", w->avatar, w->entity,

@@ -356,7 +356,6 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
     const HfPlayerEvent* p = (const HfPlayerEvent*)info;
     if (p->local)
     {
-        if (p->entity) atomic_store(&g_avatar, p->entity);
         if (p->peer != g_myPeer)
             Log("you: peer %llu, entity %u; this machine's SteamID %llu: %s", (unsigned long long)p->peer, p->entity, (unsigned long long)st.me,
                 p->peer == st.me ? "THE SAME (peer ids are SteamIDs)" : "different");
@@ -370,6 +369,11 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
         if (!known) { for (int i = 0; i < 16; i++) if (!seen[i]) { seen[i] = p->peer; break; } Log("player: peer %llu, entity %u (another machine's)", (unsigned long long)p->peer, p->entity); }
         if ((p->peer >> 52) == 0x011) Know(p->peer, 0);
     }
+}
+static void OnWeaponAvatar(HfMod* mod, const HfEventInfo* info, void* user)
+{
+    const HfWeaponEvent* w = (const HfWeaponEvent*)info;
+    if (w->avatar && w->avatar != atomic_load(&g_avatar)) { atomic_store(&g_avatar, w->avatar);  }
 }
 static void OnExplosion(HfMod* mod, const HfEventInfo* info, void* user)
 {
@@ -532,7 +536,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 15 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
     Log("Net Probe " VERSION ": multiplayer research. F5 Steam ping, F6 ask the host over Steam, F7 try from here");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
-    int ok = api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_EXPLOSION, OnExplosion, NULL, 0) &&
+    int ok = api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeaponAvatar, NULL, 0) && api->subscribe(mod, HF_ON_EXPLOSION, OnExplosion, NULL, 0) &&
              api->subscribe(mod, HF_ON_STRATAGEM, OnStratagem, NULL, 0) && api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) &&
              api->subscribe(mod, HF_ON_STATE, OnState, NULL, 0) && api->on_game_thread(mod, Tick, NULL);
     if (!ok) Log("events or the game thread are unavailable");

@@ -187,13 +187,14 @@ static void Report(const char* name, Call* ring, volatile uint64_t* n, uint64_t*
         Call c = ring[*seen % RING];
         (*seen)++;
         int mine = me && (uint32_t)c.a2 == me;
-        if (!mine && others++ >= 10) continue;
+        int warpSite = c.ret == game + 0x88D795;
+        if (!mine && !warpSite && others++ >= 10) continue;
         char r[48];
         float f[3] = {0};
         for (int i = 0; i < 3 && i < (int)c.floats; i++) { uint32_t v = c.f[i]; memcpy(&f[i], &v, 4); }
-        Log("%s%s from %s: entity %u, to %.2f %.2f %.2f", name, mine ? " (YOUR HELLDIVER)" : "", Where(c.ret, r, sizeof r),
+        Log("%s%s%s from %s: entity %u, to %.2f %.2f %.2f", name, mine ? " (YOUR HELLDIVER)" : "", warpSite ? " (the Warp Pack)" : "", Where(c.ret, r, sizeof r),
             (uint32_t)c.a2, (double)f[0], (double)f[1], (double)f[2]);
-        if (mine && isSet)
+        if ((mine || warpSite) && isSet)
         {
             static uint64_t lastFlag;
             if (g_flagN)
@@ -231,7 +232,12 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfPlayerEvent* p = (const HfPlayerEvent*)info;
-    if (p->local && p->entity) atomic_store(&g_avatar, p->entity);
+    (void)p;   /* the Helldiver comes from weapon events: a player-spawn entity was not the one the game moves */
+}
+static void OnWeaponAvatar(HfMod* mod, const HfEventInfo* info, void* user)
+{
+    const HfWeaponEvent* w = (const HfWeaponEvent*)info;
+    if (w->avatar && w->avatar != atomic_load(&g_avatar)) { atomic_store(&g_avatar, w->avatar); Log("your Helldiver: entity %u", w->avatar); }
 }
 static int PosOf(uint32_t entity, float out[3])
 {
@@ -478,6 +484,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     Log("Summon & Warp Probe " VERSION " (research only, no gameplay effect)");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     if (!api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) || !api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) ||
+        !api->subscribe(mod, HF_ON_WEAPON, OnWeaponAvatar, NULL, 0) ||
         !api->on_game_thread(mod, Tick, NULL))
         Log("events or the game thread are unavailable");
     return 0;

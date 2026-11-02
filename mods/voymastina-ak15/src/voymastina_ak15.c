@@ -305,7 +305,11 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
     int k = 0;
     while (k < 8 && g_players[k] && g_players[k] != p->entity) k++;
     if (k < 8) g_players[k] = p->entity;
-    if (p->local) { atomic_store(&g_me, p->entity); g_myNet = 0; }
+}
+static void OnWeaponAvatar(HfMod* mod, const HfEventInfo* info, void* user)
+{
+    const HfWeaponEvent* w = (const HfWeaponEvent*)info;
+    if (w->avatar && w->avatar != atomic_load(&g_me)) { atomic_store(&g_me, w->avatar); g_myNet = 0; for (int k = 0; k < 8; k++) if (!g_players[k] || g_players[k] == w->avatar) { g_players[k] = w->avatar; break; } Log("her Helldiver: entity %u", w->avatar); }
 }
 static int Mine(uint32_t dealer, uint32_t owner)
 {
@@ -397,7 +401,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     Log("Voymastina: AK-15 on foot " VERSION " (test build of her GFL1 kit; run it with Voymastina for her fists)");
     srand(GetTickCount());
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
-    int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 10) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
+    int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 10) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeaponAvatar, NULL, 0) &&
              api->subscribe(mod, HF_ON_DAMAGE, OnDamage, NULL, 0) && api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) &&
              api->on_game_thread(mod, Tick, NULL);
     if (!ok) Log("events or the game thread are unavailable");
