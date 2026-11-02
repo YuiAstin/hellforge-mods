@@ -87,3 +87,13 @@ To give a skill an explosion or arc of its own (own damage, own arc), see [nativ
 
 - Skill icons: `images/<id>.png`, 256×256. An orange-and-white picture on a transparent background works; the build converts it to the game's R/G masks.
 - The Lua HUD reads the DLL's exported state struct through LuaJIT's ffi; keep the struct layout versioned.
+
+## The camera (where the reticle points)
+
+- **The camera's pose** is a 4x4 matrix at **World + 0x230920**. Its rows are right, forward, up and position. This is
+  what Lua's `World.debug_camera_pose` returns: the binding at exe+0x3f1270, found by Khi and used by Apache - Rise
+  Above (Riggs) for its gunner turret.
+- **Finding the World:** a unit object's `+0x18` (EXO Beacon Launcher's layout). Failing that, search the unit object's
+  pointers one level deep for a valid camera matrix within 300 m, as the Apache does.
+- **What it replaces:** the forward row is the reticle's direction, with no head sway. Leva 0.5.5 (`aim_camera = 1`)
+  uses it for her lines and fields.
