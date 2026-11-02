@@ -125,7 +125,9 @@ hf-mod.com/Mods/Details/118. Source: https://github.com/HadePasianax/hd2-explosi
 
 ## Beelzebub's Strat Pack 1.8.3 and Custom Stratagem Compendium 1.0.4 (2026-11-02)
 
-Both are "All rights reserved" (Beelzebub; SkyeShade), so this records techniques only. Any use is our own code.
+Both packages show "All rights reserved", HellForge's default when a creator picks no licence. **Beelzebub said
+(2026-11-02, to Yui) that reusing his code is fine, and welcome if our code is made compatible with his.** Credit him in
+`THIRD_PARTY_NOTICES.md` for anything adapted. SkyeShade's Compendium: techniques only, until asked.
 
 - **Neither extends the explosion list.** They reuse the game's explosion rows:
   - **Carrier rounds:** an `add_projectile` copy with `impact_explosion` / `expiry_explosion`. A Compendium entity copy
