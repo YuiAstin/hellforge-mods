@@ -189,8 +189,19 @@ static uint32_t g_mech, g_mechUnit, g_actor, g_children[8];
 static int g_nchildren;
 static uint64_t g_mechRes;
 static double g_mechSpawnAt;
+static int RootOf(uint32_t unit, float out[3])
+{
+    if (!fn.local_position || !fn.unit_resolve || !fn.unit_resolve(unit)) return 0;
+    const float* p = fn.local_position(unit, 0);
+    return p && RD((uintptr_t)p, out, 12) && isfinite(out[0]) && isfinite(out[2]);
+}
+/* every physical actor the unit owns, logged with its position; the one nearest the unit's root is the suit's body */
 static uint32_t FindActor(uint32_t unit)
 {
+    float root[3];
+    int haveRoot = RootOf(unit, root);
+    uint32_t best = 0;
+    float bestD = 1e30f;
     if (!fn.unit_resolve(unit)) return 0;
     _Alignas(8) uint8_t buf[128] = {0};
     if (fn.components(unit, 127, buf) <= 0) return 0;
@@ -203,10 +214,19 @@ static uint32_t FindActor(uint32_t unit)
         {
             uint32_t id;
             if (!RD(ids + k * 4ull, &id, 4)) return 0;
-            if ((id & 0x20000000u) && fn.valid(id) && fn.owner(id) == unit && fn.physical(id)) return id;
+            if ((id & 0x20000000u) && fn.valid(id) && fn.owner(id) == unit && fn.physical(id))
+            {
+                float p[4] = {0};
+                fn.position(id, p);
+                float d = haveRoot ? (p[0] - root[0]) * (p[0] - root[0]) + (p[1] - root[1]) * (p[1] - root[1]) + (p[2] - root[2]) * (p[2] - root[2]) : 0;
+                Log("  physics actor %08x at %.1f %.1f %.1f%s", id, p[0], p[1], p[2], haveRoot ? "" : " (no root to compare)");
+                if (!best || d < bestD) { best = id; bestD = d; }
+            }
         }
     }
-    return 0;
+    if (haveRoot) Log("  the suit's root is at %.1f %.1f %.1f; chosen actor %08x (%.1f m off)", root[0], root[1], root[2], best, sqrtf(bestD));
+    if (haveRoot && bestD > 9.0f) { Log("  no actor within 3 m of the suit's root: F9 is off for this suit"); return 0; }
+    return best;
 }
 static void Children(void)
 {
@@ -312,9 +332,8 @@ static void ThrustFrame(void)
 static double g_warpCheck;
 static void Warp(void)
 {
-    if (!fn.set_position || !g_actor) { Log("F10: no warp setter or no physics body"); return; }
     float p[4] = {0}, f[3] = {1, 0, 0};
-    fn.position(g_actor, p);
+    if (!fn.set_position || !RootOf(g_mechUnit, p)) { Log("F10: no warp setter or the suit's position is unknown"); return; }
     if (!CameraForward(g_mechUnit, f)) Log("F10: camera not found, warping along +x");
     float h = sqrtf(f[0] * f[0] + f[1] * f[1]);
     if (h < 0.05f) { f[0] = 1; f[1] = 0; h = 1; }
@@ -489,8 +508,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (g_warpCheck && g_now >= g_warpCheck && g_actor)
     {
         float p[4] = {0};
-        fn.position(g_actor, p);
-        Log("F10 warp: the suit is now at %.1f %.1f %.1f", p[0], p[1], p[2]);
+        if (RootOf(g_mechUnit, p)) Log("F10 warp: the suit is now at %.1f %.1f %.1f", p[0], p[1], p[2]);
         g_warpCheck = 0;
     }
     ChargeFrame();
@@ -526,7 +544,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     hf = api;
     self = mod;
     if (!api || api->version < 15 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
-    Log("Mech Probe 0.1.1: research only; logs a movement-input lead; F9 charge, F10 warp, F11 arm thrust while you pilot an exosuit");
+    Log("Mech Probe 0.1.2: research only; logs a movement-input lead; F9 charge, F10 warp, F11 arm thrust while you pilot an exosuit");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_DAMAGE, OnDamage, NULL, 0) &&
