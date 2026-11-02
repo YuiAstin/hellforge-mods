@@ -40,7 +40,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.5"
+#define VERSION "0.3.6"
 #define BUILD "25480438"
 #define AVATAR UINT64_C(0x4D1C334D294DFA97)
 #define NODE_HEAD 90u
@@ -70,6 +70,7 @@ static float s_barkRadius = 6, s_corrPer = 0.5f, s_taken = 0.1f, s_takenOut = 1.
 static int s_corrMax = 6;
 static int s_barkBlasts = 6, s_barkDamage = 2000;
 
+static int s_dashMove = 1;   /* 1: her dash goes the way she moves (facing when still or just hit); 0: her facing */
 static int s_badKey;
 static void Setting(const char* key, double v)
 {
@@ -84,7 +85,7 @@ static void Setting(const char* key, double v)
     F("ld_cooldown", s_ldCd, 0, 600); F("ld_distance", s_ldDistance, 2, 30); F("ld_width", s_ldWidth, 0.5, 15); F("ld_step", s_ldStep, 1, 10);
     F("ld_window", s_ldWindow, 0, 10); F("lp_climb", s_lpClimb, 0.5, 30); F("lp_drop", s_lpDrop, 0.5, 50);
     F("mark_mult", s_markMult, 1, 10); F("mark_seconds", s_markSeconds, 0.5, 60); F("mist_seconds", s_mistSeconds, 0, 60);
-    F("mist_radius", s_mistRadius, 1, 20); I("steady", s_steady, 0, 1); I("gas_explosion", s_acidRow, 0, 100000); I("gas_immune", s_gasImmune, 0, 1);
+    F("mist_radius", s_mistRadius, 1, 20); I("steady", s_steady, 0, 1); I("dash_move", s_dashMove, 0, 1); I("gas_explosion", s_acidRow, 0, 100000); I("gas_immune", s_gasImmune, 0, 1);
     F("bark_radius", s_barkRadius, 0, 30); F("corrosion_per_stack", s_corrPer, 0, 5); F("damage_taken", s_taken, 0, 1); F("damage_taken_outside", s_takenOut, 0, 1); I("corrosion_max", s_corrMax, 1, 20); I("bark_blasts", s_barkBlasts, 0, 24); I("bark_damage", s_barkDamage, 0, 100000); F("shred_per_stack", s_shredPer, 0, 5); F("shred_max", s_shredMax, 0, 10);
     F("hp_mult", s_hpMult, 0.1, 10); F("stamina_mult", s_staminaMult, 0.1, 20); I("hellbomb_on_exhaustion", s_hellbomb, 0, 1); I("hellbomb_explosion", s_hellbombRow, 0, 100000); F("hellbomb_hold", s_hellbombHold, 0, 10);
 #undef F
@@ -813,6 +814,40 @@ static float SpeedMult(void)
     if (g_now < g_bonusUntil) m *= 1 + s_pursuitSpeed * (float)g_pursuitStage;
     return m;
 }
+static _Atomic unsigned long long g_hurtMs;
+/* ---- the way she moves (her dashes go that way: kiting means running from what she shoots at). Her root position each
+ * update; her movement is the last ~0.2 s of it, when she covers at least 2 m/s and was not hit in the last 0.4 s (a hit's
+ * push is not where the player steers). Standing still or just hit: her facing, as before. */
+static float g_moveP[16][3];
+static double g_moveT[16];
+static unsigned g_moveN;
+static void MoveTrack(void)
+{
+    float p[3];
+    if (!PlayerPose(p, NULL)) return;
+    unsigned k = g_moveN++ % 16;
+    memcpy(g_moveP[k], p, sizeof p);
+    g_moveT[k] = g_now;
+}
+static int MoveDir(float dir[2])
+{
+    if (!s_dashMove || g_moveN < 2) return 0;
+    if (GetTickCount64() - atomic_load(&g_hurtMs) < 400) return 0;
+    unsigned last = (g_moveN - 1) % 16;
+    for (unsigned back = 1; back < 16 && back < g_moveN; back++)
+    {
+        unsigned k = (g_moveN - 1 - back) % 16;
+        double dt = g_moveT[last] - g_moveT[k];
+        if (dt < 0.15) continue;
+        if (dt > 0.5) return 0;
+        float dx = g_moveP[last][0] - g_moveP[k][0], dy = g_moveP[last][1] - g_moveP[k][1];
+        float d = sqrtf(dx * dx + dy * dy);
+        if (d / dt < 2.0) return 0;
+        dir[0] = dx / d; dir[1] = dy / d;
+        return 1;
+    }
+    return 0;
+}
 static void LoyalDash(void)
 {
     if (g_leap) return;
@@ -835,9 +870,13 @@ static void LoyalDash(void)
     float pos[3], aim[3];
     if (!PlayerPose(pos, aim)) { Log("Loyal Dash: her position or aim cannot be read"); return; }
     float h = sqrtf(aim[0] * aim[0] + aim[1] * aim[1]);
-    if (h < 0.05f) { Log("Loyal Dash: she is looking straight up or down"); return; }
-    g_leapDir[0] = aim[0] / h;
-    g_leapDir[1] = aim[1] / h;
+    if (MoveDir(g_leapDir)) { static int told; if (told++ < 3) Log("Loyal Dash: the way she moves (%.2f %.2f)", g_leapDir[0], g_leapDir[1]); }
+    else
+    {
+        if (h < 0.05f) { Log("Loyal Dash: she is looking straight up or down"); return; }
+        g_leapDir[0] = aim[0] / h;
+        g_leapDir[1] = aim[1] / h;
+    }
     g_leap = 1;
     g_leapT0 = g_now;
 }
@@ -1335,6 +1374,7 @@ static _Atomic unsigned g_ownStopped;
 /* A hit on her: one of her own blasts (an explosion from within 14 m of one she set off in the last 1.2 s) does
  * nothing to her: its result is cleared (damage, stagger, push, knockdown, reaction). With steady (her passive) or in
  * Loyal Dash's window any hit's knockdown is cleared. */
+static _Atomic unsigned long long g_hurtMs;   /* her last hit (the hit hook): her dashes trust her movement 0.4 s after */
 static void Steady(const void* hit, void* result)
 {
     if (!atomic_load(&g_hooked) || !hit || !result) return;
@@ -1342,6 +1382,7 @@ static void Steady(const void* hit, void* result)
     uint32_t me = atomic_load(&g_avatar);
     if (!me || !ReadAt((uintptr_t)hit, h, sizeof h) || Word(h + 0x20) != me) return;
     unsigned long long now = GetTickCount64();
+    atomic_store(&g_hurtMs, now);
     if (Word(h) == 4)
     {
         float origin[3];
@@ -1588,6 +1629,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
     if (!g_inMission) return;
     MyItems();
+    MoveTrack();
     static int prev[3];
     int focused = Focused();
     int mods = focused ? ((GetAsyncKeyState(VK_SHIFT) & 0x8000) ? KM_SHIFT : 0) | ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? KM_CTRL : 0) |

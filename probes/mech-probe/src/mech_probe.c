@@ -373,10 +373,49 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
 }
 
 static int Down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
+/* ---- the movement input (a lead from EXO Beacon Launcher, whose suit steering copies 3 floats from the avatar manager's
+ * per-avatar data: [game+0x3326D20] + 0x150 + index * 0xA7AEC + 0xA7AE0, index from the manager's hash at +0xF8). Logged
+ * with the keys held (W A S D), the camera's forward and her actual movement, so the log shows whether it is the stick */
+static void InputProbe(void)
+{
+    static double next;
+    static unsigned lines;
+    static float lastV[3], lastPos[3];
+    static double lastPosT;
+    if (g_now < next || lines >= 400) return;
+    next = g_now + 0.2;
+    uint32_t me = atomic_load(&g_avatar), i;
+    uintptr_t avatars = P(game + 0x3326D20);
+    float v[3];
+    if (!me || !avatars || !Lookup(avatars + 0xF8, me, &i) || i >= 8 || !RD(avatars + 0x150 + (uintptr_t)i * 0xA7AECu + 0xA7AE0u, v, 12)) return;
+    char keys[5] = {Down('W') ? 'W' : '-', Down('A') ? 'A' : '-', Down('S') ? 'S' : '-', Down('D') ? 'D' : '-', 0};
+    Ent e;
+    float pos[4] = {0}, cam[3] = {0, 0, 0}, mv[2] = {0, 0};
+    if (Resolve(me, &e))
+    {
+        uintptr_t registry = P(exe + 0x1A100F0), objects, object, nodes;
+        uint32_t id = 0, slot = e.unit & 0x3FFFFF;
+        if (registry && (objects = P(registry + 0x88)) && (object = P(objects + 8u * slot)) && RD(object + 8, &id, 4) && id == e.unit &&
+            (nodes = P(object + 0x88)) && RD(nodes + 48, pos, 12))
+        {
+            if (lastPosT > 0 && g_now - lastPosT > 0.05) { mv[0] = (float)((pos[0] - lastPos[0]) / (g_now - lastPosT)); mv[1] = (float)((pos[1] - lastPos[1]) / (g_now - lastPosT)); }
+            memcpy(lastPos, pos, 12); lastPosT = g_now;
+        }
+        CameraForward(e.unit, cam);
+    }
+    int changed = fabsf(v[0] - lastV[0]) + fabsf(v[1] - lastV[1]) + fabsf(v[2] - lastV[2]) > 0.02f;
+    static char lastKeys[5];
+    if (!changed && !strcmp(keys, lastKeys)) return;
+    memcpy(lastV, v, 12); memcpy(lastKeys, keys, 5);
+    lines++;
+    Log("input? avatar %u index %u: %.3f %.3f %.3f | keys %s | camera forward %.2f %.2f | moving %.1f %.1f m/s", me, i, v[0], v[1], v[2], keys,
+        cam[0], cam[1], mv[0], mv[1]);
+}
 static void Tick(HfMod* mod, float dt, void* user)
 {
     g_now += dt > 0 && dt < 1 ? dt : 0;
     if (g_ready != 1 || hf->game_state(self) != HF_STATE_MISSION) return;
+    InputProbe();
     static double next;
     if (g_now >= next)
     {
@@ -476,7 +515,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     hf = api;
     self = mod;
     if (!api || api->version < 15 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
-    Log("Mech Probe 0.1.0: research only; F9 charge, F10 warp, F11 arm thrust while you pilot an exosuit");
+    Log("Mech Probe 0.1.1: research only; logs a movement-input lead; F9 charge, F10 warp, F11 arm thrust while you pilot an exosuit");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_DAMAGE, OnDamage, NULL, 0) &&

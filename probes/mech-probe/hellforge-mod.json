@@ -2,8 +2,8 @@
   "format": 1,
   "id": "yui.mech-probe",
   "name": "Mech Probe (research)",
-  "version": "0.1.0",
-  "description": "Research for Voymastina's Sinbreaker: logs how the game seats you in an exosuit, how its arms and its shield bash register, and tries three things on a key while you pilot (F9: a one-second physics charge forward, F10: a 3 m warp, F11: a shield-arm thrust). Methods from Apache - Rise Above (Riggs, after Khi), EXO Beacon Launcher (enochlophobianumerophobia, MIT) and HD2Runtime research. Turn off when done.",
+  "version": "0.1.1",
+  "description": "Research for Voymastina's Sinbreaker: logs how the game seats you in an exosuit, how its arms and its shield bash register, and tries three things on a key while you pilot (F9: a one-second physics charge forward, F10: a 3 m warp, F11: a shield-arm thrust). Methods from Apache - Rise Above (Riggs, after Khi), EXO Beacon Launcher (enochlophobianumerophobia, MIT) and HD2Runtime research. Also logs a lead for the movement input (keys held, camera, movement) for her dashes. Turn off when done.",
   "gameplay": false,
   "code": {
     "dll": "mech_probe.dll",
