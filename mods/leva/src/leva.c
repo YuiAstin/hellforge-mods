@@ -42,7 +42,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.5.7"
+#define VERSION "0.5.6"
 #define BUILD "25480438"
 #define AVATAR UINT64_C(0x4D1C334D294DFA97)
 #define NODE_HEAD 90u
@@ -58,7 +58,7 @@ static uintptr_t game, exe;
 #define KM_ALT 4
 typedef struct Key { int vk, mods; char label[24]; } Key;
 static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
-static int s_nativeRows = 1, s_nativeArc = 0, s_burstRequest = 0;
+static int s_nativeRows = 1, s_nativeArc = 1, s_burstRequest = 1;
 static int s_arcMode = 1, s_arcShell = 222, s_arcRow = 157, s_rsColumns = 7, s_rsRows = 3, s_ultArcsMax = 24, s_fsMax = 2, s_codeMax = 4, s_steady = 0;
 static int s_rsArcs = 2;
 static float s_rsCd = 14, s_rsDistance = 12, s_rsWidth = 18, s_rsDepth = 6, s_rsParalysis = 4, s_rsSweep = 0.05f, s_rsSeconds = 10, s_rsPulse = 0.5f, s_rsDamage = 0.067f, s_rsHold = 1.0f;
@@ -72,7 +72,7 @@ static float s_vzRadius = 3.5f, s_vzSeconds = 9, s_vzArm = 1.0f;
 static float s_arcRate = 10, s_arcReach = 8, s_arcBurst = 0;
 static int s_arcChain = -1, s_arcSplit = -1, s_arcStyle = 0;
 static float s_arcRange = 0, s_aimSmooth = 0.2f;
-static int s_aimCamera = 0;   /* 1: her lines and fields follow the game camera (the reticle); 0: her head, averaged */
+static int s_aimCamera = 1;   /* 1: her lines and fields follow the game camera (the reticle); 0: her head, averaged */
 static int s_arcGrenade = 0;
 static int s_arcEmpty = 1;
 static float s_lpClimb = 6, s_lpDrop = 12;

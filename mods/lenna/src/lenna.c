@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.12"
+#define VERSION "0.2.11"
 #define BUILD "25480438"
 #define AVATAR UINT64_C(0x4D1C334D294DFA97)
 #define NODE_HEAD 90u
@@ -69,7 +69,7 @@ static int s_hellbomb = 1, s_hellbombRow = 125;
 static float s_hellbombHold = 0.5f;
 static int s_ems = 0, s_arcRow = 157, s_arcBlast = 41;  /* 157: the G-31 Arc grenade's detonation (her arcs); 41: the GL-52 De-Escalator's burst (their blast) */  /* the EMS explosion row: 0 = the EMS Mortar Sentry shell's own (read at game start) */
 
-static int s_dashMove = 0;   /* 1: her dash goes the way she moves (facing when still or just hit); 0: her facing */
+static int s_dashMove = 1;   /* 1: her dash goes the way she moves (facing when still or just hit); 0: her facing */
 static int s_badKey;
 static void Setting(const char* key, double v)
 {

@@ -40,7 +40,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.7"
+#define VERSION "0.3.6"
 #define BUILD "25480438"
 #define AVATAR UINT64_C(0x4D1C334D294DFA97)
 #define NODE_HEAD 90u
@@ -70,7 +70,7 @@ static float s_barkRadius = 6, s_corrPer = 0.5f, s_taken = 0.1f, s_takenOut = 1.
 static int s_corrMax = 6;
 static int s_barkBlasts = 6, s_barkDamage = 2000;
 
-static int s_dashMove = 0;   /* 1: her dash goes the way she moves (facing when still or just hit); 0: her facing */
+static int s_dashMove = 1;   /* 1: her dash goes the way she moves (facing when still or just hit); 0: her facing */
 static int s_badKey;
 static void Setting(const char* key, double v)
 {
