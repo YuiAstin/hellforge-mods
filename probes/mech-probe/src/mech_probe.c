@@ -269,65 +269,81 @@ static double g_chargeUntil, g_chargeLog;
 static float g_chargeDir[2], g_massGuess = 8000;
 static float g_lastV[3], g_lastJ[3];
 static int g_lastHave;
+/* F9: a stepped charge, as the game settles a Helldiver after a warp: the suit's position set a little further every
+ * update (an exosuit walks on a character mover, not a physics body: pushing its bodies moved nothing) */
 static void ChargeFrame(void)
 {
-    if (!g_chargeUntil || !g_actor || !fn.valid(g_actor)) return;
-    float v[4] = {0}, w[4] = {0}, p[4] = {0};
-    fn.velocities(g_actor, v, w);
-    fn.position(g_actor, p);
-    if (!isfinite(v[0])) { g_chargeUntil = 0; return; }
-    /* the mass the last push showed: impulse / change of speed (horizontal) */
-    if (g_lastHave)
-    {
-        float dv = sqrtf((v[0] - g_lastV[0]) * (v[0] - g_lastV[0]) + (v[1] - g_lastV[1]) * (v[1] - g_lastV[1]));
-        float jj = sqrtf(g_lastJ[0] * g_lastJ[0] + g_lastJ[1] * g_lastJ[1]);
-        if (dv > 0.05f && jj > 1) g_massGuess = g_massGuess * 0.7f + (jj / dv) * 0.3f;
-    }
-    int braking = g_now >= g_chargeUntil;
-    float want[2] = {braking ? 0 : g_chargeDir[0] * 12, braking ? 0 : g_chargeDir[1] * 12};
-    float j[4] = {(want[0] - v[0]) * g_massGuess * 0.5f, (want[1] - v[1]) * g_massGuess * 0.5f, 0, 0};
-    fn.impulse(g_actor, j, NULL);
-    memcpy(g_lastV, v, 12); memcpy(g_lastJ, j, 12); g_lastHave = 1;
-    if (g_now >= g_chargeLog)
-    {
-        g_chargeLog = g_now + 0.1;
-        Log("F9 charge%s: speed %.2f %.2f %.2f m/s at %.1f %.1f %.1f; impulse %.0f %.0f; mass guess %.0f kg", braking ? " (braking)" : "",
-            v[0], v[1], v[2], p[0], p[1], p[2], j[0], j[1], g_massGuess);
-    }
-    if (braking && (g_now >= g_chargeUntil + 0.6 || v[0] * v[0] + v[1] * v[1] < 0.25f)) { g_chargeUntil = 0; g_lastHave = 0; Log("F9 charge: done"); }
+    if (!g_chargeUntil) return;
+    static double last;
+    float p[4] = {0};
+    if (!fn.set_position || !RootOf(g_mechUnit, p)) { g_chargeUntil = 0; Log("F9 charge: the suit's position is unknown"); return; }
+    double dt = last > 0 ? g_now - last : 0;
+    last = g_now;
+    if (g_now >= g_chargeUntil) { g_chargeUntil = 0; last = 0; Log("F9 charge: done at %.1f %.1f %.1f", p[0], p[1], p[2]); return; }
+    if (dt <= 0 || dt > 0.1) return;
+    float step = (float)(20.0 * dt);   /* 20 m/s */
+    float dest[3] = {p[0] + g_chargeDir[0] * step, p[1] + g_chargeDir[1] * step, p[2]};
+    fn.set_position(NULL, g_mech, dest);
+    if (g_now >= g_chargeLog) { g_chargeLog = g_now + 0.1; Log("F9 charge: at %.1f %.1f %.1f, step %.2f m", p[0], p[1], p[2], step); }
 }
-static int g_axis;
 static double g_thrustUntil;
 static float g_thrustBase[8][4];
 static uint32_t g_thrustUnit[8];
 static int g_nthrust;
+/* F11: one node inside the suit's arms at a time, nudged 0.4 m along its local x for 0.4 s (set every update, since the
+ * arm's animation sets it back each frame), then left to the animation again; each press moves to the next node */
+static int NodeCount(uint32_t unit)
+{
+    uintptr_t registry = P(exe + 0x1A100F0), objects, object;
+    uint32_t count = 0, id, slot = unit & 0x3FFFFF;
+    if (!registry || !RD(registry + 0x98, &count, 4) || slot >= count || !(objects = P(registry + 0x88)) ||
+        !(object = P(objects + 8u * slot)) || !RD(object + 8, &id, 4) || id != unit || !RD(object + 0x70, &count, 4) || count > 4096)
+        return 0;
+    return (int)count;
+}
+static int g_nudgeArm, g_nudgeNode = 0;
+static uint32_t g_nudgeUnit;
+static float g_nudgeBase[3];
 static void ThrustStart(void)
 {
     if (!fn.set_local_position || !fn.local_position) { Log("F11: no unit API"); return; }
-    g_nthrust = 0;
-    for (int i = 0; i < g_nchildren && g_nthrust < 8; i++)
+    uint32_t arms[8];
+    int n = 0;
+    for (int i = 0; i < g_nchildren && n < 8; i++)
     {
         Ent e;
-        if (!Resolve(g_children[i], &e) || !fn.unit_resolve(e.unit)) continue;
-        const float* lp = fn.local_position(e.unit, 0);
-        if (!lp || !isfinite(lp[0])) continue;
-        memcpy(g_thrustBase[g_nthrust], lp, 12); g_thrustBase[g_nthrust][3] = 0;
-        float v[4] = {lp[0], lp[1], lp[2], 0};
-        v[g_axis] += 0.6f;
-        fn.set_local_position(e.unit, 0, v);
-        g_thrustUnit[g_nthrust++] = e.unit;
-        Log("F11 thrust: child %u unit %08x root node local %.2f %.2f %.2f moved +0.6 m along %c", g_children[i], e.unit, lp[0], lp[1], lp[2], "xyz"[g_axis]);
+        if (Resolve(g_children[i], &e) && WielderOf(g_children[i]) == atomic_load(&g_avatar) && fn.unit_resolve(e.unit)) arms[n++] = e.unit;
     }
-    if (!g_nthrust) Log("F11 thrust: no child of the suit to move (were its arms seen spawning? see the log)");
-    g_thrustUntil = g_now + 0.3;
-    g_axis = (g_axis + 1) % 3;
+    if (!n) { Log("F11: no arm of yours on this suit"); return; }
+    for (int tries = 0; tries < 64; tries++)
+    {
+        if (g_nudgeArm >= n) { g_nudgeArm = 0; g_nudgeNode = 0; }
+        uint32_t unit = arms[g_nudgeArm];
+        int count = NodeCount(unit);
+        if (++g_nudgeNode >= count) { g_nudgeArm++; g_nudgeNode = 0; continue; }
+        const float* lp = fn.local_position(unit, (uint32_t)g_nudgeNode);
+        if (!lp || !isfinite(lp[0])) continue;
+        g_nudgeUnit = unit;
+        memcpy(g_nudgeBase, lp, 12);
+        g_thrustUntil = g_now + 0.4;
+        Log("F11: arm %d (unit %08x) node %d of %d, local %.2f %.2f %.2f: nudged 0.4 m along x", g_nudgeArm, unit, g_nudgeNode, count,
+            lp[0], lp[1], lp[2]);
+        return;
+    }
+    Log("F11: no node found to nudge");
 }
 static void ThrustFrame(void)
 {
-    if (!g_thrustUntil || g_now < g_thrustUntil) return;
-    for (int i = 0; i < g_nthrust; i++) if (fn.unit_resolve(g_thrustUnit[i])) fn.set_local_position(g_thrustUnit[i], 0, g_thrustBase[i]);
+    if (!g_thrustUntil || !g_nudgeUnit || !fn.unit_resolve(g_nudgeUnit)) return;
+    if (g_now < g_thrustUntil)
+    {
+        float v[4] = {g_nudgeBase[0] + 0.4f, g_nudgeBase[1], g_nudgeBase[2], 0};
+        fn.set_local_position(g_nudgeUnit, (uint32_t)g_nudgeNode, v);
+        return;
+    }
+    float v[4] = {g_nudgeBase[0], g_nudgeBase[1], g_nudgeBase[2], 0};
+    fn.set_local_position(g_nudgeUnit, (uint32_t)g_nudgeNode, v);
     g_thrustUntil = 0;
-    Log("F11 thrust: put back");
 }
 static double g_warpCheck;
 static void Warp(void)
@@ -523,14 +539,13 @@ static void Tick(HfMod* mod, float dt, void* user)
             if (!g_mech) Log("F%d: you are not piloting an exosuit", 9 + k);
             else if (k == 0)
             {
-                if (!g_actor) g_actor = FindActor(g_mechUnit);
                 float f[3] = {1, 0, 0};
                 if (!CameraForward(g_mechUnit, f)) Log("F9: camera not found, charging along +x");
                 float h = sqrtf(f[0] * f[0] + f[1] * f[1]);
                 if (h < 0.05f) { f[0] = 1; f[1] = 0; h = 1; }
                 g_chargeDir[0] = f[0] / h; g_chargeDir[1] = f[1] / h;
-                if (!g_actor) Log("F9: the suit's physics body was not found");
-                else { g_chargeUntil = g_now + 1.0; g_chargeLog = 0; g_lastHave = 0; Log("F9 charge: 1 s toward %.2f %.2f, body %08x", g_chargeDir[0], g_chargeDir[1], g_actor); }
+                g_chargeUntil = g_now + 0.5; g_chargeLog = 0;
+                Log("F9 charge: 0.5 s at 20 m/s toward %.2f %.2f", g_chargeDir[0], g_chargeDir[1]);
             }
             else if (k == 1) Warp();
             else ThrustStart();
@@ -544,7 +559,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     hf = api;
     self = mod;
     if (!api || api->version < 15 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
-    Log("Mech Probe 0.1.2: research only; logs a movement-input lead; F9 charge, F10 warp, F11 arm thrust while you pilot an exosuit");
+    Log("Mech Probe 0.1.3: research only; logs a movement-input lead; F9 stepped charge, F10 warp, F11 arm node nudge while you pilot an exosuit");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_DAMAGE, OnDamage, NULL, 0) &&
