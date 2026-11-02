@@ -29,7 +29,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.1"
+#define VERSION "0.1.2"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -175,11 +175,35 @@ static int g_nfoes;
 static double g_now;
 static int IsPlayer(uint32_t e) { for (int i = 0; i < 8; i++) if (e && g_players[i] == e) return 1; return 0; }
 static uint32_t EntityOfNet(uint32_t net) { return net && net < NETS ? g_netEntity[net] : 0; }
+static uint32_t NetOf(uint32_t entity)
+{
+    if (!g_resolve || !entity || entity == UINT32_MAX) return 0;
+    void* o = g_resolve(entity);
+    uint8_t h[24];
+    if (!o || !RD((uintptr_t)o, h, 24) || U32(h + 8) != entity) return 0;
+    uint32_t net = U32(h + 16);
+    return net && net < 0x7FFF ? net : 0;
+}
 static uint32_t MyNet(void)
 {
-    uint32_t me = atomic_load(&g_me);
-    for (uint32_t i = 1; i < NETS && me; i++) if (g_netEntity[i] == me) return i;
-    return 0;
+    uint32_t me = atomic_load(&g_me), net = NetOf(me);
+    if (net && net < NETS) g_netEntity[net] = me;
+    return net;
+}
+/* spawned entities whose network id is not known yet (spawn events give 32767): resolved a few each update */
+#define LATE 4096
+static uint32_t g_late[LATE];
+static unsigned g_lateN, g_lateDone;
+static void LateNets(void)
+{
+    if (g_lateN - g_lateDone > LATE) g_lateDone = g_lateN - LATE;
+    for (int k = 0; k < 64 && g_lateDone < g_lateN; k++)
+    {
+        uint32_t e = g_late[g_lateDone % LATE], net = NetOf(e);
+        if (net && net < NETS) { g_netEntity[net] = e; g_lateDone++; }
+        else if (k == 0) { g_late[g_lateN++ % LATE] = e; g_lateDone++; }   /* not yet: try it again later */
+        else break;
+    }
 }
 static Foe* FoeOf(uint32_t e)
 {
@@ -297,6 +321,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
     if (s->network && s->network < NETS) g_netEntity[s->network] = s->entity;
+    else g_late[g_lateN++ % LATE] = s->entity;
 }
 static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 {
@@ -369,6 +394,7 @@ static void Tick(HfMod* mod, float dt, void* user)
 {
     g_now += dt > 0 && dt < 1 ? dt : 0;
     if (hf->game_state(self) != HF_STATE_MISSION) { g_nfoes = 0; g_eyeUntil = g_overloadUntil = g_immuneUntil = g_rageUntil = 0; return; }
+    LateNets();
     EyeFrame();
     static int prevEye, prevEject;
     int focus = Focused(), eye = focus && Held(&s_keyEye), eject = focus && Held(&s_keyEject);

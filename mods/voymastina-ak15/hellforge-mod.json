@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.voymastina-ak15",
   "name": "Voymastina: AK-15 on foot (test)",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Test build of Voymastina's GFL1 kit as AK-15, to be merged into Voymastina for when she fights on foot after her mech falls. Run it together with Voymastina (her fists). Rage: her hits may make her rage, hitting harder. Eye of the White Mastiff (N): monitors nearby enemies, her hits on them hit harder and theirs on her softer, until it overloads. Blood-Curdling Howl: when she monitors more than 5 enemies, or on Ctrl+N (stands in for being thrown out of her mech): immune for a moment, and a blast on the strongest enemy near. Settings in voymastina-ak15.ini (edit with the game closed).",
   "gameplay": true,
   "code": {
