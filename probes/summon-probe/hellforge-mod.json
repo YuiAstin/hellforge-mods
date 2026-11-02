@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.summon-probe",
+  "name": "Summon & Warp Probe (research)",
+  "version": "0.1.0",
+  "description": "Research only, no gameplay effect. Warp: wear a LIFT-182 Warp Pack and warp a few times; the log shows the checks the game runs before it moves you (its raycasts, their timing) and the warp's own code. Summon: logs the code of the game's entity spawn and the engine's unit functions, and every 10 s the nearest enemies (type, distance), for a summoned mech the mod drives itself. Turn off when done.",
+  "gameplay": false,
+  "code": {
+    "dll": "summon_probe.dll",
+    "sdk": 15
+  }
+}
