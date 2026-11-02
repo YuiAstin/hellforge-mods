@@ -227,3 +227,14 @@ All of this needs one live run, logged in the mod (no game changes):
   - **Her blasts in her colours:** copies of the Railcannon, Precision Strike and Recoilless effects (`particles`) with
     new colour keys, swapped in for her explosions.
   - **Skill icons:** 256×256 PNGs.
+- **The modding Discord (2026-11-02, #mod-development-help):**
+  - Nito: the SDK has no API for editing animations. You make the animation and load it as an asset.
+  - CowboyBingus: shipping Arrowhead's own assets is redistribution, and that includes reused animations. A mod that
+    ships them needs the content lock.
+- **For the Sinbreaker:**
+  - **No animation shipped:** it reuses the Breakthrough's bash where it already lives in the player's game.
+  - **Locked like the original:** as a copy of the EXO-55 Breakthrough (the Exo Experts premium warbond, 2026-04-28),
+    it is locked automatically to players who own that warbond (HellForge `concepts.md` "Premium content").
+  - **Logic HellForge does not lock:** her code's effects are not locked by HellForge. Tie the pile driver to the
+    Sinbreaker entity, which is locked, rather than to every Breakthrough. Or declare `"premium"` for the warbond in the
+    manifest.
