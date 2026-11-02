@@ -175,3 +175,29 @@ All of this needs one live run, logged in the mod (no game changes):
     fist's bullet trick. Add a short lunge if the probe shows a suit can be moved.
   - **Looks:** a pile-bunker arm model would need a mesh someone provides, packed in the mod's data. HellForge's
     `add_entity` takes a `unit` / `model_from`.
+
+### The Breakthrough's shield bash as the pile driver (2026-11-02)
+
+- **The shield arm:** the EXO-55 Breakthrough's left mount (`left_gun`, slot 0) holds `combat_walker_shield`. It is a
+  wieldable unit with:
+  - its own HealthComponent: the arm pool 800 (Medium armour 3), and the plate 5000 (Heavy armour 4);
+  - WeaponData;
+  - **MeleeShield**;
+  - **AbilityWeapon (the shield bash)**.
+
+  It has no projectile and no energy-shield component (HD2Runtime `vehicle-weapons.md` "EXO-55 Breakthrough shield
+  arm"). The right arm is the flak cannon: rounds-fed, 6 per magazine, 64 spare, 1.1 s reload.
+- **The plan:** base the **Sinbreaker on the Breakthrough** and keep the shield arm; its bash animation is the punch.
+  When a bash lands (a melee hit dealt by the shield arm of the suit she pilots):
+  - its result gains the pile driver's damage, AP, demolition and stagger, through the hit hook as her bare hands do;
+  - the Railcannon blast goes off where it struck, carried along the suit's facing by the fist's bullet;
+  - her passives fire as from her melee: Support Action, the charge, Sirius Fall.
+- **Terrain and objects:** a bash on a wall or a bug hole rim makes no damage event. So the bash itself is watched:
+  the shield arm's AbilityWeapon, or the ability she runs while piloting, learned the way her melee is. A bash that
+  hits no enemy casts a ray along the suit's facing, and whatever it meets takes the blast.
+- **Look:** the plate stays a shield unless a pile-driver mesh is provided, which would replace the shield arm's unit
+  through `add_entity` / the mod's data. The plate's block still works, which suits Mastiff's Pledge.
+- **Probe additions:**
+  - a bash's damage event (kind, dealer, owner) and its hit-hook record;
+  - the shield arm's entity, and its Wieldable wielder while piloted;
+  - the AbilityWeapon or avatar ability id while bashing.
