@@ -122,3 +122,52 @@ hf-mod.com/Mods/Details/118. Source: https://github.com/HadePasianax/hd2-explosi
     is absent.
   - **Leva:** her burst copies 41 (whose own arc is kept), so it fits ABI 1 as it is.
   - **Lenna:** needs the arc field.
+
+## Beelzebub's Strat Pack 1.8.3 and Custom Stratagem Compendium 1.0.4 (2026-11-02)
+
+Both are "All rights reserved" (Beelzebub; SkyeShade), so this records techniques only. Any use is our own code.
+
+- **Neither extends the explosion list.** They reuse the game's explosion rows:
+  - **Carrier rounds:** an `add_projectile` copy with `impact_explosion` / `expiry_explosion`. A Compendium entity copy
+    sets `Explosive.explosion` (+0x24) instead.
+  - **Damage edits inside a time window:** `hf_live` / `set_live(HF_LIVE_SHARED)` changes a shared damage row only
+    while the stratagem runs, and NULL puts it back.
+- **Calling the game's explosion request directly** (Beelzebub, `explosion_request.c`):
+  - **The call:** the game's own RequestExplosion, pinned by 10 byte patterns, with `read_code` reading the code as
+    shipped (past HellForge's HF_ON_EXPLOSION hook). Arguments: `(queue, pos, type, source, owner, peer, …)`.
+  - **The queue:** count `+0x20`, entries from `+0x28`, stride 0x98, capacity 256. Keep at least 8 slots free, and
+    rate-limit the requests.
+  - **What it adds over `spawn_explosion`:** any explosion row at any position, with the **source, owner and creditor
+    chosen**.
+  - **Arcs:** with source = 0, the G-31 (157) and GL-52 (41) arcs **start at the blast**. Naming the player's weapon as
+    the source draws the arcs **from the player**. That matches Leva's lockdown lightning "running to and from the
+    player". Leva's carrier bullet is hers, and her own arc row reads its source.
+    - Candidate fix: request the burst with source 0 and her as owner and creditor.
+  - **Untested:** whether requesting an extended id (423+, from Leva's extension or the Explosives Library) fires the
+    new row directly, with no carrier.
+  - **Layering:** the Arc Barrage reads the queue each tick for the field explosions its shells queued (180). It adds
+    41 and 157 blasts at the same spot, with the same source, owner and creditor.
+- **Exosuits** (Beelzebub's EXO-51P Prism):
+  - **The suit:** `register_entity` with base the Lumberer, `.mount` = its own arm definitions, and `own_all`.
+  - **Arms:** **a mount slot can hold a handheld weapon entity.** The LAS-98 and LAS-99 are used this way, with the
+    arm model swapped through `.unit`.
+  - **Node hashes rewritten to point at the muzzle:** WeaponData `+0xCC`, BeamWeapon `+0x4C`, WeaponHeat `+0x1F4`,
+    ProjectileWeapon `+0x21C`. The scope block at WeaponData `+0x1D4..0x1EF` is zeroed.
+  - **Pilot detection (a heuristic):** HF_ON_WEAPON with entity 0 or one of the suit's arm resources means in; another
+    weapon, the suit's kill, the player going down or the mission's end means out.
+  - **Arm hits:** `HF_ON_DAMAGE_PRE` rescales `d->amount` for the arm's dealer ids. That writing a *scaled* amount is
+    honoured is a claim to verify; our note says `amount = 0` is not.
+  - **For the Sinbreaker:** any weapon entity can go on an arm, and a pile driver can be an arm firing a copied round
+    with a tiny `lifetime` and an `expiry_explosion`.
+- **Recolours:** done as data. A `unit` copy swaps in a `material` copy, which swaps in a `texture` copy with a `lut`.
+  At run time, the Gas Mortar rebinds a material's LUT slot (0x7E662968) to a data-built texture through the entity's
+  unit, mesh and material. Don't create render buffers at run time; that crashed. No particle recolours were found.
+- **Barrages:** copy the 120mm bombardment (`0x2D3BD00B1ED411B1`, `own_all`) and set `Bombardment.shells[i]` (keep the
+  list packed), `salvos`, `shells_per_salvo`, `shell_interval`.
+- **Also reusable:**
+  - Stun on hit: status 39 in a copied damage row at PROJECTILES_READY.
+  - Status durations through `set_live` on `StatusEffectSettings.duration`.
+  - Recognising one's own hits by a unique damage amount (655 instead of 650).
+  - Mod Options registration: UMM's `ModOptionsMenu` first, then Vanilla Plus Native's `HD2_MOD_OPTIONS_v1` after
+    about 300 frames.
+  - Pelican payloads with behaviours (hold, orbit, face target), and `remove_tags` NO_KILL_CREDIT on a mounted turret.
