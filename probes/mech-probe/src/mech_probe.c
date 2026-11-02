@@ -291,6 +291,9 @@ static float Ray(uint32_t skip, const float from[3], const float dir[3], float l
     if (id >= 4) return -1;
     Ent me;
     if (Resolve(atomic_load(&g_avatar), &me)) pilot = me.unit;   /* she sits inside the suit: her own body is not a wall */
+    uint32_t parts[8];   /* nor are the suit's own arms (the shield sits 0.6 m ahead at knee height) */
+    int nparts = 0;
+    for (int i = 0; i < g_nchildren && nparts < 8; i++) { Ent c; if (Resolve(g_children[i], &c)) parts[nparts++] = c.unit; }
     uint8_t hits[16 * 44];
     memset(hits, 0, sizeof hits);
     uint32_t n = fn.raycast(id, from, dir, len, 2, 1, 0, 0x80000009u, skip, hits, 16);
@@ -301,7 +304,9 @@ static float Ray(uint32_t skip, const float from[3], const float dir[3], float l
         float d;
         memcpy(&d, hits + 44u * i + 24, 4);
         uint32_t u = U32(hits + 44u * i + 28);
-        if (u == skip || (pilot && u == pilot) || !isfinite(d) || d < 0.3f) continue;
+        int own = u == skip || (pilot && u == pilot);
+        for (int k = 0; k < nparts && !own; k++) own = u == parts[k];
+        if (own || !isfinite(d) || d < 0.3f) continue;
         if (d < best) best = d;
     }
     return best;
@@ -619,7 +624,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     hf = api;
     self = mod;
     if (!api || api->version < 15 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
-    Log("Mech Probe 0.1.5: research only; logs a movement-input lead; F9 stepped charge (Shift: velocity, Ctrl: jump), F10 warp, F11 arm node nudge while you pilot an exosuit");
+    Log("Mech Probe 0.1.6: research only; logs a movement-input lead; F9 stepped charge (Shift: velocity, Ctrl: jump), F10 warp, F11 arm node nudge while you pilot an exosuit");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_DAMAGE, OnDamage, NULL, 0) &&
