@@ -36,6 +36,130 @@ local k32 = ffi.load('kernel32')
 
 local ELECTRIC, YELLOW, INK, PANEL, TEXT, MUTED = {96, 205, 255}, {255, 232, 0}, {8, 9, 10}, {12, 14, 16}, {240, 243, 245}, {150, 156, 160}
 local NAMES = {'WILD EXTINCTION', 'LEAPING PURSUIT', 'HUNTING STRATEGY'}
+
+-------------------------------- GFL2_SHARED: cooldowns while the list is closed, in-game key bindings (same in each kit) --
+-- Cooldowns: with the GFL2 KITS HUD option "<Kit>: Always Show Cooldowns" on (the default), the skills on cooldown stay
+-- on screen while the stratagem list is closed, each on its own (only the ones recharging), where the list shows them.
+-- Key bindings: the three skills are registered with Mod Bindings Menu (Vanilla Plus Megapack: ESC > OPTIONS > the
+-- keyboard or controller binding page > MODS) as native game actions, the game's own binding rows (they start unbound:
+-- only the menu's fixed slots get keyboard defaults); with every native action taken they fall back to extended bindings
+-- (MORE MODS) with the .ini's keys as defaults. Each press is passed to the DLL (<kit>_input); the .ini's keys keep
+-- working beside them (a press of both within 0.3 s counts once).
+local X = {kit = 'Lenna', id = 'lenna', always = true, opt_done = false, opt_wait = 0, bind_done = false, bind_wait = 0,
+    ids = {}, prev = {}, labels = {}, beat = 0, label_wait = 0, last_box = nil}
+pcall(ffi.cdef, [[
+typedef int (*gfl2bind_input)(unsigned int version, int skill);
+typedef int (*gfl2bind_key)(unsigned int version, int skill, int *vk, int *mods);
+]])
+local VK_NAMES = {[0x08] = 'backspace', [0x09] = 'tab', [0x0D] = 'enter', [0x14] = 'caps lock', [0x20] = 'space',
+    [0x21] = 'page up', [0x22] = 'page down', [0x23] = 'end', [0x24] = 'home', [0x25] = 'left', [0x26] = 'up',
+    [0x27] = 'right', [0x28] = 'down', [0x2D] = 'insert', [0x2E] = 'delete', [0x10] = 'left shift', [0x11] = 'left ctrl',
+    [0x12] = 'left alt', [0xA0] = 'left shift', [0xA1] = 'right shift', [0xA2] = 'left ctrl', [0xA3] = 'right ctrl',
+    [0xA4] = 'left alt', [0xA5] = 'right alt'}
+local VK_MOUSE = {[0x04] = 'middle', [0x05] = 'extra 1', [0x06] = 'extra 2'}
+-- the .ini key as a binding default ({button, modifiers} with the engine's names), nil when it has no engine name
+local function default_spec(vk, mods)
+    local button, device
+    if vk >= 0x41 and vk <= 0x5A then button = string.char(vk + 32)
+    elseif vk >= 0x30 and vk <= 0x39 then button = string.char(vk)
+    elseif vk >= 0x70 and vk <= 0x87 then button = 'f' .. (vk - 0x6F)
+    elseif vk >= 0x60 and vk <= 0x69 then button = 'numpad ' .. (vk - 0x60)
+    elseif VK_MOUSE[vk] then button, device = VK_MOUSE[vk], 'mouse'
+    else button = VK_NAMES[vk] end
+    if not button then return nil end
+    local m = {}
+    if mods % 2 == 1 and button ~= 'left shift' then m[#m + 1] = 'left shift' end
+    if math.floor(mods / 2) % 2 == 1 and button ~= 'left ctrl' then m[#m + 1] = 'left ctrl' end
+    if math.floor(mods / 4) % 2 == 1 and button ~= 'left alt' then m[#m + 1] = 'left alt' end
+    return {{button = button, device = device, modifiers = #m > 0 and m or nil}}
+end
+local function gfl2_dll(name)
+    local module = k32.lennahud1_GetModuleHandleA('lenna.dll')
+    if module == nil then return nil end
+    local p = k32.lennahud1_GetProcAddress(module, name)
+    return p ~= nil and p or nil
+end
+-- "<Kit>: Always Show Cooldowns" on the MODS tab (its own GFL2 KITS HUD entry: each kit's own entry is full)
+local function gfl2_options(dt)
+    if X.opt_done then return end
+    X.opt_wait = X.opt_wait - dt
+    if X.opt_wait > 0 then return end
+    X.opt_wait = 2
+    local menu = rawget(_G, 'ModOptionsMenu')
+    if not menu or menu.api ~= 1 then return end
+    X.opt_done = true
+    local id = 'yui.gfl2hud.' .. X.id .. '.cooldowns'
+    local ok, why = menu.register_option(id, {type = 'toggle', label = X.kit .. ': Always Show Cooldowns', mod = 'GFL2 Kits HUD',
+        mod_id = 'yui.gfl2hud', default = true,
+        description = X.kit .. "'s skills on cooldown stay on screen while the stratagem list is closed."})
+    if not ok then log('[' .. X.kit .. ' HUD] cooldowns option not added: ' .. tostring(why)) return end
+    local saved = menu.get(id)
+    if saved ~= nil then X.always = saved and true or false end
+    menu.on_change(id, function(value) X.always = value and true or false end)
+end
+-- the bound keys' names for the list ('CTRL+A'), refreshed once a second
+local function binding_label(mbm, id)
+    local ok, list = pcall(mbm.binding, id)
+    if not ok or type(list) ~= 'table' then return nil end
+    local alt = list[1]
+    if type(alt) ~= 'table' then return 'UNBOUND' end
+    local parts = {}
+    for _, m in ipairs(type(alt.modifiers) == 'table' and alt.modifiers or {}) do parts[#parts + 1] = tostring(m):gsub('^left ', ''):gsub('^right ', '') end
+    parts[#parts + 1] = tostring(alt.button or '?')
+    return string.upper(table.concat(parts, '+'))
+end
+local function gfl2_bindings(dt)
+    if X.bind_done == 'off' then return end
+    local mbm = rawget(_G, 'ModBindingsMenu')
+    if not X.bind_done then
+        X.bind_wait = X.bind_wait - dt
+        if X.bind_wait > 0 then return end
+        X.bind_wait = 2
+        if type(mbm) ~= 'table' or type(mbm.register_binding) ~= 'function' or type(mbm.is_down) ~= 'function' then return end
+        if (tonumber(mbm.version) or 0) < 4 then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings: Mod Bindings Menu is too old (version ' .. tostring(mbm.version) .. ')') return end
+        local ip, kp = gfl2_dll('lenna_input'), gfl2_dll('lenna_key')
+        if not ip or not kp then
+            if gfl2_dll('lenna_hud_state') then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings: this lenna.dll has none (update it)') end
+            return
+        end
+        X.input = ffi.cast('gfl2bind_input', ip)
+        local key = ffi.cast('gfl2bind_key', kp)
+        local vk, mods = ffi.new('int[1]'), ffi.new('int[1]')
+        for i = 1, 3 do
+            local spec = nil
+            if key(1, i, vk, mods) == 1 then spec = default_spec(tonumber(vk[0]), tonumber(mods[0])) end
+            local id = 'yui.' .. X.id .. '.key' .. i   -- not '.skill': those ids were extended bindings (0.2.6), which stay extended
+            local ok, res, why = pcall(mbm.register_binding, id, X.kit .. ': ' .. NAMES[i], nil, {category = X.kit, default = spec})
+            if not ok or not res then
+                X.bind_done = 'off'
+                log('[' .. X.kit .. ' HUD] key bindings: ' .. id .. ' not registered (' .. tostring(ok and why or res) .. '): the .ini keys stay')
+                return
+            end
+            X.ids[i] = id
+        end
+        X.bind_done = true
+        local info = mbm.binding_info and mbm.binding_info(X.ids[1])
+        log('[' .. X.kit .. ' HUD] key bindings: registered with Mod Bindings Menu as ' .. tostring(type(info) == 'table' and info.backend or '?') .. ' bindings (the binding pages\' MODS tab); the .ini keys keep working')
+    end
+    for i = 1, 3 do
+        local down = mbm.is_down(X.ids[i]) == true
+        if down and not X.prev[i] then X.input(1, i) end
+        X.prev[i] = down
+    end
+    X.beat = X.beat - dt
+    if X.beat <= 0 then X.beat = 0.5; X.input(1, 0) end
+    X.label_wait = X.label_wait - dt
+    if X.label_wait <= 0 then
+        X.label_wait = 1
+        for i = 1, 3 do X.labels[i] = binding_label(mbm, X.ids[i]) end
+    end
+end
+local function gfl2_step(dt)
+    local ok, err = pcall(gfl2_options, dt)
+    if not ok then X.opt_done = true; log('[' .. X.kit .. ' HUD] cooldowns option failed: ' .. tostring(err)) end
+    ok, err = pcall(gfl2_bindings, dt)
+    if not ok then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings failed, the .ini keys stay: ' .. tostring(err)) end
+end
 local SHORT = {'WILD', 'LEAP', 'HUNT'}
 
 local state, refresh, find_wait = nil, nil, 0
@@ -189,7 +313,7 @@ local function ability(d, i, x, y, size, alpha)
     local tx = x + size + 10 * s
     local nsize = math.max(17 * s, size * 0.36)
     heavy(d, NAMES[i], tx, y + size * 0.02, nsize, 'title', ready and rgba(TEXT, a) or rgba(MUTED, a))
-    local label = state.version >= 2 and ffi.string(state.key_label[i - 1]) or key_name(state.keys[i - 1])
+    local label = X.labels[i] or (state.version >= 2 and ffi.string(state.key_label[i - 1]) or key_name(state.keys[i - 1]))
     local ksize = math.max(18 * s, size * 0.4)
     heavy(d, label, tx, y + size * 0.5, ksize, 'title', ready and rgba(YELLOW, a) or rgba(MUTED, a))
     if not ready then
@@ -198,7 +322,7 @@ local function ability(d, i, x, y, size, alpha)
     end
 end
 
-local function abilities(d, box)
+local function abilities(d, box, only)
     local s = d.scale
     local size, step, x, y, a
     if box then
@@ -209,11 +333,14 @@ local function abilities(d, box)
         size, step, a = 44 * s, 52 * s, 1
         x, y = 330 * s, 90 * s
     end
+    local shown = {}
+    for i = 1, 3 do if not only or tonumber(state.cd[i - 1]) > 0.05 then shown[#shown + 1] = i end end
+    if #shown == 0 then return end
     -- a panel like the list's
     local w = size + 10 * s + math.max(230 * s, size * 5)
-    d:rect(x - 10 * s, y - 10 * s, w + 20 * s, step * 3 + 20 * s - (step - size), rgba(PANEL, a * 0.72), 0)
-    d:rect(x - 10 * s, y - 10 * s, 3 * s, step * 3 + 20 * s - (step - size), rgba(ELECTRIC, a), 1)
-    for i = 1, 3 do ability(d, i, x, y + (i - 1) * step, size, a) end
+    d:rect(x - 10 * s, y - 10 * s, w + 20 * s, step * #shown + 20 * s - (step - size), rgba(PANEL, a * 0.72), 0)
+    d:rect(x - 10 * s, y - 10 * s, 3 * s, step * #shown + 20 * s - (step - size), rgba(ELECTRIC, a), 1)
+    for k, i in ipairs(shown) do ability(d, i, x, y + (k - 1) * step, size, a) end
 end
 
 ------------------------------------------------------------------------------------ CI and effects, bottom middle --
@@ -347,6 +474,7 @@ local overlay = hd2.ui.overlay({id = 'kit', owner = OWNER})
 overlay:draw(function(d, dt)
     dt = tonumber(dt) or 0
     WARN.dt = dt
+    gfl2_step(dt)
     if not O.failed then
         local okO, errO = pcall(options_step, dt)
         if not okO then O.failed = true; log('[Lenna HUD] options failed: ' .. tostring(errO)) end
@@ -356,7 +484,23 @@ overlay:draw(function(d, dt)
     ci_bar(d)
     local okL, box = pcall(list_box, d, dt)
     if not okL then L.on = false; log('[Lenna HUD] following the list failed, abilities always shown: ' .. tostring(box)); box = nil end
-    if box == false then return end      -- the list is closed
+    if box == false then                 -- the list is closed: the skills on cooldown only, under where the open list ends
+        if X.always then                 -- (beside the closed list they covered Reinforce and the stratagems recharging)
+            local s = d.scale
+            local H = d.height or (d.width * 9 / 16)
+            local lb = X.last_box
+            local size = lb and lb.size or 44 * s
+            local step = lb and lb.step or 52 * s
+            local left = math.max(20 * s, lb and lb.left or 40 * s)
+            local top = lb and (lb.bottom + step * 0.6) or H * 0.45
+            abilities(d, {alpha = 1, size = size, step = step, left = left - 290 * s, top = top}, true)
+        end
+        return
+    end
+    -- remembered only while the list is fully shown and on screen (it slides off to the left as it closes)
+    if box and (box.alpha or 1) >= 0.95 and box.left >= 0 and (not X.last_box or box.left >= X.last_box.left - 2) then
+        X.last_box = {left = box.left, top = box.top, bottom = box.bottom, size = box.size, step = box.step}
+    end
     abilities(d, box or nil)
 end)
 
