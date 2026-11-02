@@ -146,6 +146,18 @@ All of this needs one live run, logged in the mod (no game changes):
    - arm and stat changes as decided.
 4. **HUD:** while piloting, the same skills, plus the mech's health in the bottom bar.
 
+## Yui's notes (2026-11-02)
+
+- **As in GFL2:** she starts the mission in the Sinbreaker; if the Sinbreaker is destroyed, she dies with it. Mastiff's
+  Vow's 80% damage reduction (while her Stability holds) is what keeps it alive, so in practice it rarely falls.
+- **What that means here:**
+  - the damage reduction and the no-knockdown rule apply to hits on the mech and both arms, not only on her;
+  - Stability is the counterplay: heavy hits break it, and the reduction drops to 30% until it recovers;
+  - the mech's death is linked to hers (the mod kills her when the mech's kill event names it), or, as an option,
+    she ejects with her on-foot kit.
+- **Starting in the mech:** HellForge has no "call a stratagem" action, so the start is the Sinbreaker stratagem with
+  one use and no wait, thrown at the drop.
+
 ## Decisions for Yui
 
 - **Mech mode:** any exosuit, or only the Sinbreaker?
