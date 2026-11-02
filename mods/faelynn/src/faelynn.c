@@ -40,7 +40,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.4"
+#define VERSION "0.3.5"
 #define BUILD "25480438"
 #define AVATAR UINT64_C(0x4D1C334D294DFA97)
 #define NODE_HEAD 90u
@@ -244,7 +244,7 @@ static uint64_t Quad(const uint8_t* p) { uint64_t v; memcpy(&v, p, 8); return v;
 static int AddressOk(uintptr_t a, size_t n) { return n && a >= 0x10000 && a < UINT64_C(0x800000000000) && n <= UINT64_C(0x800000000000) - a; }
 static int ReadAt(uintptr_t a, void* out, size_t n) { return AddressOk(a, n) && hf->read(a, out, n) == 0; }
 static uintptr_t Pointer(uintptr_t a) { uintptr_t v = 0; return ReadAt(a, &v, 8) && AddressOk(v, 1) ? v : 0; }
-/* An entity's health record (HD2Runtime's research: the health manager at game+0x3326F88, its open-addressed entity
+/* An entity's health record (HD2Runtime's research: the health manager at game+0x3326688, its open-addressed entity
  * hash, 440-byte records with health at +20 and life at +412, 0 alive). 1 with *health and *life filled */
 static int HealthOf(uint32_t entity, int32_t* health, uint32_t* life)
 {
@@ -981,7 +981,7 @@ static unsigned g_hitNotes;
 static int NetOk(uint32_t n) { return n && n != 0x7FFF && n != UINT32_MAX; }
 static int MineHit(const HfDamageEvent* d)
 {
-    int match = NetOk(g_avatarNet) && (d->dealer == g_avatarNet || d->owner == g_avatarNet);
+    int match = NetOk(g_avatarNet) && (d->dealer == g_avatarNet || (d->owner == g_avatarNet && !NetOk(d->dealer)));   /* not a sentry's or a dog's: theirs name their own dealer */
     int hooked = d->target && d->target == atomic_load(&g_hookTarget) && GetTickCount64() - atomic_load(&g_hookMs) <= 250;
     if (hooked && !NetOk(g_avatarNet) && NetOk(d->owner))
     {
@@ -1365,6 +1365,7 @@ static void Steady(const void* hit, void* result)
     atomic_fetch_add(&g_kdStopped, 1);
 }
 /* Every hit she deals: its target and where it struck (hit +0x20 target, +0x34 point, +0x80 dealer, +0x100 owner) */
+static int Mine(uint32_t dealer);
 static void Observe(const void* hit)
 {
     uint32_t me = atomic_load(&g_avatar);
@@ -1372,7 +1373,7 @@ static void Observe(const void* hit)
     uint8_t h[HIT_SIZE];
     if (!ReadAt((uintptr_t)hit, h, sizeof h)) return;
     uint32_t target = Word(h + 0x20), dealer = Word(h + 0x80), owner = Word(h + 0x100);
-    if (target == me || !target || (owner != me && dealer != me)) return;
+    if (target == me || !target || !(dealer == me || (owner == me && (!dealer || Mine(dealer))))) return;   /* dealt by her or her weapon: a sentry's or a dog's hits are dealt by it */
     memcpy(g_hookPos, h + 0x34, sizeof g_hookPos);
     atomic_store(&g_hookTarget, target);
     atomic_store(&g_hookMs, GetTickCount64());
@@ -1518,21 +1519,91 @@ static int Focused(void)
     return pid == GetCurrentProcessId();
 }
 
+/* ---- in-game key bindings: the HUD registers her three skills with Mod Bindings Menu (Vanilla Plus Megapack: the MODS
+ * tab of the binding pages) and passes each press here (and a heartbeat twice a second); the .ini's keys keep working */
+static _Atomic unsigned long long g_bindMs;
+static atomic_int g_bindPress;
+HF_MOD_EXPORT int faelynn_input(unsigned version, int skill)
+{
+    if (version != 1) return 0;
+    atomic_store(&g_bindMs, GetTickCount64());
+    if (skill >= 1 && skill <= 3) atomic_fetch_or(&g_bindPress, 1 << (skill - 1));
+    return 1;
+}
+/* A skill's .ini key for the binding's default: its virtual-key code and modifiers (1 Shift, 2 Ctrl, 4 Alt) */
+HF_MOD_EXPORT int faelynn_key(unsigned version, int skill, int* vk, int* mods)
+{
+    if (version != 1 || skill < 1 || skill > 3 || !vk || !mods) return 0;
+    *vk = s_keys[skill - 1].vk;
+    *mods = s_keys[skill - 1].mods;
+    return 1;
+}
+/* Her own items (primary, secondary, support weapon, backpack: the inventory manager game+53634872, HD2Runtime's
+ * research: hash +40, descriptors +64, 48-byte records at +80), read twice a second on the game thread: a hit owned by her
+ * and dealt by one of them is hers (a laser's hits name the rifle as their dealer), a sentry's or a dog's is not */
+static atomic_uint g_myItems[4];
+static double g_myItemsAt = -100;
+static void MyItems(void)
+{
+    if (g_now - g_myItemsAt < 0.5) return;
+    g_myItemsAt = g_now;
+    uint32_t me = atomic_load(&g_avatar), i;
+    uintptr_t m = Pointer(game + 53634872u), arr, d, recs;
+    uint8_t desc[24], rec[48];
+    if (!me || !m || !Lookup(m + 40, me, 1048576, &i) || i >= 0x10000 || !(arr = Pointer(m + 64)) || !(d = Pointer(arr + 8u * i)) ||
+        !ReadAt(d, desc, 24) || Word(desc + 8) != me || !(recs = Pointer(m + 80)) || !ReadAt(recs + 48u * i, rec, 48))
+        return;
+    for (int k = 0; k < 4; k++) atomic_store(&g_myItems[k], Word(rec + 4u * k));
+}
+static int MyItem(uint32_t e)
+{
+    for (int k = 0; k < 4; k++) if (e && atomic_load(&g_myItems[k]) == e) return 1;
+    return 0;
+}
+/* Who holds an item: the Wieldable component (game+53634864, HD2Runtime's attribution research: hash +24, u32 wielders at
+ * +56). Her rifle is held by her; a sentry or a turret holds itself, so its hits are its own. 1 with *by, 0 unreadable */
+static int WielderOf(uint32_t e, uint32_t* by)
+{
+    uintptr_t m = Pointer(game + 53634864u), arr;
+    uint32_t i;
+    if (!e || !m || !Lookup(m + 24, e, 1048576, &i) || i >= 0x10000 || !(arr = Pointer(m + 56))) return 0;
+    return ReadAt(arr + 4u * i, by, 4) && *by;
+}
+/* A hit owned by her and dealt by `dealer`: hers when the game says she holds the dealer (first), else when it is one of her
+ * own items (her inventory: a backpack's or support weapon's gear the wielder record does not name) */
+static int Mine(uint32_t dealer)
+{
+    uint32_t me = atomic_load(&g_avatar), by = 0;
+    int held = WielderOf(dealer, &by), mine = held && by == me ? 1 : held && by != dealer && MyItem(by) ? 1 : !held && MyItem(dealer);
+    static atomic_uint told;
+    if (atomic_fetch_add(&told, 1) < 8)
+        Log("a hit dealt by entity %u: %s%s", dealer, held ? (by == dealer ? "it holds itself" : by == me ? "held by her" : "held by another") : "no holder known",
+            mine ? ": hers" : ": not hers");
+    return mine;
+}
 static void Tick(HfMod* mod, float dt, void* user)
 {
     g_now += dt > 0 && dt < 1 ? dt : 0;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
     if (!g_inMission) return;
+    MyItems();
     static int prev[3];
     int focused = Focused();
     int mods = focused ? ((GetAsyncKeyState(VK_SHIFT) & 0x8000) ? KM_SHIFT : 0) | ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? KM_CTRL : 0) |
                          ((GetAsyncKeyState(VK_MENU) & 0x8000) ? KM_ALT : 0) : 0;
+    /* the keys from Mod Bindings Menu while the HUD passes them, else the .ini's */
+    int bound = GetTickCount64() - atomic_load(&g_bindMs) < 2000, presses = atomic_exchange(&g_bindPress, 0);
+    static int wasBound = -1;
+    if (bound != wasBound) { wasBound = bound; Log("keys: %s", bound ? "the .ini's and Mod Bindings Menu's (the binding pages' MODS tab)" : "the .ini's"); }
     for (int i = 0; i < 3; i++)
     {
         int own = s_keys[i].vk == VK_SHIFT ? KM_SHIFT : s_keys[i].vk == VK_CONTROL ? KM_CTRL : s_keys[i].vk == VK_MENU ? KM_ALT : 0;
+        /* both the .ini's key and the binding fire it; one press within 0.3 s of the other is the same press */
         int down = focused && (GetAsyncKeyState(s_keys[i].vk) & 0x8000) != 0 && (mods & ~own) == s_keys[i].mods;
-        if (down && !prev[i] && g_alive && atomic_load(&g_avatar))
+        static unsigned long long fired[3];
+        int press = (down && !prev[i]) || (presses >> i & 1);
+        if (press && GetTickCount64() - fired[i] > 300 && g_alive && atomic_load(&g_avatar) && (fired[i] = GetTickCount64(), 1))
         {
             if (i == 0) TripleMaul();
             else if (i == 1) KnifeEaredHunt();
