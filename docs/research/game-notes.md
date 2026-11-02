@@ -70,7 +70,7 @@ To give a skill an explosion or arc of its own (own damage, own arc), see [nativ
 
 ## The Helldiver
 
-- **Health:** the health manager at `0x3326F88` (HD2Runtime research); `HealthOf` per entity.
+- **Health:** the health manager at `0x3326688` (53634696; HD2Runtime research); `HealthOf` per entity.
 - **Stamina (0..1):** action manager `[0x3326D20]`, per Helldiver at `+0x547854 + index * 0x78`. The game's stamina write at `0xA50E2D` is `f3 42 0f 11 8c 11 54 78 54 00`.
 - **Teleport:** the LIFT-182 Warp Pack's own position setter `0x5A2BB0` (called from `0x88D795` with NULL, the entity, the destination), then velocity zeroed with `0x4A7550`. Found with the Warp Probe (`probes/warp-probe`). Details in [teleport-blink.md](teleport-blink.md).
 - **Raycast:** `exe+0x79F860` world id, `exe+0x7F4590` raycast (as Helldiver Survival Rework's cover check calls it), world at `[0x346BFA0]`, filter `0x80000009`. Hits are 44 bytes: `+24` distance, `+28` unit. `probes/groundat.c` is the ground finder built on it.
