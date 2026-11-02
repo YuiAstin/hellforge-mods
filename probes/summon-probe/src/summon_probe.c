@@ -9,7 +9,8 @@
  * Summon: what a mech the mod drives itself needs. It logs the code of the game's entity spawn (+0xFDC140, HD2Runtime:
  * "takes spawn parameters and network replication that are not proven") so its arguments can be read offline, the
  * engine's unit function table (where an animation call would be), and every 10 s in a mission the 5 nearest spawned
- * entities that are not yours (type, distance, simulated here): the targeting a summon would use.
+ * entities that are not yours (type, distance, simulated here): the targeting a summon would use. It also logs the
+ * game's entity destroy (+0xFDC820), to remove a summon again.
  *
  * Addresses: HD2Runtime by SkyeShade (warp call site, the spawn), ConsistentVaulting (0BSD: mover table, stand check),
  * Helldiver Survival Rework (MIT: the raycast's signature), EXO Beacon Launcher (MIT: the unit table). */
@@ -277,6 +278,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     Dump("ConsistentVaulting's stand check", game, 0xA9D560, 0x100);
     /* summon */
     Dump("the entity spawn (HD2Runtime's 0xFDC140)", game, 0xFDC140, 0x400);
+    Dump("the entity destroy (HD2Runtime's 0xFDC820)", game, 0xFDC820, 0x200);
     uintptr_t script = P(game + 0x3326308), units = script ? P(script + 0x18) : 0;
     if (units)
     {
