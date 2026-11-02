@@ -505,11 +505,25 @@ static int HealthOf(uint32_t entity, int32_t* health)
     }
     return 0;
 }
-static int Hostile(uint64_t res)
+static int HostileRaw(uint64_t res)
 {
     uint32_t stride;
     return res && hf->component_record("BehaviorComponentData", res, &stride) && !hf->component_record("AvatarComponentData", res, &stride) &&
            !hf->component_record("TurretComponentData", res, &stride) && !MechName(res) && res != 0x75BE82ED8592A6B3ull;
+}
+static int Hostile(uint64_t res)
+{
+    static uint64_t keys[512];
+    static int8_t vals[512];
+    if (!res) return 0;
+    unsigned h = (unsigned)(res ^ (res >> 31)) & 511;
+    for (unsigned i = 0; i < 512; i++)
+    {
+        unsigned k = (h + i) & 511;
+        if (keys[k] == res) return vals[k];
+        if (!keys[k]) { keys[k] = res; vals[k] = (int8_t)HostileRaw(res); return vals[k]; }
+    }
+    return HostileRaw(res);
 }
 static uint32_t g_dragEnt, g_dragUnit;
 static float g_dragDir[2], g_dragLeft;
@@ -566,12 +580,15 @@ static void Push(void)
     if (!Resolve(atomic_load(&g_avatar), &me) || !RootOf(me.unit, mp)) { Log("Ctrl+F11: your position is unknown"); return; }
     uint32_t pick = 0, unit = 0;
     float bd = 1e30f, cp[3] = {0};
-    for (unsigned i = 0; i < (g_ndead < 256 ? g_ndead : 256); i++)
+    unsigned n = g_nseen < SEEN ? g_nseen : SEEN;
+    for (unsigned i = 0; i < n; i++)
     {
         float p[3];
-        if (!Resolve(g_dead[i], &e) || !RootOf(e.unit, p)) continue;
+        int32_t hp = 1;
+        if (!Hostile(g_seenRes[i]) || (HealthOf(g_seenEnt[i], &hp) && hp > 0) || !Resolve(g_seenEnt[i], &e) || !RootOf(e.unit, p)) continue;
+        uint32_t id = g_seenEnt[i];
         float d = (p[0] - mp[0]) * (p[0] - mp[0]) + (p[1] - mp[1]) * (p[1] - mp[1]);
-        if (d < bd) { bd = d; pick = g_dead[i]; unit = e.unit; memcpy(cp, p, sizeof cp); }
+        if (d < bd) { bd = d; pick = id; unit = e.unit; memcpy(cp, p, sizeof cp); }
     }
     if (!pick) { Log("Ctrl+F11: no corpse found (kill something first)"); return; }
     g_npush = 0;
@@ -785,7 +802,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     hf = api;
     self = mod;
     if (!api || api->version < 15 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
-    Log("Mech Probe 0.1.7: research only; logs a movement-input lead; F9 stepped charge (Shift: velocity, Ctrl: jump), F10 warp, F11 arm node nudge while you pilot an exosuit; Ctrl+F10 drags the nearest enemy, Ctrl+F11 pushes the nearest corpse");
+    Log("Mech Probe 0.1.8: research only; logs a movement-input lead; F9 stepped charge (Shift: velocity, Ctrl: jump), F10 warp, F11 arm node nudge while you pilot an exosuit; Ctrl+F10 drags the nearest enemy, Ctrl+F11 pushes the nearest corpse");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_DAMAGE, OnDamage, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
