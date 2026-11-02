@@ -153,8 +153,20 @@ All of this needs one live run, logged in the mod (no game changes):
 - **What that means here:**
   - the damage reduction and the no-knockdown rule apply to hits on the mech and both arms, not only on her;
   - Stability is the counterplay: heavy hits break it, and the reduction drops to 30% until it recovers;
-  - the mech's death is linked to hers (the mod kills her when the mech's kill event names it), or, as an option,
-    she ejects with her on-foot kit.
+  - decided: when the mech is destroyed she ejects and fights on foot with her fists (not killed with it).
+- **Two kits:** in the mech, her GFL2 kit (the table above). On foot, her GFL1 kit as AK-15
+  ([IOP Wiki skill](https://iopwiki.com/wiki/AK-15/skilldata), [Mod II skill](https://iopwiki.com/wiki/AK-15/skill2data),
+  [GamePress](https://gamepress.gg/girlsfrontline/node/21096)), around her fists:
+  - **Rage** (passive): 15% chance on a hit to rage for 3 s; while raging each hit adds an extra 40% (50% at Mod) hit.
+  - **Eye of the White Mastiff** (active, 8 s cooldown): monitors every enemy in range for 6 s; her hits on them get
+    +40% (+50% at Mod) damage, and their hits on her are dodged more (40% evasion: here a damage cut). Overload: +5
+    every 2 s, +1 per monitored enemy; at 24 it ends, resets, and she is slowed for 5 s (-20% rate of fire and accuracy:
+    here slower punches), and can't use it again until that ends. Many enemies overload it fast.
+  - **Blood-Curdling Howl** (Mod II): when she monitors more than 5 enemies, or loses a Dummy-link (here: when her
+    Sinbreaker is destroyed and she is thrown out), 2 s immune to all damage, then a guaranteed hit on the strongest
+    enemy near, ignoring armour (25x, doubled while raging).
+  - **DEFY bonus** (optional): with only DEFY members in the squad (for example a Koleda kit), Eye of the White Mastiff
+    also taunts enemies and cuts her damage taken by 90% for 6 s.
 - **Starting in the mech:** HellForge has no "call a stratagem" action, so the start is the Sinbreaker stratagem with
   one use and no wait, thrown at the drop.
 
