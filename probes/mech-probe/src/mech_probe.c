@@ -269,9 +269,7 @@ static int CameraForward(uint32_t unit, float f[3])
 /* ---- the tests ------------------------------------------------------------------------------------------------------ */
 static double g_chargeUntil, g_chargeLog;
 static int g_chargeMode;   /* 0 velocity, 1 stepped, 2 jump */
-static float g_chargeDir[2], g_massGuess = 8000;
-static float g_lastV[3], g_lastJ[3];
-static int g_lastHave;
+static float g_chargeDir[2];
 /* F9: a stepped charge, as the game settles a Helldiver after a warp: the suit's position set a little further every
  * update (an exosuit walks on a character mover, not a physics body: pushing its bodies moved nothing) */
 static void ChargeFrame(void)
@@ -299,9 +297,6 @@ static void ChargeFrame(void)
     if (g_now >= g_chargeLog) { g_chargeLog = g_now + 0.1; Log("F9 charge: at %.1f %.1f %.1f, step %.2f m", p[0], p[1], p[2], step); }
 }
 static double g_thrustUntil;
-static float g_thrustBase[8][4];
-static uint32_t g_thrustUnit[8];
-static int g_nthrust;
 /* F11: one node inside the suit's arms at a time, nudged 0.4 m along its local x for 0.4 s (set every update, since the
  * arm's animation sets it back each frame), then left to the animation again; each press moves to the next node */
 static int NodeCount(uint32_t unit)
