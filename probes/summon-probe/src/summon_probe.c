@@ -116,6 +116,29 @@ __attribute__((noinline)) static uint32_t RayDetour(uint32_t world, const void* 
     return original_ray(world, from, dir, len, a5, a6, filter, flags, unit, hits, max);
 }
 
+/* ---- the game's music and mix states (Wwise SetState by name, HD2Runtime's wwise-plugin research: plugin+0xDD690) -- */
+typedef void (*StateFn)(const char*, const char*);
+static StateFn original_state;
+typedef struct { volatile uint64_t tsc; char group[48], state[48]; } State;
+static State g_states[64];
+static volatile uint64_t g_stateN;
+static void CopyName(char* out, const char* in)
+{
+    size_t i = 0;
+    if (Plausible((uint64_t)(uintptr_t)in) || ((uintptr_t)in >= 0x10000 && (uintptr_t)in < 0x7FFFFFFF0000ull))
+        for (; i < 47 && in[i]; i++) out[i] = in[i];
+    out[i] = 0;
+}
+__attribute__((noinline)) static void StateDetour(const char* group, const char* state)
+{
+    uint64_t i = __atomic_fetch_add(&g_stateN, 1, __ATOMIC_RELAXED);
+    State* r = &g_states[i % 64];
+    r->tsc = __rdtsc();
+    CopyName(r->group, group);
+    CopyName(r->state, state);
+    original_state(group, state);
+}
+
 /* ---- the warp report: what ran in the 2 s before your Helldiver moved --------------------------------------------- */
 typedef struct { uint64_t ret; unsigned n; double first, last; float len; uint32_t flags; } Caller;
 static void WarpReport(uint64_t moved)
@@ -261,6 +284,14 @@ static void Tick(HfMod* mod, float dt, void* user)
     static uint64_t seenSet, seenFlag;
     if (original_flag) Report("LaunchFlag", g_flag, &g_flagN, &seenFlag, 0);
     if (original_set) Report("SetPosition", g_set, &g_setN, &seenSet, 1);
+    static uint64_t seenState;
+    while (seenState < g_stateN)
+    {
+        if (g_stateN - seenState > 64) seenState = g_stateN - 64;
+        State st = g_states[seenState % 64];
+        seenState++;
+        Log("sound state: %s = %s%s", st.group, st.state, hf->game_state(self) == HF_STATE_MISSION ? " (in a mission)" : "");
+    }
     static double clock, next = 10;
     clock += dt > 0 && dt < 1 ? dt : 0;
     if (clock >= next && hf->game_state(self) == HF_STATE_MISSION) { next = clock + 10; Nearest(); }
@@ -321,6 +352,16 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         if (!g_rays || hf->hook(self, exe + 0x7F4590, (void*)RayDetour, (void**)&original_ray)) { original_ray = NULL; Log("raycast: hook refused"); }
     }
     else Log("the raycast is not the reviewed code: no raycast timing");
+    {
+        size_t ws = 0;
+        uintptr_t wwise = hf->module_base("wwise_pluginw64_release.dll", &ws);
+        if (wwise && ws > 0xDD6B0 && hf->code_matches(wwise + 0xDD6A9, "41 ba c5 9d 1c 81"))
+        {
+            if (hf->hook(self, wwise + 0xDD690, (void*)StateDetour, (void**)&original_state)) { original_state = NULL; Log("sound states: hook refused"); }
+            else Log("sound states: hooked (the music's combat state should show as it changes)");
+        }
+        else Log("sound states: the Wwise plugin is not the reviewed build (%s)", wwise ? "another build" : "not loaded yet");
+    }
     Log("probing: SetPosition %s, LaunchFlag %s, raycast %s, positions %s. Wear a LIFT-182 Warp Pack and warp a few times.",
         original_set ? "hooked" : "OFF", original_flag ? "hooked" : "OFF", original_ray ? "hooked" : "OFF", g_resolve && g_localPos ? "yes" : "no");
 }
