@@ -59,6 +59,8 @@ static struct {
     ActorVelFn velocities;
     ActorPushFn impulse;
     SetVecFn set_position, set_velocity;
+    uint32_t (*world_id)(const void*);
+    uint32_t (*raycast)(uint32_t, const void*, const void*, float, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, void*, uint32_t);
     LocalPosFn local_position;
     SetLocalPosFn set_local_position;
 } fn;
@@ -96,6 +98,12 @@ static int Bind(void)
         fn.set_position = (SetVecFn)(game + 0x5A2BB0);
     if (hf->code_matches(game + 0x4A7550, "48 89 5c 24 18 57 48 83 ec 20 3b 15 ?? ?? ?? ?? 48 8b 1d"))
         fn.set_velocity = (SetVecFn)(game + 0x4A7550);   /* the motion record's velocity (as Exo Dodge drives an exosuit) */
+    if (hf->code_matches(exe + 0x79F860, "33 c0 4c 8d 05 c7 b2 01 02 0f 1f 80 00 00 00 00 49 39 0c c0 74 0c ff c0 83 f8 04 75 f3") &&
+        hf->code_matches(exe + 0x7F4590, "48 8b c4 f3 0f 11 58 20 89 48 08 55 53 56 57 41 54 41 55 41 56 41 57 48"))
+    {   /* the game's raycast, as Helldiver Survival Rework (MIT) calls it: walls and ground for the stepped charge */
+        fn.world_id = (uint32_t (*)(const void*))(exe + 0x79F860);
+        fn.raycast = (uint32_t (*)(uint32_t, const void*, const void*, float, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, void*, uint32_t))(exe + 0x7F4590);
+    }
     else Log("the warp pack's position setter is not the reviewed code: F10 is off");
     uintptr_t script = P(game + 0x3326308), units = script ? P(script + 0x18) : 0;
     if (units && P(units + 0x00) == exe + 0x1fc450 && P(units + 0x38) == exe + 0x1fc720)
@@ -270,6 +278,34 @@ static int CameraForward(uint32_t unit, float f[3])
 static double g_chargeUntil, g_chargeLog;
 static int g_chargeMode;   /* 0 velocity, 1 stepped, 2 jump */
 static float g_chargeDir[2];
+/* The nearest static thing along a ray (the suit's own unit skipped): its distance, len + 1 when clear, -1 when the
+ * query can't be made (the physics jobs are running, or no raycast) */
+static float Ray(uint32_t skip, const float from[3], const float dir[3], float len)
+{
+    uintptr_t world = P(game + 0x346BFA0), scheduler = P(game + 0x347D7E0);
+    uint32_t count, jobs[72];
+    if (!world || !fn.raycast || !fn.world_id || !scheduler || !RD(scheduler, &count, 4) || count || !RD(scheduler + 0x40008, jobs, sizeof jobs))
+        return -1;
+    for (unsigned i = 0; i < 24; i++) if (jobs[3 * i + 2] != 1) return -1;
+    uint32_t id = fn.world_id((const void*)world), pilot = 0;
+    if (id >= 4) return -1;
+    Ent me;
+    if (Resolve(atomic_load(&g_avatar), &me)) pilot = me.unit;   /* she sits inside the suit: her own body is not a wall */
+    uint8_t hits[16 * 44];
+    memset(hits, 0, sizeof hits);
+    uint32_t n = fn.raycast(id, from, dir, len, 2, 1, 0, 0x80000009u, skip, hits, 16);
+    if (n > 16) return -1;
+    float best = len + 1;
+    for (uint32_t i = 0; i < n; i++)
+    {
+        float d;
+        memcpy(&d, hits + 44u * i + 24, 4);
+        uint32_t u = U32(hits + 44u * i + 28);
+        if (u == skip || (pilot && u == pilot) || !isfinite(d) || d < 0.3f) continue;
+        if (d < best) best = d;
+    }
+    return best;
+}
 /* F9: a stepped charge, as the game settles a Helldiver after a warp: the suit's position set a little further every
  * update (an exosuit walks on a character mover, not a physics body: pushing its bodies moved nothing) */
 static void ChargeFrame(void)
@@ -292,7 +328,22 @@ static void ChargeFrame(void)
     }
     if (dt <= 0 || dt > 0.1) return;
     float step = (float)(20.0 * dt);   /* 20 m/s */
-    float dest[3] = {p[0] + g_chargeDir[0] * step, p[1] + g_chargeDir[1] * step, p[2]};
+    float dir[3] = {g_chargeDir[0], g_chargeDir[1], 0}, down[3] = {0, 0, -1};
+    /* walls: knee and chest height, the step plus the suit's half width ahead */
+    for (int h = 0; h < 2; h++)
+    {
+        float from[3] = {p[0], p[1], p[2] + (h ? 2.4f : 1.0f)};
+        float w = Ray(g_mechUnit, from, dir, step + 1.5f);
+        if (w < 0) return;   /* not this update: the physics is busy */
+        if (w <= step + 1.5f) { g_chargeUntil = 0; last = 0; Log("F9 charge: stopped by a wall %.1f m ahead (%s height)", w, h ? "chest" : "knee"); return; }
+    }
+    float dest[3] = {p[0] + dir[0] * step, p[1] + dir[1] * step, p[2]};
+    /* ground: from 2.5 m above the next spot down to 2.5 m below its height */
+    float top[3] = {dest[0], dest[1], p[2] + 2.5f};
+    float g = Ray(g_mechUnit, top, down, 5.0f);
+    if (g < 0) return;
+    if (g > 5.0f) { g_chargeUntil = 0; last = 0; Log("F9 charge: stopped at an edge (no ground within 2.5 m below)"); return; }
+    dest[2] = top[2] - g;
     fn.set_position(NULL, g_mech, dest);
     if (g_now >= g_chargeLog) { g_chargeLog = g_now + 0.1; Log("F9 charge: at %.1f %.1f %.1f, step %.2f m", p[0], p[1], p[2], step); }
 }
@@ -551,10 +602,10 @@ static void Tick(HfMod* mod, float dt, void* user)
                 float h = sqrtf(f[0] * f[0] + f[1] * f[1]);
                 if (h < 0.05f) { f[0] = 1; f[1] = 0; h = 1; }
                 g_chargeDir[0] = f[0] / h; g_chargeDir[1] = f[1] / h;
-                g_chargeMode = Down(VK_CONTROL) ? 2 : Down(VK_SHIFT) ? 1 : 0;
+                g_chargeMode = Down(VK_CONTROL) ? 2 : Down(VK_SHIFT) ? 0 : 1;   /* F9 stepped (with wall and ground checks), Shift velocity, Ctrl jump */
                 g_chargeUntil = g_now + (g_chargeMode == 2 ? 0.05 : 0.5); g_chargeLog = 0;
-                Log("F9 %s toward %.2f %.2f", g_chargeMode == 2 ? "jump (Ctrl: 9 m/s up)" : g_chargeMode == 1 ? "stepped charge (Shift: positions, 20 m/s, 0.5 s)" :
-                    "velocity charge (20 m/s for 0.5 s through the motion record)", g_chargeDir[0], g_chargeDir[1]);
+                Log("F9 %s toward %.2f %.2f", g_chargeMode == 2 ? "jump (Ctrl: 9 m/s up)" : g_chargeMode == 1 ? "stepped charge (positions, 20 m/s, 0.5 s, stops at walls and edges)" :
+                    "velocity charge (Shift: 20 m/s for 0.5 s through the motion record)", g_chargeDir[0], g_chargeDir[1]);
             }
             else if (k == 1) Warp();
             else ThrustStart();
@@ -568,7 +619,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     hf = api;
     self = mod;
     if (!api || api->version < 15 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
-    Log("Mech Probe 0.1.4: research only; logs a movement-input lead; F9 velocity charge (Shift: stepped, Ctrl: jump), F10 warp, F11 arm node nudge while you pilot an exosuit");
+    Log("Mech Probe 0.1.5: research only; logs a movement-input lead; F9 stepped charge (Shift: velocity, Ctrl: jump), F10 warp, F11 arm node nudge while you pilot an exosuit");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_DAMAGE, OnDamage, NULL, 0) &&
