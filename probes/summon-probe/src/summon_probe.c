@@ -218,11 +218,15 @@ static LocalPosFn g_localPos;
 typedef struct { uint32_t entity; uint64_t resource; uint32_t authority; } Seen;
 static Seen g_seen[2048];
 static unsigned g_nseen;
+static void CommanderSpawned(uint32_t e, uint64_t res);
+static void NearCommander(uint32_t e, uint64_t res, uint32_t network, uint32_t authority);
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
     Seen* e = &g_seen[g_nseen++ % 2048];
     e->entity = s->entity; e->resource = s->resource; e->authority = s->authority;
+    CommanderSpawned(s->entity, s->resource);
+    NearCommander(s->entity, s->resource, s->network, s->authority);
 }
 static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 {
@@ -269,6 +273,95 @@ static void Nearest(void)
             best[i].s.authority ? "yes" : "no");
 }
 
+/* ---- the Brood and Alpha Commanders' summons: which ability they run when warriors appear near them ------------- */
+#define BROOD 0xD522FD4748D443A5ull   /* warrior_big (Brood Commander), HD2Runtime's entity catalogue */
+#define ALPHA 0xF79CD8BB654397DFull   /* warrior_big_tier2 (Alpha Commander) */
+static int Lookup(uintptr_t at, uint32_t key, uint32_t* index)
+{
+    uint8_t h[20], row[8];
+    if (hf->read(at, h, sizeof h)) return 0;
+    uintptr_t entries; memcpy(&entries, h, 8);
+    uint32_t n, empty, mult;
+    memcpy(&n, h + 8, 4); memcpy(&empty, h + 12, 4); memcpy(&mult, h + 16, 4);
+    if (!Plausible(entries) || !n || n > 1048576 || (n & (n - 1)) || key == empty) return 0;
+    for (unsigned i = 0; i < n && i < 128; i++)
+    {
+        if (hf->read(entries + 8u * ((key * mult + i) & (n - 1)), row, 8)) return 0;
+        uint32_t k, v; memcpy(&k, row, 4); memcpy(&v, row + 4, 4);
+        if (k == key) { *index = v; return v != UINT32_MAX; }
+        if (k == empty) return 0;
+    }
+    return 0;
+}
+static int AbilityOf(uint32_t e, uint32_t* id, int* active)
+{
+    uintptr_t m = P(game + 0x3326640), recs;
+    uint32_t i;
+    uint8_t r[17];
+    if (!m || !Lookup(m + 24, e, &i) || i >= 0x10000 || !(recs = P(m + 56)) || hf->read(recs + 224u * i, r, 17)) return 0;
+    memcpy(id, r, 4); *active = r[16] != 0;
+    return 1;
+}
+typedef struct { uint32_t entity, ability; int active; double changed; } Commander;
+static Commander g_cmd[16];
+static int g_ncmd;
+static double g_clock;
+static void CommanderSpawned(uint32_t e, uint64_t res)
+{
+    if (res != BROOD && res != ALPHA) return;
+    if (g_ncmd < 16) { g_cmd[g_ncmd].entity = e; g_cmd[g_ncmd].ability = 0; g_cmd[g_ncmd].active = -1; g_cmd[g_ncmd].changed = 0; g_ncmd++; }
+    Log("commander: %s, entity %u", res == ALPHA ? "Alpha Commander" : "Brood Commander", e);
+}
+static void NearCheck(uint32_t e, uint64_t res, uint32_t network, uint32_t authority, double spawnedAt);
+static void CommanderFrame(void)
+{
+    static unsigned done;
+    if (g_npend - done > 64) done = g_npend - 64;
+    while (done < g_npend && g_clock - g_pend[done % 64].at >= 0.3)
+    {
+        Pending q = g_pend[done % 64];
+        done++;
+        NearCheck(q.e, q.res, q.network, q.authority, q.at);
+    }
+    for (int i = 0; i < g_ncmd; i++)
+    {
+        uint32_t id = 0;
+        int act = 0;
+        if (!AbilityOf(g_cmd[i].entity, &id, &act)) continue;
+        if (id != g_cmd[i].ability || act != g_cmd[i].active)
+        {
+            Log("commander %u: ability %u %s", g_cmd[i].entity, id, act ? "ACTIVE" : "idle");
+            g_cmd[i].ability = id; g_cmd[i].active = act; g_cmd[i].changed = g_clock;
+        }
+    }
+}
+/* a spawn within 20 m of a commander: what appeared, and how long after that commander's ability last changed (checked
+ * 0.3 s after the spawn event, once the new unit has a position) */
+typedef struct { uint32_t e, network, authority; uint64_t res; double at; } Pending;
+static Pending g_pend[64];
+static unsigned g_npend;
+static void NearCommander(uint32_t e, uint64_t res, uint32_t network, uint32_t authority)
+{
+    if (!g_ncmd) return;
+    Pending* q = &g_pend[g_npend++ % 64];
+    q->e = e; q->res = res; q->network = network; q->authority = authority; q->at = g_clock;
+}
+static void NearCheck(uint32_t e, uint64_t res, uint32_t network, uint32_t authority, double spawnedAt)
+{
+    float p[3];
+    if (!PosOf(e, p)) return;
+    for (int i = 0; i < g_ncmd; i++)
+    {
+        float c[3];
+        if (g_cmd[i].entity == e || !PosOf(g_cmd[i].entity, c)) continue;
+        float d = sqrtf((p[0] - c[0]) * (p[0] - c[0]) + (p[1] - c[1]) * (p[1] - c[1]) + (p[2] - c[2]) * (p[2] - c[2]));
+        if (d > 20) continue;
+        Log("  spawned %.1f m from commander %u: entity %u type %016llX network %u%s, %.2f s after its ability became %u (%s)", (double)d,
+            g_cmd[i].entity, e, (unsigned long long)res, network, authority ? " (simulated here)" : "", spawnedAt - g_cmd[i].changed,
+            g_cmd[i].ability, g_cmd[i].active ? "active" : "idle");
+    }
+}
+
 static void Tick(HfMod* mod, float dt, void* user)
 {
     static LARGE_INTEGER q0, qf;
@@ -294,6 +387,8 @@ static void Tick(HfMod* mod, float dt, void* user)
     }
     static double clock, next = 10;
     clock += dt > 0 && dt < 1 ? dt : 0;
+    g_clock = clock;
+    if (hf->game_state(self) == HF_STATE_MISSION) CommanderFrame(); else g_ncmd = 0;
     if (clock >= next && hf->game_state(self) == HF_STATE_MISSION) { next = clock + 10; Nearest(); }
 }
 
