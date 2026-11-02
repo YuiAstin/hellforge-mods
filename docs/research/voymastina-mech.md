@@ -201,3 +201,29 @@ All of this needs one live run, logged in the mod (no game changes):
   - a bash's damage event (kind, dealer, owner) and its hit-hook record;
   - the shield arm's entity, and its Wieldable wielder while piloted;
   - the AbilityWeapon or avatar ability id while bashing.
+
+## Models, effects and animations: what the tools cover (2026-11-02)
+
+- **HellForge** (`app/sdk/docs/modding/data.md` in the install) brings data three ways:
+  - **Patch files** in `data/`: the community's format, which is what HD2SDK makes. Rule: only ship data you made.
+    Data made from the game's own resources goes in a data spec instead.
+  - **Cosmetic packs**, as the community ships them. The `Voymastina SR-18` character pack already in the mods folder
+    is one.
+  - **Data specs** (`hellforge-data.json`), built on each player's machine from their own game copy:
+    - copies of a `unit`, `material`, `texture` or `particles`;
+    - recolours (a material's `colours`, a lookup-texture `lut`, `particles` colour keys);
+    - `include` (sound banks);
+    - `icon`;
+    - **`mesh`**: a Wavefront OBJ of your own. It is rigid on the unit's main bone and keeps the base's materials,
+      physics, hitboxes and attachment points. Example: `cube-gun`.
+- **HD2SDK Community Edition** (Blender add-on): textures, meshes and materials in the game's archives, and patch
+  export. Animations are not listed.
+- **Animations:** neither HellForge's docs nor HD2SDK's page covers new or changed animations. New moves have to reuse
+  existing ones, which is why the Breakthrough's bash is the pile driver's animation.
+- **What this allows for Voymastina:**
+  - **A pile-driver mesh on the Breakthrough's shield arm:** an OBJ on a copy of `combat_walker_shield`'s unit. Being
+    rigid on the arm's main bone, it moves with the bash. Recolour it through the material LUT, for example the V2
+    yellow and purple accents.
+  - **Her blasts in her colours:** copies of the Railcannon, Precision Strike and Recoilless effects (`particles`) with
+    new colour keys, swapped in for her explosions.
+  - **Skill icons:** 256×256 PNGs.
