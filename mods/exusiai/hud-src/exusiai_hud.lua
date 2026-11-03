@@ -26,7 +26,8 @@ end
 
 local ffi = require('ffi')
 pcall(ffi.cdef, [[
-typedef struct exuhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t charge_hits; float charge, guns, overload; uint32_t keys[3]; char key_label[3][24]; } exuhud1_state;
+typedef struct exuhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t charge, charge_max; float free_bursts, guns, overload; uint32_t keys[3]; char key_label[3][24]; } exuhud1_state;
+typedef int (*exuammo1)(unsigned int version, uint32_t entity, int rounds);
 void *exuhud1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
 void *exuhud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
 ]])
@@ -295,6 +296,9 @@ local function ability(d, i, x, y, size, alpha)
     local s = d.scale
     local left, full = tonumber(state.cd[i - 1]), math.max(0.01, tonumber(state.cd_max[i - 1]))
     local ready = left <= 0.05
+    local passive = i == 1                 -- Charging Mode: charged by her bursts, no cooldown
+    local charge, charge_max = tonumber(state.charge), math.max(1, tonumber(state.charge_max))
+    if passive then ready = charge >= charge_max end
     local a = alpha
     -- the icon's tile, framed like a stratagem's
     local t = math.max(1, 2 * s)
@@ -311,7 +315,9 @@ local function ability(d, i, x, y, size, alpha)
     if not ICONS[i] then
         heavy(d, SHORT[i], x + size / 2, y + size * 0.3, math.max(17 * s, size * 0.34), 'title', ready and rgba(TEXT, a) or rgba(MUTED, a), 'center')
     end
-    if not ready then
+    if passive then
+        heavy(d, ('%d/%d'):format(charge, charge_max), x + size / 2, y + size * 0.62, math.max(17 * s, size * 0.3), 'title', ready and rgba(YELLOW, a) or rgba(TEXT, a), 'center')
+    elseif not ready then
         -- the part of the cooldown left, darkening the icon from the top
         d:rect(x + t, y + t, size - 2 * t, (size - 2 * t) * math.min(1, left / full), rgba(INK, a * 0.55), 4)
         heavy(d, string.format('%.0f', math.ceil(left)), x + size / 2, y + size * 0.25, math.max(20 * s, size * 0.42), 'title', rgba(TEXT, a), 'center')
@@ -320,10 +326,10 @@ local function ability(d, i, x, y, size, alpha)
     local tx = x + size + 10 * s
     local nsize = math.max(17 * s, size * 0.36)
     heavy(d, NAMES[i], tx, y + size * 0.02, nsize, 'title', ready and rgba(TEXT, a) or rgba(MUTED, a))
-    local label = X.labels[i] or (state.version >= 2 and ffi.string(state.key_label[i - 1]) or key_name(state.keys[i - 1]))
+    local label = passive and (ready and 'NEXT BURST' or 'PASSIVE') or X.labels[i] or ffi.string(state.key_label[i - 1])
     local ksize = math.max(18 * s, size * 0.4)
     heavy(d, label, tx, y + size * 0.5, ksize, 'title', ready and rgba(YELLOW, a) or rgba(MUTED, a))
-    if not ready then
+    if not ready and not passive then
         local kw = d:text_width(label, ksize, 'title') or (ksize * #label * 0.6)
         heavy(d, string.format('%.0fs', math.ceil(left)), tx + kw + 12 * s, y + size * 0.5, ksize, 'title', rgba(TEXT, a * 0.8))
     end
@@ -356,7 +362,9 @@ local function status_bar(d)
     local H = d.height or (d.width * 9 / 16)
     local cx, y = d.width / 2, H - 64 * s
     local bits = {}
-    if tonumber(state.charge_hits) > 0 then bits[#bits + 1] = string.format('CHARGED x%d %.0fs', tonumber(state.charge_hits), math.ceil(state.charge)) end
+    local charge, charge_max = tonumber(state.charge), tonumber(state.charge_max)
+    if state.free_bursts > 0 then bits[#bits + 1] = 'FREE BURSTS'
+    elseif charge_max > 0 then bits[#bits + 1] = 'CHARGE ' .. string.rep('|', charge) .. string.rep('.', math.max(0, charge_max - charge)) end
     if state.guns > 0 then bits[#bits + 1] = string.format('GUNS %.0fs', math.ceil(state.guns)) end
     if state.overload > 0 then bits[#bits + 1] = string.format('OVERLOADING %.0fs', math.ceil(state.overload)) end
     if #bits > 0 then heavy(d, table.concat(bits, '   '), cx, y - 6 * s, 20 * s, 'title', rgba(ELECTRIC, 1), 'center') end
@@ -369,9 +377,8 @@ end
 local OPTIONS = {
     {'fire_rate', 'slider', 'Fast Cartridge: Fire Rate', 1, 2, 0.05, 'Her guns fire this many times faster (from when she next equips each one).'},
     {'bless_mult', 'slider', "Angel's Blessings: Damage", 1, 2, 0.01, 'Her shots deal this times their damage.'},
-    {'ch_cooldown', 'slider', 'Charging Mode: Cooldown', 0, 60, 1, 'Seconds before Charging Mode can be used again.', true},
-    {'ch_hits', 'slider', 'Charging Mode: Hits', 1, 10, 1, 'How many of her next hits are charged.'},
-    {'ch_mult', 'slider', 'Charging Mode: Damage', 1, 5, 0.05, 'Charged hits deal this times their damage.'},
+    {'ch_every', 'slider', 'Charging Mode: Bursts To Charge', 1, 10, 1, 'Bursts she fires to charge it; the next one sets off the free bursts.', true},
+    {'ch_free', 'slider', 'Charging Mode: Free Bursts', 0, 6, 1, 'Extra bursts of her gun\'s rounds the charged burst sets off.'},
     {'s2_cooldown', 'slider', 'Summoned Guns: Cooldown', 0, 120, 5, 'Seconds before the guns can be summoned again.', true},
     {'s2_seconds', 'slider', 'Summoned Guns: Duration', 5, 60, 1, 'Seconds the two guns stay at her shoulders.'},
     {'gun_every', 'slider', 'Summoned Guns: Fire Interval', 0.05, 1, 0.05, 'Each gun fires at most once in this many seconds.'},
@@ -432,6 +439,27 @@ local function options_step(dt)
     log(('[Exusiai HUD] options: %d settings on the MODS tab'):format(count))
 end
 
+------------------------------------------------------------------------- her magazine, for Charging Mode --
+-- The rounds in the gun in hand (HD2Runtime's player:ammo()), passed to exusiai.dll every frame (exusiai_ammo): the DLL
+-- counts her bursts from the rounds going down.
+local A = {fn = nil, failed = false}
+local function ammo_step()
+    if A.failed then return end
+    if not A.fn then
+        local module = k32.exuhud1_GetModuleHandleA('exusiai.dll')
+        if module == nil then return end
+        local proc = k32.exuhud1_GetProcAddress(module, 'exusiai_ammo')
+        if proc == nil then A.failed = true; log('[Exusiai HUD] ammo: exusiai.dll has no ammo entry (update Exusiai)') return end
+        A.fn = ffi.cast('exuammo1', proc)
+    end
+    local me = hd2.local_player and hd2.local_player()
+    if not me then return end
+    local ok, a = pcall(me.ammo, me)
+    if not ok or type(a) ~= 'table' or type(a.rounds) ~= 'number' then A.fn(1, 0, -1) return end
+    A.fn(1, tonumber(a.entity_id) or 0, a.rounds)
+    if not A.told then A.told = true; log(('[Exusiai HUD] ammo: %s (%s), %d rounds: reported each frame'):format(tostring(a.name), tostring(a.feed), a.rounds)) end
+end
+
 local overlay = hd2.ui.overlay({id = 'kit', owner = OWNER})
 overlay:draw(function(d, dt)
     dt = tonumber(dt) or 0
@@ -443,6 +471,8 @@ overlay:draw(function(d, dt)
     end
     if not find(dt) then return end
     if state.in_mission == 0 then return end
+    local okA, errA = pcall(ammo_step)
+    if not okA then A.failed = true; log('[Exusiai HUD] ammo failed: ' .. tostring(errA)) end
     status_bar(d)
     local okL, box = pcall(list_box, d, dt)
     if not okL then L.on = false; log('[Exusiai HUD] following the list failed, abilities always shown: ' .. tostring(box)); box = nil end

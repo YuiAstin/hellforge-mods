@@ -3,7 +3,10 @@
  *
  *   Fast Cartridge (passive): her guns fire fire_rate times faster (set when she equips each one).
  *   Angel's Blessings (passive): hp_mult times a Helldiver's health, and her shots deal bless_mult times their damage.
- *   Charging Mode (key_charge, default Z): her next ch_hits hits within ch_window s deal ch_mult times their damage.
+ *   Charging Mode (passive): every ch_every bursts she fires charge it; the next burst sets off ch_free more bursts of
+ *     her gun's own rounds along her aim, for free (no ammunition). A burst is a group of her rounds with gaps under
+ *     ch_gap s, or her gun's burst size (WeaponData burst_rounds; 3 without one) in full-auto fire. Her rounds are
+ *     counted from the magazine the HUD reads (hd2.local_player():ammo()) and passes in (exusiai_ammo).
  *   Summoned guns (key_guns, default X): for s2_seconds two guns hover at her shoulders; each time she lands a shot,
  *     each fires at what she hit (at most once every gun_every s).
  *   Overloading Mode (key_overload, default C): for s3_seconds four more guns hover behind her, each choosing its own
@@ -44,8 +47,8 @@
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static float s_fireRate = 1.15f, s_blessMult = 1.08f;
-static float s_chCd = 6, s_chWindow = 8, s_chMult = 1.45f;
-static int s_chHits = 3;
+static int s_chEvery = 4, s_chFree = 3;
+static float s_chGap = 0.2f, s_chSpread = 0.6f;
 static float s_s2Cd = 40, s_s2Seconds = 15, s_gunEvery = 0.15f;
 static float s_s3Cd = 60, s_s3Seconds = 15, s_s3Every = 0.35f, s_s3Range = 60;
 static int s_gunRound = 7, s_noFriendlyFire = 1;
@@ -53,7 +56,7 @@ static int s_gunRound = 7, s_noFriendlyFire = 1;
 /* Every setting: its .ini / Mod Options Menu name, variable and range (kitbase/kb_settings.h) */
 static const KbSetting kSettings[] = {
     KB_F("fire_rate", s_fireRate, 1, 3), KB_F("bless_mult", s_blessMult, 1, 3),
-    KB_F("ch_cooldown", s_chCd, 0, 120), KB_F("ch_window", s_chWindow, 1, 30), KB_F("ch_mult", s_chMult, 1, 10), KB_I("ch_hits", s_chHits, 1, 50),
+    KB_I("ch_every", s_chEvery, 1, 20), KB_I("ch_free", s_chFree, 0, 10), KB_F("ch_gap", s_chGap, 0.05, 1), KB_F("ch_spread", s_chSpread, 0, 5),
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("s2_seconds", s_s2Seconds, 1, 120), KB_F("gun_every", s_gunEvery, 0.05, 5),
     KB_F("s3_cooldown", s_s3Cd, 0, 600), KB_F("s3_seconds", s_s3Seconds, 1, 120), KB_F("s3_every", s_s3Every, 0.05, 5), KB_F("s3_range", s_s3Range, 5, 200),
     KB_I("gun_round", s_gunRound, 1, 100000), KB_I("no_friendly_fire", s_noFriendlyFire, 0, 1),
@@ -68,10 +71,12 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
     fprintf(f, "; Exusiai %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for a\n"
                "; combo (Shift+Q). The game still sees the keys too (Shift sprints, R reloads), so pick ones it leaves alone.\n"
                "key_charge = %s\nkey_guns = %s\nkey_overload = %s\n"
+               "; (key_charge: Charging Mode is passive now; the key only says so.)\n"
                "; Fast Cartridge: her guns fire this many times faster (from when she next equips each one).\nfire_rate = %g\n"
                "; Angel's Blessings: her shots deal this times their damage (her health: hp_mult, below).\nbless_mult = %g\n"
-               "; Charging Mode: cooldown; her next ch_hits hits within ch_window s deal ch_mult times their damage.\n"
-               "ch_cooldown = %g\nch_hits = %d\nch_window = %g\nch_mult = %g\n"
+               "; Charging Mode: every ch_every bursts she fires, the next sets off ch_free more bursts of her gun's rounds for free.\n"
+               "; ch_gap: a pause longer than this (s) ends a burst; ch_spread: the free rounds' spread (degrees).\n"
+               "ch_every = %d\nch_free = %d\nch_gap = %g\nch_spread = %g\n"
                "; Summoned guns: cooldown; for s2_seconds two guns at her shoulders fire at what she hits (each at most once every\n"
                "; gun_every s).\ns2_cooldown = %g\ns2_seconds = %g\ngun_every = %g\n"
                "; Overloading Mode: cooldown; for s3_seconds four more guns each pick their own target within s3_range m (the\n"
@@ -82,17 +87,15 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint. hellbomb_on_exhaustion 1 sets off a\n"
                "; Hellbomb on her if she runs her stamina dry (a T-Doll's price; off for her).\n"
                "hp_mult = 1.13\nstamina_mult = 1\nhellbomb_on_exhaustion = 0\n",
-            VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_fireRate, (double)s_blessMult, (double)s_chCd, s_chHits,
-            (double)s_chWindow, (double)s_chMult, (double)s_s2Cd, (double)s_s2Seconds, (double)s_gunEvery, (double)s_s3Cd,
+            VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_fireRate, (double)s_blessMult, s_chEvery, s_chFree,
+            (double)s_chGap, (double)s_chSpread, (double)s_s2Cd, (double)s_s2Seconds, (double)s_gunEvery, (double)s_s3Cd,
             (double)s_s3Seconds, (double)s_s3Every, (double)s_s3Range, s_gunRound, s_noFriendlyFire);
 }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
-static double g_cd[3];                  /* ready at: Charging Mode, the guns, Overloading Mode */
-static int g_chHits;                    /* charged hits left */
-static double g_chUntil;
+static double g_cd[3];                  /* ready at: (Charging Mode: unused), the guns, Overloading Mode */
 static double g_s2Until, g_s3Until;
-static unsigned g_casts[3], g_charged, g_shots[2], g_spared, g_tunedGuns;
+static unsigned g_casts[3], g_shots[2], g_spared, g_tunedGuns;
 
 /* who hit her last (the hit hook, another thread): Overloading Mode's third gun goes after them */
 static atomic_uint g_threat;
@@ -261,14 +264,123 @@ static void GunsFrame(void)
 }
 
 /* ---- the skills ------------------------------------------------------------------------------------------------- */
-static void ChargingMode(void)
+/* ---- Charging Mode: her bursts ---------------------------------------------------------------------------------- */
+/* her gun in hand (the weapon event) and what its rounds are: its projectile type, burst size and fire rate */
+static uint32_t g_heldEntity;
+static uint64_t g_heldRes;
+typedef struct GunInfo { uint64_t res; uint32_t projectile, burst; float rpm; } GunInfo;
+static GunInfo g_gunInfo[24];
+static int g_ngunInfo;
+static const GunInfo* InfoOf(uint64_t res)
 {
-    if (g_now < g_cd[0]) return;
-    g_cd[0] = g_now + s_chCd;
-    g_chHits = s_chHits;
-    g_chUntil = g_now + s_chWindow;
+    for (int i = 0; i < g_ngunInfo; i++) if (g_gunInfo[i].res == res) return &g_gunInfo[i];
+    if (!res || g_ngunInfo >= 24) return NULL;
+    GunInfo* g = &g_gunInfo[g_ngunInfo++];
+    memset(g, 0, sizeof *g);
+    g->res = res;
+    HfField proj = HF_FIELD(ProjectileWeapon, projectile), rate = {HfProjectileWeapon_INFO, 0x08, 4, HF_TYPE_F32, __LINE__},
+            burst = HF_FIELD(WeaponData, burst_rounds), entity = HF_FIELD(ProjectileWeapon, projectile_entity);
+    HfLiveValue v;
+    memset(&v, 0, sizeof v);
+    if (hf->get_live(self, res, &proj, &v) && v.base.number > 0) g->projectile = (uint32_t)v.base.number;
+    memset(&v, 0, sizeof v);
+    if (hf->get_live(self, res, &entity, &v) && v.base.number != 0) g->projectile = 0;   /* it fires an entity per shot */
+    memset(&v, 0, sizeof v);
+    g->rpm = hf->get_live(self, res, &rate, &v) && v.base.number > 0 ? (float)v.base.number : 600;
+    memset(&v, 0, sizeof v);
+    g->burst = hf->get_live(self, res, &burst, &v) && v.base.number >= 2 && v.base.number <= 10 ? (uint32_t)v.base.number : 3;
+    Log("Charging Mode: weapon %016llx fires projectile %u, %.0f rpm, bursts of %u%s", (unsigned long long)res, g->projectile, (double)g->rpm,
+        g->burst, g->projectile ? "" : " (no projectile: no free bursts from it)");
+    return g;
+}
+/* the HUD's report of the gun in hand: its entity and the rounds in its magazine (-1: unknown) */
+static atomic_uint g_ammoEntity;
+static atomic_int g_ammoRounds = -1;
+static _Atomic unsigned long long g_ammoMs;
+HF_MOD_EXPORT int exusiai_ammo(unsigned version, uint32_t entity, int rounds)
+{
+    if (version != 1) return 0;
+    static int first = 1;
+    if (first) { first = 0; Log("Charging Mode: the HUD reports her magazine"); }
+    atomic_store(&g_ammoEntity, entity);
+    atomic_store(&g_ammoRounds, rounds);
+    atomic_store(&g_ammoMs, GetTickCount64());
+    return 1;
+}
+static int g_charge;                 /* bursts charged (0 .. ch_every) */
+static int g_groupShots;             /* rounds in the burst under way */
+static int g_groupFree;              /* the burst under way is the charged one */
+static double g_groupLast;           /* her last round */
+static uint32_t g_lastEntity;
+static int g_lastRounds = -1;
+static unsigned g_bursts, g_freeBursts;
+/* the free bursts: rounds left, the next one's time, the gap between rounds and the burst size */
+static int g_freeLeft, g_freeInBurst;
+static double g_freeNext;
+static uint32_t g_freeProjectile, g_freeBurstSize;
+static float g_freeStep;
+static void CloseBurst(void)
+{
+    if (g_groupShots <= 0) return;
+    g_bursts++;
+    if (!g_groupFree && g_charge < s_chEvery) g_charge++;
+    g_groupShots = 0;
+    g_groupFree = 0;
+}
+static void StartFree(const GunInfo* gi)
+{
+    if (!gi || !gi->projectile || s_chFree <= 0) { Log("Charging Mode: charged, but the gun in hand has no rounds to copy"); return; }
+    g_freeProjectile = gi->projectile;
+    g_freeBurstSize = gi->burst;
+    g_freeStep = 60.0f / (gi->rpm > 60 ? gi->rpm : 600);
+    g_freeLeft = s_chFree * (int)gi->burst;
+    g_freeInBurst = 0;
+    g_freeNext = g_now + 0.12;   /* right behind her own burst */
+    g_freeBursts++;
     g_casts[0]++;
-    Log("Charging Mode: her next %d hits deal x%.2f (%.0f s)", s_chHits, (double)s_chMult, (double)s_chWindow);
+    static unsigned told;
+    if (told++ < 6) Log("Charging Mode: %d free bursts of %u (projectile %u)", s_chFree, gi->burst, gi->projectile);
+}
+static void BurstFrame(void)
+{
+    /* her rounds, from the HUD's magazine report: the same gun, fewer rounds */
+    unsigned long long ms = atomic_load(&g_ammoMs);
+    uint32_t ent = atomic_load(&g_ammoEntity);
+    int rounds = atomic_load(&g_ammoRounds);
+    const GunInfo* gi = g_heldEntity && ent == g_heldEntity ? InfoOf(g_heldRes) : NULL;
+    if (!ms || GetTickCount64() - ms > 1000 || rounds < 0 || ent != g_lastEntity) { g_lastEntity = ent; g_lastRounds = rounds; }
+    else if (rounds < g_lastRounds && g_lastRounds - rounds <= 20)
+    {
+        int fired = g_lastRounds - rounds;
+        g_lastRounds = rounds;
+        if (g_groupShots > 0 && g_now - g_groupLast > s_chGap) CloseBurst();
+        for (int k = 0; k < fired; k++)
+        {
+            if (g_groupShots == 0 && g_charge >= s_chEvery) { g_charge = 0; g_groupFree = 1; StartFree(gi); }
+            g_groupShots++;
+            if (gi && g_groupShots >= (int)gi->burst) CloseBurst();   /* full auto: every burst-size rounds is one */
+        }
+        g_groupLast = g_now;
+    }
+    else g_lastRounds = rounds;   /* a reload, a new magazine */
+    if (g_groupShots > 0 && g_now - g_groupLast > s_chGap) CloseBurst();
+    /* the free rounds: along her aim from in front of her, a little spread */
+    while (g_freeLeft > 0 && g_now >= g_freeNext)
+    {
+        float pos[3], aim[3];
+        if (!PlayerPose(pos, aim)) { g_freeLeft = 0; break; }
+        float from[3] = {pos[0] + aim[0] * 0.9f, pos[1] + aim[1] * 0.9f, pos[2] + 1.45f + aim[2] * 0.9f}, dir[3];
+        float sp = s_chSpread * 0.0174533f;
+        for (int k = 0; k < 3; k++) dir[k] = aim[k] + sp * ((float)rand() / RAND_MAX - 0.5f);
+        float n = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+        for (int k = 0; k < 3; k++) dir[k] /= n;
+        int r = hf->spawn_projectile(self, g_freeProjectile, from, dir);
+        if (r == HF_ACT_WAITING) { g_freeNext = g_now + 0.05; break; }
+        Act("a free burst's round", r);
+        g_freeLeft--;
+        if (++g_freeInBurst >= (int)g_freeBurstSize) { g_freeInBurst = 0; g_freeNext = g_now + 0.18; }
+        else g_freeNext = g_now + g_freeStep;
+    }
 }
 static void SummonGuns(void)
 {
@@ -320,6 +432,8 @@ static void OnWeaponExu(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfWeaponEvent* w = (const HfWeaponEvent*)info;
     if (!w->avatar || w->avatar != atomic_load(&g_avatar)) return;
+    g_heldEntity = w->entity;
+    g_heldRes = w->resource;
     FastCartridge(w->resource);
 }
 
@@ -344,7 +458,6 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     if (!IsShot(d)) return;
     int gun = GunsHit(d->position);
     double mult = s_blessMult;                                                  /* Angel's Blessings */
-    if (!gun && g_chHits > 0 && g_now <= g_chUntil) { mult *= s_chMult; g_chHits--; g_charged++; }   /* Charging Mode */
     if (mult != 1) ScaleDamage(d, mult);
     if (gun) return;
     NoteTarget(d);
@@ -400,8 +513,8 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 static void Reset(const char* why)
 {
     if (g_casts[0] || g_casts[1] || g_casts[2])
-        Log("%s: casts %u / %u / %u, %u charged hits, %u assist and %u Overloading shots, %u hits on allies spared", why, g_casts[0],
-            g_casts[1], g_casts[2], g_charged, g_shots[0], g_shots[1], g_spared);
+        Log("%s: %u bursts, %u charged (free bursts), guns %u / Overloading %u, %u assist and %u Overloading shots, %u hits on allies spared",
+            why, g_bursts, g_casts[0], g_casts[1], g_casts[2], g_shots[0], g_shots[1], g_spared);
     int start = !strcmp(why, "mission start");
     Body(start);
     /* the Guard Dog's package: its rounds fly (and sound) only once that is in */
@@ -415,9 +528,12 @@ static void Reset(const char* why)
     memset(g_gunNext, 0, sizeof g_gunNext);
     memset(g_gunTarget, 0, sizeof g_gunTarget);
     memset(g_gunAimAt, 0, sizeof g_gunAimAt);
-    g_charged = g_spared = 0;
-    g_chHits = 0;
-    g_chUntil = g_s2Until = g_s3Until = 0;
+    g_spared = 0;
+    g_charge = g_groupShots = g_groupFree = 0;
+    g_freeLeft = 0;
+    g_bursts = g_freeBursts = 0;
+    g_lastRounds = -1;
+    g_s2Until = g_s3Until = 0;
     g_nassist = 0;
     g_lastTarget = 0;
     atomic_store(&g_threat, 0);
@@ -437,9 +553,9 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
 typedef struct ExusiaiHud
 {
     uint32_t version, in_mission;
-    float cd[3], cd_max[3];           /* seconds left, full cooldowns: Charging Mode, the guns, Overloading Mode */
-    uint32_t charge_hits;             /* charged hits left */
-    float charge, guns, overload;     /* seconds left of each */
+    float cd[3], cd_max[3];           /* seconds left, full cooldowns: (Charging Mode: 0), the guns, Overloading Mode */
+    uint32_t charge, charge_max;      /* Charging Mode: bursts charged, of ch_every */
+    float free_bursts, guns, overload;  /* free bursts' rounds left; seconds left of the guns and of Overloading Mode */
     uint32_t keys[3];
     char key_label[3][24];
 } ExusiaiHud;
@@ -447,11 +563,11 @@ static ExusiaiHud g_hud = {1};
 HF_MOD_EXPORT ExusiaiHud* exusiai_hud_state(void)
 {
     g_hud.in_mission = (uint32_t)(g_inMission && g_alive);
-    float m[3] = {s_chCd, s_s2Cd, s_s3Cd};
+    float m[3] = {0, s_s2Cd, s_s3Cd};
     for (int i = 0; i < 3; i++) { g_hud.cd[i] = (float)fmax(0, g_cd[i] - g_now); g_hud.cd_max[i] = m[i]; }
-    int charged = g_chHits > 0 && g_now <= g_chUntil;
-    g_hud.charge_hits = (uint32_t)(charged ? g_chHits : 0);
-    g_hud.charge = charged ? (float)(g_chUntil - g_now) : 0;
+    g_hud.charge = (uint32_t)g_charge;
+    g_hud.charge_max = (uint32_t)s_chEvery;
+    g_hud.free_bursts = (float)g_freeLeft;
     g_hud.guns = (float)fmax(0, g_s2Until - g_now);
     g_hud.overload = (float)fmax(0, g_s3Until - g_now);
     for (int i = 0; i < 3; i++)
@@ -500,13 +616,13 @@ static void Tick(HfMod* mod, float dt, void* user)
         int press = (down && !prev[i]) || (presses >> i & 1);
         if (press && GetTickCount64() - fired[i] > 300 && g_alive && atomic_load(&g_avatar) && (fired[i] = GetTickCount64(), 1))
         {
-            if (i == 0) ChargingMode();
+            if (i == 0) { static unsigned told; if (told++ < 3) Log("Charging Mode is passive: every %d bursts the next sets off %d more", s_chEvery, s_chFree); }
             else if (i == 1) SummonGuns();
             else OverloadingMode();
         }
         prev[i] = down;
     }
-    if (g_alive) GunsFrame();
+    if (g_alive) { GunsFrame(); BurstFrame(); }
     Exhaustion();
     atomic_exchange(&g_ownStopped, 0);
     atomic_exchange(&g_kdStopped, 0);
@@ -514,15 +630,14 @@ static void Tick(HfMod* mod, float dt, void* user)
 
 /* ---- Mod Options Menu ------------------------------------------------------------------------------------------- */
 static const KbOption kOptions[] = {
-    {"fire_rate", &s_fireRate, NULL}, {"bless_mult", &s_blessMult, NULL}, {"ch_cooldown", &s_chCd, NULL}, {"ch_hits", NULL, &s_chHits},
-    {"ch_mult", &s_chMult, NULL}, {"s2_cooldown", &s_s2Cd, NULL}, {"s2_seconds", &s_s2Seconds, NULL}, {"gun_every", &s_gunEvery, NULL},
+    {"fire_rate", &s_fireRate, NULL}, {"bless_mult", &s_blessMult, NULL}, {"ch_every", NULL, &s_chEvery}, {"ch_free", NULL, &s_chFree}, {"s2_cooldown", &s_s2Cd, NULL}, {"s2_seconds", &s_s2Seconds, NULL}, {"gun_every", &s_gunEvery, NULL},
     {"s3_cooldown", &s_s3Cd, NULL}, {"s3_seconds", &s_s3Seconds, NULL}, {"s3_every", &s_s3Every, NULL}, {"s3_range", &s_s3Range, NULL},
     {"no_friendly_fire", NULL, &s_noFriendlyFire}, {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
     {"hellbomb_on_exhaustion", NULL, &s_hellbomb},
 };
 static void OptionAfter(const char* name, int changed)
 {
-    if (changed && g_chHits > s_chHits) g_chHits = s_chHits;
+    if (changed && g_charge > s_chEvery) g_charge = s_chEvery;
 }
 HF_MOD_EXPORT int exusiai_option_get(const char* name, double* out)
 {
