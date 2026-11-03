@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "Gun Probe",
+  "resource": "mods/yui/gun_probe",
+  "guid": "31ec5f9c-751a-5501-92ab-9c2798604673",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.50.1",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}
