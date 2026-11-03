@@ -43,7 +43,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.0"
+#define VERSION "0.3.1"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -477,7 +477,7 @@ static void Trace(int redirect)
  * there). 0.2.6's hard forget, by hand, held exactly while nothing sensed her; this runs it on its own. */
 static int g_auto;
 static const double s_lose = 3.0;
-static struct { int lost, after, sensing; } g_autoSum;
+static struct { int lost, after, sensing, nearby, chasing, passes; } g_autoSum;
 static void AutoPass(void)
 {
     Ent me, e;
@@ -485,12 +485,14 @@ static void AutoPass(void)
     uint32_t meId = atomic_load(&g_avatar);
     if (!Resolve(meId, &me) || !RootOf(me.unit, mp)) return;
     Refresh();
+    g_autoSum.passes++;
     for (int j = g_nlive - 1; j >= 0; j--)
     {
         uint32_t id = g_live[j];
         if (!LiveEnemy(j, &e, p)) continue;
         float d = sqrtf((p[0] - mp[0]) * (p[0] - mp[0]) + (p[1] - mp[1]) * (p[1] - mp[1]));
         if (d > 80) { g_liveUnseen[j] = 0; continue; }
+        g_autoSum.nearby++;
         uintptr_t br = Behaviour(id), pr = Perception(id);
         uint8_t b[0xA0];
         if (!br || !RD(br, b, sizeof b)) continue;
@@ -499,11 +501,13 @@ static void AutoPass(void)
         int counts[3], mine = pr ? HerEntries(pr, meId, &sense, counts) : 0, sqMine = sq ? HerEntries(sq, meId, &sqSense, counts) : 0;
         if ((mine && sense) || (sqMine && sqSense))
         {
+            if (target == meId) g_autoSum.chasing++;
             memcpy(g_liveLast[j], mp, sizeof mp); g_liveHasLast[j] = 1;
             g_liveUnseen[j] = 0;
             g_autoSum.sensing++;
             continue;
         }
+        if (target == meId) g_autoSum.chasing++;   /* counted before the sensing check below would skip it */
         if (target != meId) { g_liveUnseen[j] = 0; continue; }
         g_autoSum.after++;
         if (!g_liveUnseen[j]) { g_liveUnseen[j] = g_now; continue; }
@@ -588,12 +592,15 @@ static void Tick(HfMod* mod, float dt, void* user)
         QueryPerformanceCounter(&b0); QueryPerformanceFrequency(&f0);
         double ms = (double)(b0.QuadPart - a0.QuadPart) * 1000.0 / (double)f0.QuadPart;
         if (ms > 20 && g_now - autoSlowTold > 10) { autoSlowTold = g_now; Log("auto: a pass took %.0f ms (%d live enemies)", ms, g_nlive); }
-        if (g_now - autoTold >= 2 && (g_autoSum.lost || g_autoSum.after))
+        /* 0.3.1: a line every 5 s while on (0.3.0 printed only when someone was after her unsensed, and said nothing
+         * for a whole bot fight): averages per pass, so the counts read as enemies */
+        if (g_now - autoTold >= 5 && g_autoSum.passes)
         {
             autoTold = g_now;
-            Log("auto: %d lost her (sent to where they last saw her); passes with someone after her unsensing %d, sensing her %d",
-                g_autoSum.lost, g_autoSum.after, g_autoSum.sensing);
-            g_autoSum.lost = g_autoSum.after = g_autoSum.sensing = 0;
+            double n = g_autoSum.passes;
+            Log("auto: %d live; within 80 m %.1f, after her %.1f (sensing her %.1f, not %.1f); %d lost her in the last 5 s",
+                g_nlive, g_autoSum.nearby / n, g_autoSum.chasing / n, g_autoSum.sensing / n, g_autoSum.after / n, g_autoSum.lost);
+            memset(&g_autoSum, 0, sizeof g_autoSum);
         }
     }
     static double hideNext;
@@ -637,7 +644,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     else if (d && Down(VK_MENU) && Down(VK_CONTROL))
     {
         g_auto = !g_auto;
-        g_autoSum.lost = g_autoSum.after = g_autoSum.sensing = 0;
+        memset(&g_autoSum, 0, sizeof g_autoSum);
         for (int j = 0; j < g_nlive; j++) g_liveUnseen[j] = 0;
         Log(g_auto ? "Ctrl+Alt+F7: auto break-contact ON: an enemy after her that has not sensed her for %.0f s loses her and searches where it last saw her"
                    : "Ctrl+Alt+F7: auto break-contact OFF", s_lose);

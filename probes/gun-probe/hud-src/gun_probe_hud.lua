@@ -2,7 +2,7 @@
 -- own gun models as a visual only (no gameplay), keep it hovering beside the view and turn it, through the engine's own
 -- Lua calls (World.spawn_unit, Unit.set_local_position / rotation, the view camera as Treasure Radar finds it)?
 --
---   F6        spawn two guns (Ctrl+F6: the next loaded gun model) beside the view for 10 s (left and right of the camera, a little ahead), then remove them;
+--   F6        spawn two guns (Ctrl+F6: the next loaded gun model; Alt+F6: linked to the view camera's unit, 0.1.6's try) beside the view for 10 s (left and right of the camera, a little ahead), then remove them;
 --             while they are out each "fires" the Guard Dog's firing sound (hd2.sounds, HD2Runtime's sound API, marked
 --             offline-tested only) on its own model every 0.5 s, the two a quarter-second apart
 --   Shift+F6  log which engine calls this addon can reach, which gun models are loaded right now, and what HD2Runtime's
@@ -24,7 +24,9 @@ local function log(message)
         if ok then sink = result end
     end
     if sink then
-        if not pcall(function() sink:write(message .. '\n'); if sink.flush then sink:flush() end end) then sink = nil end
+        -- 0.1.7: a failed write opens the log again next time (0.1.6's log kept only its first line: the addon is
+        -- loaded again at a mission start, which opens the same file anew)
+        if not pcall(function() sink:write(message .. '\n'); if sink.flush then sink:flush() end end) then sink = nil; sink_tried = false end
     end
 end
 
@@ -227,12 +229,13 @@ local function clear(w)
     end
     G.units = {}
 end
-local function spawn(step_model)
+local function spawn(step_model, link)
     local w = world()
     if not w then log('[Gun Probe] F6: no main world') return end
     local c = camera(w)
     if not c then log('[Gun Probe] F6: no view camera') return end
     clear(w)
+    G.link = link   -- 0.1.7: linking is Alt+F6 only (0.1.6 linked every F6, and no gun was seen)
     G.model = nil
     if step_model then
         for k = 1, #MODELS do
@@ -252,7 +255,7 @@ local function spawn(step_model)
             -- 0.1.6: still fell with disable_physics (0.1.5's test). Linked to the view camera's unit, a unit is placed by
             -- its parent, not its physics: World.link_unit(world, child, child_node, parent, parent_node), then its
             -- local position is the offset in the camera unit's frame (x right, y forward, z up)
-            if C.unit and fn('World.link_unit') then
+            if G.link and C.unit and fn('World.link_unit') then
                 local okl, err = call('World.link_unit', w, unit, 1, C.unit, 1)
                 if okl then
                     G.linked = true
@@ -331,7 +334,7 @@ overlay:draw(function(d, dt)
     local now = down(0x75)                                   -- F6
     if now and not prev then
         if down(0x10) then local okr, err = pcall(report); if not okr then log('[Gun Probe] report failed: ' .. tostring(err)) end
-        else local oks, err = pcall(spawn, down(0x11)); if not oks then log('[Gun Probe] spawn failed: ' .. tostring(err)) end end
+        else local oks, err = pcall(spawn, down(0x11), down(0x12)); if not oks then log('[Gun Probe] spawn failed: ' .. tostring(err)) end end
     end
     prev = now
     pcall(sound_step, dt)
