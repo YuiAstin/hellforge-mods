@@ -43,7 +43,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.4"
+#define VERSION "0.3.5"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -151,6 +151,7 @@ static uint64_t g_liveRes[LIVE];
 static double g_liveUnseen[LIVE];      /* auto: when it last stopped sensing her (0: sensing, or not after her) */
 static float g_liveLast[LIVE][3];      /* auto: where she was when it last sensed her */
 static uint8_t g_liveHasLast[LIVE];
+static double g_liveForgot[LIVE];      /* 0.3.5: when break-contact last made it lose her (0: never) */
 static int g_nlive;
 static unsigned g_cursor;
 static void Refresh(void)
@@ -169,7 +170,7 @@ static void Refresh(void)
         if (k == 1 && g_nlive < LIVE)
         {
             g_live[g_nlive] = g_seenEnt[i]; g_liveRes[g_nlive] = g_seenRes[i];
-            g_liveUnseen[g_nlive] = 0; g_liveHasLast[g_nlive] = 0;
+            g_liveUnseen[g_nlive] = 0; g_liveHasLast[g_nlive] = 0; g_liveForgot[g_nlive] = 0;
             g_nlive++;
         }
     }
@@ -182,6 +183,7 @@ static int LiveEnemy(int j, Ent* e, float p[3])
         int l = --g_nlive;
         g_live[j] = g_live[l]; g_liveRes[j] = g_liveRes[l]; g_liveUnseen[j] = g_liveUnseen[l];
         memcpy(g_liveLast[j], g_liveLast[l], sizeof g_liveLast[j]); g_liveHasLast[j] = g_liveHasLast[l];
+        g_liveForgot[j] = g_liveForgot[l];
         return 0;
     }
     return RootOf(e->unit, p);
@@ -482,7 +484,7 @@ static int g_auto;
 static const double s_lose = 3.0;
 static struct { int lost, after, sensing, nearby, chasing, passes; } g_autoSum;
 /* 0.3.3: what the HUD shows (ai_probe_hud): the latest pass's counts */
-static struct { int nearby, chasing, sensing, unsensed, lostTotal; } g_hud;
+static struct { int nearby, chasing, sensing, unsensed, lostTotal, blind; } g_hud;
 static void AutoPass(void)
 {
     int nNear = 0, nChase = 0, nSense = 0, nUnsensed = 0;
@@ -514,6 +516,24 @@ static void AutoPass(void)
             continue;
         }
         if (target == meId) { g_autoSum.chasing++; nChase++; nUnsensed++; }
+        /* 0.3.5: after her again, without sensing her, within 15 s of losing her: who is it, and whose record does it
+         * perceive through? (bugs did this throughout 0.3.4's test; Yui: Stalkers know where she is and may share it) */
+        if (target == meId && g_liveForgot[j] > 0 && g_now - g_liveForgot[j] < 15)
+        {
+            static unsigned told;
+            uint64_t pres = 0;
+            Ent pe;
+            if (perceiver && perceiver != id && Resolve(perceiver, &pe)) pres = pe.resource;
+            uintptr_t pbr = perceiver && perceiver != id ? Behaviour(perceiver) : 0;
+            uint32_t ptarget = 0;
+            if (pbr) RD(pbr + 0x18, &ptarget, 4);
+            g_hud.blind++;
+            if (told++ < 60)
+                Log("blind re-target: entity %u (type %016llx) %.0f m after her again %.1f s after losing her, unsensed; perceives through %s %u (type %016llx)%s",
+                    id, (unsigned long long)e.resource, d, g_now - g_liveForgot[j], perceiver == id ? "itself" : "its squad", perceiver,
+                    (unsigned long long)pres, ptarget == meId ? ", which is after her" : "");
+            g_liveForgot[j] = 0;   /* once per loss */
+        }
         if (target != meId) { g_liveUnseen[j] = 0; continue; }
         g_autoSum.after++;
         if (!g_liveUnseen[j]) { g_liveUnseen[j] = g_now; continue; }
@@ -534,6 +554,7 @@ static void AutoPass(void)
             g_setDest(NULL, id, at);
         }
         g_liveUnseen[j] = 0;
+        g_liveForgot[j] = g_now;
         g_autoSum.lost++;
         g_hud.lostTotal++;
     }
