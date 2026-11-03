@@ -24,8 +24,16 @@ def gen(mod):
     src = os.path.join(ROOT, 'mods', mod, 'src', mod + '.c')
     s = open(src, encoding='utf-8').read()
     ver = re.search(r'#define VERSION "([^"]+)"', s).group(1)
+    # settings and the Key struct a kit takes from the kit base (kitbase/*.h) count as its own; the kit's KB_* defaults
+    # (#define KB_STEADY 1, before its includes) first, then the headers' own for the ones it leaves out
+    defaults = re.findall(r'^#define KB_(?!FN\b|VAR\b)\w+ .*$', s, re.M)
+    for h in re.findall(r'#include "kitbase/(\w+\.h)"', s):
+        text = open(os.path.join(ROOT, 'kitbase', h), encoding='utf-8').read()
+        defaults += ['#ifndef %s\n#define %s %s\n#endif' % (n, n, v) for n, v in re.findall(r'#ifndef (KB_\w+)\n#define \1 (.*)', text)
+                     if n not in ('KB_FN', 'KB_VAR')]
+        s = re.sub(r'^KB_VAR ', 'static ', text, flags=re.M) + '\n' + s
     key = re.search(r'typedef struct Key \{.*?\} Key;', s, re.S).group(0)
-    decls = re.findall(r'^static (?:int|float|double|unsigned|uint32_t|Key) s_\w[^;]*;', s, re.M)
+    decls = defaults + re.findall(r'^static (?:int|float|double|unsigned|uint32_t|Key) s_\w[^;]*;', s, re.M)
     i = s.index('fprintf(f, "; ')
     stmt = s[i:s.index(');\n', i) + 2]
     prog = ('#include <stdio.h>\n#include <stdint.h>\n#define VERSION "%s"\n%s\n%s\nint main(void){FILE* f=stdout;\n%s\nreturn 0;}\n'
