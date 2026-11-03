@@ -267,3 +267,17 @@ Ctrl+Shift+F7 for comparison.
   the squad's own target re-set it at once. 0.2.4 sends again every 2 s and logs each one's +0x60 against the point.
 - **Gun Probe 0.1.3:** guns spawned beside the view and followed it (532 and 546 frames moved in 10 s); the
   drone_mg unit is the Guard Dog's body without its gun. 0.1.4 tries the support machine guns first.
+
+**0.2.4 in game: set_destination steers a patrol that has not seen her.** Three enemies within 150 m, all "after
+nobody". Two stood still with +0x60 on their own position, and set_destination did not change it (guards or idle
+enemies; the call only moves ones already walking). The third, walking, had its +0x60 set exactly to the point
+(0.0 m) and held there through every resend for 20 s; it walked toward the point (96 m → 87 m from it, a patrol's
+pace). When it spotted her it turned "after HER" and +0x60 went back to her (63 m from the point). So:
+- **Lemuen's nest works this way:** while she is unseen, patrols heading her way get a destination away from her,
+  sent again every few seconds; once one sees her, the fight is normal.
+- Standing enemies are untouched (they were not coming anyway).
+- The forget (Ctrl+F7) could not be judged: nobody was after her when it ran.
+- Passes still stalled now and then (22 to 72 ms): 0.2.5 keeps the enemy check per enemy type, not per spawn.
+
+**Gun Probe 0.1.4:** the support machine gun spawned as a dropped weapon: it fell to the ground first and only then
+followed the view (its physics moved it until it rested). 0.1.5 makes its actors kinematic, with collision off.

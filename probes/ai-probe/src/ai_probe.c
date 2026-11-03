@@ -37,7 +37,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.4"
+#define VERSION "0.2.5"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -115,17 +115,37 @@ static unsigned g_nseen;
 /* 0.2.1: an enemy among the spawns seen, its entity and position. 0.2.0 asked the component tables (four string lookups)
  * about every one of up to 2048 spawns on each pass, and Ctrl+F7 ran a pass every frame: seconds a frame (the freeze).
  * Now each spawn is asked once, and one that has gone is dropped. */
-static int g_classified;   /* new spawns asked about in this pass */
+static int g_classified;   /* new spawn types asked about in this pass */
+/* 0.2.5: the answer kept per resource (an enemy type), not per spawn: a wave of one type is asked about once. 0.2.4
+ * still stalled (22 to 72 ms passes) asking the component tables about each new spawn */
+static uint64_t g_kindRes[1024];
+static uint8_t g_kindOf[1024];
+static int KindOf(uint64_t res)
+{
+    unsigned h = (unsigned)((res ^ (res >> 29)) * 0x9E3779B1u) & 1023;
+    for (unsigned k = 0; k < 1024; k++, h = (h + 1) & 1023)
+    {
+        if (g_kindRes[h] == res) return g_kindOf[h];
+        if (!g_kindRes[h])
+        {
+            if (g_classified >= 4) return 0;   /* ask the rest on a later pass */
+            g_classified++;
+            g_kindRes[h] = res;
+            g_kindOf[h] = Hostile(res) ? 1 : 2;
+            return g_kindOf[h];
+        }
+    }
+    return 2;
+}
 static int SeenEnemy(unsigned i, Ent* e, float p[3])
 {
     if (g_seenKind[i] == 2) return 0;
     if (!Resolve(g_seenEnt[i], e) || e->resource != g_seenRes[i]) { g_seenKind[i] = 2; return 0; }
     if (!g_seenKind[i])
     {
-        /* 0.2.4: at most 24 new spawns asked about per pass (a wave of spawns cost one pass 52 ms in 0.2.3's test) */
-        if (g_classified >= 24) return 0;
-        g_classified++;
-        g_seenKind[i] = Hostile(g_seenRes[i]) ? 1 : 2;
+        int k = KindOf(g_seenRes[i]);
+        if (!k) return 0;
+        g_seenKind[i] = (uint8_t)k;
     }
     return g_seenKind[i] == 1 && RootOf(e->unit, p);
 }

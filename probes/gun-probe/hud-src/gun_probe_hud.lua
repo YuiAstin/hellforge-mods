@@ -42,7 +42,7 @@ local function down(vk) return bit.band(u32.gunprobe1_GetAsyncKeyState(vk), 0x80
 
 -- the engine's globals, as this addon sees them
 local E = {}
-local NAMES = {'World', 'Unit', 'Camera', 'Vector3', 'Quaternion', 'Application'}
+local NAMES = {'World', 'Unit', 'Camera', 'Vector3', 'Quaternion', 'Application', 'Actor'}
 -- 0.1.2: the engine's libraries sit in the global `stingray` table (as HD2Runtime's own modules reach them), not as bare
 -- globals: 0.1.1 found all six nil
 local S = rawget(_G, 'stingray')
@@ -197,6 +197,28 @@ local function place(c, o)
     local z = c.p[3] + c.r[3] * o[1] + c.u[3] * o[2] + c.f[3] * o[3]
     return vec(x, y, z)
 end
+-- 0.1.4's test: the machine gun spawned as a dropped weapon, fell to the ground and only then followed the view (its
+-- physics actor moves it until it rests). 0.1.5 takes its physics away: every actor kinematic with collision off, else
+-- the actors destroyed, else Unit.disable_physics; which one worked is logged once
+local still_told = false
+local function still(u)
+    local how = {}
+    local okn, n = call('Unit.num_actors', u)
+    if okn and type(n) == 'number' and n > 0 then
+        local kin, gone = 0, 0
+        for i = n, 1, -1 do
+            local oka, a = call('Unit.actor', u, i)
+            if oka and a then
+                local okk = call('Actor.set_kinematic', a, true)
+                if okk then kin = kin + 1; call('Actor.set_collision_enabled', a, false); call('Actor.set_scene_query_enabled', a, false)
+                elseif call('Unit.destroy_actor', u, i) then gone = gone + 1 end
+            end
+        end
+        how[#how + 1] = ('%d actors: %d kinematic, %d destroyed'):format(n, kin, gone)
+    else how[#how + 1] = 'no actors listed' end
+    if call('Unit.disable_physics', u) then how[#how + 1] = 'disable_physics' end
+    if not still_told then still_told = true; log('[Gun Probe]   physics: ' .. table.concat(how, ', ')) end
+end
 local function clear(w)
     for i, u in ipairs(G.units) do
         local okd = call('World.destroy_unit', w, u)
@@ -226,6 +248,8 @@ local function spawn(step_model)
         local oks, unit = call('World.spawn_unit', w, G.model, pos, c.rot)
         log(('[Gun Probe] F6: gun %d %s (%s)'):format(i, oks and unit and 'spawned' or 'NOT spawned', G.model))
         if oks and unit then
+            local okq, err = pcall(still, unit)
+            if not okq then log('[Gun Probe]   physics: ' .. tostring(err)) end
             G.units[#G.units + 1] = unit
             local okx, at = call('Unit.world_position', unit, 1)
             local ax, ay, az = xyz(okx and at or nil)
@@ -233,6 +257,7 @@ local function spawn(step_model)
         end
     end
     G.until_t, G.moved, G.why = G.t + 10, 0, nil
+    still_told = false
     G.beat = {0, 0.25}
     local okp, err = pcall(sound_prepare)
     if not okp then log('[Gun Probe] sound: prepare failed: ' .. tostring(err)) end
@@ -273,7 +298,7 @@ local function report()
     log('[Gun Probe] stingray: ' .. type(S))
     for _, n in ipairs(NAMES) do log('[Gun Probe] ' .. n .. ': ' .. type(E[n])) end
     for _, p in ipairs({'Application.main_world', 'Application.can_get', 'World.units', 'World.spawn_unit', 'World.destroy_unit', 'Unit.alive',
-        'Unit.num_cameras', 'Unit.camera', 'Unit.set_local_position', 'Unit.set_local_rotation', 'Camera.world_position',
+        'Unit.num_cameras', 'Unit.camera', 'Unit.set_local_position', 'Unit.set_local_rotation', 'Unit.num_actors', 'Unit.actor', 'Actor.set_kinematic', 'Actor.set_collision_enabled', 'Unit.destroy_actor', 'Unit.disable_physics', 'Camera.world_position',
         'Camera.world_rotation', 'Quaternion.forward', 'Quaternion.right', 'Quaternion.up', 'Vector3', 'Vector3.to_elements'}) do
         log('[Gun Probe]   ' .. p .. ': ' .. (fn(p) and 'yes' or 'no'))
     end
