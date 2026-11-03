@@ -221,6 +221,7 @@ local function still(u)
 end
 local function clear(w)
     for i, u in ipairs(G.units) do
+        if G.linked then call('World.unlink_unit', w, u) end
         local okd = call('World.destroy_unit', w, u)
         log('[Gun Probe] gun ' .. i .. ' removed: ' .. tostring(okd))
     end
@@ -248,6 +249,17 @@ local function spawn(step_model)
         local oks, unit = call('World.spawn_unit', w, G.model, pos, c.rot)
         log(('[Gun Probe] F6: gun %d %s (%s)'):format(i, oks and unit and 'spawned' or 'NOT spawned', G.model))
         if oks and unit then
+            -- 0.1.6: still fell with disable_physics (0.1.5's test). Linked to the view camera's unit, a unit is placed by
+            -- its parent, not its physics: World.link_unit(world, child, child_node, parent, parent_node), then its
+            -- local position is the offset in the camera unit's frame (x right, y forward, z up)
+            if C.unit and fn('World.link_unit') then
+                local okl, err = call('World.link_unit', w, unit, 1, C.unit, 1)
+                if okl then
+                    G.linked = true
+                    call('Unit.set_local_position', unit, 1, vec(o[1], o[3], o[2]))
+                    log('[Gun Probe]   linked to the view camera unit')
+                else log('[Gun Probe]   link failed: ' .. tostring(err)) end
+            elseif i == 1 then log('[Gun Probe]   World.link_unit: not reachable') end
             local okq, err = pcall(still, unit)
             if not okq then log('[Gun Probe]   physics: ' .. tostring(err)) end
             G.units[#G.units + 1] = unit
@@ -256,7 +268,7 @@ local function spawn(step_model)
             log(('[Gun Probe]   at %s (camera at %.1f %.1f %.1f)'):format(ax and ('%.1f %.1f %.1f'):format(ax, ay, az) or 'unknown', c.p[1], c.p[2], c.p[3]))
         end
     end
-    G.until_t, G.moved, G.why = G.t + 10, 0, nil
+    G.until_t, G.moved, G.why, G.linked = G.t + 10, 0, nil, false
     still_told = false
     G.beat = {0, 0.25}
     local okp, err = pcall(sound_prepare)
@@ -276,12 +288,13 @@ local function step(dt)
     if not c then return end
     local all = true
     for i, u in ipairs(G.units) do
+        if G.linked then break end   -- the parent places them
         local pos = place(c, OFFSETS[i])
         local okp = pos and call('Unit.set_local_position', u, 1, pos)
         local okr = call('Unit.set_local_rotation', u, 1, c.rot)
         all = all and okp and okr
     end
-    if all then G.moved = G.moved + 1
+    if all and not G.linked then G.moved = G.moved + 1
     elseif not G.why then G.why = true; log('[Gun Probe] a frame not moved (position or rotation refused)') end
     for i, u in ipairs(G.units) do
         G.beat[i] = (G.beat[i] or 0) - dt
@@ -298,7 +311,7 @@ local function report()
     log('[Gun Probe] stingray: ' .. type(S))
     for _, n in ipairs(NAMES) do log('[Gun Probe] ' .. n .. ': ' .. type(E[n])) end
     for _, p in ipairs({'Application.main_world', 'Application.can_get', 'World.units', 'World.spawn_unit', 'World.destroy_unit', 'Unit.alive',
-        'Unit.num_cameras', 'Unit.camera', 'Unit.set_local_position', 'Unit.set_local_rotation', 'Unit.num_actors', 'Unit.actor', 'Actor.set_kinematic', 'Actor.set_collision_enabled', 'Unit.destroy_actor', 'Unit.disable_physics', 'Camera.world_position',
+        'Unit.num_cameras', 'Unit.camera', 'Unit.set_local_position', 'Unit.set_local_rotation', 'Unit.num_actors', 'Unit.actor', 'Actor.set_kinematic', 'Actor.set_collision_enabled', 'Unit.destroy_actor', 'Unit.disable_physics', 'World.link_unit', 'World.unlink_unit', 'Camera.world_position',
         'Camera.world_rotation', 'Quaternion.forward', 'Quaternion.right', 'Quaternion.up', 'Vector3', 'Vector3.to_elements'}) do
         log('[Gun Probe]   ' .. p .. ': ' .. (fn(p) and 'yes' or 'no'))
     end

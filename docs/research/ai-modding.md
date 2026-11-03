@@ -288,3 +288,14 @@ target directly, so perception is not what drives them. 0.2.6 adds Ctrl+Alt+F7, 
 after her also lose the behaviour target (+0x18, +0x78) and are sent to where they stand; and the tally counts
 enemies after her with no perception entry for her at all. Gun Probe 0.1.5: Unit.num_actors is not reachable;
 Unit.disable_physics went through. The Guard Dog's firing sound (a loop entry) played on the floating models.
+
+**0.2.6 in game: the hard forget works while she is unsensed.** No enemy after her ever lacked a perception entry
+for her, so breach spawns are not clairvoyant in the data: what kept them on her was the behaviour target, which a
+plain forget left in place. With the target cleared (+0x18, +0x78), her entries removed and the enemy stopped:
+- 2 to 3 enemies after her → 0 for the 9 s it ran; after it ended they picked her up again within 1 to 4 s (more
+  arriving, some sensing her).
+- A breach of 42 within 60 m: 24 targets cleared at once, nobody after her for 6 s; then her sense bits came back
+  on (19 → 36 entries sensing her), they were left alone as designed and re-acquired her.
+So it holds exactly as long as nothing senses her. For Lemuen: clear unsensing enemies' targets while she is hidden
+(scoped, still, out of sight), and let anything that sees her fight as normal. Gun Probe 0.1.5: guns still fell
+with disable_physics; 0.1.6 links them to the view camera's unit (World.link_unit) instead.
