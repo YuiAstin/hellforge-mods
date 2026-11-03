@@ -55,7 +55,7 @@ static int s_markArmour = 3, s_markHealth = 750;
 static float s_modusAfter = 20, s_modusMult = 1.10f;
 static float s_s1Cd = 15, s_s1Mult = 3.1f;
 static int s_s1AnyGun = 0;
-static float s_s2Cd = 20, s_s2Min = 1.8f, s_s2Max = 4.25f, s_s2Hold = 3.5f, s_s2Cone = 4, s_s2Range = 250, s_fpDistance = 0.45f;
+static float s_s2Cd = 20, s_s2Min = 1.8f, s_s2Max = 4.25f, s_s2Hold = 3.5f, s_s2Cone = 4, s_s2Range = 600, s_fpDistance = 0.45f;
 static float s_s3Cd = 90, s_s3Every = 0.35f, s_s3Height = 120;
 static int s_s3Max = 8, s_s3Shell = 194;
 
