@@ -353,3 +353,7 @@ they drop her once unsensed for 3 s. Still open: bugs and Illuminate, co-op (oth
   her** (or breaches keep handing her to new spawns). So for bugs break-contact only thins the chase.
 Next for bugs: count, per enemy, how often one that lost her is after her again within a few seconds without
 sensing her, and log where it came from (new spawn, its squad's perceiver, a breach), to find what re-targets them.
+Yui: bug maps have Stalkers, which know where she is at all times, like the Illuminate's Stingrays; but Stingrays
+do not share it with the rest of their faction, and Stalkers may. A likely source of the bugs' blind re-targeting:
+the next probe logs the enemy type of each blind re-acquirer and of its perceiver (its squad's record), to see
+whether the bugs that come back are Stalkers, or share a squad record with one.
