@@ -42,7 +42,6 @@
 
 #define VERSION "0.4.0"
 static int HerRide(uint32_t target);
-static int FriendRes(uint64_t res);
 /* her two kits (p8): the Sinbreaker's GFL2 kit, the AK-15 kit on foot */
 static void AkHit(HfDamageEvent* d);
 static int AkWatching(void);
@@ -55,6 +54,8 @@ static double HowlImmuneUntil(void);
 
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
+#include "kitbase/kb_friends.h"
+#include "kitbase/kb_body.h"
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
@@ -87,9 +88,6 @@ static int s_apBonus = 1;
 static int s_ppPer = 2, s_ppMax = 6, s_ppAp = 2;
 static float s_ppMult = 1.5f;
 static float s_lpClimb = 6, s_lpDrop = 12;
-static int s_hellbomb = 1, s_hellbombRow = 125;
-static float s_hpMult = 1.5f, s_staminaMult = 2.0f;
-static float s_hellbombHold = 0.5f;
 /* the Sinbreaker (her mech, the GFL2 kit) and its earned Pile Bunker follow-up */
 static int s_sinOn = 1, s_sinUses = -1, s_mechAny = 0, s_sinGrant = 1, s_sinLoadout = 1;
 static float s_sinCd = 120, s_mechLunge = 8;
@@ -570,48 +568,6 @@ static int NearShrapnel(const float at[3])
 }
 /* ---- enemies around her (her area attacks): spawned entities whose kind runs a behaviour and is no turret or
  * Helldiver, and anything her own hits landed on; dropped on death or when the entity id is reused ------------------ */
-#define FOES 1024
-static uint32_t g_foe[FOES];
-static uint64_t g_foeRes[FOES];
-static unsigned g_foeNext;
-typedef struct Kind { uint64_t res; int foe; } Kind;
-static Kind g_kinds[256];
-static int FoeKind(uint64_t res)
-{
-    if (!res || res == AVATAR) return 0;
-    unsigned h = (unsigned)(res ^ (res >> 29)) & 255;
-    for (unsigned i = 0; i < 256; i++)
-    {
-        Kind* k = &g_kinds[(h + i) & 255];
-        if (k->res == res) return k->foe;
-        if (!k->res)
-        {
-            uint32_t stride;
-            k->res = res;
-            k->foe = hf->component_record("BehaviorComponentData", res, &stride) != 0 && !hf->component_record("TurretComponentData", res, &stride) &&
-                     !hf->component_record("AvatarComponentData", res, &stride) && !hf->component_record("SeatCollectionComponentData", res, &stride) && !FriendRes(res); /* no friend: exosuits and their parts, dog drones, sentries, SEAF, the Pelican (FriendRes) */
-            return k->foe;
-        }
-    }
-    return 0;
-}
-static void AddFoe(uint32_t entity, uint64_t res)
-{
-    uint32_t holder = 0; if (!entity || entity == atomic_load(&g_avatar) || res == AVATAR || (WielderOf(entity, &holder) && holder != entity && holder)) return;   /* nothing a Helldiver holds or wears */
-    int free_ = -1;
-    for (int i = 0; i < FOES; i++)
-    {
-        if (g_foe[i] == entity) { g_foeRes[i] = res; return; }
-        if (!g_foe[i] && free_ < 0) free_ = i;
-    }
-    unsigned slot = free_ >= 0 ? (unsigned)free_ : g_foeNext++ % FOES;
-    g_foe[slot] = entity;
-    g_foeRes[slot] = res;
-}
-static void DropFoe(uint32_t entity)
-{
-    for (int i = 0; i < FOES; i++) if (g_foe[i] == entity) g_foe[i] = 0;
-}
 
 /* ---- targets ---------------------------------------------------------------------------------------------------- */
 /* An enemy's position (its root), 1 when it is still the tracked entity */
@@ -1253,111 +1209,6 @@ static atomic_int g_bareOn;
 /* What her blasts spare besides her: any exosuit and its parts (hers or not, piloted or empty, still dropping: 0.2.19
  * only spared one within 6 m of her, and an empty or second Breakthrough went down), the arms she holds, the dog drones
  * (all of them), SEAF and the Pelican. None of these is ever a Lock On target. */
-/* Helldiver- and Super Earth-faction units (HD2Runtime's entity catalogue, enemy_controls.lua: 0.2.20's log showed the
- * Hot Dog and Dog Breath drones taken for enemies), the exosuits and their parts (the Breakthrough's, Mech Probe) and
- * the Pelican; structures left out (her blasts still break those) */
-static const uint64_t kFriends[] = {   /* + what friends mount (the catalogue's mount chains: the FRV's B/FLAM-80 Cremator flamer, the exosuits' arms) */
-    0x019544309FAC4508ULL, 0x01FFBFA7671EDFADULL, 0x021EAECF4CA267DCULL, 0x03C74D93700C884DULL, 0x0736BEE2D6328726ULL,
-    0x07ABC11F4596A788ULL, 0x0800B8C12FF96A8EULL, 0x0801B6B3C5D12EBCULL, 0x0807D288AD22601BULL, 0x085C1EDB038EC24EULL,
-    0x08F6089289C83D22ULL, 0x09183066C4EBCE28ULL, 0x0A03761D50BA5121ULL, 0x0A60397B7409995EULL, 0x0AC9CDDBE8C64851ULL,
-    0x0BCE5532D5D5E3EBULL, 0x0BD0F9D59048E9D1ULL, 0x0C8257D1C0255593ULL, 0x0DC7A18342B62BECULL, 0x0E8C2515261E0325ULL,
-    0x0E977C49DB7604F9ULL, 0x0E9D35CD5C0217C2ULL, 0x0FD8B759412815DDULL, 0x11332832C10681BCULL, 0x12C8D71AC3897A5CULL,
-    0x130574E0FFFE0058ULL, 0x14453B8FCB040099ULL, 0x16474112801385B6ULL, 0x17C5D12D8D5DEE2CULL, 0x1980D92B619FF5FEULL,
-    0x1B3BCADABC7EF8D6ULL, 0x1B9AC59697006337ULL, 0x1D42A8677882F1CDULL, 0x1D5943301A29C940ULL, 0x1E592FE6DAED807FULL,
-    0x1EAD9F7191BFC50AULL, 0x1FA1F596769225C2ULL, 0x20225DEE487C9F5FULL, 0x20AAFC3A504D2E5FULL, 0x23A60681DD4383ECULL,
-    0x24510E7B16B5F7A5ULL, 0x25A2FD037B6ED25CULL, 0x263817187B7CE092ULL, 0x27BB558C893383CCULL, 0x27EE1ED8F6FB6356ULL,
-    0x299C0D3DFD2F0994ULL, 0x29AE906EA485A7FAULL, 0x2AB2507588D54B8BULL, 0x2ADE442313B5B7B3ULL, 0x2B11C9E4980EC479ULL,
-    0x2C66C201B2543D2CULL, 0x2D85BFE3D8717FE5ULL, 0x2EA01CB1676ACA29ULL, 0x2F67BF9C4F560C02ULL, 0x31400A6A3003E29CULL,
-    0x31C4DD88C1450282ULL, 0x32C7063B4BCC4208ULL, 0x34DA42A01BDC971AULL, 0x35DBF54F016F3624ULL, 0x37079568DC86E9C6ULL,
-    0x37BACD53809F3A77ULL, 0x37CDE43876BA26BBULL, 0x38ACA665AB1D872DULL, 0x397792815583DA29ULL, 0x3A061009AA31E9CBULL,
-    0x3A50B58B0553056AULL, 0x3CAABAD4D5C09D33ULL, 0x3CB772E481DBE9F8ULL, 0x3D4970D1C4E640EEULL, 0x3E3A31261A124454ULL,
-    0x3EC790806D0B0540ULL, 0x3F2C34C69CFC94B2ULL, 0x3F8734AEC15B82ADULL, 0x41436D438139F786ULL, 0x423FF97D57AB04F5ULL,
-    0x439F9E65C18567DAULL, 0x444880F62CA7EAE8ULL, 0x44D72A2C4D5F0507ULL, 0x44FD108C1BA32019ULL, 0x4676BD9A16D3AC28ULL,
-    0x46B9E3BE0AE9972EULL, 0x486522867199D7F3ULL, 0x491E961533AFFC15ULL, 0x4932CBF33CD47EF9ULL, 0x4ABCF54464695EFAULL,
-    0x4B071633584E4594ULL, 0x4C63119F69165321ULL, 0x4C7E4680FF843A1BULL, 0x4CF9D9B3F6813F52ULL, 0x4D1C334D294DFA97ULL,
-    0x4DF41F84668D07FBULL, 0x4E52F730432CDB1EULL, 0x4E69B56270226250ULL, 0x5052EC6A928CCF1AULL, 0x51A0812E3BCE2D74ULL,
-    0x526A3C003F2EA8DDULL, 0x52DCE8A110418742ULL, 0x5429EE4183CC2C2FULL, 0x548136F66F5C9B5CULL, 0x54D86057F5DACFB9ULL,
-    0x56070F36CFFFA8A8ULL, 0x57F27CBD5B71B0CBULL, 0x5BEEC97F4C7F4AE9ULL, 0x5CA062D2FA1F76B9ULL, 0x5CAF553BA7EA1429ULL,
-    0x5F41C4DCABE95421ULL, 0x5F9AEAC72B738298ULL, 0x60778A2CFFB6E47FULL, 0x61353DF120F27732ULL, 0x61EFB2D6A167F285ULL,
-    0x6293CAF0559BACF6ULL, 0x6454186A40F772F0ULL, 0x65489809A8181B96ULL, 0x65CD4325BA23F3C6ULL, 0x67AC082FF6D142F3ULL,
-    0x68A34D32A1025F04ULL, 0x694C059E2BAB805EULL, 0x6B22AE8E5F669D4FULL, 0x6B6E7FE1B931393CULL, 0x6FB1E73E00A84329ULL,
-    0x72DB04413D4AB0F0ULL, 0x73B63D637973C7A4ULL, 0x73F8498BFFDCF415ULL, 0x74599E56F72F9D7EULL, 0x74F33BD19068A439ULL,
-    0x75BE82ED8592A6B3ULL, 0x75F7E96AF7DCD303ULL, 0x776A8FD06099E43CULL, 0x77C52E494527AA8AULL, 0x78DABC7344E50234ULL,
-    0x7956C174E9FAEFE0ULL, 0x79E4B3D2DA5E45E3ULL, 0x79EB2092EBE7CDDCULL, 0x7B0F8449CA9D2DA0ULL, 0x7B2326F6FD9C8069ULL,
-    0x7FA006885812A756ULL, 0x7FF0FD4572F5996FULL, 0x820CC3BAFE962858ULL, 0x821D035AA47E3E75ULL, 0x824B7E0C4C879EB5ULL,
-    0x8365609B35EF6672ULL, 0x840590F468D65A1BULL, 0x847A06CA8885C6ABULL, 0x84E683468C0BCA1AULL, 0x85DCE14563448A5FULL,
-    0x8633FF89EF4F6788ULL, 0x87F46B6D12BB016AULL, 0x888EAAFD58C03C75ULL, 0x891ADA7D553B69DBULL, 0x89CFD784797A7621ULL,
-    0x8A9E543022C18092ULL, 0x8AFF7F0793A5BCEDULL, 0x8CA4DFA795A473C8ULL, 0x8DB8B823889324F9ULL, 0x92BCC263E751BD45ULL,
-    0x94C5114EBA59AA21ULL, 0x9579D47B23904246ULL, 0x96615499993B1E16ULL, 0x967ED15E0BAE363BULL, 0x968211C0033DCE64ULL,
-    0x979E9BC6D48D1FC6ULL, 0x9872EEB31A5F88FDULL, 0x9B2140378640432EULL, 0x9B75217D8312DD67ULL, 0x9CC8C7AE4CEDB109ULL,
-    0x9D4F7CB4EB34515DULL, 0x9D90F5CD1A00A353ULL, 0x9DE2C3A3C9A6353EULL, 0x9E83637BB077E782ULL, 0xA00331F24DEEF2EEULL,
-    0xA0532C3616528CBFULL, 0xA0E691598F32932FULL, 0xA0FF2F9A0CA6992AULL, 0xA20683199DFC19E8ULL, 0xA32621E3BDE13379ULL,
-    0xA4E796F84801B40AULL, 0xA6A8273F408D0309ULL, 0xA6B6C68624AB47ECULL, 0xA6DCC225E1263606ULL, 0xA8D4030E707A49B4ULL,
-    0xA970CBA66FBEAA11ULL, 0xA9982969137F3D77ULL, 0xAA4564F90CDBF5F1ULL, 0xAE38F34B101315DDULL, 0xAF04113302F5621DULL,
-    0xB0C9FAF4AF8903F9ULL, 0xB2053A1838092F8BULL, 0xB3F6EC87073AAFECULL, 0xB52BEAAE4F85C391ULL, 0xB56FA3F5510000ABULL,
-    0xB62620AE2CD89F49ULL, 0xB729A2BA153BCAEDULL, 0xB7791DA91F13488CULL, 0xB9BAF571FC8F9959ULL, 0xBB3AFFFB572C3488ULL,
-    0xBBD57DF3E5B15ED8ULL, 0xBC650C081EAB0735ULL, 0xBCFC57848F206106ULL, 0xBF32E12923A9A252ULL, 0xBF4167FD26917AB1ULL,
-    0xBFB5C88D557595D8ULL, 0xC18C1301580FA0C4ULL, 0xC2D449ECF7FACAB1ULL, 0xC30B36E82086D814ULL, 0xC47287D738BE91C3ULL,
-    0xC57F85252B7D853BULL, 0xC6A87C428FD3C7A3ULL, 0xC734373E4B3E1DF7ULL, 0xC87555EED1E9F092ULL, 0xC87AADA6F7B9DCDEULL,
-    0xCA4F3FC268F449D5ULL, 0xCA6E81E2B3E22B18ULL, 0xCC21C7FFD3EBEFB9ULL, 0xCDCA29C351EA71D8ULL, 0xD00A26BA08786344ULL,
-    0xD23393AF036CC727ULL, 0xD25291CB6BBEAE8BULL, 0xD336BA1CAD16769FULL, 0xD4D4EAE659BC671CULL, 0xD58AE6A04EDB10DEULL,
-    0xD7F32C2DF7934784ULL, 0xD87D04AACBC0269CULL, 0xD8E278355CF29EF4ULL, 0xD9C51B722B223BC4ULL, 0xD9E5D03FF013187FULL,
-    0xDB6676E595797E8AULL, 0xDBB286AD7ED9DF96ULL, 0xDC0B7C25253A8255ULL, 0xDDDB2910FF2B24E9ULL, 0xDDEE9646723E09D3ULL,
-    0xDE18775FA447A9BFULL, 0xDE6CD49631940A14ULL, 0xDE6F09BC8EAEBE27ULL, 0xDF51FE8D62F294BEULL, 0xDFBB9A0D8FA27D85ULL,
-    0xE0E257B37526DBE3ULL, 0xE310DABABD5E36AFULL, 0xE44B691DC039A505ULL, 0xE5F64DCC3BFE9DD1ULL, 0xE753849CDD977D10ULL,
-    0xE86BAA795FA4E457ULL, 0xE90F771A36FB441EULL, 0xE9CD1D0D118886AFULL, 0xEA534432474985A0ULL, 0xEB91B90EEC279745ULL,
-    0xEB95609DCBAD53FEULL, 0xEBB32D4A2A4154B6ULL, 0xED13DDC480EC6910ULL, 0xEE4C107B941AB7F4ULL, 0xEF6BDEED79DB2999ULL,
-    0xEF85D6CF58E31D70ULL, 0xF00C349422E8E320ULL, 0xF5C67AED5CB5ACA0ULL, 0xF800D5F62789246CULL, 0xF88D61A8FE1E0766ULL,
-    0xF9D5219640D65EF9ULL, 0xFA75F8DCBFFBA877ULL, 0xFCE722B5EF57E4B6ULL, 0xFDE262593307CA2FULL, 0xFF9878576A4C543BULL,
-};
-static int FriendTable(uint64_t res)
-{
-    size_t lo = 0, hi = sizeof kFriends / sizeof kFriends[0];
-    while (lo < hi)
-    {
-        size_t mid = (lo + hi) / 2;
-        if (kFriends[mid] == res) return 1;
-        if (kFriends[mid] < res) lo = mid + 1; else hi = mid;
-    }
-    return 0;
-}
-/* a friend, or a copy a mod made of one (the incendiary FRV "Cremator" is a mod's copy of the FRV: 0.2.21's overwatch
- * took it for an enemy); the answers kept per resource */
-static int FriendRes(uint64_t res)
-{
-    static uint64_t keys[256];
-    static int8_t vals[256];
-    if (!res) return 0;
-    if (FriendTable(res)) return 1;
-    unsigned h = (unsigned)(res ^ (res >> 33)) & 255;
-    for (unsigned i = 0; i < 256; i++)
-    {
-        unsigned k = (h + i) & 255;
-        if (keys[k] == res) return vals[k];
-        if (keys[k]) continue;
-        uint64_t at = res;
-        int friend_ = 0;
-        for (int depth = 0; depth < 4 && !friend_; depth++)
-        {
-            uint64_t base = 0;
-            HfContent c;
-            for (uint32_t n = 0; n < 4096; n++)
-            {
-                memset(&c, 0, sizeof c);
-                c.size = sizeof c;
-                if (!hf->content(self, n, &c)) break;
-                if (c.kind == HF_KIND_ENTITY && c.id == at) { base = c.base; break; }
-            }
-            if (!base || base == at) break;
-            if (FriendTable(base)) { friend_ = 1; Log("a mod's copy %016llx of a friend (%016llx): spared and never a target", (unsigned long long)res, (unsigned long long)base); }
-            at = base;
-        }
-        vals[k] = (int8_t)friend_;   /* the answer before the key: a hit read on another thread never sees a key without it */
-        keys[k] = res;
-        return friend_;
-    }
-    return 0;
-}
 static int HerRide(uint32_t target)
 {
     uint32_t me = atomic_load(&g_avatar), by = 0;
@@ -1579,56 +1430,6 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     g_spawnNet[g_spawnNext % 8] = s->network;
     g_spawnNext++;
     LearnNet();
-}
-/* The T-Doll's body (as Lenna's): more health and a longer sprint, for the mission */
-static int g_bodyOn;
-static void Body(int on)
-{
-    HfField hp = HF_FIELD(Health, health), sd = HF_FIELD(Avatar, sprint_duration);
-    if (!on)
-    {
-        if (g_bodyOn) { hf->set_live(self, AVATAR, &hp, NULL, HF_LIVE_SHARED); hf->set_live(self, AVATAR, &sd, NULL, HF_LIVE_SHARED); }
-        g_bodyOn = 0;
-        return;
-    }
-    HfLiveValue a, b;
-    memset(&a, 0, sizeof a);
-    memset(&b, 0, sizeof b);
-    if (!hf->get_live(self, AVATAR, &hp, &a) || !hf->get_live(self, AVATAR, &sd, &b)) { Log("body: her health or stamina cannot be read"); return; }
-    HfValue h = HF_I32((int32_t)floor(a.base.number * s_hpMult + 0.5)), d = HF_F32((float)(b.base.number * s_staminaMult));
-    int r1 = fabsf(s_hpMult - 1) > 0.001f ? hf->set_live(self, AVATAR, &hp, &h, HF_LIVE_SHARED) : -1;
-    int r2 = fabsf(s_staminaMult - 1) > 0.001f ? hf->set_live(self, AVATAR, &sd, &d, HF_LIVE_SHARED) : -1;
-    Log("body: health %.0f -> %d, sprint %.0f -> %.0f s before the bar empties (applies: %d / %d; 1 = now, 2 = next spawn)", a.base.number,
-        (int)h.number, b.base.number, d.number, r1, r2);
-    g_bodyOn = 1;
-}
-/* The T-Doll's price (as Lenna's): one Hellbomb per run-out, armed while her bar is above a fifth, fired once it has
- * sat at 0 for hellbomb_hold s, spawned once its packages are in. */
-static double g_boomPending;
-static int g_boomArmed;
-static void Exhaustion(void)
-{
-    if (!s_hellbomb || !g_alive) { g_boomPending = 0; return; }
-    float v = StaminaNow();
-    static int noted;
-    if (v >= 0 && !noted) { noted = 1; Log("stamina: %.2f (read live)", (double)v); }
-    if (v > 0.2f) g_boomArmed = 1;
-    static double emptySince;
-    if (v >= 0 && v <= 0.001f) { if (emptySince <= 0) emptySince = g_now; }
-    else emptySince = 0;
-    if (g_boomArmed && emptySince > 0 && g_now - emptySince >= s_hellbombHold) { g_boomArmed = 0; g_boomPending = g_now + 3; }
-    if (g_boomPending <= 0) return;
-    if (g_now > g_boomPending) { g_boomPending = 0; Log("out of stamina: the Hellbomb's packages did not load in time"); return; }
-    float pos[3];
-    if (!PlayerPose(pos, NULL)) return;
-    pos[2] += 0.3f;
-    int r = hf->spawn_explosion(self, (uint32_t)s_hellbombRow, pos);   /* not one of her own blasts: it is meant to reach her */
-    if (r == HF_ACT_WAITING) return;
-    g_boomPending = 0;
-    g_boomAt = g_now;
-    atomic_store(&g_boomMs, GetTickCount64());
-    memcpy(g_boomPos, pos, sizeof pos);
-    Log("out of stamina: HELLBOMB (row %d, answer %d)", s_hellbombRow, r);
 }
 
 /* The packages of the explosions she uses, loaded ahead at mission start (HellForge's references.json, build 25480438);
@@ -3391,10 +3192,19 @@ HF_MOD_EXPORT int voymastina_option_set(const char* name, double value)
     return 1;
 }
 
+/* Her Hellbomb went off: its blast is meant to reach her (OnDamagePre lets it through) */
+static void HellbombFired(const float pos[3])
+{
+    g_boomAt = g_now;
+    atomic_store(&g_boomMs, GetTickCount64());
+    memcpy(g_boomPos, pos, sizeof g_boomPos);
+}
+
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
+    kb_hellbomb_fired = HellbombFired;
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();

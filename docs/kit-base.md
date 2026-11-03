@@ -31,6 +31,8 @@ A function-by-function comparison of the four kit sources (Voymastina 0.4.0, Lev
 kitbase/                 source of truth (header-only)
   kb_core.h              layer 0: memory, lookups, entities, units, log, keys
   kb_player.h            layer 0: her avatar, items and weapons, hook bookkeeping, stamina
+  kb_friends.h           layer 1: the friend list (what her blasts spare, what is never a target)
+  kb_body.h              layer 1: the T-Doll body (health, stamina, the stamina Hellbomb)
   ...                    later layers as they are extracted
 mods/<kit>/src/kitbase/  copies, kept in sync by tools/kitbase_sync.py
 ```
@@ -45,7 +47,13 @@ A kit includes the base right after the SDK headers, in place of its own `hf`, `
 #include "hellforge_content.h"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
+#include "kitbase/kb_friends.h"
+#include "kitbase/kb_body.h"
 ```
+
+A kit changes a block's behaviour through callbacks it sets in `hellforge_mod_init`, never by editing the block. The
+T-Doll body has two: `kb_hellbomb_veto` (Faelynn holds the Hellbomb back while Last Bark has her) and
+`kb_hellbomb_fired` (Voymastina lets that one blast through her immunity).
 
 ## Layers
 
@@ -98,9 +106,11 @@ between blocks.
 
 ## Steps
 
-1. **Layer 0** into `kitbase/`; all four kits include it. Check: each kit's translation unit holds exactly the same
+1. **Done.** **Layer 0** into `kitbase/`; all four kits include it. Check: each kit's translation unit holds exactly the same
    function definitions and globals as before (only moved), and all four build with `-Wall -Werror`.
-2. **Friend list and T-Doll body.** Small, and every kit gets Voymastina's fuller friend table.
+2. **Done (needs its in-game check).** **Friend list and T-Doll body.** Every kit now uses Voymastina's friend list:
+   exosuits, vehicles, dog drones, SEAF, the Pelican, mod copies of any of them, and anything a Helldiver holds are
+   never taken for enemies. The body is Lenna's code with the two callbacks above.
 3. **Damage dispatcher.** Port Lenna first (simplest `Steady`), then Faelynn, Leva, Voymastina; test each in game.
 4. **Settings table and the generic HUD.**
 5. **AK-12 on the base.** Layer 2 and 3 blocks move only when she needs them.

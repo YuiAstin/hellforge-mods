@@ -42,6 +42,8 @@
 
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
+#include "kitbase/kb_friends.h"
+#include "kitbase/kb_body.h"
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
@@ -55,9 +57,6 @@ static float s_arcRate = 10;
 static double g_arcBudget = 5, g_arcBudgetAt;
 static unsigned g_arcsSkipped;
 static float s_markMult = 1.3f, s_markSeconds = 6;
-static float s_hpMult = 1.5f, s_staminaMult = 2.0f;
-static int s_hellbomb = 1, s_hellbombRow = 125;
-static float s_hellbombHold = 0.5f;
 static int s_ems = 0, s_arcRow = 157, s_arcBlast = 41;  /* 157: the G-31 Arc grenade's detonation (her arcs); 41: the GL-52 De-Escalator's burst (their blast) */  /* the EMS explosion row: 0 = the EMS Mortar Sentry shell's own (read at game start) */
 
 static int s_badKey;
@@ -810,48 +809,6 @@ static void Pulse_(const float at[3]) { Blast_((uint32_t)s_ems, at, "EMS pulse")
 
 /* ---- enemies around her (Hunting Strategy's zap): spawned entities whose kind runs a behaviour and is no turret or
  * Helldiver, and anything her own hits landed on; dropped on death or when the entity id is reused ------------------ */
-#define FOES 1024
-static uint32_t g_foe[FOES];
-static uint64_t g_foeRes[FOES];
-static unsigned g_foeNext;
-typedef struct Kind { uint64_t res; int foe; } Kind;
-static Kind g_kinds[256];
-static int FoeKind(uint64_t res)
-{
-    if (!res || res == AVATAR) return 0;
-    unsigned h = (unsigned)(res ^ (res >> 29)) & 255;
-    for (unsigned i = 0; i < 256; i++)
-    {
-        Kind* k = &g_kinds[(h + i) & 255];
-        if (k->res == res) return k->foe;
-        if (!k->res)
-        {
-            uint32_t stride;
-            k->res = res;
-            k->foe = hf->component_record("BehaviorComponentData", res, &stride) != 0 && !hf->component_record("TurretComponentData", res, &stride) &&
-                     !hf->component_record("AvatarComponentData", res, &stride);
-            return k->foe;
-        }
-    }
-    return 0;
-}
-static void AddFoe(uint32_t entity, uint64_t res)
-{
-    if (!entity || entity == atomic_load(&g_avatar) || res == AVATAR) return;
-    int free_ = -1;
-    for (int i = 0; i < FOES; i++)
-    {
-        if (g_foe[i] == entity) { g_foeRes[i] = res; return; }
-        if (!g_foe[i] && free_ < 0) free_ = i;
-    }
-    unsigned slot = free_ >= 0 ? (unsigned)free_ : g_foeNext++ % FOES;
-    g_foe[slot] = entity;
-    g_foeRes[slot] = res;
-}
-static void DropFoe(uint32_t entity)
-{
-    for (int i = 0; i < FOES; i++) if (g_foe[i] == entity) g_foe[i] = 0;
-}
 /* Stunned and held: the stun is renewed until `until` */
 typedef struct Held { uint32_t entity; double until, next; } Held;
 static Held g_held[128];
@@ -1056,54 +1013,6 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 }
 
 /* ---- her body: more health and stamina, and the price of running dry --------------------------------------------- */
-static int g_bodyOn;
-static void Body(int on)
-{
-    HfField hp = HF_FIELD(Health, health), sd = HF_FIELD(Avatar, sprint_duration);
-    if (!on)
-    {
-        if (g_bodyOn) { hf->set_live(self, AVATAR, &hp, NULL, HF_LIVE_SHARED); hf->set_live(self, AVATAR, &sd, NULL, HF_LIVE_SHARED); }
-        g_bodyOn = 0;
-        return;
-    }
-    HfLiveValue a, b;
-    memset(&a, 0, sizeof a);
-    memset(&b, 0, sizeof b);
-    if (!hf->get_live(self, AVATAR, &hp, &a) || !hf->get_live(self, AVATAR, &sd, &b)) { Log("body: her health or stamina cannot be read"); return; }
-    HfValue h = HF_I32((int32_t)floor(a.base.number * s_hpMult + 0.5)), d = HF_F32((float)(b.base.number * s_staminaMult));
-    int r1 = fabsf(s_hpMult - 1) > 0.001f ? hf->set_live(self, AVATAR, &hp, &h, HF_LIVE_SHARED) : -1;
-    int r2 = fabsf(s_staminaMult - 1) > 0.001f ? hf->set_live(self, AVATAR, &sd, &d, HF_LIVE_SHARED) : -1;
-    Log("body: health %.0f -> %d, sprint %.0f -> %.0f s before the bar empties (applies: %d / %d; 1 = now, 2 = next spawn)", a.base.number,
-        (int)h.number, b.base.number, d.number, r1, r2);
-    g_bodyOn = 1;
-}
-
-/* One Hellbomb per run-out: armed while her bar is above a fifth, fired when it reaches 0 (the bar then sits at 0
- * through the recovery delay, which must not fire it again), and spawned once its packages are in. */
-static double g_boomPending;
-static int g_boomArmed;
-static void Exhaustion(void)
-{
-    if (!s_hellbomb || !g_alive) { g_boomPending = 0; return; }
-    float v = StaminaNow();
-    static int noted;
-    if (v >= 0 && !noted) { noted = 1; Log("stamina: %.2f (read live)", (double)v); }
-    if (v > 0.2f) g_boomArmed = 1;
-    /* empty for hellbomb_hold s in a row: the bar flickers to 0 for a moment at times while it is not run dry */
-    static double emptySince;
-    if (v >= 0 && v <= 0.001f) { if (emptySince <= 0) emptySince = g_now; }
-    else emptySince = 0;
-    if (g_boomArmed && emptySince > 0 && g_now - emptySince >= s_hellbombHold) { g_boomArmed = 0; g_boomPending = g_now + 3; }
-    if (g_boomPending <= 0) return;
-    if (g_now > g_boomPending) { g_boomPending = 0; Log("out of stamina: the Hellbomb's packages did not load in time"); return; }
-    float pos[3];
-    if (!PlayerPose(pos, NULL)) return;
-    pos[2] += 0.3f;
-    int r = hf->spawn_explosion(self, (uint32_t)s_hellbombRow, pos);   /* not one of her own blasts: it is meant to reach her */
-    if (r == HF_ACT_WAITING) return;                                     /* its packages: again next frame */
-    g_boomPending = 0;
-    Log("out of stamina: HELLBOMB (row %d, answer %d)", s_hellbombRow, r);
-}
 
 static void Reset(const char* why)
 {
