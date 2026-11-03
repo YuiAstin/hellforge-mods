@@ -23,6 +23,9 @@
 typedef struct Key { int vk, mods; char label[24]; } Key;
 
 /* The SDK and the game, set by the kit's hellforge_mod_init */
+/* This kit is the one acting this mission (kb_roster.h: with several kits installed, the one the player picked) */
+KB_VAR int kb_kit_on = 1;
+
 KB_VAR const HfApi* hf;
 KB_VAR HfMod* self;
 KB_VAR uintptr_t game, exe;

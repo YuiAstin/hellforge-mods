@@ -51,6 +51,10 @@
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
+#include "kitbase/kb_roster.h"
+
+/* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
+KB_ROSTER_EXPORTS(faelynn)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static int s_cpMax = 3, s_htMax = 10, s_acidRow = 177, s_gasImmune = 1;
@@ -905,6 +909,7 @@ static void GasImmunity(int on)
 
 static void Reset(const char* why)
 {
+    if (!strcmp(why, "mission start")) KitDecide();   /* with several kits installed: is this one picked? */
     g_haveLastMe = 0;
     g_barkPending = 0;
     g_dying = g_barked = 0;
@@ -1004,7 +1009,7 @@ typedef struct FaelynnHud
 static FaelynnHud g_hud = {2};
 HF_MOD_EXPORT FaelynnHud* faelynn_hud_state(void)
 {
-    g_hud.in_mission = (uint32_t)(g_inMission && g_alive);
+    g_hud.in_mission = (uint32_t)(g_inMission && g_alive && kb_kit_on);
     g_hud.cp = (uint32_t)g_cp;
     g_hud.cp_max = (uint32_t)s_cpMax;
     g_hud.ht = (uint32_t)g_ht;
@@ -1056,7 +1061,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     g_now += dt > 0 && dt < 1 ? dt : 0;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
-    if (!g_inMission) return;
+    if (!g_inMission || !kb_kit_on) return;   /* (standing by: another kit is picked) */
     MyItems();
     static int prev[3];
     int focused = Focused();
@@ -1179,6 +1184,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
+    RosterJoin("faelynn", "Faelynn");
     kb_ini = "faelynn.ini";
     kb_key_names[0] = "key_maul";
     kb_key_names[1] = "key_hunt";

@@ -62,6 +62,10 @@ static double HowlImmuneUntil(void);
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
+#include "kitbase/kb_roster.h"
+
+/* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
+KB_ROSTER_EXPORTS(voymastina)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static float s_sfCd = 6, s_sfRange = 40, s_sfWindow = 10;
@@ -1410,6 +1414,7 @@ static unsigned g_pierced;
 static void Speed(int on);
 static void Reset(const char* why)
 {
+    if (!strcmp(why, "mission start")) KitDecide();   /* with several kits installed: is this one picked? */
     if (atomic_load(&g_bareOn)) { atomic_store(&g_bareOn, 0); Speed(0); }
     int start = !strcmp(why, "mission start");
     if (g_casts[0] || g_casts[1] || g_casts[2] || g_support || g_dropBlasts || g_charges)
@@ -2471,6 +2476,7 @@ static void TuneWeapon(uint64_t res)
 }
 static void OnWeaponAk(HfMod* mod, const HfEventInfo* info, void* user)
 {
+    if (!kb_kit_on) return;
     const HfWeaponEvent* w = (const HfWeaponEvent*)info;
     if (!w->avatar || w->avatar != atomic_load(&g_avatar)) return;
     TuneWeapon(w->resource);
@@ -2584,7 +2590,7 @@ typedef struct VoymastinaHud
 static VoymastinaHud g_hud = {3};
 HF_MOD_EXPORT VoymastinaHud* voymastina_hud_state(void)
 {
-    g_hud.in_mission = (uint32_t)(g_inMission && g_alive);
+    g_hud.in_mission = (uint32_t)(g_inMission && g_alive && kb_kit_on);
     double r[3] = {g_cd[0], g_cd[1], g_cd[2]};
     float m[3] = {s_sfCd, s_eyeCd, s_pbCd};
     for (int i = 0; i < 3; i++) { g_hud.cd[i] = (float)fmax(0, r[i] - g_now); g_hud.cd_max[i] = m[i]; }
@@ -2880,7 +2886,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     g_now += step;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); KitReset(); g_inMission = inMission; }
-    if (!g_inMission) return;
+    if (!g_inMission || !kb_kit_on) return;   /* (standing by: another kit is picked) */
     atomic_store(&g_ppArmorOn, g_ppReady || g_now < g_ppArmorUntil);
     StaminaGuard();
     BareFrame();
@@ -3075,6 +3081,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
+    RosterJoin("voymastina", "Voymastina");
     kb_ini = "voymastina.ini";
     kb_key_names[0] = "key_sirius";
     kb_key_names[1] = "key_eye";

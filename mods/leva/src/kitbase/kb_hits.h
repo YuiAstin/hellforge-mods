@@ -99,7 +99,7 @@ KB_FN int OwnBlast(const uint8_t* h, int* emp)
 /* A hit on her: see the pipeline above */
 KB_FN void Steady(const void* hit, void* result)
 {
-    if (!atomic_load(&g_hooked) || !hit || !result) return;
+    if (!atomic_load(&g_hooked) || !hit || !result || !kb_kit_on) return;
     uint8_t h[HIT_SIZE], r[RESULT_SIZE];
     uint32_t me = atomic_load(&g_avatar);
     if (!me || !ReadAt((uintptr_t)hit, h, sizeof h) || Word(h + 0x20) != me) return;
@@ -134,10 +134,10 @@ KB_FN uintptr_t Calculate(uintptr_t a, void* out, const void* hit)
 {
     Observe(hit);
     KbHitCall c = {KB_HIT_CALC, hit, out, {0, 0, 0}, 0, 0};
-    if (kb_hit_before) kb_hit_before(&c);
+    if (kb_hit_before && kb_kit_on) kb_hit_before(&c);
     uintptr_t r = original_calculate(a, out, hit);
     if (c.restore) Unshred(hit, c.saved);
-    if (kb_hit_after) kb_hit_after(&c);
+    if (kb_hit_after && kb_kit_on) kb_hit_after(&c);
     Steady(hit, out);
     return r;
 }
@@ -145,10 +145,10 @@ KB_FN void Blast(uintptr_t a, void* out, const void* hit)
 {
     Observe(hit);
     KbHitCall c = {KB_HIT_BLAST, hit, out, {0, 0, 0}, 0, 0};
-    if (kb_hit_before) kb_hit_before(&c);
+    if (kb_hit_before && kb_kit_on) kb_hit_before(&c);
     original_blast(a, out, hit);
     if (c.restore) Unshred(hit, c.saved);
-    if (kb_hit_after) kb_hit_after(&c);
+    if (kb_hit_after && kb_kit_on) kb_hit_after(&c);
     Steady(hit, out);
 }
 KB_FN uintptr_t Emit(uintptr_t a, void* result, const void* hit, uint32_t mode) { Steady(hit, result); return original_emit(a, result, hit, mode); }

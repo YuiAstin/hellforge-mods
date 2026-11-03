@@ -162,7 +162,52 @@ local function gfl2_bindings(dt)
         for i = 1, 3 do X.labels[i] = binding_label(mbm, X.ids[i]) end
     end
 end
+-- The roster: with two or more character kits installed, an "Active Character" choice on the MODS tab (GFL2 Kits HUD);
+-- only the picked kit acts, from the next mission start (kitbase/kb_roster.h). Each HUD passes the pick to its own DLL;
+-- every kit reads the same shared answer. One kit alone: no row, it simply acts.
+pcall(ffi.cdef, [[
+typedef int (*gfl2roster_text)(char *out, int size);
+typedef int (*gfl2roster_pick)(const char *id);
+]])
+local R = {done = false, wait = 0, tries = 0}
+local function gfl2_roster(dt)
+    if R.done then return end
+    R.wait = R.wait - dt
+    if R.wait > 0 then return end
+    R.wait = 2
+    local menu = rawget(_G, 'ModOptionsMenu')
+    if not menu or menu.api ~= 1 then return end
+    local tp, pp = gfl2_dll(X.id .. '_roster'), gfl2_dll(X.id .. '_pick')
+    if not tp or not pp then R.done = true return end              -- a DLL from before the roster
+    local buf = ffi.new('char[1024]')
+    local n = ffi.cast('gfl2roster_text', tp)(buf, 1024)
+    R.tries = R.tries + 1
+    if n < 2 then if R.tries >= 5 then R.done = true end return end  -- alone: nothing to pick
+    R.done = true
+    local list, active = ffi.string(buf):match('^(.*)|(.*)$')
+    local ids, names, default = {}, {}, 1
+    for entry in (list or ''):gmatch('[^;]+') do
+        local id, name = entry:match('^([^:]+):(.*)$')
+        if id then ids[#ids + 1] = id; names[#names + 1] = name; if id == active then default = #ids end end
+    end
+    if #ids < 2 or #ids > 16 then return end
+    local key = 0                                                    -- a short id for this roster (a new kit: a new row)
+    for _, id in ipairs(ids) do for c = 1, #id do key = (key * 31 + id:byte(c)) % 2147483647 end end
+    local option = 'yui.gfl2hud.character.' .. key
+    local ok, why = menu.register_option(option, {type = 'choice', label = 'Active Character', mod = 'GFL2 Kits HUD', mod_id = 'yui.gfl2hud',
+        choices = names, default = default,
+        description = 'Several character kits are installed: only the picked one acts (keys, body, skills, HUD). Takes effect at the next mission start.'})
+    if not ok then log('[' .. X.kit .. ' HUD] roster: the picker row was not added here (' .. tostring(why) .. '): another kit\'s HUD may have it') end
+    local pick = ffi.cast('gfl2roster_pick', pp)
+    local saved = menu.get(option)
+    if type(saved) == 'number' and ids[saved] then pick(ids[saved]) end
+    menu.on_change(option, function(value) if ids[value] then pick(ids[value]) end end)
+    log('[' .. X.kit .. ' HUD] roster: ' .. #ids .. ' character kits installed: ' .. table.concat(names, ', ') .. '; picked: ' ..
+        tostring(names[(type(saved) == 'number' and ids[saved]) and saved or default]))
+end
 local function gfl2_step(dt)
+    local okR, errR = pcall(gfl2_roster, dt)
+    if not okR then R.done = true; log('[' .. X.kit .. ' HUD] roster failed: ' .. tostring(errR)) end
     local ok, err = pcall(gfl2_options, dt)
     if not ok then X.opt_done = true; log('[' .. X.kit .. ' HUD] cooldowns option failed: ' .. tostring(err)) end
     ok, err = pcall(gfl2_bindings, dt)
