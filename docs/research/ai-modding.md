@@ -322,3 +322,13 @@ nobody, for a side-by-side of how long they stay after her with and without it.
 so its live list stopped growing after the first four types and break-contact acted on nobody. The HUD showed 0
 within 80 m with enemies on the minimap. **So the bot drop that despawned in 0.3.0's run did so on its own** (the
 game's give-up, see the baseline caveat above), and break-contact has not been tested yet.
+
+**0.3.4 in game, on vs observe (one mission, same area; averages per pass every 5 s):**
+- **On (14:48 to 14:51):** three engagements. Each time, once the enemies after her stopped sensing her, they
+  lost her (7, 7 and 5 of them) and "after her" was 0 within the next 5 to 10 s. Example: 7.0 after her, all
+  sensing → 4.5 after her, none sensing (7 lost her) → 0.
+- **Observe (14:51 to 14:54):** one longer engagement. "After her" rose to 9.7 and then stayed up for about two
+  minutes; from 14:52:57 nobody was sensing her at all (sensing 0.0) and still 3.7 → 2.2 → 1.0 → 1.4 → 0.6 were
+  after her for 40 s more before it reached 0 (dying, despawning or giving up on their own).
+So unsensed chasers drop off in about 5 s with break-contact on, against 40 s or more without it. One mission, bugs
+or bots not recorded, different fights: a direction, not a measurement. Next: the same fight shape both ways.
