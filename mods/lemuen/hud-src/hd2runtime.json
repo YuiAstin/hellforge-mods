@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "Lemuen HUD",
+  "resource": "mods/yui/lemuen_hud",
+  "guid": "f1cc1821-f8ed-5c12-8dae-806f30727f10",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.30.0",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}
