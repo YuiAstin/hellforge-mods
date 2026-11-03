@@ -342,3 +342,14 @@ to follow), different fights: a direction, not a measurement. Next: the same fig
   0.1 within 5 s. Every later group of 1 to 3 unsensed chasers dropped to 0 in 5 to 10 s.
 **Conclusion: break-contact works against bots.** Without it, bots off sight keep a target and track her; with it,
 they drop her once unsensed for 3 s. Still open: bugs and Illuminate, co-op (other Helldivers), defence objectives.
+
+**0.3.4, Illuminate then bugs (2026-11-04 00:54 session; observe, then on, each mission):**
+- **Illuminate, observe:** groups of 5 to 12 stayed after her with nobody sensing her for 15 to 50 s at a time
+  (17:59:30, 18:01:02 to 18:01:53, 18:04:21). **On:** a wave of 27 after her (22.7 unsensed) → 23 + 33 lost her →
+  0.5 after her within 10 s; every later group cleared the same way. **Works, as for bots.**
+- **Bugs, observe:** from 18:14:29, about 10 after her with **nobody sensing her for almost two minutes**.
+  **On (18:16 to 18:25):** they lost her (5 to 18 every 5 s), yet 4 to 12 were after her again, still unsensed,
+  through most of 18:18 to 18:24, and only from 18:24:35 did it stay at 0. Bugs **pick her up again without sensing
+  her** (or breaches keep handing her to new spawns). So for bugs break-contact only thins the chase.
+Next for bugs: count, per enemy, how often one that lost her is after her again within a few seconds without
+sensing her, and log where it came from (new spawn, its squad's perceiver, a breach), to find what re-targets them.
