@@ -317,3 +317,8 @@ Helldiver for a while", mostly solo after breaking line of sight, often with smo
 mistake you're making in Helldivers 2: running away"); the wiki gives no timer for it. So a despawning bot drop is
 not proof by itself. 0.3.2's toggle cycles off → on → observe only: observe logs the same counts and touches
 nobody, for a side-by-side of how long they stay after her with and without it.
+
+**Correction (0.3.4):** 0.3.0 to 0.3.3's auto pass never reset the per-pass budget for classifying new enemy types,
+so its live list stopped growing after the first four types and break-contact acted on nobody. The HUD showed 0
+within 80 m with enemies on the minimap. **So the bot drop that despawned in 0.3.0's run did so on its own** (the
+game's give-up, see the baseline caveat above), and break-contact has not been tested yet.

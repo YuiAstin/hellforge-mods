@@ -43,7 +43,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.3"
+#define VERSION "0.3.4"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -155,6 +155,9 @@ static int g_nlive;
 static unsigned g_cursor;
 static void Refresh(void)
 {
+    /* 0.3.4: the budget is per pass. 0.3.0 to 0.3.3's AutoPass never reset it, so after the first four enemy types the
+     * live list stopped growing: break-contact saw nobody (the HUD's 0s beside enemies on the minimap) */
+    if (g_classified > 0) g_classified = 0;
     unsigned end = g_nseen;
     if (end - g_cursor > SEEN) g_cursor = end - SEEN;
     while (g_cursor != end)
