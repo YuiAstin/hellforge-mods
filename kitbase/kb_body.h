@@ -23,6 +23,7 @@ KB_VAR void (*kb_hellbomb_fired)(const float pos[3]);
 KB_VAR int g_bodyOn;
 KB_FN void Body(int on)
 {
+    if (!kb_kit_on) on = 0;   /* a kit standing by leaves her body as it is */
     HfField hp = HF_FIELD(Health, health), sd = HF_FIELD(Avatar, sprint_duration);
     if (!on)
     {
@@ -47,6 +48,7 @@ KB_VAR double g_boomPending;
 KB_VAR int g_boomArmed;
 KB_FN void Exhaustion(void)
 {
+    if (!kb_kit_on) return;
     if (!s_hellbomb || !g_alive || (kb_hellbomb_veto && kb_hellbomb_veto())) { g_boomPending = 0; return; }
     float v = StaminaNow();
     static int noted;

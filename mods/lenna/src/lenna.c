@@ -47,6 +47,10 @@
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
+#include "kitbase/kb_roster.h"
+
+/* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
+KB_ROSTER_EXPORTS(lenna)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static int s_ciMax = 6, s_weHits = 0, s_hsPulses = 3, s_hsCiCap = 3;
@@ -957,6 +961,7 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 
 static void Reset(const char* why)
 {
+    if (!strcmp(why, "mission start")) KitDecide();   /* with several kits installed: is this one picked? */
     if (g_casts[0] || g_casts[1] || g_casts[2])
         Log("%s: casts %u / %u / %u, %u marked, %u stuns, %u charged hits, %u own pulses spared her, %u knockdowns stopped",
             why, g_casts[0], g_casts[1], g_casts[2], g_marked, g_stuns, g_boosted, g_selfSpared, g_knockdowns);
@@ -1048,7 +1053,7 @@ typedef struct LennaHud
 static LennaHud g_hud = {3};
 HF_MOD_EXPORT LennaHud* lenna_hud_state(void)
 {
-    g_hud.in_mission = (uint32_t)(g_inMission && g_alive);
+    g_hud.in_mission = (uint32_t)(g_inMission && g_alive && kb_kit_on);
     g_hud.ci = (uint32_t)g_ci;
     g_hud.ci_max = (uint32_t)s_ciMax;
     double r[3] = {g_cdWild, g_cdLeap, g_cdUlt};
@@ -1099,7 +1104,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
     NtTick();
-    if (!g_inMission) return;
+    if (!g_inMission || !kb_kit_on) return;   /* (standing by: another kit is picked) */
     /* keys (edges) */
     MyItems();
     static int prev[3];
@@ -1213,6 +1218,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
+    RosterJoin("lenna", "Lenna");
     kb_ini = "lenna.ini";
     kb_key_names[0] = "key_wild";
     kb_key_names[1] = "key_leap";

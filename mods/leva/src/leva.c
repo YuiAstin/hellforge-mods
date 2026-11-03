@@ -53,6 +53,10 @@
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
+#include "kitbase/kb_roster.h"
+
+/* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
+KB_ROSTER_EXPORTS(leva)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static int s_nativeRows = 1, s_nativeArc = 0;
@@ -1288,6 +1292,7 @@ static void Watch(uint32_t target, int before, int set, int cancel)
 }
 static void OnDamage(HfMod* mod, const HfEventInfo* info, void* user)
 {
+    if (!kb_kit_on) return;
     const HfDamageEvent* d = (const HfDamageEvent*)info;
     if (g_watchLogged >= 12) return;
     for (int i = 0; i < 16; i++)
@@ -1422,6 +1427,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 /* Her lockdown burst going off (her own explosion type): exactly where it lands */
 static void OnExplosion(HfMod* mod, const HfEventInfo* info, void* user)
 {
+    if (!kb_kit_on) return;
     const HfExplosionEvent* e = (const HfExplosionEvent*)info;
     if (g_ntState != 1 || e->type != g_ntExpId || !g_inMission) return;
     Own(e->position, TAG_FIELD);
@@ -1562,6 +1568,7 @@ static void ArcLimits(int on)
 }
 static void Reset(const char* why)
 {
+    if (!strcmp(why, "mission start")) KitDecide();   /* with several kits installed: is this one picked? */
     if (g_casts[0] || g_casts[1] || g_casts[2])
     {
         Log("%s: Rational Suppression %u, Orderly Disruption %u, Quantum Calculation %u, Superconduct Blitz %u; %u charged, %u Wise Support arcs, %u Voltage bursts, %u paralysis stuns, %u boosted hits, %u heals, %u own arcs spared her, %u knockdowns stopped; %u ground arcs fired, %u skipped (no enemy near, or late); %u lockdown arc hits; damage dealt: arcs %.0f, lockdown %.0f, Blitz %.0f, Arc Rounds %.0f, her shots %.0f",
@@ -1662,7 +1669,7 @@ typedef struct LevaHud
 static LevaHud g_hud = {2};
 HF_MOD_EXPORT LevaHud* leva_hud_state(void)
 {
-    g_hud.in_mission = (uint32_t)(g_inMission && g_alive);
+    g_hud.in_mission = (uint32_t)(g_inMission && g_alive && kb_kit_on);
     g_hud.code = (uint32_t)g_code;
     g_hud.code_max = (uint32_t)s_codeMax;
     double r[3] = {g_cdSuppress, g_cdDisrupt, g_cdUlt};
@@ -1710,7 +1717,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
     NtTick();
     if (g_ntState == 1 && g_ntApplied != s_rsDamage) NtDamage();
-    if (!g_inMission) return;
+    if (!g_inMission || !kb_kit_on) return;   /* (standing by: another kit is picked) */
     MyItems();
     static int prev[3];
     int focused = Focused();
@@ -1815,6 +1822,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
+    RosterJoin("leva", "Leva");
     kb_ini = "leva.ini";
     kb_key_names[0] = "key_suppress";
     kb_key_names[1] = "key_disrupt";

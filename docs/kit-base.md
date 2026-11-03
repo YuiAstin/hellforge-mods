@@ -36,7 +36,8 @@ kitbase/                 source of truth (header-only)
   kb_hits.h              layer 1: the damage pipeline on the game's hit code (her hits and hits on her)
   kb_damage.h            layer 1: HellForge's damage event routed to the kit, with shared helpers
   kb_settings.h          layer 1: the settings table, .ini loader, skill keys and Mod Options Menu calls
-  hud/bindings.lua       HUD: key bindings (Mod Bindings Menu) and the always-show-cooldowns option
+  kb_roster.h            several kits installed together: the shared roster and the active kit
+  hud/bindings.lua       HUD: key bindings (Mod Bindings Menu) the always-show-cooldowns option and the roster picker
   hud/list.lua           HUD: finding the open stratagem list to sit beside
   ...                    later layers as they are extracted
 mods/<kit>/src/kitbase/  copies, kept in sync by tools/kitbase_sync.py
@@ -147,3 +148,22 @@ and copy its `mod/9ba626afa44a3aa3.patch_0*` into the kit's `data/`.
 
 What is drawn (the skill tiles, the bottom-middle bar, the option rows) differs per kit and stays in each kit. A
 generic state struct and one drawing path are left for when AK-12 shows what a kit HUD needs in common.
+
+### Several kits installed (step 6)
+
+There is no base mod to install. Each kit joins a roster kept in named shared memory, one per game process
+(`Local\yui.kitbase.roster.<pid>`, a mutex beside it), which every kit DLL in the game opens (`kb_roster.h`).
+
+- **One kit:** it acts, as before; nothing changes and no picker appears.
+- **Two or more:** every kit's HUD offers the same row on the MODS tab, GFL2 Kits HUD > Active Character (a choice of
+  the installed kits, sorted by id; a new kit makes a new row). Only the picked kit acts; with none picked, the first
+  by id. A pick takes effect at the next mission start (`KitDecide()` in the kit's Reset), so a body edit is never
+  left half applied.
+- **Standing by** (`kb_kit_on` 0): the kit's frame returns early (no keys, no skills, no Hellbomb), its body stays
+  untouched, the damage event and the hit pipeline's kit callbacks skip it (its hooks stay in HellForge's chain and
+  pass every hit through), its HUD hides, and its log says so once.
+- **A kit:** `RosterJoin("id", "Name")` in hellforge_mod_init, `KitDecide()` at mission start, the frame's
+  `if (!g_inMission || !kb_kit_on) return;`, the HUD state's `in_mission` gated on `kb_kit_on`, and
+  `KB_ROSTER_EXPORTS(id)` once (the HUD's `<id>_roster` and `<id>_pick`). Event handlers with side effects of their
+  own (Leva's OnDamage and OnExplosion, Voymastina's weapon tuning) return when it is off.
+- **Co-op:** each machine picks for its own Helldiver, as before.
