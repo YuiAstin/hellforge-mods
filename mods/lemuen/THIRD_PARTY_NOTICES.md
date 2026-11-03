@@ -13,5 +13,9 @@ found in **HD2Runtime**'s attack catalogue. The settings rows use **Mod Options 
 public API. The HUD uses HD2Runtime's public overlay API, and its skill panel follows the stratagem list through
 **HD2Runtime**'s slot overlay (internal modules).
 
+The markers over her marked enemies: parts adapted from **Chef Shared Loader by Th3chef**
+(https://github.com/Th3chef/Chef-Shared-Loader): finding the view camera, projecting a world point to the screen and the
+behind-the-camera check, used with Th3chef's permission. None of the loader itself is included.
+
 Lemuen is a character of Arknights (Hypergryph / Yostar). This is an unofficial fan mod; no character model or game art
 is included.

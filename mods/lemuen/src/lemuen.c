@@ -50,7 +50,8 @@
 KB_ROSTER_EXPORTS(lemuen)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
-static float s_markRange = 100, s_markCone = 20, s_markSeconds = 6, s_markLast = 30, s_markMult = 1.18f;
+static int s_markMax = 5;   /* 0.1.2: at most this many marked at once; a new mark replaces the oldest (Yui) */
+static float s_markRange = 600, s_markCone = 20, s_markSeconds = 6, s_markLast = 30, s_markMult = 1.18f;
 static int s_markArmour = 3, s_markHealth = 750;
 static float s_modusAfter = 20, s_modusMult = 1.10f;
 static float s_s1Cd = 15, s_s1Mult = 3.1f;
@@ -60,8 +61,8 @@ static float s_s3Cd = 90, s_s3Every = 0.35f, s_s3Height = 120;
 static int s_s3Max = 8, s_s3Shell = 194;
 
 static const KbSetting kSettings[] = {
-    KB_F("mark_range", s_markRange, 10, 500), KB_F("mark_cone", s_markCone, 1, 90), KB_F("mark_seconds", s_markSeconds, 0, 30),
-    KB_F("mark_last", s_markLast, 1, 600), KB_F("mark_mult", s_markMult, 1, 5), KB_I("mark_armour", s_markArmour, 0, 10),
+    KB_F("mark_range", s_markRange, 10, 1000), KB_F("mark_cone", s_markCone, 1, 90), KB_F("mark_seconds", s_markSeconds, 0, 30),
+    KB_F("mark_last", s_markLast, 1, 600), KB_F("mark_mult", s_markMult, 1, 5), KB_I("mark_armour", s_markArmour, 0, 10), KB_I("mark_max", s_markMax, 1, 32),
     KB_I("mark_health", s_markHealth, 0, 100000),
     KB_F("modus_after", s_modusAfter, 0, 600), KB_F("modus_mult", s_modusMult, 1, 3),
     KB_F("s1_cooldown", s_s1Cd, 0, 600), KB_F("s1_mult", s_s1Mult, 1, 20), KB_I("s1_any_gun", s_s1AnyGun, 0, 1),
@@ -82,8 +83,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "key_s1 = %s\nkey_s2 = %s\nkey_s3 = %s\n"
                "; Persecution: an enemy with armour mark_armour+ or mark_health+ health she keeps within mark_cone degrees of her\n"
                "; view (mark_range m) for mark_seconds is marked for mark_last s (renewed while she watches it); marked enemies\n"
-               "; take mark_mult times the damage from her.\n"
-               "mark_range = %g\nmark_cone = %g\nmark_seconds = %g\nmark_last = %g\nmark_mult = %g\nmark_armour = %d\nmark_health = %d\n"
+               "; take mark_mult times the damage from her. At most mark_max are marked at once: a new mark replaces the oldest.\n"
+               "mark_range = %g\nmark_cone = %g\nmark_seconds = %g\nmark_last = %g\nmark_mult = %g\nmark_armour = %d\nmark_health = %d\nmark_max = %d\n"
                "; Modus Extraditio: modus_after s after she lands, her shots deal modus_mult times their damage.\n"
                "modus_after = %g\nmodus_mult = %g\n"
                "; Salve Etiam: cooldown; with a sniper or marksman rifle in hand (any gun: s1_any_gun 1) her shots deal s1_mult\n"
@@ -99,7 +100,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Hellbomb on her if she runs her stamina dry (a T-Doll's price; off for her).\n"
                "hp_mult = 1.1\nstamina_mult = 1\nhellbomb_on_exhaustion = 0\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_markRange, (double)s_markCone, (double)s_markSeconds,
-            (double)s_markLast, (double)s_markMult, s_markArmour, s_markHealth, (double)s_modusAfter, (double)s_modusMult, (double)s_s1Cd,
+            (double)s_markLast, (double)s_markMult, s_markArmour, s_markHealth, s_markMax, (double)s_modusAfter, (double)s_modusMult, (double)s_s1Cd,
             (double)s_s1Mult, s_s1AnyGun, (double)s_s2Cd, (double)s_s2Min, (double)s_s2Max, (double)s_s2Hold, (double)s_s2Cone,
             (double)s_s2Range, (double)s_fpDistance, (double)s_s3Cd, (double)s_s3Every, (double)s_s3Height, s_s3Max, s_s3Shell);
 }
@@ -196,7 +197,7 @@ static float Off(const float cam[3], const float fwd[3], const float p[3], float
 
 /* ---- Persecution: her marks --------------------------------------------------------------------------------------- */
 #define MARKS 64
-typedef struct Mark { uint32_t e; uint64_t res; double seen, last, until; } Mark;
+typedef struct Mark { uint32_t e; uint64_t res; double seen, last, until, made; } Mark;
 static Mark g_marks[MARKS];
 static int Elite(uint32_t e, uint64_t res)
 {
@@ -240,6 +241,17 @@ static void MarkFrame(void)
         {
             if (m->until <= g_now)
             {
+                /* a new mark: past mark_max, the oldest standing mark gives way */
+                Mark* oldest = NULL;
+                int standing = 0;
+                for (int i = 0; i < MARKS; i++)
+                    if (g_marks[i].e && g_marks[i].until > g_now && &g_marks[i] != m)
+                    {
+                        standing++;
+                        if (!oldest || g_marks[i].made < oldest->made) oldest = &g_marks[i];
+                    }
+                if (standing >= s_markMax && oldest) oldest->until = 0;
+                m->made = g_now;
                 g_marksMade++;
                 static unsigned told;
                 if (told++ < 10) Log("Persecution: entity %u (%016llx) marked", e, (unsigned long long)m->res);
@@ -361,6 +373,27 @@ static void ScopeFrame(double dt)
     }
     if (g_s2Target && g_s2Held > 0) { g_s2PrevTarget = g_s2Target; g_s2PrevHeld = g_s2Held; g_s2PrevAt = g_now; }
     g_s2Target = best; g_s2Held = 0; g_s2Off = 0;
+}
+
+/* 0.1.2: her marks for the HUD's markers (lemuen_marks): where each standing mark is, refreshed on the game thread
+ * every frame (TargetPos reads the game's records, not for the HUD's thread) */
+typedef struct { float x, y, z, left; uint32_t heavy; } MarkSpot;
+static MarkSpot g_spots[32];
+static volatile int g_nspots;
+static void SpotsFrame(void)
+{
+    int n = 0;
+    float q[3];
+    for (int i = 0; i < MARKS && n < 32; i++)
+    {
+        Mark* m = &g_marks[i];
+        if (!m->e || m->until <= g_now || !TargetPos(m->e, m->res, q)) continue;
+        g_spots[n].x = q[0]; g_spots[n].y = q[1]; g_spots[n].z = q[2];
+        g_spots[n].left = (float)(m->until - g_now);
+        g_spots[n].heavy = ArmourOf(m->res) >= 4;
+        n++;
+    }
+    g_nspots = n;
 }
 
 /* ---- the skills --------------------------------------------------------------------------------------------------- */
@@ -568,6 +601,20 @@ typedef struct LemuenHud
     char key_label[3][24];
 } LemuenHud;
 static LemuenHud g_hud = {1};
+/* 0.1.2: her standing marks, 5 floats each (x, y, z of the unit's root, seconds left, 1 if heavily armoured): how many */
+HF_MOD_EXPORT int lemuen_marks(unsigned version, float* out, int max)
+{
+    if (version != 1 || !out || max <= 0) return 0;
+    int n = g_nspots;
+    if (!g_inMission || !kb_kit_on) return 0;
+    if (n > max) n = max;
+    for (int i = 0; i < n; i++)
+    {
+        out[i * 5] = g_spots[i].x; out[i * 5 + 1] = g_spots[i].y; out[i * 5 + 2] = g_spots[i].z;
+        out[i * 5 + 3] = g_spots[i].left; out[i * 5 + 4] = (float)g_spots[i].heavy;
+    }
+    return n;
+}
 HF_MOD_EXPORT LemuenHud* lemuen_hud_state(void)
 {
     g_hud.in_mission = (uint32_t)(g_inMission && g_alive && kb_kit_on);
@@ -634,6 +681,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (g_alive)
     {
         MarkFrame();
+        SpotsFrame();
         ReloadFrame();
         ScopeFrame(step);
         ShellFrame();
