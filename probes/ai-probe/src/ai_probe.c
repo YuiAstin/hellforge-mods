@@ -31,7 +31,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.1"
+#define VERSION "0.2.2"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -182,7 +182,7 @@ static int HideIn(uintptr_t pr, uint32_t me)
 }
 
 /* ---- the survey ------------------------------------------------------------------------------------------------------ */
-typedef struct { int enemies, withBehaviour, withPerception, afterHer, seeHer, hidden, kicked; } Tally;
+typedef struct { int enemies, withBehaviour, withPerception, afterHer, seeHer, hidden, kicked, squads; } Tally;
 static Tally Pass(int detail, int hide)
 {
     Tally t = {0};
@@ -211,6 +211,11 @@ static Tally Pass(int detail, int hide)
         if (hide)
         {
             if (pr) t.hidden += HideIn(pr, meId);
+            /* 0.2.2: squad members perceive through their squad's record (perceiver +0x68 another entity, their own
+             * lists empty in 0.2.1's test): blank hers there too */
+            uint32_t perceiver = hb ? U32(b + 0x68) : 0;
+            uintptr_t sq = perceiver && perceiver != id ? Perception(perceiver) : 0;
+            if (sq) { t.hidden += HideIn(sq, meId); t.squads++; }
             static const uint64_t zero = 0;
             if (hb && target == meId && !hf->write(br + 0x98, &zero, 8)) t.kicked++;
         }
@@ -232,7 +237,7 @@ static void Report(const char* what, Tally t)
 {
     Log("%s: %d enemies within 60 m; %d with a behaviour record, %d with a perception record; %d after her, %d see her%s", what,
         t.enemies, t.withBehaviour, t.withPerception, t.afterHer, t.seeHer, "");
-    if (t.hidden || t.kicked) Log("  hide: %d of her perception entries blanked, %d re-picks forced", t.hidden, t.kicked);
+    if (t.hidden || t.kicked) Log("  hide: %d of her perception entries blanked (%d through a squad's record), %d re-picks forced", t.hidden, t.squads, t.kicked);
 }
 
 /* ---- patrols: navigation records (Nav Probe 0.1.1's layout) and set_destination ------------------------------------ */
@@ -367,6 +372,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         if (ms > 20) { g_hideUntil = 0; Log("hiding stopped: a pass took %.0f ms (the game would stall)", ms); }
         g_hideSum.hidden += t.hidden;
         g_hideSum.kicked += t.kicked;
+        g_hideSum.squads += t.squads;
     }
     if (g_now < g_watchUntil && g_now >= g_watchNext)
     {
@@ -374,8 +380,8 @@ static void Tick(HfMod* mod, float dt, void* user)
         Tally t = Pass(0, 0);
         char what[64];
         snprintf(what, sizeof what, "%s t+%.0f s", g_now < g_hideUntil ? "hiding" : "watch", 15 - (g_watchUntil - g_now));
-        t.hidden = g_hideSum.hidden; t.kicked = g_hideSum.kicked;
-        g_hideSum.hidden = g_hideSum.kicked = 0;
+        t.hidden = g_hideSum.hidden; t.kicked = g_hideSum.kicked; t.squads = g_hideSum.squads;
+        g_hideSum.hidden = g_hideSum.kicked = g_hideSum.squads = 0;
         Report(what, t);
     }
     if (g_now < g_traceUntil && g_now >= g_traceNext) { g_traceNext = g_now + 2; Trace(0); }

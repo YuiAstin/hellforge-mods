@@ -222,3 +222,30 @@ It is the best template for a "smart sentry" behaviour in C, with constants at l
 - **SGD is installed** (`sentries=2`, `ping=1`). It writes sense bits, P+0x90 and record+408 every frame for your sentries and dog. A new mod touching the same records will fight it: disable SGD for those sentries or build on top of it.
 - **Most AI state lives on the machine with authority.** Behaviour records replicate only some fields (e.g. P+0x178); the setter makes no network call. Gate writes on solo or host and on authority (handle +0x14 bit 0; HF `Refill` uses `ctx->entity + 0x14 & 1`).
 - **Pin everything with `code_matches`/byte checks.** All addresses are for game.dll 2E2C3B7C… (build 25480438).
+
+## Patrols and hiding, AI Probe 0.2.1 in game (2026-11-03, build 25480438)
+
+**Navigation records** ([game+0x3326418]: entity hash at +0x30, records at +0x50, 0xA8 bytes each). One
+fight, 28 enemies within 60 m, 26 after her; every 2 s each record's float triples measured against her position
+while she moved:
+
+| Offset | What it follows | Reading |
+|---|---|---|
+| +0x1C, +0x54 | the enemy itself (the same distance as its unit) | its own position |
+| +0x60 | her, often 0.0 m, and it moves when she moves | **the destination**, her position when set |
+| +0x28, +0x78 | her, 0.1 to 4 m off | the path's goal on the navmesh (snapped) |
+| +0x6C | her, 0 to 2 m, sometimes 10 m | the next waypoint, or the goal of a sub-path |
+
+After she respawned 120 m away, these fields stayed on her old spot (17 to 27 m from her) until each enemy
+picked her again. So **steering a patrol is a destination write or set_destination**, and the test of
+`set_destination` (game 0x5B36C0, Shift+Alt+F7) is next: +0x60 should move to the point it was sent to.
+
+**Hiding** (Ctrl+F7: her perception entries' sense bits blanked, re-pick time set to 0, four times a second for
+10 s): it did not work. The 25 enemies after her stayed after her the whole time. Each forced re-pick picked her
+again, and "see her" climbed back (0 → 4 → 7) between passes. Two notes for 0.2.2:
+- Squad members' behaviour records name another entity as their perceiver (+0x68: 624 for six enemies of one
+  squad), and their own perception lists are empty: they perceive through the squad's record, which 0.2.1 never
+  blanked. 0.2.2 blanks hers there too.
+- Her sense bits read 0 in almost every entry, even in the enemies after her, so those bits may not be what
+  keeps a target. If 0.2.2 also fails, hiding by perception is a dead end, and a lower detection signature
+  (Lenna's Stealth method) is the route.

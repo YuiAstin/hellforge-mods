@@ -172,6 +172,20 @@ local function sound_step(dt)
     end
 end
 
+-- 0.1.3: Vector3 is a callable table (stingray.Vector3(x, y, z)), not a library function: 0.1.2's call('Vector3', ...)
+-- could never reach it, so the guns spawned with no position and never moved ("moved 0 frames")
+local vec_told = false
+local function vec(x, y, z)
+    local V = E.Vector3
+    local okv, v = pcall(V, x, y, z)
+    if okv and v ~= nil then return v end
+    if type(V) == 'table' and type(rawget(V, 'new')) == 'function' then
+        local okn, w = pcall(V.new, x, y, z)
+        if okn and w ~= nil then return w end
+    end
+    if not vec_told then vec_told = true; log('[Gun Probe] Vector3(x, y, z) failed: ' .. tostring(v)) end
+    return nil
+end
 -- the probe: two guns, 10 s
 local G = {units = {}, until_t = 0, t = 0, moved = 0, model = nil, beat = {0, 0.25}}
 local OFFSETS = {{-0.9, 0.35, 2.2}, {0.9, 0.35, 2.2}}   -- right, up, forward (m) from the camera
@@ -179,8 +193,7 @@ local function place(c, o)
     local x = c.p[1] + c.r[1] * o[1] + c.u[1] * o[2] + c.f[1] * o[3]
     local y = c.p[2] + c.r[2] * o[1] + c.u[2] * o[2] + c.f[2] * o[3]
     local z = c.p[3] + c.r[3] * o[1] + c.u[3] * o[2] + c.f[3] * o[3]
-    local okv, v = call('Vector3', x, y, z)
-    return okv and v or nil
+    return vec(x, y, z)
 end
 local function clear(w)
     for i, u in ipairs(G.units) do
@@ -200,11 +213,17 @@ local function spawn()
     if not G.model then log('[Gun Probe] F6: none of the gun models is loaded (bring a Guard Dog AR-23 or a machine gun)') return end
     for i, o in ipairs(OFFSETS) do
         local pos = place(c, o)
+        if not pos then log('[Gun Probe] F6: no position for gun ' .. i .. ': not spawned') return end
         local oks, unit = call('World.spawn_unit', w, G.model, pos, c.rot)
         log(('[Gun Probe] F6: gun %d %s (%s)'):format(i, oks and unit and 'spawned' or 'NOT spawned', G.model))
-        if oks and unit then G.units[#G.units + 1] = unit end
+        if oks and unit then
+            G.units[#G.units + 1] = unit
+            local okx, at = call('Unit.world_position', unit, 1)
+            local ax, ay, az = xyz(okx and at or nil)
+            log(('[Gun Probe]   at %s (camera at %.1f %.1f %.1f)'):format(ax and ('%.1f %.1f %.1f'):format(ax, ay, az) or 'unknown', c.p[1], c.p[2], c.p[3]))
+        end
     end
-    G.until_t, G.moved = G.t + 10, 0
+    G.until_t, G.moved, G.why = G.t + 10, 0, nil
     G.beat = {0, 0.25}
     local okp, err = pcall(sound_prepare)
     if not okp then log('[Gun Probe] sound: prepare failed: ' .. tostring(err)) end
@@ -228,7 +247,8 @@ local function step(dt)
         local okr = call('Unit.set_local_rotation', u, 1, c.rot)
         all = all and okp and okr
     end
-    if all then G.moved = G.moved + 1 end
+    if all then G.moved = G.moved + 1
+    elseif not G.why then G.why = true; log('[Gun Probe] a frame not moved (position or rotation refused)') end
     for i, u in ipairs(G.units) do
         G.beat[i] = (G.beat[i] or 0) - dt
         if G.beat[i] <= 0 then
