@@ -43,7 +43,10 @@ local function down(vk) return bit.band(u32.gunprobe1_GetAsyncKeyState(vk), 0x80
 -- the engine's globals, as this addon sees them
 local E = {}
 local NAMES = {'World', 'Unit', 'Camera', 'Vector3', 'Quaternion', 'Application'}
-for _, n in ipairs(NAMES) do E[n] = rawget(_G, n) end
+-- 0.1.2: the engine's libraries sit in the global `stingray` table (as HD2Runtime's own modules reach them), not as bare
+-- globals: 0.1.1 found all six nil
+local S = rawget(_G, 'stingray')
+for _, n in ipairs(NAMES) do E[n] = rawget(_G, n) or (type(S) == 'table' and S[n]) or nil end
 local function fn(path)
     local t, k = path:match('^(%w+)%.([%w_]+)$')
     local lib = t and E[t]
@@ -238,6 +241,7 @@ local function step(dt)
     if G.moved == 1 then log('[Gun Probe] guns follow the view (first frame moved)') end
 end
 local function report()
+    log('[Gun Probe] stingray: ' .. type(S))
     for _, n in ipairs(NAMES) do log('[Gun Probe] ' .. n .. ': ' .. type(E[n])) end
     for _, p in ipairs({'Application.main_world', 'Application.can_get', 'World.units', 'World.spawn_unit', 'World.destroy_unit', 'Unit.alive',
         'Unit.num_cameras', 'Unit.camera', 'Unit.set_local_position', 'Unit.set_local_rotation', 'Camera.world_position',
