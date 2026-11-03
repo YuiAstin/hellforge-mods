@@ -34,7 +34,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.1"
+#define VERSION "0.1.2"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -252,6 +252,13 @@ static void MarkFrame(void)
 /* ---- the gun in hand, and her reloads (the HUD's magazine report) ------------------------------------------------- */
 static uint32_t g_heldEntity;
 static uint64_t g_heldRes;
+static uint32_t RoundOf(uint64_t res)
+{
+    HfField proj = HF_FIELD(ProjectileWeapon, projectile);
+    HfLiveValue v;
+    memset(&v, 0, sizeof v);
+    return hf->get_live(self, res, &proj, &v) ? (uint32_t)v.base.number : 0;
+}
 static int Rifle(uint64_t res)
 {
     if (s_s1AnyGun) return 1;
@@ -259,11 +266,25 @@ static int Rifle(uint64_t res)
                                        HF_ENTITY_R2_AMENDMENT, HF_ENTITY_R2124_CONSTITUTION, HF_ENTITY_R40K_HOTSHOT_MARKSMAN_RIFLE,
                                        HF_ENTITY_PLAS39_ACCELERATOR_RIFLE, HF_ENTITY_RS422_RAILGUN};
     for (unsigned i = 0; i < sizeof kRifles / sizeof kRifles[0]; i++) if (res == kRifles[i]) return 1;
-    /* the APW-1 Anti-Materiel Rifle (a support weapon): known by its round */
-    HfField proj = HF_FIELD(ProjectileWeapon, projectile);
-    HfLiveValue v;
-    memset(&v, 0, sizeof v);
-    return hf->get_live(self, res, &proj, &v) && (uint32_t)v.base.number == HF_PROJECTILE_APW1_ANTIMATERIEL_RIFLE;
+    /* 0.1.2: by its round as well, so a mod's copy of a sniper (a new resource, the same round) counts too: 0.1.1's test
+     * refused S1 five times with a rifle the list did not name. The APW-1 (a support weapon) is known this way too */
+    uint32_t r = RoundOf(res);
+    if (!r) return 0;
+    if (r == HF_PROJECTILE_APW1_ANTIMATERIEL_RIFLE) return 1;
+    static uint32_t rounds[16];
+    static int nrounds = -1;
+    if (nrounds < 0)
+    {
+        nrounds = 0;
+        for (unsigned i = 0; i < sizeof kRifles / sizeof kRifles[0] && nrounds < 16; i++)
+        {
+            uint32_t k = RoundOf(kRifles[i]);
+            if (k) rounds[nrounds++] = k;
+        }
+        if (!nrounds) nrounds = -1;   /* the records are not readable yet: ask again next time */
+    }
+    for (int i = 0; i < nrounds; i++) if (rounds[i] == r) return 1;
+    return 0;
 }
 static atomic_uint g_ammoEntity;
 static atomic_int g_ammoRounds = -1;
@@ -299,6 +320,11 @@ static void ReloadFrame(void)
 /* ---- Honesta Missio: the target in her scope --------------------------------------------------------------------- */
 static uint32_t g_s2Target;
 static double g_s2Held, g_s2Lost;
+/* 0.1.2: the last lock, kept 1.5 s after the scope leaves it: a long shot lands after the recoil has kicked the
+ * scope off its target, and 0.1.1 then found no held target when the hit came (Yui: the boost dropped on the last
+ * target without a swap or a reload). Also the scope drifting off for a moment no longer starts the hold anew */
+static uint32_t g_s2PrevTarget;
+static double g_s2PrevHeld, g_s2PrevAt, g_s2Off;
 static double S2Mult(void)
 {
     double t = g_s2Held / (s_s2Hold > 0.01f ? s_s2Hold : 0.01f);
@@ -326,15 +352,28 @@ static void ScopeFrame(double dt)
         float o = Off(cam, fwd, q, &d);
         if (o < bestOff && d <= s_s2Range) { bestOff = o; best = e; }
     }
-    if (best != g_s2Target) { g_s2Target = best; g_s2Held = 0; }
-    else if (best) g_s2Held += dt;
+    if (best == g_s2Target) { if (best) { g_s2Held += dt; g_s2Off = 0; } return; }
+    if (!best && g_s2Target)
+    {
+        /* nobody in the cone: keep the lock for a moment (sway, recoil) */
+        if (!g_s2Off) g_s2Off = g_now;
+        if (g_now - g_s2Off < 0.4) return;
+    }
+    if (g_s2Target && g_s2Held > 0) { g_s2PrevTarget = g_s2Target; g_s2PrevHeld = g_s2Held; g_s2PrevAt = g_now; }
+    g_s2Target = best; g_s2Held = 0; g_s2Off = 0;
 }
 
 /* ---- the skills --------------------------------------------------------------------------------------------------- */
 static void SalveEtiam(void)
 {
     if (g_now < g_cd[0] || g_s1On) return;
-    if (!g_heldRes || !Rifle(g_heldRes)) { static unsigned told; if (told++ < 5) Log("Salve Etiam: needs a sniper or marksman rifle in hand"); return; }
+    if (!g_heldRes || !Rifle(g_heldRes))
+    {
+        static unsigned told;
+        if (told++ < 5) Log("Salve Etiam: needs a sniper or marksman rifle in hand (this one: %016llx, round %u; s1_any_gun = 1 allows any)",
+                            (unsigned long long)g_heldRes, g_heldRes ? RoundOf(g_heldRes) : 0);
+        return;
+    }
     g_cd[0] = g_now + s_s1Cd;
     g_s1On = 1;
     g_casts[0]++;
@@ -411,6 +450,12 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     if (IsShot(d))
     {
         if (g_s1On) { mult *= xS1 = s_s1Mult; g_empowered++; }                           /* Salve Etiam */
+        if (g_s2On && d->target && d->target == g_s2PrevTarget && g_now - g_s2PrevAt < 1.5 && g_s2PrevHeld > 0 &&
+            !(d->target == g_s2Target && g_s2Held > 0))
+        {
+            /* the lock it just left (see g_s2PrevTarget) */
+            g_s2Target = g_s2PrevTarget; g_s2Held = g_s2PrevHeld; g_s2PrevTarget = 0;
+        }
         if (g_s2On && g_s2Target && d->target == g_s2Target && g_s2Held > 0)             /* Honesta Missio */
         {
             double x = S2Mult();
