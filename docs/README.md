@@ -14,5 +14,6 @@ The research notes were written while working, so their file paths point at a sc
 
 ## Design
 
+- [kit-base.md](kit-base.md): the shared kit base: what the four GFL2 kits have in common, the layers, and the extraction steps.
 - [leva-design.md](leva-design.md): Leva's original kit plan.
 - [leva-future.md](leva-future.md): ideas parked for later (a Lenna + Leva duo arc, a Wise Support rework).

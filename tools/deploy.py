@@ -10,6 +10,8 @@ one, so deploy refuses while the game is running.
 """
 import argparse, os, shutil, subprocess, sys
 
+import kitbase_sync
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP_DIRS = {'__pycache__', 'build', '.vs', '.idea'}
 
@@ -50,6 +52,8 @@ def main():
     if game_running():
         sys.exit('the game is running: close it first (HellForge would switch the mods off)')
     mods = a.mods or sorted(os.listdir(os.path.join(ROOT, 'mods')))
+    if not kitbase_sync.check([m for m in mods if m in kitbase_sync.kits()]):
+        sys.exit('a kit carries a stale kitbase copy: run tools/kitbase_sync.py first')
     for m in mods:
         deploy(m, target)
 

@@ -24,6 +24,8 @@ Do this with the game closed: adding or changing files in `mods/` mid-session sw
 
 1. Move the mod's real source out of `mods/`, e.g. `HellForge/mods/<leva>/src/leva.c` → `Z:\HD2HF\dev\leva\leva.c`.
    HellForge builds **every** `.c` under `src/`, so nothing but the socket may stay there.
+   A kit built on the kit base (docs/kit-base.md) takes its `src/kitbase/` folder along: the plug includes
+   `kitbase/kb_core.h` relative to its own `.c`.
 2. Put into `HellForge/mods/<leva>/src/`:
    - `socket.c` (any name works; e.g. `leva.c`),
    - `hotreload_plug.h`,

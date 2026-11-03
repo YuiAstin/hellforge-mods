@@ -39,20 +39,11 @@
 
 #define VERSION "0.2.10"
 #define BUILD "25480438"
-#define AVATAR UINT64_C(0x4D1C334D294DFA97)
-#define NODE_HEAD 90u
-#define NODE_HEAD_AIM 91u
 
-static const HfApi* hf;
-static HfMod* self;
-static uintptr_t game, exe;
+#include "kitbase/kb_core.h"
+#include "kitbase/kb_player.h"
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
-/* A key and the modifiers that must be held with it (exactly: Q alone and Shift+Q are different keys) */
-#define KM_SHIFT 1
-#define KM_CTRL 2
-#define KM_ALT 4
-typedef struct Key { int vk, mods; char label[24]; } Key;
 static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
 static int s_ciMax = 6, s_weHits = 0, s_hsPulses = 3, s_hsCiCap = 3;
 static float s_weCd = 8, s_weWindow = 5, s_arcStep = 0.35f, s_weMult = 2.4f, s_weMultEnh = 3.0f;
@@ -95,65 +86,6 @@ static void Setting(const char* key, double v)
 #undef F
 #undef I
 #undef CL
-}
-
-/* "Shift+Q", "Ctrl+Alt+F", "F5", "Mouse4", "5", or a Windows virtual-key code ("#81") */
-static int ParseKey(const char* text, Key* out)
-{
-    Key k = {0, 0, ""};
-    char buf[64];
-    snprintf(buf, sizeof buf, "%s", text);
-    for (char* tok = strtok(buf, "+ \t\r\n"); tok; tok = strtok(NULL, "+ \t\r\n"))
-    {
-        char t[24];
-        size_t n = 0;
-        for (; tok[n] && n < sizeof t - 1; n++) t[n] = (char)toupper((unsigned char)tok[n]);
-        t[n] = 0;
-        if (!strcmp(t, "SHIFT")) k.mods |= KM_SHIFT;
-        else if (!strcmp(t, "CTRL") || !strcmp(t, "CONTROL")) k.mods |= KM_CTRL;
-        else if (!strcmp(t, "ALT")) k.mods |= KM_ALT;
-        else if (k.vk) return 0;  /* two main keys */
-        else if (n == 1 && ((t[0] >= 'A' && t[0] <= 'Z') || (t[0] >= '0' && t[0] <= '9'))) k.vk = t[0];
-        else if (t[0] == 'F' && n <= 3 && atoi(t + 1) >= 1 && atoi(t + 1) <= 24) k.vk = VK_F1 + atoi(t + 1) - 1;
-        else if (!strcmp(t, "MOUSE4")) k.vk = VK_XBUTTON1;
-        else if (!strcmp(t, "MOUSE5")) k.vk = VK_XBUTTON2;
-        else if (!strcmp(t, "MOUSE3") || !strcmp(t, "MIDDLEMOUSE")) k.vk = VK_MBUTTON;
-        else if (t[0] == '#' && atoi(t + 1) > 0 && atoi(t + 1) < 255) k.vk = atoi(t + 1);
-        else if (n >= 2 && strspn(t, "0123456789") == n && atoi(t) > 0 && atoi(t) < 255) k.vk = atoi(t);  /* 0.1.0's codes */
-        else return 0;
-    }
-    if (!k.vk)  /* a modifier alone is a key of its own: Ctrl, Alt or Shift */
-    {
-        if (k.mods == KM_SHIFT) k.vk = VK_SHIFT;
-        else if (k.mods == KM_CTRL) k.vk = VK_CONTROL;
-        else if (k.mods == KM_ALT) k.vk = VK_MENU;
-        else return 0;
-        k.mods = 0;
-    }
-    char name[24];
-    if ((k.vk >= 'A' && k.vk <= 'Z') || (k.vk >= '0' && k.vk <= '9')) snprintf(name, sizeof name, "%c", k.vk);
-    else if (k.vk >= VK_F1 && k.vk <= VK_F24) snprintf(name, sizeof name, "F%d", k.vk - VK_F1 + 1);
-    else if (k.vk == VK_XBUTTON1) snprintf(name, sizeof name, "M4");
-    else if (k.vk == VK_XBUTTON2) snprintf(name, sizeof name, "M5");
-    else if (k.vk == VK_MBUTTON) snprintf(name, sizeof name, "M3");
-    else if (k.vk == VK_SHIFT) snprintf(name, sizeof name, "Shift");
-    else if (k.vk == VK_CONTROL) snprintf(name, sizeof name, "Ctrl");
-    else if (k.vk == VK_MENU) snprintf(name, sizeof name, "Alt");
-    else snprintf(name, sizeof name, "#%d", k.vk);
-    snprintf(k.label, sizeof k.label, "%s%s%s%s", k.mods & KM_CTRL ? "Ctrl+" : "", k.mods & KM_ALT ? "Alt+" : "",
-        k.mods & KM_SHIFT ? "Shift+" : "", name);
-    *out = k;
-    return 1;
-}
-
-/* The settings file, opened by its UTF-8 path as Windows reads it (plain fopen reads the path in the ANSI code page, so a
- * folder with a non-English letter in it fails). HellForge holds mod folders read-only while the game runs, so the mod
- * never writes it: the release ships it with the defaults (made from the text below by inigen/gen.py). */
-static FILE* OpenUtf8(const char* path, const wchar_t* mode)
-{
-    wchar_t w[MAX_PATH * 2];
-    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, w, MAX_PATH * 2)) return NULL;
-    return _wfopen(w, mode);
 }
 
 static void LoadSettings(void)
@@ -233,77 +165,6 @@ static void LoadSettings(void)
 }
 
 /* ---- the clock, the player ------------------------------------------------------------------------------------ */
-static double g_now;
-static atomic_uint g_avatar;      /* her Helldiver's entity (0: none) */
-static uint32_t g_avatarNet;      /* its network id */
-static int g_alive, g_inMission;
-static uint32_t g_weapon[4];      /* the held weapons by selection (1 primary, 2 secondary, 3 support): entities */
-static uint64_t g_weaponRes[4];
-
-static uint32_t Word(const uint8_t* p) { uint32_t v; memcpy(&v, p, 4); return v; }
-static uint64_t Quad(const uint8_t* p) { uint64_t v; memcpy(&v, p, 8); return v; }
-static int AddressOk(uintptr_t a, size_t n) { return n && a >= 0x10000 && a < UINT64_C(0x800000000000) && n <= UINT64_C(0x800000000000) - a; }
-static int ReadAt(uintptr_t a, void* out, size_t n) { return AddressOk(a, n) && hf->read(a, out, n) == 0; }
-static uintptr_t Pointer(uintptr_t a) { uintptr_t v = 0; return ReadAt(a, &v, 8) && AddressOk(v, 1) ? v : 0; }
-static int Lookup(uintptr_t at, uint32_t key, uint32_t limit, uint32_t* index)
-{
-    uint8_t h[20], row[8];
-    if (!ReadAt(at, h, sizeof h)) return 0;
-    uintptr_t entries = (uintptr_t)Quad(h);
-    uint32_t n = Word(h + 8), empty = Word(h + 12), mult = Word(h + 16);
-    if (!AddressOk(entries, 8) || !n || n > limit || (n & (n - 1)) || key == empty) return 0;
-    for (unsigned i = 0; i < n && i < 128; i++)
-    {
-        if (!ReadAt(entries + 8u * ((key * mult + i) & (n - 1)), row, 8)) return 0;
-        if (Word(row) == key) { *index = Word(row + 4); return *index != UINT32_MAX; }
-        if (Word(row) == empty) return 0;
-    }
-    return 0;
-}
-/* An entity's descriptor: its resource (+0), entity (+8), unit (+12), flags (+20, bit 0: this machine's authority) */
-static int Descriptor(uint32_t entity, uint8_t out[24])
-{
-    if (!game || !entity || entity == UINT32_MAX || entity == 0x7FFF) return 0;
-    uintptr_t root = Pointer(game + 0x346BF98);
-    uint32_t index;
-    if (!root || !Lookup(root + 0xF1AEB0, entity, 1048576, &index) || index >= 262144) return 0;
-    return ReadAt(root + 0xF32F18 + 24u * index, out, 24) && Word(out + 8) == entity;
-}
-/* A node's world position in a unit's scene graph (64-byte matrices, translation at +0x30) */
-static int UnitNode(uint32_t unit, uint32_t node, float out[3])
-{
-    if (!exe) return 0;
-    uintptr_t registry = Pointer(exe + 0x1A100F0), generations, objects, object, nodes;
-    uint32_t count, id, slot = unit & 0x3FFFFF;
-    uint8_t generation;
-    if (!registry || !ReadAt(registry + 0x98, &count, 4) || count > 0x400000 || slot >= count ||
-        !(generations = Pointer(registry + 0xA0)) || !ReadAt(generations + slot, &generation, 1) || generation != (uint8_t)(unit >> 22) ||
-        !(objects = Pointer(registry + 0x88)) || !(object = Pointer(objects + 8u * slot)) || !ReadAt(object + 8, &id, 4) || id != unit ||
-        !ReadAt(object + 0x70, &count, 4) || node >= count || count > 4096 || !(nodes = Pointer(object + 0x88)))
-        return 0;
-    if (!ReadAt(nodes + 64u * node + 48, out, 12)) return 0;
-    for (int i = 0; i < 3; i++) if (!isfinite(out[i]) || fabsf(out[i]) > 100000) return 0;
-    return 1;
-}
-static int PlayerPose(float pos[3], float aim[3])
-{
-    uint8_t id[24];
-    uint32_t avatar = atomic_load(&g_avatar);
-    if (!Descriptor(avatar, id) || Quad(id) != AVATAR) return 0;
-    uint32_t unit = Word(id + 12);
-    if (!UnitNode(unit, 0, pos)) return 0;
-    if (aim)
-    {
-        float head[3], ahead[3];
-        if (!UnitNode(unit, NODE_HEAD, head) || !UnitNode(unit, NODE_HEAD_AIM, ahead)) return 0;
-        float d[3] = {ahead[0] - head[0], ahead[1] - head[1], ahead[2] - head[2]};
-        float n = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-        if (!(n > 0.1f)) return 0;
-        for (int i = 0; i < 3; i++) aim[i] = d[i] / n;
-    }
-    return 1;
-}
-static float Dist2(const float* a, const float* b) { float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2]; return x * x + y * y + z * z; }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
 static int g_ci;
@@ -343,27 +204,6 @@ typedef struct Mark { uint32_t entity; double until, stunnedAt; } Mark;
 static Mark g_marks[64];
 /* counts for the log */
 static unsigned g_casts[3], g_marked, g_stuns, g_boosted, g_selfSpared, g_knockdowns;
-
-static void Log(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-static void Log(const char* fmt, ...)
-{
-    char buf[512];
-    va_list a;
-    va_start(a, fmt);
-    vsnprintf(buf, sizeof buf, fmt, a);
-    va_end(a);
-    hf->log(self, "%s", buf);
-}
-
-/* An action's answer: done, requested or queued count as done; the log says why one was not */
-static int Act(const char* what, int r)
-{
-    if (r == HF_ACT_DONE || r == HF_ACT_REQUESTED || r == HF_ACT_QUEUED) return 1;
-    static unsigned noted;
-    if (noted++ < 20)
-        Log("%s: %s (%s)", what, r == HF_ACT_WAITING ? "waiting for its packages" : "refused", hf->last_log ? hf->last_log(self) : "");
-    return 0;
-}
 
 static Mark* MarkOf(uint32_t entity)
 {
@@ -488,14 +328,6 @@ typedef uint32_t (*RayFn)(uint32_t, const void*, const void*, float, uint32_t, u
 static SetVecFn g_setPosition, g_setVelocity;
 static WorldFn g_worldId;
 static RayFn g_raycast;
-static int QueryIdle(void)
-{
-    uintptr_t scheduler = Pointer(game + 0x347D7E0);
-    uint32_t count, jobs[72];
-    if (!scheduler || !ReadAt(scheduler, &count, 4) || count || !ReadAt(scheduler + 0x40008, jobs, sizeof jobs)) return 0;
-    for (unsigned i = 0; i < 24; i++) if (jobs[3 * i + 2] != 1) return 0;
-    return 1;
-}
 /* The nearest static obstruction along a ray (static actors only, so enemies are not walls): its distance, len + 1
  * when clear, or -1 when the query cannot be made */
 static float RayWith(uint32_t unit, const float from[3], const float dir[3], float len, uint32_t filter, uint32_t flags, unsigned* count);
@@ -1109,31 +941,6 @@ static void HuntingStrategy(void)
 }
 
 /* ---- events ------------------------------------------------------------------------------------------------------ */
-/* Her own hits. The game's hit code (hooked) names the entity that dealt or owns each hit: one owned or dealt by her
- * Helldiver is hers (the hook records its target). Damage events name network ids instead: her Helldiver's is learned
- * from the first such hit (its spawn carries none), then matched directly. */
-static atomic_uint g_hookTarget;
-static _Atomic unsigned long long g_hookMs;
-static float g_hookPos[3];
-static unsigned g_hitNotes;
-static int NetOk(uint32_t n) { return n && n != 0x7FFF && n != UINT32_MAX; }
-static int MineHit(const HfDamageEvent* d)
-{
-    int match = NetOk(g_avatarNet) && (d->dealer == g_avatarNet || (d->owner == g_avatarNet && !NetOk(d->dealer)));   /* not a sentry's or a dog's: theirs name their own dealer */
-    int hooked = d->target && d->target == atomic_load(&g_hookTarget) && GetTickCount64() - atomic_load(&g_hookMs) <= 250;
-    if (hooked && !NetOk(g_avatarNet) && NetOk(d->owner))
-    {
-        g_avatarNet = d->owner;
-        Log("her hits: owned by network %u (dealer %u), learned from the game's hit code", d->owner, d->dealer);
-    }
-    if (d->creditor && g_hitNotes < 6 && (d->kind == 0 || d->kind == 1 || d->kind == 3))
-    {
-        g_hitNotes++;
-        Log("credited hit: kind %u, dealer %u, owner %u (hers: network %u%s): %s", d->kind, d->dealer, d->owner, g_avatarNet,
-            hooked ? ", the hook saw it" : "", match || hooked ? "hers" : "not hers");
-    }
-    return match || hooked;
-}
 static int NearPulseR(const float at[3], double within, float radius)
 {
     for (int i = 0; i < 12; i++)
@@ -1224,19 +1031,6 @@ static void OnKill(HfMod* mod, const HfEventInfo* info, void* user)
     if (k->victim == g_chargeTarget) g_chargeHits = 0;
 }
 
-/* Helldivers this machine spawned: entity -> network id (the spawn may come before the player event) */
-static uint32_t g_spawnEntity[8], g_spawnNet[8];
-static unsigned g_spawnNext;
-static void LearnNet(void)
-{
-    uint32_t me = atomic_load(&g_avatar);
-    for (int i = 0; i < 8; i++)
-        if (g_spawnEntity[i] && g_spawnEntity[i] == me && NetOk(g_spawnNet[i]) && g_spawnNet[i] != g_avatarNet)
-        {
-            g_avatarNet = g_spawnNet[i];
-            Log("her Helldiver: entity %u, network %u", me, g_avatarNet);
-        }
-}
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
@@ -1259,13 +1053,6 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
         LearnNet();
     }
     else g_alive = 0;
-}
-
-static void OnWeapon(HfMod* mod, const HfEventInfo* info, void* user)
-{
-    const HfWeaponEvent* w = (const HfWeaponEvent*)info;
-    if (w->avatar && w->avatar != atomic_load(&g_avatar)) { atomic_store(&g_avatar, w->avatar); g_avatarNet = 0; g_alive = 1; LearnNet(); }
-    if (w->selection >= 1 && w->selection <= 3 && w->entity) { g_weapon[w->selection] = w->entity; g_weaponRes[w->selection] = w->resource; }
 }
 
 /* ---- her body: more health and stamina, and the price of running dry --------------------------------------------- */
@@ -1291,36 +1078,6 @@ static void Body(int on)
     g_bodyOn = 1;
 }
 
-/* Her stamina, live (0 empty .. 1 full): the action manager [game.dll+0x3326D20] holds it per Helldiver at +0x547854,
- * 0x78 apart (game.dll+0xA50E2D: movss [rcx+r10+0x547854], xmm1, rcx = index x 0x78; found with Cheat Engine), by the
- * same index as the action records at +0x53E170 (HellForge's resupply: its avatar map at +0xF8). */
-static int g_staminaOk;
-static int HashFind(uintptr_t header, uint32_t key, uint32_t* value)
-{
-    uint8_t h[20];
-    if (!key || !ReadAt(header, h, sizeof h)) return 0;
-    uintptr_t buckets = (uintptr_t)Quad(h);
-    uint32_t cap = Word(h + 8), empty = Word(h + 12), mult = Word(h + 16);
-    if (!AddressOk(buckets, 8) || !cap || cap > 1048576) return 0;
-    for (uint32_t i = 0; i < cap && i < 4096; i++)
-    {
-        uint32_t row[2];
-        if (!ReadAt(buckets + 8u * ((key * mult + i) % cap), row, 8)) return 0;
-        if (row[0] == key) { *value = row[1]; return row[1] != UINT32_MAX; }
-        if (row[0] == empty) return 0;
-    }
-    return 0;
-}
-static float StaminaNow(void)
-{
-    uint32_t me = atomic_load(&g_avatar), ai, named;
-    uintptr_t actions = Pointer(game + 0x3326D20), d;
-    if (!g_staminaOk || !actions || !HashFind(actions + 0xF8, me, &ai) || ai >= 64 || !(d = Pointer(actions + 0x110 + 8u * ai)) ||
-        !ReadAt(d + 8, &named, 4) || named != me) return -1;
-    float v;
-    if (!ReadAt(actions + 0x547854 + (uintptr_t)ai * 0x78, &v, 4) || !isfinite(v) || v < -0.01f || v > 1.01f) return -1;
-    return v;
-}
 /* One Hellbomb per run-out: armed while her bar is above a fifth, fired when it reaches 0 (the bar then sits at 0
  * through the recovery delay, which must not fire it again), and spawned once its packages are in. */
 static double g_boomPending;
@@ -1386,9 +1143,7 @@ static void Reset(const char* why)
 }
 
 /* ---- the knockdown window: hooks on the game's hit code (as Primed Sure Footed) -------------------------------------- */
-#define HIT_SIZE 0x118u
 #define RESULT_SIZE 0x24u
-static atomic_int g_hooked;
 static _Atomic unsigned g_kdStopped;
 static _Atomic unsigned g_ownStopped;
 /* A hit on her: one of her own blasts (an explosion from within 14 m of one she set off in the last 1.2 s) does
@@ -1422,20 +1177,6 @@ static void Steady(const void* hit, void* result)
     if (!ReadAt((uintptr_t)result, r, sizeof r) || !r[0x1E]) return;
     ((uint8_t*)result)[0x1E] = 0;
     atomic_fetch_add(&g_kdStopped, 1);
-}
-/* Every hit she deals: its target and where it struck (hit +0x20 target, +0x34 point, +0x80 dealer, +0x100 owner) */
-static int Mine(uint32_t dealer);
-static void Observe(const void* hit)
-{
-    uint32_t me = atomic_load(&g_avatar);
-    if (!atomic_load(&g_hooked) || !hit || !me) return;
-    uint8_t h[HIT_SIZE];
-    if (!ReadAt((uintptr_t)hit, h, sizeof h)) return;
-    uint32_t target = Word(h + 0x20), dealer = Word(h + 0x80), owner = Word(h + 0x100);
-    if (target == me || !target || !(dealer == me || (owner == me && (!dealer || Mine(dealer))))) return;   /* dealt by her or her weapon: a sentry's or a dog's hits are dealt by it */
-    memcpy(g_hookPos, h + 0x34, sizeof g_hookPos);
-    atomic_store(&g_hookTarget, target);
-    atomic_store(&g_hookMs, GetTickCount64());
 }
 typedef uintptr_t (*CalculateFn)(uintptr_t, void*, const void*);
 typedef void (*BlastFn)(uintptr_t, void*, const void*);
@@ -1512,7 +1253,6 @@ typedef struct LennaHud
     uint32_t hellbomb;                   /* version 3: 1 when running dry sets off the Hellbomb */
 } LennaHud;
 static LennaHud g_hud = {3};
-static float StaminaNow(void);
 HF_MOD_EXPORT LennaHud* lenna_hud_state(void)
 {
     g_hud.in_mission = (uint32_t)(g_inMission && g_alive);
@@ -1540,13 +1280,6 @@ HF_MOD_EXPORT LennaHud* lenna_hud_state(void)
 }
 
 /* ---- the frame ------------------------------------------------------------------------------------------------- */
-static int Focused(void)
-{
-    HWND w = GetForegroundWindow();
-    DWORD pid = 0;
-    if (w) GetWindowThreadProcessId(w, &pid);
-    return pid == GetCurrentProcessId();
-}
 
 /* ---- in-game key bindings: the HUD registers her three skills with Mod Bindings Menu (Vanilla Plus Megapack: the MODS
  * tab of the binding pages) and passes each press here (and a heartbeat twice a second); the .ini's keys keep working */
@@ -1566,49 +1299,6 @@ HF_MOD_EXPORT int lenna_key(unsigned version, int skill, int* vk, int* mods)
     *vk = s_keys[skill - 1].vk;
     *mods = s_keys[skill - 1].mods;
     return 1;
-}
-/* Her own items (primary, secondary, support weapon, backpack: the inventory manager game+53634872, HD2Runtime's
- * research: hash +40, descriptors +64, 48-byte records at +80), read twice a second on the game thread: a hit owned by her
- * and dealt by one of them is hers (a laser's hits name the rifle as their dealer), a sentry's or a dog's is not */
-static atomic_uint g_myItems[4];
-static double g_myItemsAt = -100;
-static void MyItems(void)
-{
-    if (g_now - g_myItemsAt < 0.5) return;
-    g_myItemsAt = g_now;
-    uint32_t me = atomic_load(&g_avatar), i;
-    uintptr_t m = Pointer(game + 53634872u), arr, d, recs;
-    uint8_t desc[24], rec[48];
-    if (!me || !m || !Lookup(m + 40, me, 1048576, &i) || i >= 0x10000 || !(arr = Pointer(m + 64)) || !(d = Pointer(arr + 8u * i)) ||
-        !ReadAt(d, desc, 24) || Word(desc + 8) != me || !(recs = Pointer(m + 80)) || !ReadAt(recs + 48u * i, rec, 48))
-        return;
-    for (int k = 0; k < 4; k++) atomic_store(&g_myItems[k], Word(rec + 4u * k));
-}
-static int MyItem(uint32_t e)
-{
-    for (int k = 0; k < 4; k++) if (e && atomic_load(&g_myItems[k]) == e) return 1;
-    return 0;
-}
-/* Who holds an item: the Wieldable component (game+53634864, HD2Runtime's attribution research: hash +24, u32 wielders at
- * +56). Her rifle is held by her; a sentry or a turret holds itself, so its hits are its own. 1 with *by, 0 unreadable */
-static int WielderOf(uint32_t e, uint32_t* by)
-{
-    uintptr_t m = Pointer(game + 53634864u), arr;
-    uint32_t i;
-    if (!e || !m || !Lookup(m + 24, e, 1048576, &i) || i >= 0x10000 || !(arr = Pointer(m + 56))) return 0;
-    return ReadAt(arr + 4u * i, by, 4) && *by;
-}
-/* A hit owned by her and dealt by `dealer`: hers when the game says she holds the dealer (first), else when it is one of her
- * own items (her inventory: a backpack's or support weapon's gear the wielder record does not name) */
-static int Mine(uint32_t dealer)
-{
-    uint32_t me = atomic_load(&g_avatar), by = 0;
-    int held = WielderOf(dealer, &by), mine = held && by == me ? 1 : held && by != dealer && MyItem(by) ? 1 : !held && MyItem(dealer);
-    static atomic_uint told;
-    if (atomic_fetch_add(&told, 1) < 8)
-        Log("a hit dealt by entity %u: %s%s", dealer, held ? (by == dealer ? "it holds itself" : by == me ? "held by her" : "held by another") : "no holder known",
-            mine ? ": hers" : ": not hers");
-    return mine;
 }
 static void Tick(HfMod* mod, float dt, void* user)
 {
