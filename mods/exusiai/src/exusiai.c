@@ -34,7 +34,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -331,10 +331,18 @@ static void CloseBurst(void)
     g_groupShots = 0;
     g_groupFree = 0;
 }
+/* rounds HellForge cannot spawn (its catalogue has no packages for them: the 1300 rpm SMG's projectile 61, 0.1.0's test):
+ * the free rounds use the guns' round instead */
+static uint32_t g_noSpawn[8];
+static int NoSpawn(uint32_t type)
+{
+    for (int k = 0; k < 8; k++) if (g_noSpawn[k] == type) return 1;
+    return 0;
+}
 static void StartFree(const GunInfo* gi)
 {
     if (!gi || !gi->projectile || s_chFree <= 0) { Log("Charging Mode: charged, but the gun in hand has no rounds to copy"); return; }
-    g_freeProjectile = gi->projectile;
+    g_freeProjectile = NoSpawn(gi->projectile) ? (uint32_t)s_gunRound : gi->projectile;
     g_freeBurstSize = gi->burst;
     g_freeStep = 60.0f / (gi->rpm > 60 ? gi->rpm : 600);
     g_freeLeft = s_chFree * (int)gi->burst;
@@ -380,6 +388,14 @@ static void BurstFrame(void)
         for (int k = 0; k < 3; k++) dir[k] /= n;
         int r = hf->spawn_projectile(self, g_freeProjectile, from, dir);
         if (r == HF_ACT_WAITING) { g_freeNext = g_now + 0.05; break; }
+        if (!r && g_freeProjectile != (uint32_t)s_gunRound)
+        {
+            static int n;
+            if (n < 8) g_noSpawn[n++] = g_freeProjectile;
+            Log("Charging Mode: projectile %u cannot be spawned here; free rounds use projectile %d (gun_round) instead", g_freeProjectile, s_gunRound);
+            g_freeProjectile = (uint32_t)s_gunRound;
+            continue;
+        }
         Act("a free burst's round", r);
         g_freeLeft--;
         if (++g_freeInBurst >= (int)g_freeBurstSize) { g_freeInBurst = 0; g_freeNext = g_now + 0.18; }
