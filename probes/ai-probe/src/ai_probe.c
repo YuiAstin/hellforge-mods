@@ -31,7 +31,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -104,7 +104,18 @@ static const char* Who(uint32_t target, uint32_t me)
 #define SEEN 2048
 static uint32_t g_seenEnt[SEEN];
 static uint64_t g_seenRes[SEEN];
+static uint8_t g_seenKind[SEEN];   /* 0 not checked yet, 1 an enemy, 2 not one or gone */
 static unsigned g_nseen;
+/* 0.2.1: an enemy among the spawns seen, its entity and position. 0.2.0 asked the component tables (four string lookups)
+ * about every one of up to 2048 spawns on each pass, and Ctrl+F7 ran a pass every frame: seconds a frame (the freeze).
+ * Now each spawn is asked once, and one that has gone is dropped. */
+static int SeenEnemy(unsigned i, Ent* e, float p[3])
+{
+    if (g_seenKind[i] == 2) return 0;
+    if (!Resolve(g_seenEnt[i], e) || e->resource != g_seenRes[i]) { g_seenKind[i] = 2; return 0; }
+    if (!g_seenKind[i]) g_seenKind[i] = Hostile(g_seenRes[i]) ? 1 : 2;
+    return g_seenKind[i] == 1 && RootOf(e->unit, p);
+}
 
 /* ---- the two records ------------------------------------------------------------------------------------------------- */
 static uintptr_t Behaviour(uint32_t e)
@@ -184,7 +195,7 @@ static Tally Pass(int detail, int hide)
     for (unsigned i = 0; i < n; i++)
     {
         uint32_t id = g_seenEnt[i];
-        if (!Hostile(g_seenRes[i]) || !Resolve(id, &e) || !RootOf(e.unit, p)) continue;
+        if (!SeenEnemy(i, &e, p)) continue;
         float d = sqrtf((p[0] - mp[0]) * (p[0] - mp[0]) + (p[1] - mp[1]) * (p[1] - mp[1]));
         if (d > 60) continue;
         t.enemies++;
@@ -258,7 +269,7 @@ static void Trace(int redirect)
     for (unsigned i = 0; i < n && told < 12; i++)
     {
         uint32_t id = g_seenEnt[i], k;
-        if (!Hostile(g_seenRes[i]) || !Resolve(id, &e) || !RootOf(e.unit, p) || !NavIndex(id, &k)) continue;
+        if (!SeenEnemy(i, &e, p) || !NavIndex(id, &k)) continue;
         float d = sqrtf((p[0] - mp[0]) * (p[0] - mp[0]) + (p[1] - mp[1]) * (p[1] - mp[1]));
         if (d > 150) continue;
         uintptr_t rec = NavRecord(k);
@@ -311,7 +322,8 @@ static int Bind(void)
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* e = (const HfSpawnEvent*)info;
-    g_seenEnt[g_nseen % SEEN] = e->entity; g_seenRes[g_nseen % SEEN] = e->resource; g_nseen++;
+    unsigned i = g_nseen % SEEN;
+    g_seenKind[i] = 0; g_seenEnt[i] = e->entity; g_seenRes[i] = e->resource; g_nseen++;
 }
 static void OnWeapon(HfMod* mod, const HfEventInfo* info, void* user)
 {
@@ -343,9 +355,16 @@ static void Tick(HfMod* mod, float dt, void* user)
         else if (++tries >= 10) { g_ready = -1; Log("REFUSED after 10 tries in a mission"); }
         if (g_ready != 1) return;
     }
-    if (g_now < g_hideUntil)
+    static double hideNext;
+    if (g_now < g_hideUntil && g_now >= hideNext)
     {
+        hideNext = g_now + 0.25;   /* four times a second, not every frame */
+        LARGE_INTEGER a, b, f;
+        QueryPerformanceCounter(&a);
         Tally t = Pass(0, 1);
+        QueryPerformanceCounter(&b); QueryPerformanceFrequency(&f);
+        double ms = (double)(b.QuadPart - a.QuadPart) * 1000.0 / (double)f.QuadPart;
+        if (ms > 20) { g_hideUntil = 0; Log("hiding stopped: a pass took %.0f ms (the game would stall)", ms); }
         g_hideSum.hidden += t.hidden;
         g_hideSum.kicked += t.kicked;
     }
