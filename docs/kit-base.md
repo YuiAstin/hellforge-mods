@@ -36,6 +36,8 @@ kitbase/                 source of truth (header-only)
   kb_hits.h              layer 1: the damage pipeline on the game's hit code (her hits and hits on her)
   kb_damage.h            layer 1: HellForge's damage event routed to the kit, with shared helpers
   kb_settings.h          layer 1: the settings table, .ini loader, skill keys and Mod Options Menu calls
+  hud/bindings.lua       HUD: key bindings (Mod Bindings Menu) and the always-show-cooldowns option
+  hud/list.lua           HUD: finding the open stratagem list to sit beside
   ...                    later layers as they are extracted
 mods/<kit>/src/kitbase/  copies, kept in sync by tools/kitbase_sync.py
 ```
@@ -124,7 +126,8 @@ between blocks.
    `kb_damage_seen` (every hit; Leva's probe), and holds what every kit did the same way: `IsShot`, `ScaleDamage`,
    `NoteTarget` and her last target. The rest of each kit's handler is skill logic and stays in the kit: an ordered
    handler chain would only rename it. Revisit once AK-12 shows which rules repeat.
-4. **Settings table (done, on branch `kitbase-settings`, needs its in-game check)** and the generic HUD (next).
+4. **Settings table (done, on branch `kitbase-settings`, needs its in-game check)** and the shared HUD (done, on
+   branch `kitbase-hud`, needs its in-game check).
    A kit lists every setting once (`KB_F` / `KB_I`: name, variable, range) and names its .ini and key names;
    `kb_settings.h` loads the .ini, clamps, and answers Mod Options Menu (the kit's `<kit>_option_get` / `_set` exports
    stay, one line each, since the menu finds them by name). Kit extras after a change go in `kb_option_after`. The
@@ -133,3 +136,14 @@ between blocks.
 
 Steps 2 onward change behaviour, so each kit gets an in-game check before release, and kits ship on the base only
 once tested.
+
+### The shared HUD (step 4b)
+
+Each kit keeps its own HUD addon (its own resource, GUID and state struct, so kits still install on their own). The
+parts every kit's Lua had word for word live in `kitbase/hud/*.lua`, and `tools/kitbase_sync.py` writes them into the
+marked regions of each kit's HUD Lua (`-- kitbase:<name>.lua begin` ... `end`). The kit names itself in one line
+above them (`local KIT = {name, id, module, proc}`). After a change there, sync, rebuild each HUD with HD2Runtime's SDK
+and copy its `mod/9ba626afa44a3aa3.patch_0*` into the kit's `data/`.
+
+What is drawn (the skill tiles, the bottom-middle bar, the option rows) differs per kit and stays in each kit. A
+generic state struct and one drawing path are left for when AK-12 shows what a kit HUD needs in common.

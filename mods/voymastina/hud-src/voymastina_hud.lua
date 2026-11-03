@@ -41,6 +41,10 @@ local EMPOWER = {255, 170, 60}
 local NAMES = {'SIRIUS FALL', 'EYE OF THE WHITE MASTIFF', 'PILE BUNKER'}
 local OVERLOAD_RED = {255, 90, 70}
 
+-- the kit, for the shared parts below
+local KIT = {name = 'Voymastina', id = 'voymastina', module = k32.voyhud1_GetModuleHandleA, proc = k32.voyhud1_GetProcAddress}
+-- kitbase:bindings.lua begin. Shared by the GFL2 kits' HUDs: written by tools/kitbase_sync.py from kitbase/hud/bindings.lua, so edit
+-- it there (the kit names itself in KIT, above).
 -------------------------------- GFL2_SHARED: cooldowns while the list is closed, in-game key bindings (same in each kit) --
 -- Cooldowns: with the GFL2 KITS HUD option "<Kit>: Always Show Cooldowns" on (the default), the skills on cooldown stay
 -- on screen while the stratagem list is closed, each on its own (only the ones recharging), where the list shows them.
@@ -49,7 +53,7 @@ local OVERLOAD_RED = {255, 90, 70}
 -- only the menu's fixed slots get keyboard defaults); with every native action taken they fall back to extended bindings
 -- (MORE MODS) with the .ini's keys as defaults. Each press is passed to the DLL (<kit>_input); the .ini's keys keep
 -- working beside them (a press of both within 0.3 s counts once).
-local X = {kit = 'Voymastina', id = 'voymastina', always = true, opt_done = false, opt_wait = 0, bind_done = false, bind_wait = 0,
+local X = {kit = KIT.name, id = KIT.id, always = true, opt_done = false, opt_wait = 0, bind_done = false, bind_wait = 0,
     ids = {}, prev = {}, labels = {}, beat = 0, label_wait = 0, last_box = nil}
 pcall(ffi.cdef, [[
 typedef int (*gfl2bind_input)(unsigned int version, int skill);
@@ -78,9 +82,9 @@ local function default_spec(vk, mods)
     return {{button = button, device = device, modifiers = #m > 0 and m or nil}}
 end
 local function gfl2_dll(name)
-    local module = k32.voyhud1_GetModuleHandleA('voymastina.dll')
+    local module = KIT.module(X.id .. '.dll')
     if module == nil then return nil end
-    local p = k32.voyhud1_GetProcAddress(module, name)
+    local p = KIT.proc(module, name)
     return p ~= nil and p or nil
 end
 -- "<Kit>: Always Show Cooldowns" on the MODS tab (its own GFL2 KITS HUD entry: each kit's own entry is full)
@@ -121,9 +125,9 @@ local function gfl2_bindings(dt)
         X.bind_wait = 2
         if type(mbm) ~= 'table' or type(mbm.register_binding) ~= 'function' or type(mbm.is_down) ~= 'function' then return end
         if (tonumber(mbm.version) or 0) < 4 then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings: Mod Bindings Menu is too old (version ' .. tostring(mbm.version) .. ')') return end
-        local ip, kp = gfl2_dll('voymastina_input'), gfl2_dll('voymastina_key')
+        local ip, kp = gfl2_dll(X.id .. '_input'), gfl2_dll(X.id .. '_key')
         if not ip or not kp then
-            if gfl2_dll('voymastina_hud_state') then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings: this voymastina.dll has none (update it)') end
+            if gfl2_dll(X.id .. '_hud_state') then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings: this ' .. X.id .. '.dll has none (update it)') end
             return
         end
         X.input = ffi.cast('gfl2bind_input', ip)
@@ -147,11 +151,7 @@ local function gfl2_bindings(dt)
     end
     for i = 1, 3 do
         local down = mbm.is_down(X.ids[i]) == true
-        if down and not X.prev[i] then
-            X.input(1, i)
-            X.downs = (X.downs or 0) + 1
-            if X.downs <= 20 then log('[' .. X.kit .. ' HUD] binding ' .. i .. ' pressed (' .. tostring(X.labels[i]) .. '): passed to the DLL') end
-        end
+        if down and not X.prev[i] then X.input(1, i) end
         X.prev[i] = down
     end
     X.beat = X.beat - dt
@@ -168,6 +168,7 @@ local function gfl2_step(dt)
     ok, err = pcall(gfl2_bindings, dt)
     if not ok then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings failed, the .ini keys stay: ' .. tostring(err)) end
 end
+-- kitbase:bindings.lua end
 local SHORT = {'FALL', 'EYE', 'PILE'}
 
 local state, refresh, find_wait = nil, nil, 0
@@ -212,6 +213,8 @@ end
 for i, id in ipairs({'voymastina_sirius', 'voymastina_eye', 'voymastina_pile'}) do ICONS[i] = load_icon(id) end
 ICON.ak_eye, ICON.howl, ICON.pledge = load_icon('voymastina_ak_eye'), load_icon('voymastina_howl'), load_icon('voymastina_pledge')
 
+-- kitbase:list.lua begin. Shared by the GFL2 kits' HUDs: written by tools/kitbase_sync.py from kitbase/hud/list.lua, so edit
+-- it there (the kit names itself in KIT, above).
 -------------------------------------------------------------------------- the stratagem list, to sit beside --
 -- The list's entries and their icons' rectangles come from HD2Runtime's slot overlay (code / research from
 -- HD2Runtime by SkyeShade, its internal modules); without them the abilities show at a fixed place under the list.
@@ -222,14 +225,14 @@ local okC, SEL = pcall(require, 'hd2runtime/runtime/stratagem_selector')
 if not (okA and okB and okC and type(SO) == 'table' and type(SO.hud_entries) == 'function' and type(SO.rect) == 'function'
         and type(W) == 'table' and type(W.open) == 'function' and type(SEL) == 'table' and type(SEL.prove) == 'function') then
     L.on = false
-    log('[Voymastina HUD] the stratagem list cannot be followed on this HD2Runtime: abilities always shown')
+    log('[' .. X.kit .. ' HUD] the stratagem list cannot be followed on this HD2Runtime: abilities always shown')
 end
 local said = {}
 local function why_not(what, why)
     local key = what .. ': ' .. tostring(why)
     if said[key] then return end
     said[key] = true
-    log('[Voymastina HUD] list: ' .. key)
+    log('[' .. X.kit .. ' HUD] list: ' .. key)
 end
 -- {left, top, right, size, step, alpha} of the open list (top-left origin), false when it is closed, nil when unknown
 local function list_box(d, dt)
@@ -240,7 +243,7 @@ local function list_box(d, dt)
         local proven, why = SEL.prove(world)
         if not proven then why_not('not proven yet', why) return nil end
         L.proven = true
-        log('[Voymastina HUD] the stratagem list can be followed on this build')
+        log('[' .. X.kit .. ' HUD] the stratagem list can be followed on this build')
     end
     L.wait = L.wait - dt
     if not L.entries or L.wait <= 0 then
@@ -274,7 +277,7 @@ local function list_box(d, dt)
     end
     table.sort(seen)
     local view = string.format('%d of %d used entries shown: %s', #tops, total, table.concat(seen, ' '))
-    if view ~= L.last_view and (L.views or 0) < 40 then L.last_view = view; L.views = (L.views or 0) + 1; log('[Voymastina HUD] list: ' .. view) end
+    if view ~= L.last_view and (L.views or 0) < 40 then L.last_view = view; L.views = (L.views or 0) + 1; log('[' .. X.kit .. ' HUD] list: ' .. view) end
     -- open or closed, by how many icons show: the open list shows the whole loadout (7, more with event stratagems;
     -- limited-use ones stay listed), and its most this mission is learned the first time it opens; the closed list
     -- keeps only Reinforce and the few stratagems inbound or recharging. Open: the most, or one fewer (the SOS Beacon
@@ -293,6 +296,7 @@ local function list_box(d, dt)
     return box
 end
 
+-- kitbase:list.lua end
 ---------------------------------------------------------------------------------------------- the abilities --
 local function ability(d, i, x, y, size, alpha)
     local s = d.scale
