@@ -299,3 +299,9 @@ plain forget left in place. With the target cleared (+0x18, +0x78), her entries 
 So it holds exactly as long as nothing senses her. For Lemuen: clear unsensing enemies' targets while she is hidden
 (scoped, still, out of sight), and let anything that sees her fight as normal. Gun Probe 0.1.5: guns still fell
 with disable_physics; 0.1.6 links them to the view camera's unit (World.link_unit) instead.
+
+**0.3.0, auto break-contact** (Ctrl+Alt+F7 toggles): every enemy within 80 m that is after her, four times a
+second. While it or its squad senses her, her position is kept as its last sight of her. After 3 s without
+sensing her it loses her: entries removed, target cleared, re-pick due, and set_destination to where it last saw
+her, so it goes and searches there instead of freezing. The probe now keeps a list of live enemies as they spawn
+(enemy types classified a few per pass) instead of walking all 2048 spawns, the cause of the 20 to 70 ms passes.

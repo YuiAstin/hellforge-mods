@@ -8,7 +8,8 @@
  *             entries has sense bits; its squad's record too) loses her entries altogether: they are taken out of its
  *             perception lists (the entries after them moved up, the count lowered), and its re-pick is forced.
  *             The idea: the game refreshes an entry while she is seen, so it is removed only once they lost sight
- *   Ctrl+Alt+F7  hard forget (0.2.6): as Ctrl+F7, and an enemy after her that cannot sense her also has its behaviour
+ *   Ctrl+Alt+F7  (0.3.0) auto break-contact on / off: see AutoPass. Ctrl+Shift+Alt+F7 is 0.2.6's hard forget by hand:
+ *   hard forget (0.2.6): as Ctrl+F7, and an enemy after her that cannot sense her also has its behaviour
  *             target cleared (+0x18 and has-target +0x78 to 0) and is sent to where it stands (set_destination to its
  *             own position: it stops). Breach spawns came through smoke after a plain forget (0.2.5's test): this
  *             shows whether their target or their destination is what keeps them on her. The tally adds how many
@@ -42,7 +43,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.6"
+#define VERSION "0.3.0"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -142,17 +143,45 @@ static int KindOf(uint64_t res)
     }
     return 2;
 }
-static int SeenEnemy(unsigned i, Ent* e, float p[3])
+/* 0.3.0: the live enemies, kept as they spawn (new spawns classified a few types a pass), dead ones dropped as they
+ * are met. Passes walk this list, not all 2048 spawns (0.2.x's passes stalled 20 to 70 ms walking the whole ring) */
+#define LIVE 512
+static uint32_t g_live[LIVE];
+static uint64_t g_liveRes[LIVE];
+static double g_liveUnseen[LIVE];      /* auto: when it last stopped sensing her (0: sensing, or not after her) */
+static float g_liveLast[LIVE][3];      /* auto: where she was when it last sensed her */
+static uint8_t g_liveHasLast[LIVE];
+static int g_nlive;
+static unsigned g_cursor;
+static void Refresh(void)
 {
-    if (g_seenKind[i] == 2) return 0;
-    if (!Resolve(g_seenEnt[i], e) || e->resource != g_seenRes[i]) { g_seenKind[i] = 2; return 0; }
-    if (!g_seenKind[i])
+    unsigned end = g_nseen;
+    if (end - g_cursor > SEEN) g_cursor = end - SEEN;
+    while (g_cursor != end)
     {
+        unsigned i = g_cursor % SEEN;
         int k = KindOf(g_seenRes[i]);
-        if (!k) return 0;
-        g_seenKind[i] = (uint8_t)k;
+        if (!k) break;   /* this type next pass */
+        g_cursor++;
+        if (k == 1 && g_nlive < LIVE)
+        {
+            g_live[g_nlive] = g_seenEnt[i]; g_liveRes[g_nlive] = g_seenRes[i];
+            g_liveUnseen[g_nlive] = 0; g_liveHasLast[g_nlive] = 0;
+            g_nlive++;
+        }
     }
-    return g_seenKind[i] == 1 && RootOf(e->unit, p);
+}
+/* the live enemy at j, its entity and position; a gone one is dropped (the last moved into its place: walk j down) */
+static int LiveEnemy(int j, Ent* e, float p[3])
+{
+    if (!Resolve(g_live[j], e) || e->resource != g_liveRes[j])
+    {
+        int l = --g_nlive;
+        g_live[j] = g_live[l]; g_liveRes[j] = g_liveRes[l]; g_liveUnseen[j] = g_liveUnseen[l];
+        memcpy(g_liveLast[j], g_liveLast[l], sizeof g_liveLast[j]); g_liveHasLast[j] = g_liveHasLast[l];
+        return 0;
+    }
+    return RootOf(e->unit, p);
 }
 
 /* ---- the two records ------------------------------------------------------------------------------------------------- */
@@ -275,12 +304,12 @@ static Tally Pass(int detail, int hide)
     float mp[3], p[3];
     uint32_t meId = atomic_load(&g_avatar);
     if (!Resolve(meId, &me) || !RootOf(me.unit, mp)) { if (detail) Log("survey: your position is unknown"); return t; }
-    unsigned n = g_nseen < SEEN ? g_nseen : SEEN;
+    Refresh();
     int told = 0;
-    for (unsigned i = 0; i < n; i++)
+    for (int j = g_nlive - 1; j >= 0; j--)
     {
-        uint32_t id = g_seenEnt[i];
-        if (!SeenEnemy(i, &e, p)) continue;
+        uint32_t id = g_live[j];
+        if (!LiveEnemy(j, &e, p)) continue;
         float d = sqrtf((p[0] - mp[0]) * (p[0] - mp[0]) + (p[1] - mp[1]) * (p[1] - mp[1]));
         if (d > 60) continue;
         t.enemies++;
@@ -390,12 +419,12 @@ static void Trace(int redirect)
     float moved = sqrtf((mp[0] - g_traceMe[0]) * (mp[0] - g_traceMe[0]) + (mp[1] - g_traceMe[1]) * (mp[1] - g_traceMe[1]));
     memcpy(g_traceMe, mp, sizeof mp);
     Log("patrols: you at %.1f %.1f %.1f (moved %.1f m since the last trace)", mp[0], mp[1], mp[2], moved);
-    unsigned n = g_nseen < SEEN ? g_nseen : SEEN;
+    Refresh();
     int told = 0, sent = 0;
-    for (unsigned i = 0; i < n && told < 12; i++)
+    for (int j = g_nlive - 1; j >= 0 && told < 12; j--)
     {
-        uint32_t id = g_seenEnt[i], k;
-        if (!SeenEnemy(i, &e, p) || !NavIndex(id, &k)) continue;
+        uint32_t id = g_live[j], k;
+        if (!LiveEnemy(j, &e, p) || !NavIndex(id, &k)) continue;
         float d = sqrtf((p[0] - mp[0]) * (p[0] - mp[0]) + (p[1] - mp[1]) * (p[1] - mp[1]));
         if (d > 150) continue;
         uintptr_t rec = NavRecord(k);
@@ -440,6 +469,60 @@ static void Trace(int redirect)
         }
     }
     if (sent) Log("patrols: %d sent to their points (set_destination)%s", sent, redirect ? ", again every 2 s for 30 s" : "");
+}
+/* ---- 0.3.0: auto break-contact (Ctrl+Alt+F7 toggles) ------------------------------------------------------------------
+ * Four times a second, every live enemy within 80 m that is after her: while it (or its squad) senses her, where she
+ * stands is kept as its last sight of her; once it has not sensed her for s_lose seconds, it loses her: her perception
+ * entries removed (its own and its squad's), its target cleared, and it is sent to where it last saw her (it searches
+ * there). 0.2.6's hard forget, by hand, held exactly while nothing sensed her; this runs it on its own. */
+static int g_auto;
+static const double s_lose = 3.0;
+static struct { int lost, after, sensing; } g_autoSum;
+static void AutoPass(void)
+{
+    Ent me, e;
+    float mp[3], p[3];
+    uint32_t meId = atomic_load(&g_avatar);
+    if (!Resolve(meId, &me) || !RootOf(me.unit, mp)) return;
+    Refresh();
+    for (int j = g_nlive - 1; j >= 0; j--)
+    {
+        uint32_t id = g_live[j];
+        if (!LiveEnemy(j, &e, p)) continue;
+        float d = sqrtf((p[0] - mp[0]) * (p[0] - mp[0]) + (p[1] - mp[1]) * (p[1] - mp[1]));
+        if (d > 80) { g_liveUnseen[j] = 0; continue; }
+        uintptr_t br = Behaviour(id), pr = Perception(id);
+        uint8_t b[0xA0];
+        if (!br || !RD(br, b, sizeof b)) continue;
+        uint32_t target = U32(b + 0x18), perceiver = U32(b + 0x68), sense = 0, sqSense = 0;
+        uintptr_t sq = perceiver && perceiver != id ? Perception(perceiver) : 0;
+        int counts[3], mine = pr ? HerEntries(pr, meId, &sense, counts) : 0, sqMine = sq ? HerEntries(sq, meId, &sqSense, counts) : 0;
+        if ((mine && sense) || (sqMine && sqSense))
+        {
+            memcpy(g_liveLast[j], mp, sizeof mp); g_liveHasLast[j] = 1;
+            g_liveUnseen[j] = 0;
+            g_autoSum.sensing++;
+            continue;
+        }
+        if (target != meId) { g_liveUnseen[j] = 0; continue; }
+        g_autoSum.after++;
+        if (!g_liveUnseen[j]) { g_liveUnseen[j] = g_now; continue; }
+        if (g_now - g_liveUnseen[j] < s_lose) continue;
+        /* it lost her */
+        if (pr) ForgetIn(pr, meId);
+        if (sq) ForgetIn(sq, meId);
+        static const uint32_t z = 0;
+        static const uint64_t z8 = 0;
+        hf->write(br + 0x18, &z, 4); hf->write(br + 0x78, &z, 4); hf->write(br + 0x98, &z8, 8);
+        if (g_setDest)
+        {
+            const float* to = g_liveHasLast[j] ? g_liveLast[j] : p;
+            _Alignas(16) float at[4] = {to[0], to[1], to[2], 0};
+            g_setDest(NULL, id, at);
+        }
+        g_liveUnseen[j] = 0;
+        g_autoSum.lost++;
+    }
 }
 /* ---- binding, events, the game thread --------------------------------------------------------------------------------- */
 static int Bind(void)
@@ -495,6 +578,24 @@ static void Tick(HfMod* mod, float dt, void* user)
         else if (++tries >= 10) { g_ready = -1; Log("REFUSED after 10 tries in a mission"); }
         if (g_ready != 1) return;
     }
+    static double autoNext, autoTold, autoSlowTold;
+    if (g_auto && g_now >= autoNext)
+    {
+        autoNext = g_now + 0.25;
+        LARGE_INTEGER a0, b0, f0;
+        QueryPerformanceCounter(&a0);
+        AutoPass();
+        QueryPerformanceCounter(&b0); QueryPerformanceFrequency(&f0);
+        double ms = (double)(b0.QuadPart - a0.QuadPart) * 1000.0 / (double)f0.QuadPart;
+        if (ms > 20 && g_now - autoSlowTold > 10) { autoSlowTold = g_now; Log("auto: a pass took %.0f ms (%d live enemies)", ms, g_nlive); }
+        if (g_now - autoTold >= 2 && (g_autoSum.lost || g_autoSum.after))
+        {
+            autoTold = g_now;
+            Log("auto: %d lost her (sent to where they last saw her); passes with someone after her unsensing %d, sensing her %d",
+                g_autoSum.lost, g_autoSum.after, g_autoSum.sensing);
+            g_autoSum.lost = g_autoSum.after = g_autoSum.sensing = 0;
+        }
+    }
     static double hideNext;
     if (g_now < g_hideUntil && g_now >= hideNext)
     {
@@ -527,11 +628,19 @@ static void Tick(HfMod* mod, float dt, void* user)
     int raw = Down(VK_F7), d = raw && !prev && g_now >= keyAfter;   /* 0.2.4: at most one press a second */
     if (d) keyAfter = g_now + 1;
     prev = raw;
-    if (d && Down(VK_MENU) && Down(VK_CONTROL))
+    if (d && Down(VK_MENU) && Down(VK_CONTROL) && Down(VK_SHIFT))
     {
         g_forget = 1; g_hard = 1;
-        Log("Ctrl+Alt+F7: hard forget: as Ctrl+F7, and the unsensing ones after her lose their target and stop, for 10 s (and watching for 15 s)");
+        Log("Ctrl+Shift+Alt+F7: hard forget (0.2.6, by hand) for 10 s (and watching for 15 s)");
         g_hideUntil = g_now + 10; g_watchUntil = g_now + 15; g_watchNext = g_now;
+    }
+    else if (d && Down(VK_MENU) && Down(VK_CONTROL))
+    {
+        g_auto = !g_auto;
+        g_autoSum.lost = g_autoSum.after = g_autoSum.sensing = 0;
+        for (int j = 0; j < g_nlive; j++) g_liveUnseen[j] = 0;
+        Log(g_auto ? "Ctrl+Alt+F7: auto break-contact ON: an enemy after her that has not sensed her for %.0f s loses her and searches where it last saw her"
+                   : "Ctrl+Alt+F7: auto break-contact OFF", s_lose);
     }
     else if (d && Down(VK_MENU))
     {
