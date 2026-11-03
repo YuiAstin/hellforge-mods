@@ -330,5 +330,6 @@ game's give-up, see the baseline caveat above), and break-contact has not been t
 - **Observe (14:51 to 14:54):** one longer engagement. "After her" rose to 9.7 and then stayed up for about two
   minutes; from 14:52:57 nobody was sensing her at all (sensing 0.0) and still 3.7 → 2.2 → 1.0 → 1.4 → 0.6 were
   after her for 40 s more before it reached 0 (dying, despawning or giving up on their own).
-So unsensed chasers drop off in about 5 s with break-contact on, against 40 s or more without it. One mission, bugs
-or bots not recorded, different fights: a direction, not a measurement. Next: the same fight shape both ways.
+So unsensed chasers drop off in about 5 s with break-contact on, against 40 s or more without it. One mission, against
+bots (Yui: in observe they chased unreasonably after contact broke, even where they should not have been able
+to follow), different fights: a direction, not a measurement. Next: the same fight shape both ways.
