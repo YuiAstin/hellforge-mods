@@ -34,7 +34,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -383,7 +383,12 @@ static void ShellFrame(void)
         float down[3] = {0, 0, -1};
         int r = hf->spawn_projectile(self, (uint32_t)s_s3Shell, from, down);
         if (r == HF_ACT_WAITING) { g_shellNext = g_now + 0.1; return; }
-        if (Act("a Memento Mori shell", r)) g_shells++;
+        if (Act("a Memento Mori shell", r))
+        {
+            g_shells++;
+            static unsigned toldShell;
+            if (toldShell++ < 12) Log("Memento Mori: a shell (projectile %d) from %.0f m above entity %u", s_s3Shell, (double)s_s3Height, e);
+        }
         g_nshell--;
         g_shellNext = g_now + s_s3Every;
     }
@@ -394,20 +399,23 @@ static void DamageTaken(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     (void)e; (void)d; (void)me;
 }
+static int g_hitLogReset;
 static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     (void)e; (void)me;
     if (d->amount <= 0 || !MineHit(d)) return;
-    double mult = 1;
-    if (Marked(d->target)) mult *= s_markMult;                                           /* Persecution */
-    if (g_landedAt >= 0 && g_now - g_landedAt >= s_modusAfter) mult *= s_modusMult;      /* Modus Extraditio */
+    double mult = 1, xMark = 1, xModus = 1, xS1 = 1, xS2 = 1;
+    if (Marked(d->target)) mult *= xMark = s_markMult;                                   /* Persecution */
+    if (g_landedAt >= 0 && g_now - g_landedAt >= s_modusAfter) mult *= xModus = s_modusMult;   /* Modus Extraditio */
+    int32_t base = d->amount;
     if (IsShot(d))
     {
-        if (g_s1On) { mult *= s_s1Mult; g_empowered++; }                                  /* Salve Etiam */
+        if (g_s1On) { mult *= xS1 = s_s1Mult; g_empowered++; }                           /* Salve Etiam */
         if (g_s2On && g_s2Target && d->target == g_s2Target && g_s2Held > 0)             /* Honesta Missio */
         {
             double x = S2Mult();
             mult *= x;
+            xS2 = x;
             g_held++;
             static unsigned told;
             if (told++ < 8) Log("Honesta Missio: held %.1f s on entity %u: x%.2f", g_s2Held, d->target, x);
@@ -416,6 +424,16 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
         NoteTarget(d);
     }
     if (mult != 1) ScaleDamage(d, mult);
+    /* 0.1.1: her boosted shots in numbers (0.1.0's log said a skill was on, never what a hit dealt): the first 16 hits
+     * of a mission that a skill raised, base -> dealt, and each multiplier */
+    static unsigned shown;
+    if (g_hitLogReset) { shown = 0; g_hitLogReset = 0; }
+    if ((xS1 != 1 || xS2 != 1) && shown < 16)
+    {
+        shown++;
+        Log("her hit on entity %u: %d -> %d damage (x%.2f: mark x%.2f, Modus x%.2f, Salve Etiam x%.2f, Honesta Missio x%.2f)", d->target, base,
+            d->amount, mult, xMark, xModus, xS1, xS2);
+    }
 }
 
 /* ---- events ------------------------------------------------------------------------------------------------------ */
@@ -474,6 +492,7 @@ static void Reset(const char* why)
     memset(g_casts, 0, sizeof g_casts);
     memset(g_marks, 0, sizeof g_marks);
     g_marksMade = g_empowered = g_held = g_shells = 0;
+    g_hitLogReset = 1;
     g_s1On = g_s2On = 0;
     g_s2Target = 0;
     g_s2Held = 0;
