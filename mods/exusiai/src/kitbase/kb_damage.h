@@ -49,7 +49,7 @@ KB_FN void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
 {
     HfDamagePreEvent* e = (HfDamagePreEvent*)(void*)info;
     HfDamageEvent* d = &e->damage;
-    if (!g_inMission || e->cancel) return;
+    if (!g_inMission || e->cancel || !kb_kit_on) return;
     if (kb_damage_seen) kb_damage_seen(e, d);
     uint32_t me = atomic_load(&g_avatar);
     if (d->target == me && me) { if (kb_damage_taken) kb_damage_taken(e, d, me); }

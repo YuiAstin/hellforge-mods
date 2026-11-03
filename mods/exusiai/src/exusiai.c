@@ -44,6 +44,10 @@
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
+#include "kitbase/kb_roster.h"
+
+/* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
+KB_ROSTER_EXPORTS(exusiai)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static float s_fireRate = 1.15f, s_blessMult = 1.08f;
@@ -431,7 +435,7 @@ static void FastCartridge(uint64_t res)
 static void OnWeaponExu(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfWeaponEvent* w = (const HfWeaponEvent*)info;
-    if (!w->avatar || w->avatar != atomic_load(&g_avatar)) return;
+    if (!w->avatar || w->avatar != atomic_load(&g_avatar) || !kb_kit_on) return;
     g_heldEntity = w->entity;
     g_heldRes = w->resource;
     FastCartridge(w->resource);
@@ -516,6 +520,7 @@ static void Reset(const char* why)
         Log("%s: %u bursts, %u charged (free bursts), guns %u / Overloading %u, %u assist and %u Overloading shots, %u hits on allies spared",
             why, g_bursts, g_casts[0], g_casts[1], g_casts[2], g_shots[0], g_shots[1], g_spared);
     int start = !strcmp(why, "mission start");
+    if (start) KitDecide();   /* with several kits installed: is this one picked? */
     Body(start);
     /* the Guard Dog's package: its rounds fly (and sound) only once that is in */
     if (start && s_gunRound == 7 && !hf->load_package(self, UINT64_C(0xA14F1A98C80575AF))) Log("the Guard Dog's package could not be loaded ahead: the guns' first shots may wait");
@@ -562,7 +567,7 @@ typedef struct ExusiaiHud
 static ExusiaiHud g_hud = {1};
 HF_MOD_EXPORT ExusiaiHud* exusiai_hud_state(void)
 {
-    g_hud.in_mission = (uint32_t)(g_inMission && g_alive);
+    g_hud.in_mission = (uint32_t)(g_inMission && g_alive && kb_kit_on);
     float m[3] = {0, s_s2Cd, s_s3Cd};
     for (int i = 0; i < 3; i++) { g_hud.cd[i] = (float)fmax(0, g_cd[i] - g_now); g_hud.cd_max[i] = m[i]; }
     g_hud.charge = (uint32_t)g_charge;
@@ -601,7 +606,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     g_now += dt > 0 && dt < 1 ? dt : 0;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
-    if (!g_inMission) return;
+    if (!g_inMission || !kb_kit_on) return;   /* (standing by: another kit is picked) */
     MyItems();
     static int prev[3];
     int focused = Focused();
@@ -652,6 +657,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
+    RosterJoin("exusiai", "Exusiai");
     kb_ini = "exusiai.ini";
     kb_key_names[0] = "key_charge";
     kb_key_names[1] = "key_guns";
