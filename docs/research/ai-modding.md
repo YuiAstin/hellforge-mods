@@ -324,7 +324,7 @@ within 80 m with enemies on the minimap. **So the bot drop that despawned in 0.3
 game's give-up, see the baseline caveat above), and break-contact has not been tested yet.
 
 **0.3.4 in game, on vs observe (one mission, same area; averages per pass every 5 s):**
-- **On (14:48 to 14:51):** three engagements. Each time, once the enemies after her stopped sensing her, they
+- **On (14:48 to 14:51):** three engagements, the first a bot drop (Yui: it gave up easily). Each time, once the enemies after her stopped sensing her, they
   lost her (7, 7 and 5 of them) and "after her" was 0 within the next 5 to 10 s. Example: 7.0 after her, all
   sensing → 4.5 after her, none sensing (7 lost her) → 0.
 - **Observe (14:51 to 14:54):** one longer engagement. "After her" rose to 9.7 and then stayed up for about two
