@@ -281,3 +281,10 @@ pace). When it spotted her it turned "after HER" and +0x60 went back to her (63 
 
 **Gun Probe 0.1.4:** the support machine gun spawned as a dropped weapon: it fell to the ground first and only then
 followed the view (its physics moved it until it rested). 0.1.5 makes its actors kinematic, with collision off.
+
+**0.2.5 in game:** breach spawns lost sight of her at once (smoke) and still came through it, after a plain
+forget removed their perception entries. A breach most likely hands its spawns her position (a destination) or a
+target directly, so perception is not what drives them. 0.2.6 adds Ctrl+Alt+F7, a hard forget: unsensing enemies
+after her also lose the behaviour target (+0x18, +0x78) and are sent to where they stand; and the tally counts
+enemies after her with no perception entry for her at all. Gun Probe 0.1.5: Unit.num_actors is not reachable;
+Unit.disable_physics went through. The Guard Dog's firing sound (a loop entry) played on the floating models.
