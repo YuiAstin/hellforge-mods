@@ -4,7 +4,11 @@
  *   Shift+F7  survey: every enemy within 60 m, its behaviour record (id, stage, target, re-pick time) and perception
  *             record (list sizes, her entry and its sense bits), and who each one is after
  *   F7        a watch: the survey's tally (how many enemies are after her) once a second for 15 s
- *   Ctrl+F7   hide: for 10 s, every frame, her entries in nearby enemies' perception lists lose their sense bits (as
+ *   Ctrl+F7   forget (0.2.3): for 10 s, four times a second, an enemy that cannot sense her right now (none of her
+ *             entries has sense bits; its squad's record too) loses her entries altogether: they are taken out of its
+ *             perception lists (the entries after them moved up, the count lowered), and its re-pick is forced.
+ *             The idea: the game refreshes an entry while she is seen, so it is removed only once they lost sight
+ *   Ctrl+Shift+F7  0.2.2's hide: for 10 s, her entries in nearby enemies' perception lists lose their sense bits (as
  *             Smarter Guard Dogs hides targets from sentries) and their re-pick time is set to 0 (a re-pick now); the
  *             tally runs alongside, so the log shows whether they lose her
  *   Alt+F7    patrols (0.2.0): for 30 s, every 2 s, the navigation record (Nav Probe's [game+0x3326418], 0xA8 bytes) of
@@ -31,7 +35,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.2"
+#define VERSION "0.2.3"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -156,6 +160,49 @@ static int HerEntries(uintptr_t pr, uint32_t me, uint32_t* sense, int counts[3])
     }
     return found;
 }
+/* 0.2.3: her entries taken out, only while none of them has sense bits (the perceiver cannot sense her now): 1 per
+ * entry removed, 0 when she is sensed or has no entry. A list entry is removed by moving the ones after it up a place
+ * and lowering the count; a single slot by clearing its in-use flag (+0x48). */
+static int ForgetIn(uintptr_t pr, uint32_t me)
+{
+    uint32_t sense = 0;
+    int counts[3];
+    if (!HerEntries(pr, me, &sense, counts)) return 0;
+    for (int l = 0; l < 3; l++)
+        for (int k = 0; k < counts[l]; k++)
+        {
+            uint8_t ent[0x50];
+            if (RD(pr + kLists[l].entries + 0x50u * k, ent, sizeof ent) && U32(ent) == me && U32(ent + 0x4C)) return 0;
+        }
+    for (int s = 0; s < 3; s++)
+    {
+        uint8_t ent[0x50];
+        if (RD(pr + kSingles[s], ent, sizeof ent) && U32(ent + 0x48) && U32(ent) == me && U32(ent + 0x4C)) return 0;
+    }
+    int n = 0;
+    for (int l = 0; l < 3; l++)
+    {
+        uint32_t c = 0;
+        if (!RD(pr + kLists[l].count, &c, 4) || c > 16) continue;
+        uint8_t list[16 * 0x50];
+        if (c && !RD(pr + kLists[l].entries, list, 0x50u * c)) continue;
+        uint32_t keep = 0;
+        for (uint32_t k = 0; k < c; k++)
+            if (U32(list + 0x50u * k) != me) { if (keep != k) memmove(list + 0x50u * keep, list + 0x50u * k, 0x50); keep++; }
+        if (keep == c) continue;
+        if (keep && hf->write(pr + kLists[l].entries, list, 0x50u * keep)) continue;
+        if (hf->write(pr + kLists[l].count, &keep, 4)) continue;
+        n += (int)(c - keep);
+    }
+    for (int s = 0; s < 3; s++)
+    {
+        uintptr_t at = pr + kSingles[s];
+        uint32_t id = 0, used = 0;
+        static const uint32_t zero = 0;
+        if (RD(at, &id, 4) && id == me && RD(at + 0x48, &used, 4) && used && !hf->write(at + 0x48, &zero, 4)) n++;
+    }
+    return n;
+}
 /* her entries' sense bits cleared: 1 per entry cleared */
 static int HideIn(uintptr_t pr, uint32_t me)
 {
@@ -182,7 +229,8 @@ static int HideIn(uintptr_t pr, uint32_t me)
 }
 
 /* ---- the survey ------------------------------------------------------------------------------------------------------ */
-typedef struct { int enemies, withBehaviour, withPerception, afterHer, seeHer, hidden, kicked, squads; } Tally;
+typedef struct { int enemies, withBehaviour, withPerception, afterHer, seeHer, hidden, kicked, squads, sensed; } Tally;
+static int g_forget;   /* 0.2.3: the hide is the forget (Ctrl+F7), else 0.2.2's blanking (Ctrl+Shift+F7) */
 static Tally Pass(int detail, int hide)
 {
     Tally t = {0};
@@ -210,12 +258,21 @@ static Tally Pass(int detail, int hide)
         if (mine && sense) t.seeHer++;
         if (hide)
         {
-            if (pr) t.hidden += HideIn(pr, meId);
             /* 0.2.2: squad members perceive through their squad's record (perceiver +0x68 another entity, their own
-             * lists empty in 0.2.1's test): blank hers there too */
+             * lists empty in 0.2.1's test): hers there too */
             uint32_t perceiver = hb ? U32(b + 0x68) : 0;
             uintptr_t sq = perceiver && perceiver != id ? Perception(perceiver) : 0;
-            if (sq) { t.hidden += HideIn(sq, meId); t.squads++; }
+            if (hide == 2)
+            {
+                int f = (pr ? ForgetIn(pr, meId) : 0) + (sq ? ForgetIn(sq, meId) : 0);
+                if (f) { t.hidden += f; if (sq) t.squads++; }
+                else if (mine && sense) t.sensed++;
+            }
+            else
+            {
+                if (pr) t.hidden += HideIn(pr, meId);
+                if (sq) { t.hidden += HideIn(sq, meId); t.squads++; }
+            }
             static const uint64_t zero = 0;
             if (hb && target == meId && !hf->write(br + 0x98, &zero, 8)) t.kicked++;
         }
@@ -237,7 +294,10 @@ static void Report(const char* what, Tally t)
 {
     Log("%s: %d enemies within 60 m; %d with a behaviour record, %d with a perception record; %d after her, %d see her%s", what,
         t.enemies, t.withBehaviour, t.withPerception, t.afterHer, t.seeHer, "");
-    if (t.hidden || t.kicked) Log("  hide: %d of her perception entries blanked (%d through a squad's record), %d re-picks forced", t.hidden, t.squads, t.kicked);
+    if (t.hidden || t.kicked || t.sensed)
+        Log("  %s: %d of her perception entries %s (%d through a squad's record), %d re-picks forced%s", g_forget ? "forget" : "hide",
+            t.hidden, g_forget ? "removed" : "blanked", t.squads, t.kicked, "");
+    if (g_forget && t.sensed) Log("  forget: %d enemies left alone (they sense her now)", t.sensed);
 }
 
 /* ---- patrols: navigation records (Nav Probe 0.1.1's layout) and set_destination ------------------------------------ */
@@ -366,13 +426,14 @@ static void Tick(HfMod* mod, float dt, void* user)
         hideNext = g_now + 0.25;   /* four times a second, not every frame */
         LARGE_INTEGER a, b, f;
         QueryPerformanceCounter(&a);
-        Tally t = Pass(0, 1);
+        Tally t = Pass(0, g_forget ? 2 : 1);
         QueryPerformanceCounter(&b); QueryPerformanceFrequency(&f);
         double ms = (double)(b.QuadPart - a.QuadPart) * 1000.0 / (double)f.QuadPart;
         if (ms > 20) { g_hideUntil = 0; Log("hiding stopped: a pass took %.0f ms (the game would stall)", ms); }
         g_hideSum.hidden += t.hidden;
         g_hideSum.kicked += t.kicked;
         g_hideSum.squads += t.squads;
+        g_hideSum.sensed += t.sensed;
     }
     if (g_now < g_watchUntil && g_now >= g_watchNext)
     {
@@ -380,8 +441,8 @@ static void Tick(HfMod* mod, float dt, void* user)
         Tally t = Pass(0, 0);
         char what[64];
         snprintf(what, sizeof what, "%s t+%.0f s", g_now < g_hideUntil ? "hiding" : "watch", 15 - (g_watchUntil - g_now));
-        t.hidden = g_hideSum.hidden; t.kicked = g_hideSum.kicked; t.squads = g_hideSum.squads;
-        g_hideSum.hidden = g_hideSum.kicked = g_hideSum.squads = 0;
+        t.hidden = g_hideSum.hidden; t.kicked = g_hideSum.kicked; t.squads = g_hideSum.squads; t.sensed = g_hideSum.sensed;
+        g_hideSum.hidden = g_hideSum.kicked = g_hideSum.squads = g_hideSum.sensed = 0;
         Report(what, t);
     }
     if (g_now < g_traceUntil && g_now >= g_traceNext) { g_traceNext = g_now + 2; Trace(0); }
@@ -395,8 +456,14 @@ static void Tick(HfMod* mod, float dt, void* user)
     }
     else if (d && !prev)
     {
-        if (Down(VK_SHIFT)) { Log("Shift+F7: enemies within 60 m:"); Report("survey", Pass(1, 0)); }
-        else if (Down(VK_CONTROL)) { Log("Ctrl+F7: hiding her from nearby enemies for 10 s (and watching for 15 s)"); g_hideUntil = g_now + 10; g_watchUntil = g_now + 15; g_watchNext = g_now; }
+        if (Down(VK_CONTROL))
+        {
+            g_forget = !Down(VK_SHIFT);
+            Log(g_forget ? "Ctrl+F7: forget: enemies that cannot sense her lose her entries, for 10 s (and watching for 15 s)"
+                         : "Ctrl+Shift+F7: hiding her (0.2.2's blanking) for 10 s (and watching for 15 s)");
+            g_hideUntil = g_now + 10; g_watchUntil = g_now + 15; g_watchNext = g_now;
+        }
+        else if (Down(VK_SHIFT)) { Log("Shift+F7: enemies within 60 m:"); Report("survey", Pass(1, 0)); }
         else { Log("F7: watching for 15 s"); g_watchUntil = g_now + 15; g_watchNext = g_now; }
     }
     prev = d;

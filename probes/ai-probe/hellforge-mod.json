@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.ai-probe",
   "name": "AI Probe (research)",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Research: do the sentries' AI records (perception and behaviour) also run the enemies, and can they be made to lose you? Shift+F7 surveys the enemies within 60 m, F7 watches how many are after you for 15 s, Ctrl+F7 tries hiding you from them for 10 s. Alt+F7 traces patrols' navigation records for 30 s; Shift+Alt+F7 tries sending the patrols near you 80 m to your side. Host or solo. Turn off when done.",
   "gameplay": false,
   "code": {

@@ -249,3 +249,9 @@ again, and "see her" climbed back (0 → 4 → 7) between passes. Two notes for 
 - Her sense bits read 0 in almost every entry, even in the enemies after her, so those bits may not be what
   keeps a target. If 0.2.2 also fails, hiding by perception is a dead end, and a lower detection signature
   (Lenna's Stealth method) is the route.
+
+**0.2.3, forget when unseen** (Yui's idea): the game refreshes her entry while she is sensed, so blanking it loses
+the race. Ctrl+F7 now removes her entries outright, but only from a record where none of them has sense bits (the
+enemy, or its squad, cannot sense her right now), then forces the re-pick. If they then pick someone else, a hide
+that works while out of sight (a sniper nest after breaking contact) is possible. 0.2.2's blanking stays on
+Ctrl+Shift+F7 for comparison.
