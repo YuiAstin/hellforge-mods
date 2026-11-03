@@ -43,7 +43,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.1"
+#define VERSION "0.3.2"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -512,6 +512,9 @@ static void AutoPass(void)
         g_autoSum.after++;
         if (!g_liveUnseen[j]) { g_liveUnseen[j] = g_now; continue; }
         if (g_now - g_liveUnseen[j] < s_lose) continue;
+        /* 0.3.2: observe mode (g_auto 2) counts the ones that would lose her and leaves them be: the game's own
+         * give-up (reinforcements despawn when they cannot find a solo Helldiver for a while) is the baseline */
+        if (g_auto == 2) { g_liveUnseen[j] = g_now; g_autoSum.lost++; continue; }
         /* it lost her */
         if (pr) ForgetIn(pr, meId);
         if (sq) ForgetIn(sq, meId);
@@ -598,8 +601,9 @@ static void Tick(HfMod* mod, float dt, void* user)
         {
             autoTold = g_now;
             double n = g_autoSum.passes;
-            Log("auto: %d live; within 80 m %.1f, after her %.1f (sensing her %.1f, not %.1f); %d lost her in the last 5 s",
-                g_nlive, g_autoSum.nearby / n, g_autoSum.chasing / n, g_autoSum.sensing / n, g_autoSum.after / n, g_autoSum.lost);
+            Log("%s: %d live; within 80 m %.1f, after her %.1f (sensing her %.1f, not %.1f); %d %s in the last 5 s",
+                g_auto == 2 ? "observe" : "auto", g_nlive, g_autoSum.nearby / n, g_autoSum.chasing / n, g_autoSum.sensing / n, g_autoSum.after / n, g_autoSum.lost,
+                g_auto == 2 ? "unsensed for 3 s or more (would lose her)" : "lost her");
             memset(&g_autoSum, 0, sizeof g_autoSum);
         }
     }
@@ -643,11 +647,12 @@ static void Tick(HfMod* mod, float dt, void* user)
     }
     else if (d && Down(VK_MENU) && Down(VK_CONTROL))
     {
-        g_auto = !g_auto;
+        g_auto = (g_auto + 1) % 3;   /* 0.3.2: off -> on -> observe only -> off */
         memset(&g_autoSum, 0, sizeof g_autoSum);
         for (int j = 0; j < g_nlive; j++) g_liveUnseen[j] = 0;
-        Log(g_auto ? "Ctrl+Alt+F7: auto break-contact ON: an enemy after her that has not sensed her for %.0f s loses her and searches where it last saw her"
-                   : "Ctrl+Alt+F7: auto break-contact OFF", s_lose);
+        Log(g_auto == 1 ? "Ctrl+Alt+F7: auto break-contact ON: an enemy after her that has not sensed her for %.0f s loses her and searches where it last saw her"
+            : g_auto == 2 ? "Ctrl+Alt+F7: OBSERVE only: the same counts every 5 s, nobody is touched (unsensed %.0f s counts as 'would lose her')"
+                          : "Ctrl+Alt+F7: auto break-contact OFF", s_lose);
     }
     else if (d && Down(VK_MENU))
     {

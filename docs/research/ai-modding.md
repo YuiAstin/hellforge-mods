@@ -311,3 +311,9 @@ called a bot drop. With auto break-contact on, once she broke contact the drop's
 minute. Normally a bot drop or bug breach chases her across the map until she dies at least once. Despawning is
 the game's own clean-up of enemies with nothing to do, so the cleared targets and the search at her last seen spot
 let the game's own logic finish the job. 0.3.1 logs the counts every 5 s to confirm it.
+
+**Baseline caveat (looked up):** players report that enemies called in by an alert despawn "if they can't find a
+Helldiver for a while", mostly solo after breaking line of sight, often with smoke (gideonsgaming.com, "the biggest
+mistake you're making in Helldivers 2: running away"); the wiki gives no timer for it. So a despawning bot drop is
+not proof by itself. 0.3.2's toggle cycles off → on → observe only: observe logs the same counts and touches
+nobody, for a side-by-side of how long they stay after her with and without it.
