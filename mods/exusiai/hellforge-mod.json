@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.exusiai",
+  "name": "Exusiai",
+  "version": "0.1.0",
+  "description": "Exusiai's kit from Arknights for your Helldiver: Charging Mode (her next shots hit harder), summoned guns that fire with her, and Overloading Mode (four more guns, each picking its own target), with Fast Cartridge (faster-firing guns) and Angel's Blessings (more health and damage). Solo or host. Keys in exusiai.ini; every number also on the escape menu's MODS tab (Mod Options Menu). HUD (needs Bingus Shared Loader and HD2Runtime): skills beside the stratagem list. No character model included.",
+  "gameplay": true,
+  "code": {
+    "dll": "exusiai.dll",
+    "sdk": 13
+  }
+}
