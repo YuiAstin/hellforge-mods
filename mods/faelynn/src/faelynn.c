@@ -50,9 +50,9 @@
 #include "kitbase/kb_body.h"
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
+#include "kitbase/kb_settings.h"
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
-static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
 static int s_cpMax = 3, s_htMax = 10, s_acidRow = 177, s_gasImmune = 1;
 static float s_tmCd = 10, s_tmRadius = 5, s_tmRange = 40, s_pursuitWindow = 4, s_pursuitBonus = 0.5f, s_pursuitHold = 4, s_pursuitSpeed = 0.15f;
 static float s_khCd = 35, s_khSeconds = 8, s_khSpeed = 1.3f, s_khMult = 1.3f;
@@ -64,107 +64,63 @@ static float s_barkRadius = 6, s_corrPer = 0.5f, s_taken = 0.1f, s_takenOut = 1.
 static int s_corrMax = 6;
 static int s_barkBlasts = 6, s_barkDamage = 2000;
 
-static int s_badKey;
-static void Setting(const char* key, double v)
-{
-#define CL(x, lo, hi) ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))
-#define F(name, var, lo, hi) else if (!strcmp(key, name)) var = (float)CL(v, lo, hi)
-#define I(name, var, lo, hi) else if (!strcmp(key, name)) var = (int)CL(v, lo, hi)
-    if (0) {}
-    I("cp_max", s_cpMax, 1, 10); I("ht_max", s_htMax, 0, 50); F("ht_per_stack", s_htPer, 0, 1); F("ht_seconds", s_htSeconds, 1, 120);
-    F("tm_cooldown", s_tmCd, 0, 600); F("tm_radius", s_tmRadius, 1, 30); F("tm_range", s_tmRange, 5, 200);
-    F("pursuit_window", s_pursuitWindow, 0.5, 30); F("pursuit_bonus", s_pursuitBonus, 0, 5); F("pursuit_hold", s_pursuitHold, 0.5, 30); F("pursuit_speed", s_pursuitSpeed, 0, 1);
-    F("kh_cooldown", s_khCd, 0, 600); F("kh_seconds", s_khSeconds, 1, 60); F("kh_speed", s_khSpeed, 1, 3); F("kh_mult", s_khMult, 1, 5);
-    F("ld_cooldown", s_ldCd, 0, 600); F("ld_distance", s_ldDistance, 2, 30); F("ld_width", s_ldWidth, 0.5, 15); F("ld_step", s_ldStep, 1, 10);
-    F("ld_window", s_ldWindow, 0, 10); F("lp_climb", s_lpClimb, 0.5, 30); F("lp_drop", s_lpDrop, 0.5, 50);
-    F("mark_mult", s_markMult, 1, 10); F("mark_seconds", s_markSeconds, 0.5, 60); F("mist_seconds", s_mistSeconds, 0, 60);
-    F("mist_radius", s_mistRadius, 1, 20); I("steady", s_steady, 0, 1); I("gas_explosion", s_acidRow, 0, 100000); I("gas_immune", s_gasImmune, 0, 1);
-    F("bark_radius", s_barkRadius, 0, 30); F("corrosion_per_stack", s_corrPer, 0, 5); F("damage_taken", s_taken, 0, 1); F("damage_taken_outside", s_takenOut, 0, 1); I("corrosion_max", s_corrMax, 1, 20); I("bark_blasts", s_barkBlasts, 0, 24); I("bark_damage", s_barkDamage, 0, 100000); F("shred_per_stack", s_shredPer, 0, 5); F("shred_max", s_shredMax, 0, 10);
-    F("hp_mult", s_hpMult, 0.1, 10); F("stamina_mult", s_staminaMult, 0.1, 20); I("hellbomb_on_exhaustion", s_hellbomb, 0, 1); I("hellbomb_explosion", s_hellbombRow, 0, 100000); F("hellbomb_hold", s_hellbombHold, 0, 10);
-#undef F
-#undef I
-#undef CL
-}
+/* Every setting: its .ini / Mod Options Menu name, variable and range (kitbase/kb_settings.h) */
+static const KbSetting kSettings[] = {
+    KB_I("cp_max", s_cpMax, 1, 10), KB_I("ht_max", s_htMax, 0, 50), KB_F("ht_per_stack", s_htPer, 0, 1), KB_F("ht_seconds", s_htSeconds, 1, 120),
+    KB_F("tm_cooldown", s_tmCd, 0, 600), KB_F("tm_radius", s_tmRadius, 1, 30), KB_F("tm_range", s_tmRange, 5, 200),
+    KB_F("pursuit_window", s_pursuitWindow, 0.5, 30), KB_F("pursuit_bonus", s_pursuitBonus, 0, 5), KB_F("pursuit_hold", s_pursuitHold, 0.5, 30), KB_F("pursuit_speed", s_pursuitSpeed, 0, 1),
+    KB_F("kh_cooldown", s_khCd, 0, 600), KB_F("kh_seconds", s_khSeconds, 1, 60), KB_F("kh_speed", s_khSpeed, 1, 3), KB_F("kh_mult", s_khMult, 1, 5),
+    KB_F("ld_cooldown", s_ldCd, 0, 600), KB_F("ld_distance", s_ldDistance, 2, 30), KB_F("ld_width", s_ldWidth, 0.5, 15), KB_F("ld_step", s_ldStep, 1, 10),
+    KB_F("ld_window", s_ldWindow, 0, 10), KB_F("lp_climb", s_lpClimb, 0.5, 30), KB_F("lp_drop", s_lpDrop, 0.5, 50),
+    KB_F("mark_mult", s_markMult, 1, 10), KB_F("mark_seconds", s_markSeconds, 0.5, 60), KB_F("mist_seconds", s_mistSeconds, 0, 60),
+    KB_F("mist_radius", s_mistRadius, 1, 20), KB_I("steady", s_steady, 0, 1), KB_I("gas_explosion", s_acidRow, 0, 100000), KB_I("gas_immune", s_gasImmune, 0, 1),
+    KB_F("bark_radius", s_barkRadius, 0, 30), KB_F("corrosion_per_stack", s_corrPer, 0, 5), KB_F("damage_taken", s_taken, 0, 1), KB_F("damage_taken_outside", s_takenOut, 0, 1), KB_I("corrosion_max", s_corrMax, 1, 20), KB_I("bark_blasts", s_barkBlasts, 0, 24), KB_I("bark_damage", s_barkDamage, 0, 100000), KB_F("shred_per_stack", s_shredPer, 0, 5), KB_F("shred_max", s_shredMax, 0, 10),
+    KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1), KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
+};
 
-static void LoadSettings(void)
+/* The default faelynn.ini: tools/inigen.py writes the file from this text (the mod never writes it) */
+static __attribute__((unused)) void DefaultIni(FILE* f)
 {
-    char path[MAX_PATH * 2], line[256];
-    snprintf(path, sizeof path, "%s\\faelynn.ini", hf->mod_folder(self));
-    FILE* f = OpenUtf8(path, L"r");
-    if (f) hf->log(self, "settings: read %s", path);
-    else
-    {
-        hf->log(self, "settings: no faelynn.ini in %s (it ships with the mod), so the built-in defaults; the MODS tab still changes them", path);
-        FILE* w = NULL;   /* never written while the game runs (see OpenUtf8); the text stays as the defaults' source */
-        if ((f = w) != NULL)
-        {
-            fprintf(f, "; Faelynn %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for a\n"
-                       "; combo (Shift+Q), or Shift, Ctrl or Alt alone. The game still sees the keys too, so pick ones it leaves alone.\n"
-                       "key_maul = %s\nkey_hunt = %s\nkey_ult = %s\n"
-                       "; Combo Pounce (Pursuit's fuel) and Hunt Tracking (damage stacks: ht_per_stack each, twice in her mist; lost\n"
-                       "; ht_seconds after her last stack).\ncp_max = %d\nht_max = %d\nht_per_stack = %g\nht_seconds = %g\n"
-                       "; Triple Maul: cooldown, blast radius, how far along her aim it finds a target. Pursuit Instinct (Loyal Dash\n"
-                       "; again, up to 3 times, 1 Combo Pounce each): the window for the next one; per stage, the bonus on marked\n"
-                       "; enemies and her extra speed (stacking), and how long both hold.\n"
-                       "tm_cooldown = %g\ntm_radius = %g\ntm_range = %g\npursuit_window = %g\npursuit_bonus = %g\npursuit_hold = %g\npursuit_speed = %g\n"
-                       "; Knife-Eared Hunt: cooldown, length, speed and damage.\nkh_cooldown = %g\nkh_seconds = %g\nkh_speed = %g\nkh_mult = %g\n"
-                       "; Loyal Dash: cooldown, teleport distance, strip width and blast spacing, the protected window after it; the\n"
-                       "; ground she lands on may be lp_climb m higher or lp_drop m lower.\n"
-                       "ld_cooldown = %g\nld_distance = %g\nld_width = %g\nld_step = %g\nld_window = %g\nlp_climb = %g\nlp_drop = %g\n"
-                       "; Scent Trail: marked enemies take mark_mult times the damage for mark_seconds. Toxic Mist: zones of\n"
-                       "; mist_radius m that last mist_seconds (her own gas spares her there). steady: 1 never knocked down.\n"
-                       "; gas_explosion: her blasts (177: the G-4 Gas grenade's; 0: none). gas_immune: 1 any gas leaves her alone (no damage,\n"
-                       "; cough or slow): ADVANCED FILTRATION in the helmet's passive slot, its gas resistance set to full (solo).\n"
-                       "mark_mult = %g\nmark_seconds = %g\nmist_seconds = %g\nmist_radius = %g\nsteady = %d\ngas_explosion = %d\ngas_immune = %d\n"
-                       "; Last Bark: bark_blasts gas blasts in a ring of bark_radius m where she goes down; each hit of that gas on an enemy deals\n"
-                       "; at least bark_damage (0: the gas's own damage).\nbark_radius = %g\nbark_blasts = %d\nbark_damage = %d\n"
-                       "; Corrosion: each of her gas hits on an enemy adds a stack (Pursuit Instinct I-III add 2, 3, 4; at most corrosion_max);\n"
-                       "; gas damage on it is multiplied by 1 + corrosion_per_stack x stacks while its mark lasts.\n"
-                       "corrosion_per_stack = %g\ncorrosion_max = %d\n"
-                       "; Armor shred: every hit on a corroded enemy (anyone's) pierces shred_per_stack x stacks more armour (rounded,\n"
-                       "; at most shred_max): 1 stack +1, 6 stacks +3 at the defaults.\nshred_per_stack = %g\nshred_max = %g\n"
-                       "; Her toughness: the share of any damage she takes while she stands in her own gas (damage_taken: 0.1 is 90%% less;\n"
-                       "; 0: invulnerable there) and outside it (damage_taken_outside: 1 is full damage).\n"
-                       "damage_taken = %g\ndamage_taken_outside = %g\n"
-                       "; The T-Doll's body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties.\n"
-                       "hp_mult = %g\nstamina_mult = %g\n"
-                       "; If her stamina ever runs out, hellbomb_on_exhaustion (1) sets off hellbomb_explosion (125: the B-100 Portable\n"
-                       "; Hellbomb's) on her, once the bar has stayed empty hellbomb_hold s (it flickers to 0 at times).\n"
-                       "hellbomb_on_exhaustion = %d\nhellbomb_explosion = %d\nhellbomb_hold = %g\n",
-                VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_cpMax, s_htMax, (double)s_htPer, (double)s_htSeconds,
-                (double)s_tmCd, (double)s_tmRadius, (double)s_tmRange, (double)s_pursuitWindow, (double)s_pursuitBonus, (double)s_pursuitHold, (double)s_pursuitSpeed,
-                (double)s_khCd, (double)s_khSeconds, (double)s_khSpeed, (double)s_khMult,
-                (double)s_ldCd, (double)s_ldDistance, (double)s_ldWidth, (double)s_ldStep, (double)s_ldWindow, (double)s_lpClimb, (double)s_lpDrop,
-                (double)s_markMult, (double)s_markSeconds, (double)s_mistSeconds, (double)s_mistRadius, s_steady, s_acidRow, s_gasImmune,
-                (double)s_barkRadius, s_barkBlasts, s_barkDamage, (double)s_corrPer, s_corrMax, (double)s_shredPer, (double)s_shredMax, (double)s_taken, (double)s_takenOut,
-                (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
-            fclose(f);
-        }
-        return;
-    }
-    while (fgets(line, sizeof line, f))
-    {
-        char* c = strchr(line, ';');
-        if (c) *c = 0;
-        if (line[strspn(line, " \t")] == '#') continue;
-        char* eq = strchr(line, '=');
-        if (!eq) continue;
-        *eq = 0;
-        char key[64];
-        if (sscanf(line, " %63s", key) != 1) continue;
-        int k = !strcmp(key, "key_maul") ? 0 : !strcmp(key, "key_hunt") ? 1 : !strcmp(key, "key_ult") ? 2 : -1;
-        if (k >= 0)
-        {
-            Key parsed;
-            if (ParseKey(eq + 1, &parsed)) s_keys[k] = parsed;
-            else s_badKey |= 1 << k;
-            continue;
-        }
-        char* end;
-        double v = strtod(eq + 1, &end);
-        if (end != eq + 1) Setting(key, v);
-    }
-    fclose(f);
+fprintf(f, "; Faelynn %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for a\n"
+               "; combo (Shift+Q), or Shift, Ctrl or Alt alone. The game still sees the keys too, so pick ones it leaves alone.\n"
+               "key_maul = %s\nkey_hunt = %s\nkey_ult = %s\n"
+               "; Combo Pounce (Pursuit's fuel) and Hunt Tracking (damage stacks: ht_per_stack each, twice in her mist; lost\n"
+               "; ht_seconds after her last stack).\ncp_max = %d\nht_max = %d\nht_per_stack = %g\nht_seconds = %g\n"
+               "; Triple Maul: cooldown, blast radius, how far along her aim it finds a target. Pursuit Instinct (Loyal Dash\n"
+               "; again, up to 3 times, 1 Combo Pounce each): the window for the next one; per stage, the bonus on marked\n"
+               "; enemies and her extra speed (stacking), and how long both hold.\n"
+               "tm_cooldown = %g\ntm_radius = %g\ntm_range = %g\npursuit_window = %g\npursuit_bonus = %g\npursuit_hold = %g\npursuit_speed = %g\n"
+               "; Knife-Eared Hunt: cooldown, length, speed and damage.\nkh_cooldown = %g\nkh_seconds = %g\nkh_speed = %g\nkh_mult = %g\n"
+               "; Loyal Dash: cooldown, teleport distance, strip width and blast spacing, the protected window after it; the\n"
+               "; ground she lands on may be lp_climb m higher or lp_drop m lower.\n"
+               "ld_cooldown = %g\nld_distance = %g\nld_width = %g\nld_step = %g\nld_window = %g\nlp_climb = %g\nlp_drop = %g\n"
+               "; Scent Trail: marked enemies take mark_mult times the damage for mark_seconds. Toxic Mist: zones of\n"
+               "; mist_radius m that last mist_seconds (her own gas spares her there). steady: 1 never knocked down.\n"
+               "; gas_explosion: her blasts (177: the G-4 Gas grenade's; 0: none). gas_immune: 1 any gas leaves her alone (no damage,\n"
+               "; cough or slow): ADVANCED FILTRATION in the helmet's passive slot, its gas resistance set to full (solo).\n"
+               "mark_mult = %g\nmark_seconds = %g\nmist_seconds = %g\nmist_radius = %g\nsteady = %d\ngas_explosion = %d\ngas_immune = %d\n"
+               "; Last Bark: bark_blasts gas blasts in a ring of bark_radius m where she goes down; each hit of that gas on an enemy deals\n"
+               "; at least bark_damage (0: the gas's own damage).\nbark_radius = %g\nbark_blasts = %d\nbark_damage = %d\n"
+               "; Corrosion: each of her gas hits on an enemy adds a stack (Pursuit Instinct I-III add 2, 3, 4; at most corrosion_max);\n"
+               "; gas damage on it is multiplied by 1 + corrosion_per_stack x stacks while its mark lasts.\n"
+               "corrosion_per_stack = %g\ncorrosion_max = %d\n"
+               "; Armor shred: every hit on a corroded enemy (anyone's) pierces shred_per_stack x stacks more armour (rounded,\n"
+               "; at most shred_max): 1 stack +1, 6 stacks +3 at the defaults.\nshred_per_stack = %g\nshred_max = %g\n"
+               "; Her toughness: the share of any damage she takes while she stands in her own gas (damage_taken: 0.1 is 90%% less;\n"
+               "; 0: invulnerable there) and outside it (damage_taken_outside: 1 is full damage).\n"
+               "damage_taken = %g\ndamage_taken_outside = %g\n"
+               "; The T-Doll's body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties.\n"
+               "hp_mult = %g\nstamina_mult = %g\n"
+               "; If her stamina ever runs out, hellbomb_on_exhaustion (1) sets off hellbomb_explosion (125: the B-100 Portable\n"
+               "; Hellbomb's) on her, once the bar has stayed empty hellbomb_hold s (it flickers to 0 at times).\n"
+               "hellbomb_on_exhaustion = %d\nhellbomb_explosion = %d\nhellbomb_hold = %g\n",
+        VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_cpMax, s_htMax, (double)s_htPer, (double)s_htSeconds,
+        (double)s_tmCd, (double)s_tmRadius, (double)s_tmRange, (double)s_pursuitWindow, (double)s_pursuitBonus, (double)s_pursuitHold, (double)s_pursuitSpeed,
+        (double)s_khCd, (double)s_khSeconds, (double)s_khSpeed, (double)s_khMult,
+        (double)s_ldCd, (double)s_ldDistance, (double)s_ldWidth, (double)s_ldStep, (double)s_ldWindow, (double)s_lpClimb, (double)s_lpDrop,
+        (double)s_markMult, (double)s_markSeconds, (double)s_mistSeconds, (double)s_mistRadius, s_steady, s_acidRow, s_gasImmune,
+        (double)s_barkRadius, s_barkBlasts, s_barkDamage, (double)s_corrPer, s_corrMax, (double)s_shredPer, (double)s_shredMax, (double)s_taken, (double)s_takenOut,
+        (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
 }
 
 /* ---- the clock, the player ------------------------------------------------------------------------------------ */
@@ -1187,7 +1143,7 @@ static void Tick(HfMod* mod, float dt, void* user)
 }
 
 /* ---- the Mod Options Menu (through the Faelynn HUD addon): read and set a setting by its faelynn.ini name --------- */
-static const struct { const char* name; float* f; int* i; } kOptions[] = {
+static const KbOption kOptions[] = {
     {"cp_max", NULL, &s_cpMax}, {"ht_max", NULL, &s_htMax}, {"ht_per_stack", &s_htPer, NULL},
     {"tm_cooldown", &s_tmCd, NULL}, {"tm_radius", &s_tmRadius, NULL}, {"tm_range", &s_tmRange, NULL},
     {"pursuit_window", &s_pursuitWindow, NULL}, {"pursuit_bonus", &s_pursuitBonus, NULL}, {"pursuit_hold", &s_pursuitHold, NULL}, {"pursuit_speed", &s_pursuitSpeed, NULL},
@@ -1197,29 +1153,20 @@ static const struct { const char* name; float* f; int* i; } kOptions[] = {
     {"steady", NULL, &s_steady}, {"bark_blasts", NULL, &s_barkBlasts}, {"bark_damage", NULL, &s_barkDamage}, {"gas_immune", NULL, &s_gasImmune},
     {"corrosion_per_stack", &s_corrPer, NULL}, {"shred_per_stack", &s_shredPer, NULL}, {"shred_max", &s_shredMax, NULL}, {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL}, {"hellbomb_on_exhaustion", NULL, &s_hellbomb}, {"corrosion_max", NULL, &s_corrMax}, {"damage_taken", &s_taken, NULL}, {"damage_taken_outside", &s_takenOut, NULL},
 };
+/* After Mod Options Menu sets one (changed: its value moved) */
+static void OptionAfter(const char* name, int changed)
+{
+    if (changed && !strcmp(name, "gas_immune") && g_inMission) GasImmunity(s_gasImmune);
+    if (g_cp > s_cpMax) g_cp = s_cpMax;
+    if (g_ht > s_htMax) g_ht = s_htMax;
+}
 HF_MOD_EXPORT int faelynn_option_get(const char* name, double* out)
 {
-    if (!name || !out) return 0;
-    for (unsigned k = 0; k < sizeof kOptions / sizeof kOptions[0]; k++)
-        if (!strcmp(kOptions[k].name, name)) { *out = kOptions[k].f ? (double)*kOptions[k].f : (double)*kOptions[k].i; return 1; }
-    return 0;
+    return OptionGet(name, out);
 }
 HF_MOD_EXPORT int faelynn_option_set(const char* name, double value)
 {
-    double before;
-    if (!isfinite(value) || !faelynn_option_get(name, &before)) return 0;
-    Setting(name, value);
-    double now;
-    faelynn_option_get(name, &now);
-    if (now != before)
-    {
-        Log("option %s: %g -> %g (Mod Options Menu)", name, before, now);
-        if (!strcmp(name, "gas_immune") && g_inMission) GasImmunity(s_gasImmune);
-        if (g_inMission && (!strcmp(name, "hp_mult") || !strcmp(name, "stamina_mult"))) { Body(0); Body(1); }
-    }
-    if (g_cp > s_cpMax) g_cp = s_cpMax;
-    if (g_ht > s_htMax) g_ht = s_htMax;
-    return 1;
+    return OptionSet(name, value);
 }
 
 /* Last Bark: her Hellbomb waits while it has her */
@@ -1232,6 +1179,13 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
+    kb_ini = "faelynn.ini";
+    kb_key_names[0] = "key_maul";
+    kb_key_names[1] = "key_hunt";
+    kb_key_names[2] = "key_ult";
+    KB_SETTINGS(kSettings);
+    KB_OPTIONS(kOptions);
+    kb_option_after = OptionAfter;
     kb_damage_taken = DamageTaken;
     kb_damage_dealt = DamageDealt;
     kb_hit_before = HitBefore;

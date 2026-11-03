@@ -35,6 +35,7 @@ kitbase/                 source of truth (header-only)
   kb_body.h              layer 1: the T-Doll body (health, stamina, the stamina Hellbomb)
   kb_hits.h              layer 1: the damage pipeline on the game's hit code (her hits and hits on her)
   kb_damage.h            layer 1: HellForge's damage event routed to the kit, with shared helpers
+  kb_settings.h          layer 1: the settings table, .ini loader, skill keys and Mod Options Menu calls
   ...                    later layers as they are extracted
 mods/<kit>/src/kitbase/  copies, kept in sync by tools/kitbase_sync.py
 ```
@@ -123,7 +124,11 @@ between blocks.
    `kb_damage_seen` (every hit; Leva's probe), and holds what every kit did the same way: `IsShot`, `ScaleDamage`,
    `NoteTarget` and her last target. The rest of each kit's handler is skill logic and stays in the kit: an ordered
    handler chain would only rename it. Revisit once AK-12 shows which rules repeat.
-4. **Settings table and the generic HUD.**
+4. **Settings table (done, on branch `kitbase-settings`, needs its in-game check)** and the generic HUD (next).
+   A kit lists every setting once (`KB_F` / `KB_I`: name, variable, range) and names its .ini and key names;
+   `kb_settings.h` loads the .ini, clamps, and answers Mod Options Menu (the kit's `<kit>_option_get` / `_set` exports
+   stay, one line each, since the menu finds them by name). Kit extras after a change go in `kb_option_after`. The
+   default .ini text stays in the kit as `DefaultIni` for `tools/inigen.py`, whose output is unchanged.
 5. **AK-12 on the base.** Layer 2 and 3 blocks move only when she needs them.
 
 Steps 2 onward change behaviour, so each kit gets an in-game check before release, and kits ship on the base only

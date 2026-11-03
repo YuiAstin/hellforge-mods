@@ -52,9 +52,9 @@
 #include "kitbase/kb_body.h"
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
+#include "kitbase/kb_settings.h"
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
-static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
 static int s_nativeRows = 1, s_nativeArc = 0;
 static int s_arcMode = 1, s_arcShell = 222, s_arcRow = 157, s_rsColumns = 7, s_rsRows = 3, s_ultArcsMax = 24, s_fsMax = 2, s_codeMax = 4;
 static int s_rsArcs = 2;
@@ -73,135 +73,91 @@ static int s_arcGrenade = 0;
 static int s_arcEmpty = 1;
 static float s_lpClimb = 6, s_lpDrop = 12;
 
-static int s_badKey;
-static void Setting(const char* key, double v)
-{
-#define CL(x, lo, hi) ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))
-#define F(name, var, lo, hi) else if (!strcmp(key, name)) var = (float)CL(v, lo, hi)
-#define I(name, var, lo, hi) else if (!strcmp(key, name)) var = (int)CL(v, lo, hi)
-    if (0) {}
-    I("arc_mode", s_arcMode, 0, 3); F("arc_rate", s_arcRate, 1, 100); F("arc_reach", s_arcReach, 1, 30); F("arc_burst", s_arcBurst, 0, 100); I("arc_chain", s_arcChain, -1, 8); I("arc_shape", s_arcStyle, 0, 2); F("arc_range", s_arcRange, 0, 100); F("aim_smooth", s_aimSmooth, 0, 2); I("arc_grenade", s_arcGrenade, 0, 1); I("arc_split", s_arcSplit, -1, 8); I("arc_empty", s_arcEmpty, 0, 1); I("arc_shell", s_arcShell, 0, 100000); I("arc_explosion", s_arcRow, 0, 100000); I("steady", s_steady, 0, 1); I("native_rows", s_nativeRows, 0, 1); I("native_arc", s_nativeArc, 0, 1);
-    F("rs_cooldown", s_rsCd, 0, 600); F("rs_distance", s_rsDistance, 2, 60); F("rs_width", s_rsWidth, 2, 60); F("rs_depth", s_rsDepth, 0, 30);
-    I("rs_columns", s_rsColumns, 1, 15); I("rs_rows", s_rsRows, 1, 5); F("rs_paralysis", s_rsParalysis, 0, 30); F("rs_sweep", s_rsSweep, 0, 0.5);
-    F("rs_seconds", s_rsSeconds, 0, 60); F("rs_pulse", s_rsPulse, 0.1, 5); F("rs_damage", s_rsDamage, 0, 5); F("rs_hold", s_rsHold, 0, 5); I("rs_arcs", s_rsArcs, 0, 20);
-    F("od_cooldown", s_odCd, 0, 600); F("od_seconds", s_odSeconds, 0.5, 60); F("od_step", s_odStep, 0.05, 5); F("od_charged", s_odCharged, 1, 5);
-    F("ult_cooldown", s_ultCd, 0, 600); F("ult_radius", s_ultRadius, 5, 60); I("ult_arcs_max", s_ultArcsMax, 0, 64);
-    F("blitz_window", s_blitzWindow, 1, 30); F("blitz_length", s_blitzLength, 5, 60); F("blitz_step", s_blitzStep, 1, 10); F("blitz_stealth", s_blitzStealth, 0, 30); F("blitz_power", s_blitzPower, 0.1, 20);
-    F("fs_radius", s_fsRadius, 0, 60); F("fs_every", s_fsEvery, 0.5, 60); I("fs_max", s_fsMax, 0, 10); F("fs_cut", s_fsCut, 0, 30);
-    F("nc_seconds", s_ncSeconds, 0.5, 60); F("nc_mult", s_ncMult, 1, 5); F("elite_mult", s_eliteMult, 1, 5);
-    F("pc_heal", s_pcHeal, 0, 200); F("pc_every", s_pcEvery, 0.5, 60); F("pc_mult", s_pcMult, 1, 5);
-    I("code_max", s_codeMax, 1, 8); F("code_every", s_codeEvery, 0.5, 60); F("code_per", s_codePer, 0, 1); F("link_mult", s_linkMult, 1, 5);
-    F("vz_radius", s_vzRadius, 0.5, 15); F("vz_seconds", s_vzSeconds, 0, 60); F("vz_arm", s_vzArm, 0, 10);
-    F("lp_climb", s_lpClimb, 0.5, 30); F("lp_drop", s_lpDrop, 0.5, 50);
-    F("hp_mult", s_hpMult, 0.1, 10); F("stamina_mult", s_staminaMult, 0.1, 20); I("hellbomb_on_exhaustion", s_hellbomb, 0, 1);
-    I("hellbomb_explosion", s_hellbombRow, 0, 100000); F("hellbomb_hold", s_hellbombHold, 0, 10);
-#undef F
-#undef I
-#undef CL
-}
+/* Every setting: its .ini / Mod Options Menu name, variable and range (kitbase/kb_settings.h) */
+static const KbSetting kSettings[] = {
+    KB_I("arc_mode", s_arcMode, 0, 3), KB_F("arc_rate", s_arcRate, 1, 100), KB_F("arc_reach", s_arcReach, 1, 30), KB_F("arc_burst", s_arcBurst, 0, 100), KB_I("arc_chain", s_arcChain, -1, 8), KB_I("arc_shape", s_arcStyle, 0, 2), KB_F("arc_range", s_arcRange, 0, 100), KB_F("aim_smooth", s_aimSmooth, 0, 2), KB_I("arc_grenade", s_arcGrenade, 0, 1), KB_I("arc_split", s_arcSplit, -1, 8), KB_I("arc_empty", s_arcEmpty, 0, 1), KB_I("arc_shell", s_arcShell, 0, 100000), KB_I("arc_explosion", s_arcRow, 0, 100000), KB_I("steady", s_steady, 0, 1), KB_I("native_rows", s_nativeRows, 0, 1), KB_I("native_arc", s_nativeArc, 0, 1),
+    KB_F("rs_cooldown", s_rsCd, 0, 600), KB_F("rs_distance", s_rsDistance, 2, 60), KB_F("rs_width", s_rsWidth, 2, 60), KB_F("rs_depth", s_rsDepth, 0, 30),
+    KB_I("rs_columns", s_rsColumns, 1, 15), KB_I("rs_rows", s_rsRows, 1, 5), KB_F("rs_paralysis", s_rsParalysis, 0, 30), KB_F("rs_sweep", s_rsSweep, 0, 0.5),
+    KB_F("rs_seconds", s_rsSeconds, 0, 60), KB_F("rs_pulse", s_rsPulse, 0.1, 5), KB_F("rs_damage", s_rsDamage, 0, 5), KB_F("rs_hold", s_rsHold, 0, 5), KB_I("rs_arcs", s_rsArcs, 0, 20),
+    KB_F("od_cooldown", s_odCd, 0, 600), KB_F("od_seconds", s_odSeconds, 0.5, 60), KB_F("od_step", s_odStep, 0.05, 5), KB_F("od_charged", s_odCharged, 1, 5),
+    KB_F("ult_cooldown", s_ultCd, 0, 600), KB_F("ult_radius", s_ultRadius, 5, 60), KB_I("ult_arcs_max", s_ultArcsMax, 0, 64),
+    KB_F("blitz_window", s_blitzWindow, 1, 30), KB_F("blitz_length", s_blitzLength, 5, 60), KB_F("blitz_step", s_blitzStep, 1, 10), KB_F("blitz_stealth", s_blitzStealth, 0, 30), KB_F("blitz_power", s_blitzPower, 0.1, 20),
+    KB_F("fs_radius", s_fsRadius, 0, 60), KB_F("fs_every", s_fsEvery, 0.5, 60), KB_I("fs_max", s_fsMax, 0, 10), KB_F("fs_cut", s_fsCut, 0, 30),
+    KB_F("nc_seconds", s_ncSeconds, 0.5, 60), KB_F("nc_mult", s_ncMult, 1, 5), KB_F("elite_mult", s_eliteMult, 1, 5),
+    KB_F("pc_heal", s_pcHeal, 0, 200), KB_F("pc_every", s_pcEvery, 0.5, 60), KB_F("pc_mult", s_pcMult, 1, 5),
+    KB_I("code_max", s_codeMax, 1, 8), KB_F("code_every", s_codeEvery, 0.5, 60), KB_F("code_per", s_codePer, 0, 1), KB_F("link_mult", s_linkMult, 1, 5),
+    KB_F("vz_radius", s_vzRadius, 0.5, 15), KB_F("vz_seconds", s_vzSeconds, 0, 60), KB_F("vz_arm", s_vzArm, 0, 10),
+    KB_F("lp_climb", s_lpClimb, 0.5, 30), KB_F("lp_drop", s_lpDrop, 0.5, 50),
+    KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
+    KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
+};
 
-static void LoadSettings(void)
+/* The default leva.ini: tools/inigen.py writes the file from this text (the mod never writes it) */
+static __attribute__((unused)) void DefaultIni(FILE* f)
 {
-    char path[MAX_PATH * 2], line[256];
-    snprintf(path, sizeof path, "%s\\leva.ini", hf->mod_folder(self));
-    FILE* f = OpenUtf8(path, L"r");
-    if (f) hf->log(self, "settings: read %s", path);
-    else
-    {
-        hf->log(self, "settings: no leva.ini in %s (it ships with the mod), so the built-in defaults; the MODS tab still changes them", path);
-        FILE* w = NULL;   /* never written while the game runs (see OpenUtf8); the text stays as the defaults' source */
-        if ((f = w) != NULL)
-        {
-            fprintf(f, "; Leva %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for a\n"
-                       "; combo (Shift+Q), or Shift, Ctrl or Alt alone. The game still sees the keys too, so pick ones it leaves alone.\n"
-                       "key_suppress = %s\nkey_disrupt = %s\nkey_ult = %s\n"
-                       "; aim_smooth: seconds her aim is averaged over for her lines and fields (her head sways; 0: the raw aim).\n"
-                       "aim_smooth = %g\n"
-                       "; arc_grenade 1: her arcs are the G-31 Arc grenade's detonation (arc_explosion) set off at each point; 0: arc_mode.\n"
-                       "arc_grenade = %d\n"
-                       "; arc_mode, how her arcs are made at each point: 1 a bullet fired down from 3 m that bursts like the GL-52\n"
-                       "; De-Escalator's shell on whatever it hits (no bounce); 2 the arc_shell projectile itself fired down (222: the GL-52's\n"
-                       "; shell, which can bounce away); 3 the GL-52 shell's burst set off directly; 0 arc_explosion set off directly (157: the\n"
-                       "; G-31 Arc grenade's, whose electric effect stays on the field). steady: 1 never knocked down.\n"
-                       "arc_mode = %d\narc_shell = %d\narc_explosion = %d\nsteady = %d\n"
-                       "; native_rows 1: the lockdown bursts as an explosion and arc of her own (copies of the GL-52 burst's, added to the\n"
-                       "; game's lists), so rs_damage sets its damage in the game's data; 0: the GL-52 burst, its damage cut as it lands.\n"
-                       "; native_arc 1: its arc too (off: in testing the lightning then ran to and from her; the arc's hits are cut as they land).\n"
-                       "native_rows = %d\nnative_arc = %d\n"
-                       "; Too many arcs at once leave their lightning on the field for good: at most arc_rate arcs a second. Points with an\n"
-                       "; enemy within arc_reach m come first (the rest of them wait their turn); with arc_empty = 1 the empty points get\n"
-                       "; what the rate leaves over (showing her reach), else none (their charge, paralysis and Voltage still apply).\n"
-                       "; arc_burst: extra arcs her ultimate and Blitz may use at once, above the rate.\n"
-                       "; arc_shape 2: only arc row 15 takes the Arc Thrower's shape (its bang), row 6's fan keeps hitting; 1: both rows;\n"
-                       "; 0: neither. arc_shape 1: her arcs take the ARC-3 Arc Thrower's shape (one beam jumping on from target to target) instead of\n"
-                       "; the GL-52 burst's fan; arc_chain / arc_split (0 or more) then set its jumps and split, -1 keeps the shape's own.\n"
-                       "; arc_range: how far an arc reaches, in m (0: the burst's own 10 m; the ARC-3's 55 m strands lightning on the field).\n"
-                       "; While Leva is on, the GL-52 De-Escalator's own arcs do the same.\n"
-                       "arc_rate = %g\narc_reach = %g\narc_empty = %d\narc_burst = %g\narc_shape = %d\narc_range = %g\narc_chain = %d\narc_split = %d\n"
-                       "; Rational Suppression (a lockdown): cooldown; a field of rs_columns x rs_rows points over rs_width x rs_depth m,\n"
-                       "; rs_distance m ahead, swept in across rs_sweep s per column (enemies under it paralysed rs_paralysis s), then arcs\n"
-                       "; again every rs_pulse s for rs_seconds s, each pulse holding the enemies in it rs_hold s more; its arcs deal\n"
-                       "; rs_damage of their damage (nothing else adds to it), at most rs_arcs arcs a pulse (enemies first).\n"
-                       "rs_cooldown = %g\nrs_distance = %g\nrs_width = %g\nrs_depth = %g\nrs_columns = %d\nrs_rows = %d\nrs_paralysis = %g\nrs_sweep = %g\n"
-                       "rs_seconds = %g\nrs_pulse = %g\nrs_damage = %g\nrs_hold = %g\nrs_arcs = %d\n"
-                       "; Orderly Disruption (Arc Rounds): cooldown; for od_seconds s her bullets set off an arc where they hit an enemy (one\n"
-                       "; every od_step s at most), charging it; on charged enemies those arcs deal od_charged times.\n"
-                       "od_cooldown = %g\nod_seconds = %g\nod_step = %g\nod_charged = %g\n"
-                       "; Quantum Calculation: cooldown, radius (four rings of arcs out to it), at most ult_arcs_max arcs on enemies.\n"
-                       "; Superconduct Blitz: the window after it, the line's length and arc spacing (four arcs at its end, then back along\n"
-                       "; it to her), Stealth after it, and its arcs' damage (times the Code it spends: 1 / 1.17 / 1.42 / 2).\n"
-                       "ult_cooldown = %g\nult_radius = %g\nult_arcs_max = %d\nblitz_window = %g\nblitz_length = %g\nblitz_step = %g\nblitz_stealth = %g\nblitz_power = %g\n"
-                       "; The Fox's Scheme: Wise Support arcs on newly charged enemies within fs_radius m, at most fs_max per fs_every s, each\n"
-                       "; fs_cut s off the ultimate's cooldown.\nfs_radius = %g\nfs_every = %g\nfs_max = %d\nfs_cut = %g\n"
-                       "; Negative Charge: how long it lasts, her arcs' and her shots' damage on charged enemies.\n"
-                       "nc_seconds = %g\nnc_mult = %g\nelite_mult = %g\n"
-                       "; Positive Charge (on her): pc_heal health every pc_every s, her arcs on charged enemies pc_mult times again.\n"
-                       "pc_heal = %g\npc_every = %g\npc_mult = %g\n"
-                       "; Superconduct Code: most stacks, a stack every code_every s, code_per damage per stack, Superconduct Link at full.\n"
-                       "code_max = %d\ncode_every = %g\ncode_per = %g\nlink_mult = %g\n"
-                       "; Voltage zones: radius, how long they last, how long before they can burst.\nvz_radius = %g\nvz_seconds = %g\nvz_arm = %g\n"
-                       "; Her arcs find the ground from lp_climb m above her height down to lp_drop m below it.\nlp_climb = %g\nlp_drop = %g\n"
-                       "; The T-Doll's body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties.\n"
-                       "hp_mult = %g\nstamina_mult = %g\n"
-                       "; If her stamina ever runs out, hellbomb_on_exhaustion (1) sets off hellbomb_explosion (125: the B-100 Portable\n"
-                       "; Hellbomb's) on her, once the bar has stayed empty hellbomb_hold s (it flickers to 0 at times).\n"
-                       "hellbomb_on_exhaustion = %d\nhellbomb_explosion = %d\nhellbomb_hold = %g\n",
-                VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_aimSmooth, s_arcGrenade, s_arcMode, s_arcShell, s_arcRow, s_steady, s_nativeRows, s_nativeArc, (double)s_arcRate, (double)s_arcReach, s_arcEmpty, (double)s_arcBurst, s_arcStyle, (double)s_arcRange, s_arcChain, s_arcSplit,
-                (double)s_rsCd, (double)s_rsDistance, (double)s_rsWidth, (double)s_rsDepth, s_rsColumns, s_rsRows, (double)s_rsParalysis, (double)s_rsSweep,
-                (double)s_rsSeconds, (double)s_rsPulse, (double)s_rsDamage, (double)s_rsHold, s_rsArcs,
-                (double)s_odCd, (double)s_odSeconds, (double)s_odStep, (double)s_odCharged,
-                (double)s_ultCd, (double)s_ultRadius, s_ultArcsMax, (double)s_blitzWindow, (double)s_blitzLength, (double)s_blitzStep, (double)s_blitzStealth, (double)s_blitzPower,
-                (double)s_fsRadius, (double)s_fsEvery, s_fsMax, (double)s_fsCut, (double)s_ncSeconds, (double)s_ncMult, (double)s_eliteMult,
-                (double)s_pcHeal, (double)s_pcEvery, (double)s_pcMult, s_codeMax, (double)s_codeEvery, (double)s_codePer, (double)s_linkMult,
-                (double)s_vzRadius, (double)s_vzSeconds, (double)s_vzArm, (double)s_lpClimb, (double)s_lpDrop,
-                (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
-            fclose(f);
-        }
-        return;
-    }
-    while (fgets(line, sizeof line, f))
-    {
-        char* c = strchr(line, ';');
-        if (c) *c = 0;
-        if (line[strspn(line, " \t")] == '#') continue;
-        char* eq = strchr(line, '=');
-        if (!eq) continue;
-        *eq = 0;
-        char key[64];
-        if (sscanf(line, " %63s", key) != 1) continue;
-        int k = !strcmp(key, "key_suppress") ? 0 : !strcmp(key, "key_disrupt") ? 1 : !strcmp(key, "key_ult") ? 2 : -1;
-        if (k >= 0)
-        {
-            Key parsed;
-            if (ParseKey(eq + 1, &parsed)) s_keys[k] = parsed;
-            else s_badKey |= 1 << k;
-            continue;
-        }
-        char* end;
-        double v = strtod(eq + 1, &end);
-        if (end != eq + 1) Setting(key, v);
-    }
-    fclose(f);
+fprintf(f, "; Leva %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for a\n"
+               "; combo (Shift+Q), or Shift, Ctrl or Alt alone. The game still sees the keys too, so pick ones it leaves alone.\n"
+               "key_suppress = %s\nkey_disrupt = %s\nkey_ult = %s\n"
+               "; aim_smooth: seconds her aim is averaged over for her lines and fields (her head sways; 0: the raw aim).\n"
+               "aim_smooth = %g\n"
+               "; arc_grenade 1: her arcs are the G-31 Arc grenade's detonation (arc_explosion) set off at each point; 0: arc_mode.\n"
+               "arc_grenade = %d\n"
+               "; arc_mode, how her arcs are made at each point: 1 a bullet fired down from 3 m that bursts like the GL-52\n"
+               "; De-Escalator's shell on whatever it hits (no bounce); 2 the arc_shell projectile itself fired down (222: the GL-52's\n"
+               "; shell, which can bounce away); 3 the GL-52 shell's burst set off directly; 0 arc_explosion set off directly (157: the\n"
+               "; G-31 Arc grenade's, whose electric effect stays on the field). steady: 1 never knocked down.\n"
+               "arc_mode = %d\narc_shell = %d\narc_explosion = %d\nsteady = %d\n"
+               "; native_rows 1: the lockdown bursts as an explosion and arc of her own (copies of the GL-52 burst's, added to the\n"
+               "; game's lists), so rs_damage sets its damage in the game's data; 0: the GL-52 burst, its damage cut as it lands.\n"
+               "; native_arc 1: its arc too (off: in testing the lightning then ran to and from her; the arc's hits are cut as they land).\n"
+               "native_rows = %d\nnative_arc = %d\n"
+               "; Too many arcs at once leave their lightning on the field for good: at most arc_rate arcs a second. Points with an\n"
+               "; enemy within arc_reach m come first (the rest of them wait their turn); with arc_empty = 1 the empty points get\n"
+               "; what the rate leaves over (showing her reach), else none (their charge, paralysis and Voltage still apply).\n"
+               "; arc_burst: extra arcs her ultimate and Blitz may use at once, above the rate.\n"
+               "; arc_shape 2: only arc row 15 takes the Arc Thrower's shape (its bang), row 6's fan keeps hitting; 1: both rows;\n"
+               "; 0: neither. arc_shape 1: her arcs take the ARC-3 Arc Thrower's shape (one beam jumping on from target to target) instead of\n"
+               "; the GL-52 burst's fan; arc_chain / arc_split (0 or more) then set its jumps and split, -1 keeps the shape's own.\n"
+               "; arc_range: how far an arc reaches, in m (0: the burst's own 10 m; the ARC-3's 55 m strands lightning on the field).\n"
+               "; While Leva is on, the GL-52 De-Escalator's own arcs do the same.\n"
+               "arc_rate = %g\narc_reach = %g\narc_empty = %d\narc_burst = %g\narc_shape = %d\narc_range = %g\narc_chain = %d\narc_split = %d\n"
+               "; Rational Suppression (a lockdown): cooldown; a field of rs_columns x rs_rows points over rs_width x rs_depth m,\n"
+               "; rs_distance m ahead, swept in across rs_sweep s per column (enemies under it paralysed rs_paralysis s), then arcs\n"
+               "; again every rs_pulse s for rs_seconds s, each pulse holding the enemies in it rs_hold s more; its arcs deal\n"
+               "; rs_damage of their damage (nothing else adds to it), at most rs_arcs arcs a pulse (enemies first).\n"
+               "rs_cooldown = %g\nrs_distance = %g\nrs_width = %g\nrs_depth = %g\nrs_columns = %d\nrs_rows = %d\nrs_paralysis = %g\nrs_sweep = %g\n"
+               "rs_seconds = %g\nrs_pulse = %g\nrs_damage = %g\nrs_hold = %g\nrs_arcs = %d\n"
+               "; Orderly Disruption (Arc Rounds): cooldown; for od_seconds s her bullets set off an arc where they hit an enemy (one\n"
+               "; every od_step s at most), charging it; on charged enemies those arcs deal od_charged times.\n"
+               "od_cooldown = %g\nod_seconds = %g\nod_step = %g\nod_charged = %g\n"
+               "; Quantum Calculation: cooldown, radius (four rings of arcs out to it), at most ult_arcs_max arcs on enemies.\n"
+               "; Superconduct Blitz: the window after it, the line's length and arc spacing (four arcs at its end, then back along\n"
+               "; it to her), Stealth after it, and its arcs' damage (times the Code it spends: 1 / 1.17 / 1.42 / 2).\n"
+               "ult_cooldown = %g\nult_radius = %g\nult_arcs_max = %d\nblitz_window = %g\nblitz_length = %g\nblitz_step = %g\nblitz_stealth = %g\nblitz_power = %g\n"
+               "; The Fox's Scheme: Wise Support arcs on newly charged enemies within fs_radius m, at most fs_max per fs_every s, each\n"
+               "; fs_cut s off the ultimate's cooldown.\nfs_radius = %g\nfs_every = %g\nfs_max = %d\nfs_cut = %g\n"
+               "; Negative Charge: how long it lasts, her arcs' and her shots' damage on charged enemies.\n"
+               "nc_seconds = %g\nnc_mult = %g\nelite_mult = %g\n"
+               "; Positive Charge (on her): pc_heal health every pc_every s, her arcs on charged enemies pc_mult times again.\n"
+               "pc_heal = %g\npc_every = %g\npc_mult = %g\n"
+               "; Superconduct Code: most stacks, a stack every code_every s, code_per damage per stack, Superconduct Link at full.\n"
+               "code_max = %d\ncode_every = %g\ncode_per = %g\nlink_mult = %g\n"
+               "; Voltage zones: radius, how long they last, how long before they can burst.\nvz_radius = %g\nvz_seconds = %g\nvz_arm = %g\n"
+               "; Her arcs find the ground from lp_climb m above her height down to lp_drop m below it.\nlp_climb = %g\nlp_drop = %g\n"
+               "; The T-Doll's body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties.\n"
+               "hp_mult = %g\nstamina_mult = %g\n"
+               "; If her stamina ever runs out, hellbomb_on_exhaustion (1) sets off hellbomb_explosion (125: the B-100 Portable\n"
+               "; Hellbomb's) on her, once the bar has stayed empty hellbomb_hold s (it flickers to 0 at times).\n"
+               "hellbomb_on_exhaustion = %d\nhellbomb_explosion = %d\nhellbomb_hold = %g\n",
+        VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_aimSmooth, s_arcGrenade, s_arcMode, s_arcShell, s_arcRow, s_steady, s_nativeRows, s_nativeArc, (double)s_arcRate, (double)s_arcReach, s_arcEmpty, (double)s_arcBurst, s_arcStyle, (double)s_arcRange, s_arcChain, s_arcSplit,
+        (double)s_rsCd, (double)s_rsDistance, (double)s_rsWidth, (double)s_rsDepth, s_rsColumns, s_rsRows, (double)s_rsParalysis, (double)s_rsSweep,
+        (double)s_rsSeconds, (double)s_rsPulse, (double)s_rsDamage, (double)s_rsHold, s_rsArcs,
+        (double)s_odCd, (double)s_odSeconds, (double)s_odStep, (double)s_odCharged,
+        (double)s_ultCd, (double)s_ultRadius, s_ultArcsMax, (double)s_blitzWindow, (double)s_blitzLength, (double)s_blitzStep, (double)s_blitzStealth, (double)s_blitzPower,
+        (double)s_fsRadius, (double)s_fsEvery, s_fsMax, (double)s_fsCut, (double)s_ncSeconds, (double)s_ncMult, (double)s_eliteMult,
+        (double)s_pcHeal, (double)s_pcEvery, (double)s_pcMult, s_codeMax, (double)s_codeEvery, (double)s_codePer, (double)s_linkMult,
+        (double)s_vzRadius, (double)s_vzSeconds, (double)s_vzArm, (double)s_lpClimb, (double)s_lpDrop,
+        (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
 }
 
 /* ---- the clock, the player ------------------------------------------------------------------------------------ */
@@ -1830,7 +1786,7 @@ static void Tick(HfMod* mod, float dt, void* user)
 }
 
 /* ---- the Mod Options Menu (through the Leva HUD addon): read and set a setting by its leva.ini name -------------- */
-static const struct { const char* name; float* f; int* i; } kOptions[] = {
+static const KbOption kOptions[] = {
     {"rs_cooldown", &s_rsCd, NULL}, {"rs_distance", &s_rsDistance, NULL}, {"rs_width", &s_rsWidth, NULL}, {"rs_paralysis", &s_rsParalysis, NULL},
     {"od_cooldown", &s_odCd, NULL}, {"od_charged", &s_odCharged, NULL}, {"od_seconds", &s_odSeconds, NULL},
     {"rs_seconds", &s_rsSeconds, NULL}, {"rs_damage", &s_rsDamage, NULL}, {"rs_pulse", &s_rsPulse, NULL}, {"rs_arcs", NULL, &s_rsArcs}, {"blitz_power", &s_blitzPower, NULL}, {"arc_rate", &s_arcRate, NULL}, {"arc_chain", NULL, &s_arcChain}, {"arc_shape", NULL, &s_arcStyle}, {"arc_mode", NULL, &s_arcMode}, {"arc_grenade", NULL, &s_arcGrenade}, {"arc_range", &s_arcRange, NULL}, {"arc_split", NULL, &s_arcSplit}, {"arc_empty", NULL, &s_arcEmpty},
@@ -1841,33 +1797,31 @@ static const struct { const char* name; float* f; int* i; } kOptions[] = {
     {"link_mult", &s_linkMult, NULL}, {"vz_seconds", &s_vzSeconds, NULL}, {"vz_radius", &s_vzRadius, NULL}, {"steady", NULL, &s_steady},
     {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL}, {"hellbomb_on_exhaustion", NULL, &s_hellbomb},
 };
+/* After Mod Options Menu sets one (changed: its value moved) */
+static void OptionAfter(const char* name, int changed)
+{
+    if (changed && g_inMission && (!strcmp(name, "arc_chain") || !strcmp(name, "arc_split") || !strcmp(name, "arc_shape") || !strcmp(name, "arc_range"))) { ArcLimits(0); ArcLimits(1); }
+}
 HF_MOD_EXPORT int leva_option_get(const char* name, double* out)
 {
-    if (!name || !out) return 0;
-    for (unsigned k = 0; k < sizeof kOptions / sizeof kOptions[0]; k++)
-        if (!strcmp(kOptions[k].name, name)) { *out = kOptions[k].f ? (double)*kOptions[k].f : (double)*kOptions[k].i; return 1; }
-    return 0;
+    return OptionGet(name, out);
 }
 HF_MOD_EXPORT int leva_option_set(const char* name, double value)
 {
-    double before;
-    if (!isfinite(value) || !leva_option_get(name, &before)) return 0;
-    Setting(name, value);
-    double now;
-    leva_option_get(name, &now);
-    if (now != before)
-    {
-        Log("option %s: %g -> %g (Mod Options Menu)", name, before, now);
-        if (g_inMission && (!strcmp(name, "hp_mult") || !strcmp(name, "stamina_mult"))) { Body(0); Body(1); }
-        if (g_inMission && (!strcmp(name, "arc_chain") || !strcmp(name, "arc_split") || !strcmp(name, "arc_shape") || !strcmp(name, "arc_range"))) { ArcLimits(0); ArcLimits(1); }
-    }
-    return 1;
+    return OptionSet(name, value);
 }
 
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
+    kb_ini = "leva.ini";
+    kb_key_names[0] = "key_suppress";
+    kb_key_names[1] = "key_disrupt";
+    kb_key_names[2] = "key_ult";
+    KB_SETTINGS(kSettings);
+    KB_OPTIONS(kOptions);
+    kb_option_after = OptionAfter;
     kb_damage_seen = DamageSeen;
     kb_damage_taken = DamageTaken;
     kb_damage_dealt = DamageDealt;

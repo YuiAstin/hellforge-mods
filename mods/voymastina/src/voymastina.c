@@ -61,9 +61,9 @@ static double HowlImmuneUntil(void);
 #include "kitbase/kb_body.h"
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
+#include "kitbase/kb_settings.h"
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
-static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
 static float s_sfCd = 6, s_sfRange = 40, s_sfWindow = 10;
 /* (not in the .ini's text) */
 static float s_bareDamage = 5000, s_bareStagger = 80, s_bareAp = 9, s_bareDemolition = 60, s_bareSpeed = 1.2f, s_bareReach = 3.5f, s_bareBlastEvery = 0.5f;
@@ -108,135 +108,91 @@ static float s_akErgo = 50, s_akReload = 0.5f, s_akRecoil = 0.7f;
 static float s_sinTurn = 1.6f, s_sinSpeed = 1.4f;   /* the Sinbreaker: turning x, walking x */
 static int s_sinArmor = 5, s_akZeroTest = 3;   /* her guns on foot: + ergonomics, x reload time */
 
-static int s_badKey;
-static void Setting(const char* key, double v)
-{
-#define CL(x, lo, hi) ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))
-#define F(name, var, lo, hi) else if (!strcmp(key, name)) var = (float)CL(v, lo, hi)
-#define I(name, var, lo, hi) else if (!strcmp(key, name)) var = (int)CL(v, lo, hi)
-    if (0) {}
-    F("sf_cooldown", s_sfCd, 0, 600); F("sf_range", s_sfRange, 5, 200); F("sf_window", s_sfWindow, 0.5, 120);
-    I("bare", s_bare, 0, 1); F("bare_damage", s_bareDamage, 0, 1e6); F("bare_stagger", s_bareStagger, 0, 1000); F("bare_ap", s_bareAp, 0, 10); F("bare_demolition", s_bareDemolition, 0, 1000); F("bare_speed", s_bareSpeed, 0.1, 3); F("bare_reach", s_bareReach, 0.5, 10); I("bare_blast", s_bareBlast, 0, 100000); F("bare_blast_every", s_bareBlastEvery, 0, 5); I("bare_bolt", s_bareBolt, 0, 1); I("sf_explosion", s_sfRow, 0, 100000);
-    I("sa_on", s_saOn, 0, 1); F("sa_every", s_saEvery, 0.2, 60); I("sa_explosion", s_saRow, 0, 100000);
-    F("eye_cooldown", s_eyeCd, 0, 600); F("eye_seconds", s_eyeSeconds, 1, 60); F("eye_radius", s_eyeRadius, 5, 100);
-    F("eye_move", s_eyeMove, 0.2, 20); F("eye_every", s_eyeEvery, 0.5, 30); I("eye_max", s_eyeMax, 0, 200); I("eye_immune", s_eyeImmune, 0, 1); I("eye_explosion", s_eyeRow, 0, 100000);
-    I("drop_on", s_dropOn, 0, 1); I("drop_targets", s_dropTargets, 0, 12); F("drop_radius", s_dropRadius, 5, 100);
-    F("drop_shield", s_dropShield, 0, 10); I("drop_explosion", s_dropRow, 0, 100000);
-    F("pb_cooldown", s_pbCd, 0, 600); F("pb_lunge", s_pbLunge, 0, 15); F("pb_window", s_pbWindow, 0, 15); F("pb_dash", s_pbDash, 1, 30);
-    I("pb_explosion", s_pbRow, 0, 100000); I("pb_points", s_pbPoints, 0, 8); F("pb_step", s_pbStep, 0.5, 20); F("pb_climb", s_pbClimb, 0, 20); I("rail_explosion", s_railRow, 0, 100000); I("pb_fallback", s_pbFallback, 0, 100000);
-    I("pbp_on", s_pbpOn, 0, 1); F("pbp_radius", s_pbpRadius, 2, 60); F("pbp_distance", s_pbpDistance, 1, 20); I("pbp_points", s_pbpPoints, 1, 8);
-    F("pbp_step", s_pbpStep, 0.5, 10); F("pbp_every", s_pbpEvery, 0.5, 120); F("pb_ripple", s_ripple, 0, 1); I("pbp_explosion", s_pbpRow, 0, 100000);
-    I("steady", s_steady, 0, 1); I("dash_move", s_dashMove, 0, 1); I("unshaken", s_unshaken, 0, 1); I("no_stamina_hits", s_noStaminaHits, 0, 1); I("pp_armor", s_ppArmor, 0, 10); F("pp_armor_equal", s_ppArmorEqual, 0, 1); F("pp_armor_after", s_ppArmorAfter, 0, 60); F("dr_base", s_drBase, 0, 1); F("dr_stable", s_drStable, 0, 1);
-    F("stab_max", s_stabMax, 1, 1000); F("stab_per_damage", s_stabPer, 0, 10); F("stab_min_hit", s_stabMin, 0, 100);
-    F("stab_regen", s_stabRegen, 0, 500); F("stab_delay", s_stabDelay, 0, 30); I("ap_bonus", s_apBonus, 0, 6);
-    I("pp_per", s_ppPer, 0, 10); I("pp_max", s_ppMax, 1, 20); I("pp_ap", s_ppAp, 0, 6); F("pp_mult", s_ppMult, 1, 10);
-    F("lp_climb", s_lpClimb, 0.5, 30); F("lp_drop", s_lpDrop, 0.5, 50);
-    I("sin_on", s_sinOn, 0, 1); F("sin_cooldown", s_sinCd, 1, 3600); I("sin_uses", s_sinUses, -1, 100); I("mech_any", s_mechAny, 0, 1); I("sin_grant", s_sinGrant, 0, 1); I("sin_loadout", s_sinLoadout, 0, 1); F("mech_lunge", s_mechLunge, 0, 30);
-    I("mpb_on", s_mpbOn, 0, 1); I("mpb_unlock", s_mpbUnlock, 0, 2); F("mpb_length", s_mpbLength, 5, 80); F("mpb_width", s_mpbWidth, 1, 20); I("mpb_drag", s_mpbDrag, 0, 32);
-    I("mpb_explosion", s_mpbRow, 0, 100000); I("mpb_fallback", s_mpbFallback, 0, 100000); F("mpb_hold", s_mpbHold, 0, 5); F("mpb_delay", s_mpbDelay, 0, 5);
-    F("rage_chance", s_rageChance, 0, 1); F("rage_seconds", s_rageSeconds, 0, 60); F("rage_bonus", s_rageBonus, 0, 10);
-    F("ak_eye_seconds", s_akEyeSeconds, 0.5, 60); F("ak_eye_cooldown", s_akEyeCd, 0, 300); F("ak_eye_range", s_akEyeRange, 5, 300); F("ak_eye_bonus", s_akEyeBonus, 0, 10); F("ak_eye_evasion", s_akEyeEvasion, 0, 1);
-    F("overload_max", s_overloadMax, 1, 1000); F("overload_seconds", s_overloadSeconds, 0, 60); F("overload_penalty", s_overloadPenalty, 0, 1);
-    F("sin_turn", s_sinTurn, 0.5, 4); F("sin_speed", s_sinSpeed, 1, 3); I("sin_armor", s_sinArmor, 0, 10); I("ak_zero_test", s_akZeroTest, 0, 3); F("ak_ergo", s_akErgo, -100, 200); F("ak_reload", s_akReload, 0.1, 2); F("ak_recoil", s_akRecoil, 0, 2); I("howl_targets", s_howlTargets, 0, 100); F("howl_immune", s_howlImmune, 0, 30); I("howl_from_control", s_howlFromControl, 0, 1); F("howl_range", s_howlRange, 5, 300); I("howl_explosion", s_howlRow, 0, 100000);
-    F("hp_mult", s_hpMult, 0.1, 10); F("stamina_mult", s_staminaMult, 0.1, 20); I("hellbomb_on_exhaustion", s_hellbomb, 0, 1); I("hellbomb_explosion", s_hellbombRow, 0, 100000); F("hellbomb_hold", s_hellbombHold, 0, 10);
-#undef F
-#undef I
-#undef CL
-}
+/* Every setting: its .ini / Mod Options Menu name, variable and range (kitbase/kb_settings.h) */
+static const KbSetting kSettings[] = {
+    KB_F("sf_cooldown", s_sfCd, 0, 600), KB_F("sf_range", s_sfRange, 5, 200), KB_F("sf_window", s_sfWindow, 0.5, 120),
+    KB_I("bare", s_bare, 0, 1), KB_F("bare_damage", s_bareDamage, 0, 1e6), KB_F("bare_stagger", s_bareStagger, 0, 1000), KB_F("bare_ap", s_bareAp, 0, 10), KB_F("bare_demolition", s_bareDemolition, 0, 1000), KB_F("bare_speed", s_bareSpeed, 0.1, 3), KB_F("bare_reach", s_bareReach, 0.5, 10), KB_I("bare_blast", s_bareBlast, 0, 100000), KB_F("bare_blast_every", s_bareBlastEvery, 0, 5), KB_I("bare_bolt", s_bareBolt, 0, 1), KB_I("sf_explosion", s_sfRow, 0, 100000),
+    KB_I("sa_on", s_saOn, 0, 1), KB_F("sa_every", s_saEvery, 0.2, 60), KB_I("sa_explosion", s_saRow, 0, 100000),
+    KB_F("eye_cooldown", s_eyeCd, 0, 600), KB_F("eye_seconds", s_eyeSeconds, 1, 60), KB_F("eye_radius", s_eyeRadius, 5, 100),
+    KB_F("eye_move", s_eyeMove, 0.2, 20), KB_F("eye_every", s_eyeEvery, 0.5, 30), KB_I("eye_max", s_eyeMax, 0, 200), KB_I("eye_immune", s_eyeImmune, 0, 1), KB_I("eye_explosion", s_eyeRow, 0, 100000),
+    KB_I("drop_on", s_dropOn, 0, 1), KB_I("drop_targets", s_dropTargets, 0, 12), KB_F("drop_radius", s_dropRadius, 5, 100),
+    KB_F("drop_shield", s_dropShield, 0, 10), KB_I("drop_explosion", s_dropRow, 0, 100000),
+    KB_F("pb_cooldown", s_pbCd, 0, 600), KB_F("pb_lunge", s_pbLunge, 0, 15), KB_F("pb_window", s_pbWindow, 0, 15), KB_F("pb_dash", s_pbDash, 1, 30),
+    KB_I("pb_explosion", s_pbRow, 0, 100000), KB_I("pb_points", s_pbPoints, 0, 8), KB_F("pb_step", s_pbStep, 0.5, 20), KB_F("pb_climb", s_pbClimb, 0, 20), KB_I("rail_explosion", s_railRow, 0, 100000), KB_I("pb_fallback", s_pbFallback, 0, 100000),
+    KB_I("pbp_on", s_pbpOn, 0, 1), KB_F("pbp_radius", s_pbpRadius, 2, 60), KB_F("pbp_distance", s_pbpDistance, 1, 20), KB_I("pbp_points", s_pbpPoints, 1, 8),
+    KB_F("pbp_step", s_pbpStep, 0.5, 10), KB_F("pbp_every", s_pbpEvery, 0.5, 120), KB_F("pb_ripple", s_ripple, 0, 1), KB_I("pbp_explosion", s_pbpRow, 0, 100000),
+    KB_I("steady", s_steady, 0, 1), KB_I("dash_move", s_dashMove, 0, 1), KB_I("unshaken", s_unshaken, 0, 1), KB_I("no_stamina_hits", s_noStaminaHits, 0, 1), KB_I("pp_armor", s_ppArmor, 0, 10), KB_F("pp_armor_equal", s_ppArmorEqual, 0, 1), KB_F("pp_armor_after", s_ppArmorAfter, 0, 60), KB_F("dr_base", s_drBase, 0, 1), KB_F("dr_stable", s_drStable, 0, 1),
+    KB_F("stab_max", s_stabMax, 1, 1000), KB_F("stab_per_damage", s_stabPer, 0, 10), KB_F("stab_min_hit", s_stabMin, 0, 100),
+    KB_F("stab_regen", s_stabRegen, 0, 500), KB_F("stab_delay", s_stabDelay, 0, 30), KB_I("ap_bonus", s_apBonus, 0, 6),
+    KB_I("pp_per", s_ppPer, 0, 10), KB_I("pp_max", s_ppMax, 1, 20), KB_I("pp_ap", s_ppAp, 0, 6), KB_F("pp_mult", s_ppMult, 1, 10),
+    KB_F("lp_climb", s_lpClimb, 0.5, 30), KB_F("lp_drop", s_lpDrop, 0.5, 50),
+    KB_I("sin_on", s_sinOn, 0, 1), KB_F("sin_cooldown", s_sinCd, 1, 3600), KB_I("sin_uses", s_sinUses, -1, 100), KB_I("mech_any", s_mechAny, 0, 1), KB_I("sin_grant", s_sinGrant, 0, 1), KB_I("sin_loadout", s_sinLoadout, 0, 1), KB_F("mech_lunge", s_mechLunge, 0, 30),
+    KB_I("mpb_on", s_mpbOn, 0, 1), KB_I("mpb_unlock", s_mpbUnlock, 0, 2), KB_F("mpb_length", s_mpbLength, 5, 80), KB_F("mpb_width", s_mpbWidth, 1, 20), KB_I("mpb_drag", s_mpbDrag, 0, 32),
+    KB_I("mpb_explosion", s_mpbRow, 0, 100000), KB_I("mpb_fallback", s_mpbFallback, 0, 100000), KB_F("mpb_hold", s_mpbHold, 0, 5), KB_F("mpb_delay", s_mpbDelay, 0, 5),
+    KB_F("rage_chance", s_rageChance, 0, 1), KB_F("rage_seconds", s_rageSeconds, 0, 60), KB_F("rage_bonus", s_rageBonus, 0, 10),
+    KB_F("ak_eye_seconds", s_akEyeSeconds, 0.5, 60), KB_F("ak_eye_cooldown", s_akEyeCd, 0, 300), KB_F("ak_eye_range", s_akEyeRange, 5, 300), KB_F("ak_eye_bonus", s_akEyeBonus, 0, 10), KB_F("ak_eye_evasion", s_akEyeEvasion, 0, 1),
+    KB_F("overload_max", s_overloadMax, 1, 1000), KB_F("overload_seconds", s_overloadSeconds, 0, 60), KB_F("overload_penalty", s_overloadPenalty, 0, 1),
+    KB_F("sin_turn", s_sinTurn, 0.5, 4), KB_F("sin_speed", s_sinSpeed, 1, 3), KB_I("sin_armor", s_sinArmor, 0, 10), KB_I("ak_zero_test", s_akZeroTest, 0, 3), KB_F("ak_ergo", s_akErgo, -100, 200), KB_F("ak_reload", s_akReload, 0.1, 2), KB_F("ak_recoil", s_akRecoil, 0, 2), KB_I("howl_targets", s_howlTargets, 0, 100), KB_F("howl_immune", s_howlImmune, 0, 30), KB_I("howl_from_control", s_howlFromControl, 0, 1), KB_F("howl_range", s_howlRange, 5, 300), KB_I("howl_explosion", s_howlRow, 0, 100000),
+    KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1), KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
+};
 
-static void LoadSettings(void)
+/* The default voymastina.ini: tools/inigen.py writes the file from this text (the mod never writes it) */
+static __attribute__((unused)) void DefaultIni(FILE* f)
 {
-    char path[MAX_PATH * 2], line[256];
-    snprintf(path, sizeof path, "%s\\voymastina.ini", hf->mod_folder(self));
-    FILE* f = OpenUtf8(path, L"r");
-    if (f) hf->log(self, "settings: read %s", path);
-    else
-    {
-        hf->log(self, "settings: no voymastina.ini in %s (it ships with the mod), so the built-in defaults; the MODS tab still changes them", path);
-        FILE* w = NULL;   /* never written while the game runs (see OpenUtf8); the text stays as the defaults' source */
-        if ((f = w) != NULL)
-        {
-            fprintf(f, "; Voymastina %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for\n"
-                       "; a combo (Shift+Q), or Shift, Ctrl or Alt alone. The game still sees the keys too, so pick ones it leaves alone.\n"
-                       "key_sirius = %s\nkey_eye = %s\nkey_pile = %s\n"
-                       "; Explosions are ExplosionSettings rows (build 25480438): 361 GL-21 grenade launcher impact, 175 G-12 High\n"
-                       "; Explosive, 404 AC-8 autocannon impact, 158 R-36 Eruptor impact, 127 P-34 Breacher detonation, 19 CQC-20\n"
-                       "; Breaching Hammer, 294 GR-8 Recoilless Rifle (its special round), 343 Orbital Precision Strike, 52 Orbital Railcannon. 0: no blast.\n"
-                       "; Sirius Fall: cooldown; her next shot that hits an enemy within sf_window s sets off sf_explosion where it lands\n"
-                       "; (one per use). sf_range: how far along her aim Pile Bunker's railcannon finds its target.\n"
-                       "sf_cooldown = %g\nsf_window = %g\nsf_range = %g\nsf_explosion = %d\n"
-                       "; Support Action: her own shots on an enemy set off a blast on it, at most once every sa_every s (sa_on 0: off).\n"
-                       "sa_on = %d\nsa_every = %g\nsa_explosion = %d\n"
-                       "; Eye of the White Mastiff: cooldown, length, reach; an enemy that moves eye_move m between two looks (half a\n"
-                       "; second apart) or hits her takes a Lock On blast, once per enemy every eye_every s, at most eye_max per cast.\n"
-                       "; eye_immune 1: nothing hurts her while it lasts.\n"
-                       "eye_cooldown = %g\neye_seconds = %g\neye_radius = %g\neye_move = %g\neye_every = %g\neye_max = %d\neye_explosion = %d\neye_immune = %d\n"
-                       "; Drop-in: once she stands after a Hellpod drop, the drop_targets nearest enemies within drop_radius m take a\n"
-                       "; blast each; nothing hurts her until they have gone off (drop_shield s at most). drop_on 0: off.\n"
-                       "drop_on = %d\ndrop_targets = %d\ndrop_radius = %g\ndrop_shield = %g\ndrop_explosion = %d\n"
-                       "; Pile Bunker: cooldown, the lunge along her aim, then pb_points blasts pb_step m apart ahead (pb_fallback when the\n"
-                       "; game refuses pb_explosion) and rail_explosion on the enemy she aims at (the charge: on the enemy she charges);\n"
-                       "; pressed again within pb_window s: a dash of pb_dash m. The lunge and the charge stop in front of the enemy and land\n"
-                       "; at most pb_climb m above her.\n"
-                       "pb_cooldown = %g\npb_lunge = %g\npb_window = %g\npb_dash = %g\npb_explosion = %d\npb_fallback = %d\npb_points = %d\npb_step = %g\npb_climb = %g\nrail_explosion = %d\n"
-                       "; Pile Bunker charge: when her shot or melee hits an enemy within pbp_radius m, she drives a line of\n"
-                       "; pbp_points blasts pbp_step m apart from where she stands toward it (and a railcannon on it), without moving,\n"
-                       "; at most every pbp_every s.\n"
-                       "pbp_on = %d\npbp_radius = %g\npbp_points = %d\npbp_step = %g\npbp_every = %g\npbp_explosion = %d\n"
-                       "; Mastiff's Pledge: steady 1 never knocked down. Damage kept off her: dr_base always, dr_stable while her\n"
-                       "; Stability holds (0.8: 80%% less). Stability: stab_max points; a hit drains stab_per_damage per damage point (at\n"
-                       "; least stab_min_hit); it refills stab_regen a second after stab_delay s unhurt, and in full with Pile Bunker.\n"
-                       "; ap_bonus: extra armour penetration on her hits. unshaken 1: no stagger, push or flinch from hits either;\n"
-                       "; no_stamina_hits 1: hits take none of her stamina.\n"
-                       "steady = %d\nunshaken = %d\nno_stamina_hits = %d\ndr_base = %g\ndr_stable = %g\nstab_max = %g\nstab_per_damage = %g\nstab_min_hit = %g\nstab_regen = %g\nstab_delay = %g\nap_bonus = %d\n"
-                       "; Predation Protocol: each skill adds pp_per; at pp_max her next skill is empowered: pp_ap more armour\n"
-                       "; penetration and pp_mult times the damage on its blasts. While it waits (and pp_armor_after s after that skill)\n"
-                       "; she has heavy armour: armour value pp_armor (4: heavy): a hit with less armour penetration glances off, an\n"
-                       "; equal one deals pp_armor_equal of its damage (0: off).\n"
-                       "pp_per = %d\npp_max = %d\npp_ap = %d\npp_mult = %g\npp_armor = %d\npp_armor_equal = %g\npp_armor_after = %g\n"
-                       "; Where her teleports may land: lp_climb m higher or lp_drop m lower than she stands.\n"
-                       "lp_climb = %g\nlp_drop = %g\n"
-                       "; The T-Doll's body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties.\n"
-                       "hp_mult = %g\nstamina_mult = %g\n"
-                       "; If her stamina ever runs out, hellbomb_on_exhaustion (1) sets off hellbomb_explosion (125: the B-100 Portable\n"
-                       "; Hellbomb's) on her, once the bar has stayed empty hellbomb_hold s (it flickers to 0 at times).\n"
-                       "hellbomb_on_exhaustion = %d\nhellbomb_explosion = %d\nhellbomb_hold = %g\n",
-                VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label,
-                (double)s_sfCd, (double)s_sfWindow, (double)s_sfRange, s_sfRow, s_saOn, (double)s_saEvery, s_saRow,
-                (double)s_eyeCd, (double)s_eyeSeconds, (double)s_eyeRadius, (double)s_eyeMove, (double)s_eyeEvery, s_eyeMax, s_eyeRow, s_eyeImmune,
-                s_dropOn, s_dropTargets, (double)s_dropRadius, (double)s_dropShield, s_dropRow,
-                (double)s_pbCd, (double)s_pbLunge, (double)s_pbWindow, (double)s_pbDash, s_pbRow, s_pbFallback, s_pbPoints, (double)s_pbStep, (double)s_pbClimb, s_railRow,
-                s_pbpOn, (double)s_pbpRadius, s_pbpPoints, (double)s_pbpStep, (double)s_pbpEvery, s_pbpRow,
-                s_steady, s_unshaken, s_noStaminaHits, (double)s_drBase, (double)s_drStable, (double)s_stabMax, (double)s_stabPer, (double)s_stabMin, (double)s_stabRegen, (double)s_stabDelay, s_apBonus,
-                s_ppPer, s_ppMax, s_ppAp, (double)s_ppMult, s_ppArmor, (double)s_ppArmorEqual, (double)s_ppArmorAfter, (double)s_lpClimb, (double)s_lpDrop,
-                (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
-            fclose(f);
-        }
-        return;
-    }
-    while (fgets(line, sizeof line, f))
-    {
-        char* c = strchr(line, ';');
-        if (c) *c = 0;
-        if (line[strspn(line, " \t")] == '#') continue;
-        char* eq = strchr(line, '=');
-        if (!eq) continue;
-        *eq = 0;
-        char key[64];
-        if (sscanf(line, " %63s", key) != 1) continue;
-        int k = !strcmp(key, "key_sirius") ? 0 : !strcmp(key, "key_eye") ? 1 : !strcmp(key, "key_pile") ? 2 : -1;
-        if (k >= 0)
-        {
-            Key parsed;
-            if (ParseKey(eq + 1, &parsed)) s_keys[k] = parsed;
-            else s_badKey |= 1 << k;
-            continue;
-        }
-        char* end;
-        double v = strtod(eq + 1, &end);
-        if (end != eq + 1) Setting(key, v);
-    }
-    fclose(f);
+fprintf(f, "; Voymastina %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for\n"
+               "; a combo (Shift+Q), or Shift, Ctrl or Alt alone. The game still sees the keys too, so pick ones it leaves alone.\n"
+               "key_sirius = %s\nkey_eye = %s\nkey_pile = %s\n"
+               "; Explosions are ExplosionSettings rows (build 25480438): 361 GL-21 grenade launcher impact, 175 G-12 High\n"
+               "; Explosive, 404 AC-8 autocannon impact, 158 R-36 Eruptor impact, 127 P-34 Breacher detonation, 19 CQC-20\n"
+               "; Breaching Hammer, 294 GR-8 Recoilless Rifle (its special round), 343 Orbital Precision Strike, 52 Orbital Railcannon. 0: no blast.\n"
+               "; Sirius Fall: cooldown; her next shot that hits an enemy within sf_window s sets off sf_explosion where it lands\n"
+               "; (one per use). sf_range: how far along her aim Pile Bunker's railcannon finds its target.\n"
+               "sf_cooldown = %g\nsf_window = %g\nsf_range = %g\nsf_explosion = %d\n"
+               "; Support Action: her own shots on an enemy set off a blast on it, at most once every sa_every s (sa_on 0: off).\n"
+               "sa_on = %d\nsa_every = %g\nsa_explosion = %d\n"
+               "; Eye of the White Mastiff: cooldown, length, reach; an enemy that moves eye_move m between two looks (half a\n"
+               "; second apart) or hits her takes a Lock On blast, once per enemy every eye_every s, at most eye_max per cast.\n"
+               "; eye_immune 1: nothing hurts her while it lasts.\n"
+               "eye_cooldown = %g\neye_seconds = %g\neye_radius = %g\neye_move = %g\neye_every = %g\neye_max = %d\neye_explosion = %d\neye_immune = %d\n"
+               "; Drop-in: once she stands after a Hellpod drop, the drop_targets nearest enemies within drop_radius m take a\n"
+               "; blast each; nothing hurts her until they have gone off (drop_shield s at most). drop_on 0: off.\n"
+               "drop_on = %d\ndrop_targets = %d\ndrop_radius = %g\ndrop_shield = %g\ndrop_explosion = %d\n"
+               "; Pile Bunker: cooldown, the lunge along her aim, then pb_points blasts pb_step m apart ahead (pb_fallback when the\n"
+               "; game refuses pb_explosion) and rail_explosion on the enemy she aims at (the charge: on the enemy she charges);\n"
+               "; pressed again within pb_window s: a dash of pb_dash m. The lunge and the charge stop in front of the enemy and land\n"
+               "; at most pb_climb m above her.\n"
+               "pb_cooldown = %g\npb_lunge = %g\npb_window = %g\npb_dash = %g\npb_explosion = %d\npb_fallback = %d\npb_points = %d\npb_step = %g\npb_climb = %g\nrail_explosion = %d\n"
+               "; Pile Bunker charge: when her shot or melee hits an enemy within pbp_radius m, she drives a line of\n"
+               "; pbp_points blasts pbp_step m apart from where she stands toward it (and a railcannon on it), without moving,\n"
+               "; at most every pbp_every s.\n"
+               "pbp_on = %d\npbp_radius = %g\npbp_points = %d\npbp_step = %g\npbp_every = %g\npbp_explosion = %d\n"
+               "; Mastiff's Pledge: steady 1 never knocked down. Damage kept off her: dr_base always, dr_stable while her\n"
+               "; Stability holds (0.8: 80%% less). Stability: stab_max points; a hit drains stab_per_damage per damage point (at\n"
+               "; least stab_min_hit); it refills stab_regen a second after stab_delay s unhurt, and in full with Pile Bunker.\n"
+               "; ap_bonus: extra armour penetration on her hits. unshaken 1: no stagger, push or flinch from hits either;\n"
+               "; no_stamina_hits 1: hits take none of her stamina.\n"
+               "steady = %d\nunshaken = %d\nno_stamina_hits = %d\ndr_base = %g\ndr_stable = %g\nstab_max = %g\nstab_per_damage = %g\nstab_min_hit = %g\nstab_regen = %g\nstab_delay = %g\nap_bonus = %d\n"
+               "; Predation Protocol: each skill adds pp_per; at pp_max her next skill is empowered: pp_ap more armour\n"
+               "; penetration and pp_mult times the damage on its blasts. While it waits (and pp_armor_after s after that skill)\n"
+               "; she has heavy armour: armour value pp_armor (4: heavy): a hit with less armour penetration glances off, an\n"
+               "; equal one deals pp_armor_equal of its damage (0: off).\n"
+               "pp_per = %d\npp_max = %d\npp_ap = %d\npp_mult = %g\npp_armor = %d\npp_armor_equal = %g\npp_armor_after = %g\n"
+               "; Where her teleports may land: lp_climb m higher or lp_drop m lower than she stands.\n"
+               "lp_climb = %g\nlp_drop = %g\n"
+               "; The T-Doll's body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties.\n"
+               "hp_mult = %g\nstamina_mult = %g\n"
+               "; If her stamina ever runs out, hellbomb_on_exhaustion (1) sets off hellbomb_explosion (125: the B-100 Portable\n"
+               "; Hellbomb's) on her, once the bar has stayed empty hellbomb_hold s (it flickers to 0 at times).\n"
+               "hellbomb_on_exhaustion = %d\nhellbomb_explosion = %d\nhellbomb_hold = %g\n",
+        VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label,
+        (double)s_sfCd, (double)s_sfWindow, (double)s_sfRange, s_sfRow, s_saOn, (double)s_saEvery, s_saRow,
+        (double)s_eyeCd, (double)s_eyeSeconds, (double)s_eyeRadius, (double)s_eyeMove, (double)s_eyeEvery, s_eyeMax, s_eyeRow, s_eyeImmune,
+        s_dropOn, s_dropTargets, (double)s_dropRadius, (double)s_dropShield, s_dropRow,
+        (double)s_pbCd, (double)s_pbLunge, (double)s_pbWindow, (double)s_pbDash, s_pbRow, s_pbFallback, s_pbPoints, (double)s_pbStep, (double)s_pbClimb, s_railRow,
+        s_pbpOn, (double)s_pbpRadius, s_pbpPoints, (double)s_pbpStep, (double)s_pbpEvery, s_pbpRow,
+        s_steady, s_unshaken, s_noStaminaHits, (double)s_drBase, (double)s_drStable, (double)s_stabMax, (double)s_stabPer, (double)s_stabMin, (double)s_stabRegen, (double)s_stabDelay, s_apBonus,
+        s_ppPer, s_ppMax, s_ppAp, (double)s_ppMult, s_ppArmor, (double)s_ppArmorEqual, (double)s_ppArmorAfter, (double)s_lpClimb, (double)s_lpDrop,
+        (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
 }
 
 /* ---- the clock, the player ------------------------------------------------------------------------------------ */
@@ -2998,7 +2954,7 @@ static void Tick(HfMod* mod, float dt, void* user)
 }
 
 /* ---- the Mod Options Menu (through the Voymastina HUD addon): read and set a setting by its voymastina.ini name ---- */
-static const struct { const char* name; float* f; int* i; } kOptions[] = {
+static const KbOption kOptions[] = {
     {"sf_cooldown", &s_sfCd, NULL}, {"sa_on", NULL, &s_saOn}, {"sa_every", &s_saEvery, NULL},
     {"eye_cooldown", &s_eyeCd, NULL}, {"eye_seconds", &s_eyeSeconds, NULL}, {"eye_radius", &s_eyeRadius, NULL}, {"eye_max", NULL, &s_eyeMax}, {"eye_move", &s_eyeMove, NULL},
     {"drop_on", NULL, &s_dropOn}, {"drop_targets", NULL, &s_dropTargets},
@@ -3012,28 +2968,19 @@ static const struct { const char* name; float* f; int* i; } kOptions[] = {
     {"sf_range", &s_sfRange, NULL}, {"eye_every", &s_eyeEvery, NULL}, {"drop_radius", &s_dropRadius, NULL}, {"drop_shield", &s_dropShield, NULL},
     {"pbp_step", &s_pbpStep, NULL}, {"stab_min_hit", &s_stabMin, NULL}, {"pp_per", NULL, &s_ppPer}, {"pp_ap", NULL, &s_ppAp},
 };
+/* After Mod Options Menu sets one (changed: its value moved) */
+static void OptionAfter(const char* name, int changed)
+{
+    if (changed && !strcmp(name, "stab_max") && (g_stab > s_stabMax || !g_inMission)) g_stab = s_stabMax;
+    if (g_pp >= s_ppMax) { g_pp = 0; g_ppReady = 1; }   /* a lower most: the charge is full */
+}
 HF_MOD_EXPORT int voymastina_option_get(const char* name, double* out)
 {
-    if (!name || !out) return 0;
-    for (unsigned k = 0; k < sizeof kOptions / sizeof kOptions[0]; k++)
-        if (!strcmp(kOptions[k].name, name)) { *out = kOptions[k].f ? (double)*kOptions[k].f : (double)*kOptions[k].i; return 1; }
-    return 0;
+    return OptionGet(name, out);
 }
 HF_MOD_EXPORT int voymastina_option_set(const char* name, double value)
 {
-    double before;
-    if (!isfinite(value) || !voymastina_option_get(name, &before)) return 0;
-    Setting(name, value);
-    double now;
-    voymastina_option_get(name, &now);
-    if (now != before)
-    {
-        Log("option %s: %g -> %g (Mod Options Menu)", name, before, now);
-        if (g_inMission && (!strcmp(name, "hp_mult") || !strcmp(name, "stamina_mult"))) { Body(0); Body(1); }
-        if (!strcmp(name, "stab_max") && (g_stab > s_stabMax || !g_inMission)) g_stab = s_stabMax;
-    }
-    if (g_pp >= s_ppMax) { g_pp = 0; g_ppReady = 1; }   /* a lower most: the charge is full */
-    return 1;
+    return OptionSet(name, value);
 }
 
 /* Her Hellbomb went off: its blast is meant to reach her (OnDamagePre lets it through) */
@@ -3128,6 +3075,13 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
+    kb_ini = "voymastina.ini";
+    kb_key_names[0] = "key_sirius";
+    kb_key_names[1] = "key_eye";
+    kb_key_names[2] = "key_pile";
+    KB_SETTINGS(kSettings);
+    KB_OPTIONS(kOptions);
+    kb_option_after = OptionAfter;
     kb_damage_taken = DamageTaken;
     kb_damage_dealt = DamageDealt;
     kb_hit_before = HitBefore;

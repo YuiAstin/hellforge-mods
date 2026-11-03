@@ -46,9 +46,9 @@
 #include "kitbase/kb_body.h"
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
+#include "kitbase/kb_settings.h"
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
-static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
 static int s_ciMax = 6, s_weHits = 0, s_hsPulses = 3, s_hsCiCap = 3;
 static float s_weCd = 8, s_weWindow = 5, s_arcStep = 0.35f, s_weMult = 2.4f, s_weMultEnh = 3.0f;
 static float s_lpCd = 12, s_lpUp = 8, s_lpForward = 10, s_lpDistance = 10, s_lpWindow = 2.5f, s_lpTaken = 0.5f, s_lpHeal = 20, s_lpSpeed = 1.4f,
@@ -61,108 +61,64 @@ static unsigned g_arcsSkipped;
 static float s_markMult = 1.3f, s_markSeconds = 6;
 static int s_ems = 0, s_arcRow = 157, s_arcBlast = 41;  /* 157: the G-31 Arc grenade's detonation (her arcs); 41: the GL-52 De-Escalator's burst (their blast) */  /* the EMS explosion row: 0 = the EMS Mortar Sentry shell's own (read at game start) */
 
-static int s_badKey;
-static void Setting(const char* key, double v)
-{
-#define CL(x, lo, hi) ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))
-#define F(name, var, lo, hi) else if (!strcmp(key, name)) var = (float)CL(v, lo, hi)
-#define I(name, var, lo, hi) else if (!strcmp(key, name)) var = (int)CL(v, lo, hi)
-    if (0) {}
-    I("ci_max", s_ciMax, 3, 20);
-    F("we_cooldown", s_weCd, 0, 600); F("we_window", s_weWindow, 0.5, 30); I("we_hits", s_weHits, 0, 1000);
-    F("we_mult", s_weMult, 1, 20); F("we_mult_enhanced", s_weMultEnh, 1, 20);
-    F("lp_cooldown", s_lpCd, 0, 600); F("lp_up", s_lpUp, 0, 25); F("lp_forward", s_lpForward, 0, 25);
-    F("lp_window", s_lpWindow, 0, 30); F("lp_damage_taken", s_lpTaken, 0, 1); F("lp_heal", s_lpHeal, 0, 500);
-    F("lp_speed", s_lpSpeed, 1, 3); F("lp_speed_seconds", s_lpSpeedSeconds, 0, 60); F("lp_land", s_lpLand, 0, 5);
-    F("lp_reach", s_lpReach, 0, 200); F("lp_distance", s_lpDistance, 2, 30);
-    F("hs_cooldown", s_hsCd, 0, 600); I("hs_pulses", s_hsPulses, 0, 10); F("hs_pulse_step", s_hsPulseStep, 0.5, 10);
-    F("hs_radius", s_hsRadius, 1, 50); I("hs_ci_cap", s_hsCiCap, 0, 20); F("hs_arc", s_hsArc, 0, 60);
-    F("hs_stealth", s_hsStealth, 0, 120); F("hs_stun", s_hsStun, 0, 60); F("hs_stun_every", s_hsStunEvery, 0.3, 10);
-    I("hs_arcs_max", s_hsArcsMax, 0, 64); F("lp_lift", s_lpLift, 0, 5); F("lp_climb", s_lpClimb, 0.5, 30); F("lp_drop", s_lpDrop, 0.5, 50);
-    F("lp_burst_radius", s_lpBurstRadius, 0, 30); F("lp_stun", s_lpStun, 0, 30);
-    F("mark_mult", s_markMult, 1, 10); F("mark_seconds", s_markSeconds, 0.5, 60);
-    F("hp_mult", s_hpMult, 0.1, 10); F("stamina_mult", s_staminaMult, 0.1, 20); I("hellbomb_on_exhaustion", s_hellbomb, 0, 1);
-    I("hellbomb_explosion", s_hellbombRow, 0, 100000); F("hellbomb_hold", s_hellbombHold, 0, 10);
-    I("ems_explosion", s_ems, 0, 100000); I("arc_explosion", s_arcRow, 0, 100000); F("arc_step", s_arcStep, 0.05, 5); F("arc_rate", s_arcRate, 1, 100); I("arc_blast", s_arcBlast, 0, 100000);
-#undef F
-#undef I
-#undef CL
-}
+/* Every setting: its .ini / Mod Options Menu name, variable and range (kitbase/kb_settings.h) */
+static const KbSetting kSettings[] = {
+    KB_I("ci_max", s_ciMax, 3, 20),
+    KB_F("we_cooldown", s_weCd, 0, 600), KB_F("we_window", s_weWindow, 0.5, 30), KB_I("we_hits", s_weHits, 0, 1000),
+    KB_F("we_mult", s_weMult, 1, 20), KB_F("we_mult_enhanced", s_weMultEnh, 1, 20),
+    KB_F("lp_cooldown", s_lpCd, 0, 600), KB_F("lp_up", s_lpUp, 0, 25), KB_F("lp_forward", s_lpForward, 0, 25),
+    KB_F("lp_window", s_lpWindow, 0, 30), KB_F("lp_damage_taken", s_lpTaken, 0, 1), KB_F("lp_heal", s_lpHeal, 0, 500),
+    KB_F("lp_speed", s_lpSpeed, 1, 3), KB_F("lp_speed_seconds", s_lpSpeedSeconds, 0, 60), KB_F("lp_land", s_lpLand, 0, 5),
+    KB_F("lp_reach", s_lpReach, 0, 200), KB_F("lp_distance", s_lpDistance, 2, 30),
+    KB_F("hs_cooldown", s_hsCd, 0, 600), KB_I("hs_pulses", s_hsPulses, 0, 10), KB_F("hs_pulse_step", s_hsPulseStep, 0.5, 10),
+    KB_F("hs_radius", s_hsRadius, 1, 50), KB_I("hs_ci_cap", s_hsCiCap, 0, 20), KB_F("hs_arc", s_hsArc, 0, 60),
+    KB_F("hs_stealth", s_hsStealth, 0, 120), KB_F("hs_stun", s_hsStun, 0, 60), KB_F("hs_stun_every", s_hsStunEvery, 0.3, 10),
+    KB_I("hs_arcs_max", s_hsArcsMax, 0, 64), KB_F("lp_lift", s_lpLift, 0, 5), KB_F("lp_climb", s_lpClimb, 0.5, 30), KB_F("lp_drop", s_lpDrop, 0.5, 50),
+    KB_F("lp_burst_radius", s_lpBurstRadius, 0, 30), KB_F("lp_stun", s_lpStun, 0, 30),
+    KB_F("mark_mult", s_markMult, 1, 10), KB_F("mark_seconds", s_markSeconds, 0.5, 60),
+    KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
+    KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
+    KB_I("ems_explosion", s_ems, 0, 100000), KB_I("arc_explosion", s_arcRow, 0, 100000), KB_F("arc_step", s_arcStep, 0.05, 5), KB_F("arc_rate", s_arcRate, 1, 100), KB_I("arc_blast", s_arcBlast, 0, 100000),
+};
 
-static void LoadSettings(void)
+/* The default lenna.ini: tools/inigen.py writes the file from this text (the mod never writes it) */
+static __attribute__((unused)) void DefaultIni(FILE* f)
 {
-    char path[MAX_PATH * 2], line[256];
-    snprintf(path, sizeof path, "%s\\lenna.ini", hf->mod_folder(self));
-    FILE* f = OpenUtf8(path, L"r");
-    if (f) hf->log(self, "settings: read %s", path);
-    else
-    {
-        hf->log(self, "settings: no lenna.ini in %s (it ships with the mod), so the built-in defaults; the MODS tab still changes them", path);
-        FILE* w = NULL;   /* never written while the game runs (see OpenUtf8); the text stays as the defaults' source */
-        if ((f = w) != NULL)
-        {
-            fprintf(f, "; Lenna %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for a\n"
-                       "; combo (Shift+Q). The game still sees the keys too (Shift sprints, R reloads), so pick ones it leaves alone.\n"
-                       "key_wild = %s\nkey_leap = %s\nkey_ult = %s\n; CI: most she holds (enhanced abilities spend 3).\nci_max = %d\n"
-                       "; Wild Extinction: cooldown; for we_window s her hits (at most we_hits) deal we_mult times their damage and\n"
-                       "; each sets off an arc where it lands (at most one every arc_step s; arc_explosion: 157, the G-31 Arc's, whose arcs she\n"
-                       "; uses; arc_blast: 41, the GL-52 De-Escalator burst whose blast and sound they get, 0 none). arc_rate: at most that many\n"
-                       "; of her arcs a second, half a second's"
-                       " worth at once (too many at once leave their lightning on the field); the rest are skipped.\n"
-                       "we_cooldown = %g\nwe_window = %g\nwe_hits = %d\nwe_mult = %g\nwe_mult_enhanced = %g\n"
-                       "; Leaping Pursuit: cooldown, a teleport lp_distance m along her aim onto the ground there (at most lp_climb m\n"
-                       "; higher or lp_drop m lower; short of walls, shorter when there is no ground); an arc burst where she left and a stun of lp_stun s\n"
-                       "; on enemies within lp_burst_radius m of both ends; the protected window (no knockdown or fall damage, damage\n"
-                       "; taken times lp_damage_taken), heal, speed boost and its length, landing time and stun reach.\n"
-                       "lp_cooldown = %g\nlp_distance = %g\nlp_climb = %g\nlp_drop = %g\nlp_burst_radius = %g\nlp_stun = %g\nlp_window = %g\nlp_damage_taken = %g\nlp_heal = %g\n"
-                       "lp_speed = %g\nlp_speed_seconds = %g\nlp_land = %g\nlp_reach = %g\n"
-                       "; Hunting Strategy: cooldown; an arc zap on every enemy within hs_radius m of her, then hs_pulses more zaps\n"
-                       "; hs_pulse_step s apart; zapped enemies are stunned for hs_stun s (renewed every hs_stun_every s) and marked;\n"
-                       "; at most hs_arcs_max arc blasts a zap (the rest are still stunned); CI per cast at most; Electric Arc and\n"
-                       "; Stealth lengths.\n"
-                       "hs_cooldown = %g\nhs_pulses = %d\nhs_pulse_step = %g\nhs_radius = %g\nhs_stun = %g\nhs_stun_every = %g\n"
-                       "hs_arcs_max = %d\nhs_ci_cap = %d\nhs_arc = %g\nhs_stealth = %g\n"
-                       "; Conductivity: marked enemies take this times the damage, this long.\nmark_mult = %g\nmark_seconds = %g\n"
-                       "; An EMS blast under her zaps too (0: none; 180: the EMS Mortar Sentry shell's field; its stun reaches her).\nems_explosion = %d\n"
-                       "arc_explosion = %d\narc_blast = %d\narc_step = %g\narc_rate = %g\n"
-                       "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties. If her\n"
-                       "; stamina ever runs out, hellbomb_on_exhaustion (1) sets off hellbomb_explosion (125: the B-100 Portable\n"
-                       "; Hellbomb's) on her.\n"
-                       "; hellbomb_hold: seconds the bar must stay empty first (it flickers to 0 for a moment at times).\n"
-                       "hp_mult = %g\nstamina_mult = %g\nhellbomb_on_exhaustion = %d\nhellbomb_explosion = %d\nhellbomb_hold = %g\n",
-                VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_ciMax, (double)s_weCd, (double)s_weWindow, s_weHits, (double)s_weMult,
-                (double)s_weMultEnh, (double)s_lpCd, (double)s_lpDistance, (double)s_lpClimb, (double)s_lpDrop, (double)s_lpBurstRadius, (double)s_lpStun, (double)s_lpWindow, (double)s_lpTaken,
-                (double)s_lpHeal, (double)s_lpSpeed, (double)s_lpSpeedSeconds, (double)s_lpLand, (double)s_lpReach, (double)s_hsCd,
-                s_hsPulses, (double)s_hsPulseStep, (double)s_hsRadius, (double)s_hsStun, (double)s_hsStunEvery, s_hsArcsMax, s_hsCiCap, (double)s_hsArc, (double)s_hsStealth,
-                (double)s_markMult, (double)s_markSeconds, s_ems, s_arcRow, s_arcBlast, (double)s_arcStep, (double)s_arcRate,
-                (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
-            fclose(f);
-        }
-        return;
-    }
-    while (fgets(line, sizeof line, f))
-    {
-        char* c = strchr(line, ';');
-        if (c) *c = 0;
-        if (line[strspn(line, " \t")] == '#') continue;
-        char* eq = strchr(line, '=');
-        if (!eq) continue;
-        *eq = 0;
-        char key[64];
-        if (sscanf(line, " %63s", key) != 1) continue;
-        int k = !strcmp(key, "key_wild") ? 0 : !strcmp(key, "key_leap") ? 1 : !strcmp(key, "key_ult") ? 2 : -1;
-        if (k >= 0)
-        {
-            Key parsed;
-            if (ParseKey(eq + 1, &parsed)) s_keys[k] = parsed;
-            else s_badKey |= 1 << k;
-            continue;
-        }
-        char* end;
-        double v = strtod(eq + 1, &end);
-        if (end != eq + 1) Setting(key, v);
-    }
-    fclose(f);
+fprintf(f, "; Lenna %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for a\n"
+               "; combo (Shift+Q). The game still sees the keys too (Shift sprints, R reloads), so pick ones it leaves alone.\n"
+               "key_wild = %s\nkey_leap = %s\nkey_ult = %s\n; CI: most she holds (enhanced abilities spend 3).\nci_max = %d\n"
+               "; Wild Extinction: cooldown; for we_window s her hits (at most we_hits) deal we_mult times their damage and\n"
+               "; each sets off an arc where it lands (at most one every arc_step s; arc_explosion: 157, the G-31 Arc's, whose arcs she\n"
+               "; uses; arc_blast: 41, the GL-52 De-Escalator burst whose blast and sound they get, 0 none). arc_rate: at most that many\n"
+               "; of her arcs a second, half a second's"
+               " worth at once (too many at once leave their lightning on the field); the rest are skipped.\n"
+               "we_cooldown = %g\nwe_window = %g\nwe_hits = %d\nwe_mult = %g\nwe_mult_enhanced = %g\n"
+               "; Leaping Pursuit: cooldown, a teleport lp_distance m along her aim onto the ground there (at most lp_climb m\n"
+               "; higher or lp_drop m lower; short of walls, shorter when there is no ground); an arc burst where she left and a stun of lp_stun s\n"
+               "; on enemies within lp_burst_radius m of both ends; the protected window (no knockdown or fall damage, damage\n"
+               "; taken times lp_damage_taken), heal, speed boost and its length, landing time and stun reach.\n"
+               "lp_cooldown = %g\nlp_distance = %g\nlp_climb = %g\nlp_drop = %g\nlp_burst_radius = %g\nlp_stun = %g\nlp_window = %g\nlp_damage_taken = %g\nlp_heal = %g\n"
+               "lp_speed = %g\nlp_speed_seconds = %g\nlp_land = %g\nlp_reach = %g\n"
+               "; Hunting Strategy: cooldown; an arc zap on every enemy within hs_radius m of her, then hs_pulses more zaps\n"
+               "; hs_pulse_step s apart; zapped enemies are stunned for hs_stun s (renewed every hs_stun_every s) and marked;\n"
+               "; at most hs_arcs_max arc blasts a zap (the rest are still stunned); CI per cast at most; Electric Arc and\n"
+               "; Stealth lengths.\n"
+               "hs_cooldown = %g\nhs_pulses = %d\nhs_pulse_step = %g\nhs_radius = %g\nhs_stun = %g\nhs_stun_every = %g\n"
+               "hs_arcs_max = %d\nhs_ci_cap = %d\nhs_arc = %g\nhs_stealth = %g\n"
+               "; Conductivity: marked enemies take this times the damage, this long.\nmark_mult = %g\nmark_seconds = %g\n"
+               "; An EMS blast under her zaps too (0: none; 180: the EMS Mortar Sentry shell's field; its stun reaches her).\nems_explosion = %d\n"
+               "arc_explosion = %d\narc_blast = %d\narc_step = %g\narc_rate = %g\n"
+               "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties. If her\n"
+               "; stamina ever runs out, hellbomb_on_exhaustion (1) sets off hellbomb_explosion (125: the B-100 Portable\n"
+               "; Hellbomb's) on her.\n"
+               "; hellbomb_hold: seconds the bar must stay empty first (it flickers to 0 for a moment at times).\n"
+               "hp_mult = %g\nstamina_mult = %g\nhellbomb_on_exhaustion = %d\nhellbomb_explosion = %d\nhellbomb_hold = %g\n",
+        VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_ciMax, (double)s_weCd, (double)s_weWindow, s_weHits, (double)s_weMult,
+        (double)s_weMultEnh, (double)s_lpCd, (double)s_lpDistance, (double)s_lpClimb, (double)s_lpDrop, (double)s_lpBurstRadius, (double)s_lpStun, (double)s_lpWindow, (double)s_lpTaken,
+        (double)s_lpHeal, (double)s_lpSpeed, (double)s_lpSpeedSeconds, (double)s_lpLand, (double)s_lpReach, (double)s_hsCd,
+        s_hsPulses, (double)s_hsPulseStep, (double)s_hsRadius, (double)s_hsStun, (double)s_hsStunEvery, s_hsArcsMax, s_hsCiCap, (double)s_hsArc, (double)s_hsStealth,
+        (double)s_markMult, (double)s_markSeconds, s_ems, s_arcRow, s_arcBlast, (double)s_arcStep, (double)s_arcRate,
+        (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
 }
 
 /* ---- the clock, the player ------------------------------------------------------------------------------------ */
@@ -1230,7 +1186,7 @@ static void Tick(HfMod* mod, float dt, void* user)
 }
 
 /* ---- the Mod Options Menu (through the Lenna HUD addon): read and set a setting by its lenna.ini name --------------- */
-static const struct { const char* name; float* f; int* i; } kOptions[] = {
+static const KbOption kOptions[] = {
     {"ci_max", NULL, &s_ciMax}, {"we_cooldown", &s_weCd, NULL}, {"we_window", &s_weWindow, NULL}, {"we_mult", &s_weMult, NULL},
     {"we_mult_enhanced", &s_weMultEnh, NULL}, {"lp_cooldown", &s_lpCd, NULL}, {"lp_distance", &s_lpDistance, NULL},
     {"lp_window", &s_lpWindow, NULL}, {"lp_damage_taken", &s_lpTaken, NULL}, {"lp_heal", &s_lpHeal, NULL}, {"lp_speed", &s_lpSpeed, NULL},
@@ -1239,34 +1195,31 @@ static const struct { const char* name; float* f; int* i; } kOptions[] = {
     {"hs_arc", &s_hsArc, NULL}, {"hs_stealth", &s_hsStealth, NULL}, {"mark_mult", &s_markMult, NULL}, {"mark_seconds", &s_markSeconds, NULL},
     {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL}, {"hellbomb_on_exhaustion", NULL, &s_hellbomb},
 };
+/* After Mod Options Menu sets one (changed: its value moved) */
+static void OptionAfter(const char* name, int changed)
+{
+    if (changed && g_ci > s_ciMax) g_ci = s_ciMax;
+}
 HF_MOD_EXPORT int lenna_option_get(const char* name, double* out)
 {
-    if (!name || !out) return 0;
-    for (unsigned k = 0; k < sizeof kOptions / sizeof kOptions[0]; k++)
-        if (!strcmp(kOptions[k].name, name)) { *out = kOptions[k].f ? (double)*kOptions[k].f : (double)*kOptions[k].i; return 1; }
-    return 0;
+    return OptionGet(name, out);
 }
 HF_MOD_EXPORT int lenna_option_set(const char* name, double value)
 {
-    double before;
-    if (!isfinite(value) || !lenna_option_get(name, &before)) return 0;
-    Setting(name, value);
-    double now;
-    lenna_option_get(name, &now);
-    if (now != before)
-    {
-        Log("option %s: %g -> %g (Mod Options Menu)", name, before, now);
-        /* her body changes from here on in a mission */
-        if (g_inMission && (!strcmp(name, "hp_mult") || !strcmp(name, "stamina_mult"))) { Body(0); Body(1); }
-        if (g_ci > s_ciMax) g_ci = s_ciMax;
-    }
-    return 1;
+    return OptionSet(name, value);
 }
 
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
+    kb_ini = "lenna.ini";
+    kb_key_names[0] = "key_wild";
+    kb_key_names[1] = "key_leap";
+    kb_key_names[2] = "key_ult";
+    KB_SETTINGS(kSettings);
+    KB_OPTIONS(kOptions);
+    kb_option_after = OptionAfter;
     kb_damage_taken = DamageTaken;
     kb_damage_dealt = DamageDealt;
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
