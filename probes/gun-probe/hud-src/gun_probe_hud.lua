@@ -2,8 +2,11 @@
 -- own gun models as a visual only (no gameplay), keep it hovering beside the view and turn it, through the engine's own
 -- Lua calls (World.spawn_unit, Unit.set_local_position / rotation, the view camera as Treasure Radar finds it)?
 --
---   F6        spawn two guns beside the view for 10 s (left and right of the camera, a little ahead), then remove them
---   Shift+F6  log which engine calls this addon can reach and which gun models are loaded right now
+--   F6        spawn two guns beside the view for 10 s (left and right of the camera, a little ahead), then remove them;
+--             while they are out each "fires" the Guard Dog's firing sound (hd2.sounds, HD2Runtime's sound API, marked
+--             offline-tested only) on its own model every 0.5 s, the two a quarter-second apart
+--   Shift+F6  log which engine calls this addon can reach, which gun models are loaded right now, and what HD2Runtime's
+--             sound API says about the Guard Dog's firing sound
 --
 -- A gun model is spawned only when the engine says it is loaded (Application.can_get): bring a Guard Dog (AR-23) or a
 -- machine gun so one is. Everything is logged to GunProbe.log next to the loader's log. Research only; turn it off when
@@ -121,8 +124,53 @@ local function camera(w)
     return {p = {px, py, pz}, f = {fx, fy, fz}, r = {rx, ry, rz}, u = {ux, uy, uz}, rot = rot}
 end
 
+-- the Guard Dog's firing sound (HD2Runtime's weapon firing-sound catalogue): its bank asked for once; a loop entry is
+-- stopped after a short burst, a shot entry plays as it is
+local SOUND = 'backpack/guard_dog'
+local SND = {asked = false, kind = nil, played = 0, failed = 0}
+local function sound_prepare()
+    if SND.asked then return end
+    SND.asked = true
+    local snd = hd2.sounds
+    if type(snd) ~= 'table' or type(snd.play) ~= 'function' then log('[Gun Probe] sound: hd2.sounds is not available') return end
+    local okd, info = pcall(snd.describe, SOUND)
+    SND.kind = okd and type(info) == 'table' and (info.kind or info.type) or nil
+    log('[Gun Probe] sound: ' .. SOUND .. ' is ' .. (okd and type(info) == 'table' and ('a ' .. tostring(SND.kind) .. ' entry') or ('not described: ' .. tostring(info))))
+    if type(snd.asset) == 'function' and type(hd2.require_assets) == 'function' then
+        local oka, target = pcall(snd.asset, SOUND)
+        if oka and target then
+            local okr, why = pcall(hd2.require_assets, {id = 'gun-probe-guard-dog', targets = {target}})
+            log('[Gun Probe] sound: its bank requested: ' .. tostring(okr) .. ' ' .. tostring(why))
+        else log('[Gun Probe] sound: no asset target: ' .. tostring(target)) end
+    end
+end
+local pending_stops = {}
+local function sound_at(unit, pos)
+    local snd = hd2.sounds
+    if type(snd) ~= 'table' or type(snd.play) ~= 'function' then return end
+    local okp, h, why = pcall(snd.play, SOUND, unit and {unit = unit} or {position = pos})
+    if okp and h then
+        SND.played = SND.played + 1
+        if SND.played <= 3 then log('[Gun Probe] sound: played on ' .. (unit and 'the gun model' or 'a position')) end
+        if SND.kind == 'loop' and (type(h) == 'table' or type(h) == 'userdata') then pending_stops[#pending_stops + 1] = {h = h, t = 0.12} end
+    else
+        SND.failed = SND.failed + 1
+        if SND.failed <= 3 then log('[Gun Probe] sound: not played: ' .. tostring(okp and why or h)) end
+    end
+end
+local function sound_step(dt)
+    for i = #pending_stops, 1, -1 do
+        local s = pending_stops[i]
+        s.t = s.t - dt
+        if s.t <= 0 then
+            if SND.kind == 'loop' then pcall(function() s.h:stop() end) end
+            table.remove(pending_stops, i)
+        end
+    end
+end
+
 -- the probe: two guns, 10 s
-local G = {units = {}, until_t = 0, t = 0, moved = 0, model = nil}
+local G = {units = {}, until_t = 0, t = 0, moved = 0, model = nil, beat = {0, 0.25}}
 local OFFSETS = {{-0.9, 0.35, 2.2}, {0.9, 0.35, 2.2}}   -- right, up, forward (m) from the camera
 local function place(c, o)
     local x = c.p[1] + c.r[1] * o[1] + c.u[1] * o[2] + c.f[1] * o[3]
@@ -154,6 +202,9 @@ local function spawn()
         if oks and unit then G.units[#G.units + 1] = unit end
     end
     G.until_t, G.moved = G.t + 10, 0
+    G.beat = {0, 0.25}
+    local okp, err = pcall(sound_prepare)
+    if not okp then log('[Gun Probe] sound: prepare failed: ' .. tostring(err)) end
 end
 local function step(dt)
     G.t = G.t + dt
@@ -175,6 +226,15 @@ local function step(dt)
         all = all and okp and okr
     end
     if all then G.moved = G.moved + 1 end
+    for i, u in ipairs(G.units) do
+        G.beat[i] = (G.beat[i] or 0) - dt
+        if G.beat[i] <= 0 then
+            G.beat[i] = 0.5
+            local okx, x, y, z = call('Unit.world_position', u, 1)
+            local px, py, pz = xyz(okx and x or nil)
+            sound_at(u, px and {px, py, pz} or nil)
+        end
+    end
     if G.moved == 1 then log('[Gun Probe] guns follow the view (first frame moved)') end
 end
 local function report()
@@ -185,6 +245,12 @@ local function report()
         log('[Gun Probe]   ' .. p .. ': ' .. (fn(p) and 'yes' or 'no'))
     end
     for _, path in ipairs(MODELS) do log('[Gun Probe]   loaded ' .. tostring(loaded(path)) .. ': ' .. path) end
+    local snd = hd2.sounds
+    log('[Gun Probe]   hd2.sounds: ' .. type(snd) .. (type(snd) == 'table' and (', play ' .. type(snd.play) .. ', available ' .. type(snd.available)) or ''))
+    if type(snd) == 'table' and type(snd.available) == 'function' then
+        local oka, av = pcall(snd.available, SOUND)
+        log('[Gun Probe]   ' .. SOUND .. ' available now: ' .. tostring(oka and av or av))
+    end
 end
 
 local prev = false
@@ -197,6 +263,7 @@ overlay:draw(function(d, dt)
         else local oks, err = pcall(spawn); if not oks then log('[Gun Probe] spawn failed: ' .. tostring(err)) end end
     end
     prev = now
+    pcall(sound_step, dt)
     local okt, err = pcall(step, dt)
     if not okt then log('[Gun Probe] step failed: ' .. tostring(err)); G.units = {} end
     if #G.units > 0 then
