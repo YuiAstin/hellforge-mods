@@ -52,10 +52,14 @@ static int MechPart(uint32_t target);
 static double HowlImmuneUntil(void);
 #define BUILD "25480438"
 
+#define KB_OWN_SLOTS 16
+#define KB_STEADY 1
+#define KB_UNSHAKEN 1
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
 #include "kitbase/kb_body.h"
+#include "kitbase/kb_hits.h"
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
@@ -80,7 +84,7 @@ static unsigned g_tooHigh;
 static int s_pbpOn = 1, s_pbpPoints = 3, s_pbpRow = 343;
 static float s_pbpRadius = 10, s_pbpDistance = 6, s_pbpStep = 4, s_pbpEvery = 6;
 static float s_ripple = 0.3f;    /* s between the blasts of a line, rippling out from her (0: all at once) */
-static int s_steady = 1, s_unshaken = 1, s_noStaminaHits = 1, s_ppArmor = 4;
+static int s_noStaminaHits = 1, s_ppArmor = 4;
 static float s_ppArmorEqual = 0.35f, s_ppArmorAfter = 5;
 static float s_drBase = 0.3f, s_drStable = 0.8f;
 static float s_stabMax = 100, s_stabPer = 0.5f, s_stabMin = 5, s_stabRegen = 20, s_stabDelay = 3;
@@ -278,7 +282,6 @@ static int g_eyeShots, g_eyeEmp;
 static double g_pbFollowUntil;         /* Pile Bunker's free follow-up dash, until */
 static double g_saAt = -100, g_pbpAt = -100;
 static double g_immuneUntil;           /* drop-in: nothing hurts her until then */
-static atomic_ullong g_shieldUntilMs;  /* the same, for the hit hook (no knockdown either) */
 static _Atomic unsigned long long g_boomMs, g_hitMs;
 static atomic_int g_ppArmorOn;
 static _Atomic unsigned g_armorHits;
@@ -445,14 +448,10 @@ static int Fits(uint32_t unit, float x, float y, float z)
 enum { TAG_NONE, TAG_SIRIUS, TAG_SUPPORT, TAG_LOCKON, TAG_DROP, TAG_PILE, TAG_CHARGE, TAG_FIST, TAGS };
 static const char* const kTagName[TAGS] = {"a blast", "Sirius Fall", "Support Action", "Lock On", "Drop-in", "Pile Bunker", "Pile Bunker charge", "her hand"};
 #define OWN 32
-#define OWN_HOOK 16
+#define OWN_HOOK KB_OWN_SLOTS
 typedef struct Pulse { float p[3]; double at; uint32_t row; int tag, emp; } Pulse;
 static Pulse g_pulses[OWN];            /* her blasts lately (OnDamagePre's attribution) */
 static unsigned g_npulse;
-static _Atomic unsigned long long g_ownMs[OWN_HOOK];   /* the same for the hit hook (another thread): when, where, empowered */
-static float g_ownPos[OWN_HOOK][3];
-static atomic_int g_ownEmp[OWN_HOOK];
-static unsigned g_ownNext;
 typedef struct Retry { float p[3]; double until; uint32_t row, fallback; int tag, emp; } Retry;
 static Retry g_retry[24];              /* blasts waiting for their packages */
 static int g_retryCount;
@@ -1499,80 +1498,7 @@ static void Reset(const char* why)
 }
 
 /* ---- the hit code: hooks (as Primed Sure Footed) ---------------------------------------------------------------------- */
-#define RESULT_SIZE 0x24u
-static _Atomic unsigned g_kdStopped;
-static _Atomic unsigned g_ownStopped;
 static _Atomic unsigned g_piercedHook;
-/* An explosion hit (hit +0 type 4, its origin at +0x40) from one of her own blasts: one she set off within 14 m in the
- * last 1.2 s; *emp: an empowered one */
-static int OwnBlast(const uint8_t* h, int* emp)
-{
-    if (Word(h) != 4) return 0;
-    float origin[3];
-    memcpy(origin, h + 0x40, sizeof origin);
-    unsigned long long now = GetTickCount64();
-    int any = 0;
-    for (int i = 0; i < OWN_HOOK; i++)
-    {
-        unsigned long long at = atomic_load(&g_ownMs[i]);
-        if (!at || now - at > 1200) continue;
-        float dx = origin[0] - g_ownPos[i][0], dy = origin[1] - g_ownPos[i][1], dz = origin[2] - g_ownPos[i][2];
-        if (dx * dx + dy * dy + dz * dz <= 14.0f * 14.0f) { any = 1; if (emp && atomic_load(&g_ownEmp[i])) *emp = 1; }
-    }
-    return any;
-}
-/* A hit on her: one of her own blasts does nothing to her (its result is cleared: damage, stagger, push, knockdown,
- * reaction). With steady (Mastiff's Pledge) or under the drop-in shield, any hit's knockdown is cleared. Who dealt it
- * is noted for the Eye of the White Mastiff. */
-static void Steady(const void* hit, void* result)
-{
-    if (!atomic_load(&g_hooked) || !hit || !result) return;
-    uint8_t h[HIT_SIZE], r[RESULT_SIZE];
-    uint32_t me = atomic_load(&g_avatar);
-    if (!me || !ReadAt((uintptr_t)hit, h, sizeof h) || Word(h + 0x20) != me) return;
-    unsigned long long now = GetTickCount64();
-    if (OwnBlast(h, NULL))
-    {
-        memset(result, 0, RESULT_SIZE);
-        atomic_fetch_add(&g_ownStopped, 1);
-        return;
-    }
-    uint32_t dealer = Word(h + 0x80), owner = Word(h + 0x100);
-    if ((dealer && dealer != me) || (owner && owner != me))
-    {
-        unsigned slot = atomic_fetch_add(&g_atkNext, 1) % 8;
-        atomic_store(&g_atkWho[slot][0], dealer);
-        atomic_store(&g_atkWho[slot][1], owner);
-        atomic_store(&g_atkMs[slot], now);
-    }
-    /* her own Hellbomb is meant to reach her as it is */
-    if (now - atomic_load(&g_boomMs) < 2000) return;
-    atomic_store(&g_hitMs, now);   /* the stamina guard (Tick): a hit's stamina loss is put back */
-    if (!ReadAt((uintptr_t)result, r, sizeof r)) return;
-    /* Predation Protocol: heavy armour (armour value pp_armor) while the buff holds: a hit whose armour penetration is
-     * below it glances off (no damage), one equal to it deals pp_armor_equal of its damage */
-    if (s_ppArmor > 0 && atomic_load(&g_ppArmorOn))
-    {
-        float ap, dmg;
-        memcpy(&ap, h + 0x9C, 4);
-        memcpy(&dmg, r, 4);
-        if (isfinite(ap) && isfinite(dmg) && dmg > 0)
-        {
-            float keep = ap < (float)s_ppArmor - 0.5f ? 0.0f : ap < (float)s_ppArmor + 0.5f ? s_ppArmorEqual : 1.0f;
-            if (keep < 1.0f) { dmg *= keep; memcpy(result, &dmg, 4); atomic_fetch_add(&g_armorHits, 1); }
-        }
-    }
-    /* Mastiff's Pledge (steady): no knockdown, and with unshaken no stagger, push or flinch either */
-    if (!s_steady && now > atomic_load(&g_shieldUntilMs)) return;
-    if (r[0x1E]) { ((uint8_t*)result)[0x1E] = 0; atomic_fetch_add(&g_kdStopped, 1); }
-    if (s_unshaken)
-    {
-        static const uint8_t zero[8] = {0};
-        memcpy((uint8_t*)result + 0x0C, zero, 4);   /* stagger */
-        memcpy((uint8_t*)result + 0x10, zero, 4);   /* push */
-        ((uint8_t*)result)[0x1F] = 0;               /* hit reaction (the flinch) */
-    }
-}
 /* Her stamina written (0..1), where StaminaNow reads it */
 static void StaminaSet(float v)
 {
@@ -1598,12 +1524,6 @@ static void StaminaGuard(void)
     }
     last = v;
 }
-typedef uintptr_t (*CalculateFn)(uintptr_t, void*, const void*);
-typedef void (*BlastFn)(uintptr_t, void*, const void*);
-typedef uintptr_t (*EmitFn)(uintptr_t, void*, const void*, uint32_t);
-static CalculateFn original_calculate;
-static BlastFn original_blast;
-static EmitFn original_emit;
 /* ---- her armour penetration: a hit she deals (or one of her blasts) pierces ap_bonus more armour, an empowered
  * blast's pp_ap more on top. The hit (as its calculation gets it) carries its armour penetration at +0x9C, +0xA0, +0xA4
  * (floats, by impact angle; +0xA8 the extreme angle), found with a probe run for Faelynn's Corrosion; it is raised for
@@ -1628,7 +1548,6 @@ static float Shred(const void* hit, float saved[3])
     atomic_fetch_add(&g_piercedHook, 1);
     return bonus;
 }
-static void Unshred(const void* hit, const float saved[3]) { memcpy((uint8_t*)hit + 0x9C, saved, 12); }
 /* Her bare hands: with her primary and secondary empty and her Stability whole, a hit she deals at arm's reach (no blast
  * of hers) pierces bare_ap, and its result gains bare_damage, bare_demolition and bare_stagger (result +0 damage,
  * +0x08 demolition, +0x0C stagger: the layout Faelynn's hit probe read) */
@@ -1648,42 +1567,6 @@ static int BareHit(const void* hit)
     if (told < 12) { told++; Log("her hand? a hit of hers %.1f m away (type %u): %s", (double)d, Word(h), no ? no : "yes"); }
     return no == NULL;
 }
-static uintptr_t Calculate(uintptr_t a, void* out, const void* hit)
-{
-    Observe(hit);
-    float saved[3];
-    int bare = BareHit(hit);
-    float shred = 0;
-    if (bare)
-    {
-        memcpy(saved, (const uint8_t*)hit + 0x9C, 12);
-        float ap[3] = {s_bareAp, s_bareAp, s_bareAp};
-        memcpy((uint8_t*)hit + 0x9C, ap, 12);
-        shred = 1;
-    }
-    else shred = Shred(hit, saved);
-    uintptr_t r = original_calculate(a, out, hit);
-    if (shred > 0) Unshred(hit, saved);
-    if (bare && out)
-    {
-        float dmg;
-        int32_t demo, stag;
-        memcpy(&dmg, out, 4);
-        memcpy(&demo, (uint8_t*)out + 0x08, 4);
-        memcpy(&stag, (uint8_t*)out + 0x0C, 4);
-        float before = dmg;
-        if (isfinite(dmg)) dmg += s_bareDamage;
-        demo += (int32_t)s_bareDemolition;
-        stag += (int32_t)s_bareStagger;
-        memcpy(out, &dmg, 4);
-        memcpy((uint8_t*)out + 0x08, &demo, 4);
-        memcpy((uint8_t*)out + 0x0C, &stag, 4);
-        unsigned n = atomic_fetch_add(&g_bareHits, 1);
-        if (n < 5) Log("her hand: %.0f -> %.0f damage, demolition %d, stagger %d", (double)before, (double)dmg, demo, stag);
-    }
-    Steady(hit, out);
-    return r;
-}
 /* One of her fist's blasts (its origin within 1 m of one, 1.2 s at most): its result gains bare_demolition */
 static int FistOrigin(const void* hit)
 {
@@ -1699,32 +1582,6 @@ static int FistOrigin(const void* hit)
     }
     return 0;
 }
-static void Blast(uintptr_t a, void* out, const void* hit)
-{
-    Observe(hit);
-    float saved[3];
-    float shred = Shred(hit, saved);
-    original_blast(a, out, hit);
-    if (shred > 0) Unshred(hit, saved);
-    if (out && s_bareDemolition > 0 && FistOrigin(hit) && Word((const uint8_t*)hit + 0x20) != atomic_load(&g_avatar))
-    {
-        int32_t demo;
-        memcpy(&demo, (uint8_t*)out + 0x08, 4);
-        int32_t before = demo;
-        demo += (int32_t)s_bareDemolition;
-        memcpy((uint8_t*)out + 0x08, &demo, 4);
-        static atomic_uint told;
-        if (atomic_fetch_add(&told, 1) < 4) Log("her hand: its blast's demolition %d -> %d", before, demo);
-    }
-    Steady(hit, out);
-}
-static uintptr_t Emit(uintptr_t a, void* result, const void* hit, uint32_t mode) { Steady(hit, result); return original_emit(a, result, hit, mode); }
-
-static const struct { uint32_t rva; const char* hex; } kPins[] = {
-    {0x129DC30u, "48 89 5c 24 08 57 48 83 ec 30 33 c0 0f 57 c0 0f 11 02 49 8b f8 48 8b da 0f 11 42 10 89 42 20 41"},
-    {0x129D180u, "48 89 4c 24 08 53 55 56 57 41 55 48 83 ec 60 41 8b 40 20 33 f6 3b 05 85 6a 1e 02 49 8b f8 44 0f"},
-    {0x129DD30u, "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 20 57 41 54 41 55 41 56 41 57 48 81 ec a0 00 00 00 44"},
-};
 
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {
@@ -1733,14 +1590,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     if (!g || !x || gameSize != 74727424u || exeSize != 60719104u) { Log("REFUSED: the game's modules are not build " BUILD "'s: no aim, no knockdown guard"); return; }
     game = g;
     exe = x;
-    for (unsigned i = 0; i < sizeof kPins / sizeof kPins[0]; i++)
-        if (!hf->code_matches(game + kPins[i].rva, kPins[i].hex)) { Log("knockdown guard off: game.dll+0x%X is not the reviewed code", kPins[i].rva); return; }
-    if (hf->hook(self, game + 0x129DC30, (void*)Calculate, (void**)&original_calculate) ||
-        hf->hook(self, game + 0x129D180, (void*)Blast, (void**)&original_blast) ||
-        hf->hook(self, game + 0x129DD30, (void*)Emit, (void**)&original_emit))
-    { Log("knockdown guard off: a hook could not be placed"); return; }
-    atomic_store(&g_hooked, 1);
-    Log("knockdown guard ready (hit calculation, explosion dispatch and emission hooked)");
+    if (!HitsInstall("knockdown guard")) return;
     if (hf->code_matches(game + 0x5A2BB0, "48 89 5c 24 08 48 89 6c 24 10 56 57 41 54 41 56 41 57 48 83 ec 40") &&
         hf->code_matches(game + 0x4A7550, "48 89 5c 24 18 57 48 83 ec 20 3b 15 ?? ?? ?? ?? 48 8b 1d") &&
         hf->code_matches(exe + 0x79F860, "33 c0 4c 8d 05 c7 b2 01 02 0f 1f 80 00 00 00 00 49 39 0c c0 74 0c ff c0 83 f8 04 75 f3") &&
@@ -3200,10 +3050,93 @@ static void HellbombFired(const float pos[3])
     memcpy(g_boomPos, pos, sizeof g_boomPos);
 }
 
+/* Her hits, before the game reads them: her hand's carry bare_ap armour penetration, any other the Shred's (both put
+ * back after) */
+static void HitBefore(KbHitCall* c)
+{
+    if (c->kind == KB_HIT_CALC && BareHit(c->hit))
+    {
+        memcpy(c->saved, (const uint8_t*)c->hit + 0x9C, 12);
+        float ap[3] = {s_bareAp, s_bareAp, s_bareAp};
+        memcpy((uint8_t*)c->hit + 0x9C, ap, 12);
+        c->restore = 1;
+        c->flags = 1;
+    }
+    else c->restore = Shred(c->hit, c->saved) > 0;
+}
+/* Her hits, after: her hand's extra damage, demolition and stagger; its blast's extra demolition */
+static void HitAfter(KbHitCall* c)
+{
+    void* out = c->out;
+    if (c->kind == KB_HIT_CALC && c->flags && out)
+    {
+        float dmg;
+        int32_t demo, stag;
+        memcpy(&dmg, out, 4);
+        memcpy(&demo, (uint8_t*)out + 0x08, 4);
+        memcpy(&stag, (uint8_t*)out + 0x0C, 4);
+        float before = dmg;
+        if (isfinite(dmg)) dmg += s_bareDamage;
+        demo += (int32_t)s_bareDemolition;
+        stag += (int32_t)s_bareStagger;
+        memcpy(out, &dmg, 4);
+        memcpy((uint8_t*)out + 0x08, &demo, 4);
+        memcpy((uint8_t*)out + 0x0C, &stag, 4);
+        unsigned n = atomic_fetch_add(&g_bareHits, 1);
+        if (n < 5) Log("her hand: %.0f -> %.0f damage, demolition %d, stagger %d", (double)before, (double)dmg, demo, stag);
+    }
+    if (c->kind == KB_HIT_BLAST && out && s_bareDemolition > 0 && FistOrigin(c->hit) && Word((const uint8_t*)c->hit + 0x20) != atomic_load(&g_avatar))
+    {
+        int32_t demo;
+        memcpy(&demo, (uint8_t*)out + 0x08, 4);
+        int32_t before = demo;
+        demo += (int32_t)s_bareDemolition;
+        memcpy((uint8_t*)out + 0x08, &demo, 4);
+        static atomic_uint told;
+        if (atomic_fetch_add(&told, 1) < 4) Log("her hand: its blast's demolition %d -> %d", before, demo);
+    }
+}
+/* A hit on her (not one of her own blasts): who dealt it, her Hellbomb let through, the stamina guard's note, and
+ * Predation Protocol's armour. Nonzero: nothing more is done to it. */
+static int HitTaken(const uint8_t* h, void* result, unsigned long long now)
+{
+    uint32_t me = atomic_load(&g_avatar);
+    uint8_t r[RESULT_SIZE];
+    uint32_t dealer = Word(h + 0x80), owner = Word(h + 0x100);
+    if ((dealer && dealer != me) || (owner && owner != me))
+    {
+        unsigned slot = atomic_fetch_add(&g_atkNext, 1) % 8;
+        atomic_store(&g_atkWho[slot][0], dealer);
+        atomic_store(&g_atkWho[slot][1], owner);
+        atomic_store(&g_atkMs[slot], now);
+    }
+    /* her own Hellbomb is meant to reach her as it is */
+    if (now - atomic_load(&g_boomMs) < 2000) return 1;
+    atomic_store(&g_hitMs, now);   /* the stamina guard (Tick): a hit's stamina loss is put back */
+    if (!ReadAt((uintptr_t)result, r, sizeof r)) return 1;
+    /* Predation Protocol: heavy armour (armour value pp_armor) while the buff holds: a hit whose armour penetration is
+     * below it glances off (no damage), one equal to it deals pp_armor_equal of its damage */
+    if (s_ppArmor > 0 && atomic_load(&g_ppArmorOn))
+    {
+        float ap, dmg;
+        memcpy(&ap, h + 0x9C, 4);
+        memcpy(&dmg, r, 4);
+        if (isfinite(ap) && isfinite(dmg) && dmg > 0)
+        {
+            float keep = ap < (float)s_ppArmor - 0.5f ? 0.0f : ap < (float)s_ppArmor + 0.5f ? s_ppArmorEqual : 1.0f;
+            if (keep < 1.0f) { dmg *= keep; memcpy(result, &dmg, 4); atomic_fetch_add(&g_armorHits, 1); }
+        }
+    }
+    return 0;
+}
+
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
+    kb_hit_before = HitBefore;
+    kb_hit_after = HitAfter;
+    kb_hit_taken = HitTaken;
     kb_hellbomb_fired = HellbombFired;
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }

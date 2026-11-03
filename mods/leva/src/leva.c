@@ -45,15 +45,17 @@
 #define VERSION "0.5.4"
 #define BUILD "25480438"
 
+#define KB_OWN_SLOTS 64
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
 #include "kitbase/kb_body.h"
+#include "kitbase/kb_hits.h"
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
 static int s_nativeRows = 1, s_nativeArc = 0;
-static int s_arcMode = 1, s_arcShell = 222, s_arcRow = 157, s_rsColumns = 7, s_rsRows = 3, s_ultArcsMax = 24, s_fsMax = 2, s_codeMax = 4, s_steady = 0;
+static int s_arcMode = 1, s_arcShell = 222, s_arcRow = 157, s_rsColumns = 7, s_rsRows = 3, s_ultArcsMax = 24, s_fsMax = 2, s_codeMax = 4;
 static int s_rsArcs = 2;
 static float s_rsCd = 14, s_rsDistance = 12, s_rsWidth = 18, s_rsDepth = 6, s_rsParalysis = 4, s_rsSweep = 0.05f, s_rsSeconds = 10, s_rsPulse = 0.5f, s_rsDamage = 0.067f, s_rsHold = 1.0f;
 static float s_odCd = 15, s_odSeconds = 8, s_odStep = 0.2f, s_odCharged = 1.3f;
@@ -217,12 +219,8 @@ static double g_stealthUntil;
 static int g_stealthOn;
 static double g_fsWindowAt;              /* the Fox's Scheme: its current window started at */
 static int g_fsUsed;
-static atomic_ullong g_shieldUntilMs;
-#define OWN 64
+#define OWN KB_OWN_SLOTS
 typedef struct Pulse { float p[3]; double at; uint32_t row; } Pulse;
-static _Atomic unsigned long long g_ownMs[OWN];
-static float g_ownPos[OWN][3];
-static unsigned g_ownNext;
 static Pulse g_pulses[OWN];
 static int g_npulse;
 typedef struct Mark { uint32_t entity; double until; } Mark;   /* Negative Charge */
@@ -1660,56 +1658,6 @@ static void Reset(const char* why)
 }
 
 /* ---- the knockdown window: hooks on the game's hit code (as Primed Sure Footed) -------------------------------------- */
-#define RESULT_SIZE 0x24u
-static _Atomic unsigned g_kdStopped;
-static _Atomic unsigned g_ownStopped;
-/* A hit on her: one of her own blasts (an explosion from within 14 m of one she set off in the last 1.2 s) does
- * nothing to her: its result is cleared (damage, stagger, push, knockdown, reaction). With steady (her passive) or in
- * the knockdown window any hit's knockdown is cleared. */
-static void Steady(const void* hit, void* result)
-{
-    if (!atomic_load(&g_hooked) || !hit || !result) return;
-    uint8_t h[HIT_SIZE], r[RESULT_SIZE];
-    uint32_t me = atomic_load(&g_avatar);
-    if (!me || !ReadAt((uintptr_t)hit, h, sizeof h) || Word(h + 0x20) != me) return;
-    unsigned long long now = GetTickCount64();
-    if (Word(h) == 4)
-    {
-        float origin[3];
-        memcpy(origin, h + 0x40, sizeof origin);
-        for (int i = 0; i < OWN; i++)
-        {
-            unsigned long long at = atomic_load(&g_ownMs[i]);
-            if (!at || now - at > 1200) continue;
-            float dx = origin[0] - g_ownPos[i][0], dy = origin[1] - g_ownPos[i][1], dz = origin[2] - g_ownPos[i][2];
-            if (dx * dx + dy * dy + dz * dz <= 14.0f * 14.0f)
-            {
-                memset(result, 0, RESULT_SIZE);
-                atomic_fetch_add(&g_ownStopped, 1);
-                return;
-            }
-        }
-    }
-    if (!s_steady && now > atomic_load(&g_shieldUntilMs)) return;   
-    if (!ReadAt((uintptr_t)result, r, sizeof r) || !r[0x1E]) return;
-    ((uint8_t*)result)[0x1E] = 0;
-    atomic_fetch_add(&g_kdStopped, 1);
-}
-typedef uintptr_t (*CalculateFn)(uintptr_t, void*, const void*);
-typedef void (*BlastFn)(uintptr_t, void*, const void*);
-typedef uintptr_t (*EmitFn)(uintptr_t, void*, const void*, uint32_t);
-static CalculateFn original_calculate;
-static BlastFn original_blast;
-static EmitFn original_emit;
-static uintptr_t Calculate(uintptr_t a, void* out, const void* hit) { Observe(hit); uintptr_t r = original_calculate(a, out, hit); Steady(hit, out); return r; }
-static void Blast(uintptr_t a, void* out, const void* hit) { Observe(hit); original_blast(a, out, hit); Steady(hit, out); }
-static uintptr_t Emit(uintptr_t a, void* result, const void* hit, uint32_t mode) { Steady(hit, result); return original_emit(a, result, hit, mode); }
-
-static const struct { uint32_t rva; const char* hex; } kPins[] = {
-    {0x129DC30u, "48 89 5c 24 08 57 48 83 ec 30 33 c0 0f 57 c0 0f 11 02 49 8b f8 48 8b da 0f 11 42 10 89 42 20 41"},
-    {0x129D180u, "48 89 4c 24 08 53 55 56 57 41 55 48 83 ec 60 41 8b 40 20 33 f6 3b 05 85 6a 1e 02 49 8b f8 44 0f"},
-    {0x129DD30u, "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 20 57 41 54 41 55 41 56 41 57 48 81 ec a0 00 00 00 44"},
-};
 
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {
@@ -1728,14 +1676,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     else Log("ground finder off: the raycast is not the reviewed code (her arcs go off at her own height)");
     g_staminaOk = hf->code_matches(game + 0xA50E2D, "f3 42 0f 11 8c 11 54 78 54 00");
     Log(g_staminaOk ? "stamina readable (the game's stamina write is the reviewed code)" : "stamina off: its code is not the reviewed one");
-    for (unsigned i = 0; i < sizeof kPins / sizeof kPins[0]; i++)
-        if (!hf->code_matches(game + kPins[i].rva, kPins[i].hex)) { Log("own-arc guard off: game.dll+0x%X is not the reviewed code", kPins[i].rva); return; }
-    if (hf->hook(self, game + 0x129DC30, (void*)Calculate, (void**)&original_calculate) ||
-        hf->hook(self, game + 0x129D180, (void*)Blast, (void**)&original_blast) ||
-        hf->hook(self, game + 0x129DD30, (void*)Emit, (void**)&original_emit))
-    { Log("own-arc guard off: a hook could not be placed"); return; }
-    atomic_store(&g_hooked, 1);
-    Log("own-arc guard ready (hit calculation, explosion dispatch and emission hooked)");
+    if (!HitsInstall("own-arc guard")) return;
 }
 
 static void ProjectilesReady(HfMod* mod, HfEvent event, void* user)

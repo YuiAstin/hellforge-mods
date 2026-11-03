@@ -44,6 +44,7 @@
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
 #include "kitbase/kb_body.h"
+#include "kitbase/kb_hits.h"
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
@@ -177,8 +178,7 @@ static uint32_t g_chargeTarget;
 static int g_chargeHits, g_chargeStun;
 static float g_chargeMult;
 static double g_chargeUntil;
-/* Leaping Pursuit */
-static atomic_ullong g_shieldUntilMs;          /* the knockdown window (GetTickCount64 ms; read by the hit hooks) */
+/* Leaping Pursuit (its knockdown window: g_shieldUntilMs, kitbase/kb_hits.h) */
 static double g_drUntil, g_speedUntil, g_forwardAt, g_landAt;
 /* the leap: pushed again each few frames until she is seen rising, then forward until she is seen moving */
 static int g_leap;
@@ -188,10 +188,6 @@ static int g_speedOn;
 static float g_baseJog = -1, g_baseSprint = -1;
 /* Hunting Strategy */
 typedef struct Pulse { float p[3]; double at; uint32_t row; } Pulse;
-/* her blasts for the hit hooks (other threads): when (GetTickCount64 ms) and where */
-static _Atomic unsigned long long g_ownMs[8];
-static float g_ownPos[8][3];
-static unsigned g_ownNext;
 static double g_lastArc;
 static Pulse g_pulses[12];
 static int g_npulse;
@@ -1052,56 +1048,6 @@ static void Reset(const char* why)
 }
 
 /* ---- the knockdown window: hooks on the game's hit code (as Primed Sure Footed) -------------------------------------- */
-#define RESULT_SIZE 0x24u
-static _Atomic unsigned g_kdStopped;
-static _Atomic unsigned g_ownStopped;
-/* A hit on her: one of her own blasts (an explosion from within 14 m of one she set off in the last 1.2 s) does
- * nothing to her: its result is cleared (damage, stagger, push, knockdown, reaction). In Leaping Pursuit's window any
- * hit's knockdown is cleared. */
-static void Steady(const void* hit, void* result)
-{
-    if (!atomic_load(&g_hooked) || !hit || !result) return;
-    uint8_t h[HIT_SIZE], r[RESULT_SIZE];
-    uint32_t me = atomic_load(&g_avatar);
-    if (!me || !ReadAt((uintptr_t)hit, h, sizeof h) || Word(h + 0x20) != me) return;
-    unsigned long long now = GetTickCount64();
-    if (Word(h) == 4)
-    {
-        float origin[3];
-        memcpy(origin, h + 0x40, sizeof origin);
-        for (int i = 0; i < 8; i++)
-        {
-            unsigned long long at = atomic_load(&g_ownMs[i]);
-            if (!at || now - at > 1200) continue;
-            float dx = origin[0] - g_ownPos[i][0], dy = origin[1] - g_ownPos[i][1], dz = origin[2] - g_ownPos[i][2];
-            if (dx * dx + dy * dy + dz * dz <= 14.0f * 14.0f)
-            {
-                memset(result, 0, RESULT_SIZE);
-                atomic_fetch_add(&g_ownStopped, 1);
-                return;
-            }
-        }
-    }
-    if (now > atomic_load(&g_shieldUntilMs)) return;
-    if (!ReadAt((uintptr_t)result, r, sizeof r) || !r[0x1E]) return;
-    ((uint8_t*)result)[0x1E] = 0;
-    atomic_fetch_add(&g_kdStopped, 1);
-}
-typedef uintptr_t (*CalculateFn)(uintptr_t, void*, const void*);
-typedef void (*BlastFn)(uintptr_t, void*, const void*);
-typedef uintptr_t (*EmitFn)(uintptr_t, void*, const void*, uint32_t);
-static CalculateFn original_calculate;
-static BlastFn original_blast;
-static EmitFn original_emit;
-static uintptr_t Calculate(uintptr_t a, void* out, const void* hit) { Observe(hit); uintptr_t r = original_calculate(a, out, hit); Steady(hit, out); return r; }
-static void Blast(uintptr_t a, void* out, const void* hit) { Observe(hit); original_blast(a, out, hit); Steady(hit, out); }
-static uintptr_t Emit(uintptr_t a, void* result, const void* hit, uint32_t mode) { Steady(hit, result); return original_emit(a, result, hit, mode); }
-
-static const struct { uint32_t rva; const char* hex; } kPins[] = {
-    {0x129DC30u, "48 89 5c 24 08 57 48 83 ec 30 33 c0 0f 57 c0 0f 11 02 49 8b f8 48 8b da 0f 11 42 10 89 42 20 41"},
-    {0x129D180u, "48 89 4c 24 08 53 55 56 57 41 55 48 83 ec 60 41 8b 40 20 33 f6 3b 05 85 6a 1e 02 49 8b f8 44 0f"},
-    {0x129DD30u, "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 20 57 41 54 41 55 41 56 41 57 48 81 ec a0 00 00 00 44"},
-};
 
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {
@@ -1110,14 +1056,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     if (!g || !x || gameSize != 74727424u || exeSize != 60719104u) { Log("REFUSED: the game's modules are not build " BUILD "'s: no aim, no knockdown window"); return; }
     game = g;
     exe = x;
-    for (unsigned i = 0; i < sizeof kPins / sizeof kPins[0]; i++)
-        if (!hf->code_matches(game + kPins[i].rva, kPins[i].hex)) { Log("knockdown window off: game.dll+0x%X is not the reviewed code", kPins[i].rva); return; }
-    if (hf->hook(self, game + 0x129DC30, (void*)Calculate, (void**)&original_calculate) ||
-        hf->hook(self, game + 0x129D180, (void*)Blast, (void**)&original_blast) ||
-        hf->hook(self, game + 0x129DD30, (void*)Emit, (void**)&original_emit))
-    { Log("knockdown window off: a hook could not be placed"); return; }
-    atomic_store(&g_hooked, 1);
-    Log("knockdown window ready (hit calculation, explosion dispatch and emission hooked)");
+    if (!HitsInstall("knockdown window")) return;
     if (hf->code_matches(game + 0x5A2BB0, "48 89 5c 24 08 48 89 6c 24 10 56 57 41 54 41 56 41 57 48 83 ec 40") &&
         hf->code_matches(game + 0x4A7550, "48 89 5c 24 18 57 48 83 ec 20 3b 15 ?? ?? ?? ?? 48 8b 1d") &&
         hf->code_matches(exe + 0x79F860, "33 c0 4c 8d 05 c7 b2 01 02 0f 1f 80 00 00 00 00 49 39 0c c0 74 0c ff c0 83 f8 04 75 f3") &&

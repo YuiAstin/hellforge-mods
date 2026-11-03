@@ -33,6 +33,7 @@ kitbase/                 source of truth (header-only)
   kb_player.h            layer 0: her avatar, items and weapons, hook bookkeeping, stamina
   kb_friends.h           layer 1: the friend list (what her blasts spare, what is never a target)
   kb_body.h              layer 1: the T-Doll body (health, stamina, the stamina Hellbomb)
+  kb_hits.h              layer 1: the damage pipeline on the game's hit code (her hits and hits on her)
   ...                    later layers as they are extracted
 mods/<kit>/src/kitbase/  copies, kept in sync by tools/kitbase_sync.py
 ```
@@ -111,7 +112,12 @@ between blocks.
 2. **Done (needs its in-game check).** **Friend list and T-Doll body.** Every kit now uses Voymastina's friend list:
    exosuits, vehicles, dog drones, SEAF, the Pelican, mod copies of any of them, and anything a Helldiver holds are
    never taken for enemies. The body is Lenna's code with the two callbacks above.
-3. **Damage dispatcher.** Port Lenna first (simplest `Steady`), then Faelynn, Leva, Voymastina; test each in game.
+3. **Damage dispatcher, part 1: the hit hooks (done, on branch `kitbase-damage`, needs its in-game check).**
+   `kb_hits.h` owns the three hooks, their code pins and one pipeline (see its header comment). Kits plug in with
+   `kb_hit_before` / `kb_hit_after` (Faelynn's Shred; Voymastina's hand and Shred) and `kb_hit_taken` (Voymastina's
+   attacker record, Hellbomb pass-through and Predation armour). Defaults per kit: `KB_OWN_SLOTS` (Leva 64,
+   Voymastina 16), `KB_STEADY` (Faelynn, Voymastina 1), `KB_UNSHAKEN` (Voymastina 1).
+   Part 2: the HellForge damage event (`OnDamagePre`, 4 variants up to 115 lines) as ordered handlers.
 4. **Settings table and the generic HUD.**
 5. **AK-12 on the base.** Layer 2 and 3 blocks move only when she needs them.
 
