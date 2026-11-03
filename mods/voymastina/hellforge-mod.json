@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "id": "yui.voymastina",
+  "name": "Voymastina",
+  "version": "0.4.0",
+  "description": "Voymastina from Girls' Frontline 2 for your Helldiver, with her own exosuit: the Sinbreaker (a copy of the EXO-55 Breakthrough, stratagem LRRRR, unlimited uses, given to her every mission outside the loadout). In it she fights with her GFL2 kit: Sirius Fall, Eye of the White Mastiff (Lock On overwatch) and Pile Bunker (the suit lunges into a heavy strike); a Pile Bunker kill on a heavily armoured enemy earns a follow-up on her next shield bash: a precision-strike line that drags enemies to a Hellbomb at its end. On foot she fights with her fists and her GFL1 kit as AK-15: Rage, Eye of the White Mastiff (monitoring, overload) and the Blood-Curdling Howl when her Sinbreaker falls; her guns handle better and reload faster. Mastiff's Pledge keeps her and the Sinbreaker steady and hard to hurt. Needs the Exo Experts warbond (the EXO-55 Breakthrough). Solo or host. Keys in voymastina.ini (default Z, X, C); numbers also on the MODS tab. HUD needs Bingus Shared Loader and HD2Runtime. No character model included.",
+  "icon": "icon.png",
+  "premium": [
+    "warbond:4228295283"
+  ],
+  "gameplay": true,
+  "code": {
+    "dll": "voymastina.dll",
+    "sdk": 13
+  }
+}

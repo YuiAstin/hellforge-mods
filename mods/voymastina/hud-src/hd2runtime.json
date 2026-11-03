@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "name": "Voymastina HUD",
+  "resource": "mods/yui/voymastina_hud",
+  "guid": "b85a9465-9296-4453-bb5c-d0069e2b0d56",
+  "requires": {
+    "bingus": {"min_release": 15, "api": 1},
+    "hd2runtime": {"min_version": "0.30.0", "api": 1, "module": "mods/skyeshade/hd2runtime"}
+  }
+}

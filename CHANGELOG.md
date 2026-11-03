@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-11-03: Voymastina 0.4.0
+- First release: the Sinbreaker (her own exosuit, a copy of the EXO-55 Breakthrough, granted every mission outside the loadout; needs the Exo Experts warbond) with her GFL2 kit (Sirius Fall, Eye of the White Mastiff, Pile Bunker), the Pile Bunker Hellbomb follow-up on her shield bash, her AK-15 kit on foot (Rage, Eye with overload, Blood-Curdling Howl) with +50 ergonomics, half reload time and 30% less recoil on her guns, Mastiff's Pledge on her and the suit, and a HUD that follows her kit.
+
 ## 2026-11-02: Leva 0.5.4 · Faelynn 0.3.5 · Lenna 0.2.10
 
 ### Added
