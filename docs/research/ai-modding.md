@@ -255,3 +255,15 @@ the race. Ctrl+F7 now removes her entries outright, but only from a record where
 enemy, or its squad, cannot sense her right now), then forces the re-pick. If they then pick someone else, a hide
 that works while out of sight (a sniper nest after breaking contact) is possible. 0.2.2's blanking stays on
 Ctrl+Shift+F7 for comparison.
+
+**0.2.3 in game (the same evening):**
+- **Forget:** one enemy after her (a squad, perceiver 884). Her entries were removed from the squad's record on
+  most passes (it kept re-adding one), the re-pick forced; at t+6 s it stopped being after her, and nobody was
+  after her through the end of the watch (t+14 s, 8 s after the forget had stopped). One case, but the first time
+  anything lost her. The stall guard stopped it at t+7 s (a 52 ms pass, most likely a wave of new spawns being
+  classified at once); 0.2.4 asks about at most 24 new spawns per pass.
+- **set_destination:** a squad of three walking toward her (75 m) was sent 80 m to her side, once. Two traces
+  later its members were 20 to 29 m from her, after her, their +0x60 on her again. Either the call did not hold, or
+  the squad's own target re-set it at once. 0.2.4 sends again every 2 s and logs each one's +0x60 against the point.
+- **Gun Probe 0.1.3:** guns spawned beside the view and followed it (532 and 546 frames moved in 10 s); the
+  drone_mg unit is the Guard Dog's body without its gun. 0.1.4 tries the support machine guns first.

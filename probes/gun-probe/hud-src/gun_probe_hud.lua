@@ -2,7 +2,7 @@
 -- own gun models as a visual only (no gameplay), keep it hovering beside the view and turn it, through the engine's own
 -- Lua calls (World.spawn_unit, Unit.set_local_position / rotation, the view camera as Treasure Radar finds it)?
 --
---   F6        spawn two guns beside the view for 10 s (left and right of the camera, a little ahead), then remove them;
+--   F6        spawn two guns (Ctrl+F6: the next loaded gun model) beside the view for 10 s (left and right of the camera, a little ahead), then remove them;
 --             while they are out each "fires" the Guard Dog's firing sound (hd2.sounds, HD2Runtime's sound API, marked
 --             offline-tested only) on its own model every 0.5 s, the two a quarter-second apart
 --   Shift+F6  log which engine calls this addon can reach, which gun models are loaded right now, and what HD2Runtime's
@@ -76,15 +76,17 @@ local function xyz(v)
     return nil
 end
 
--- the gun models: the Guard Dog's rifle first (a floating gun already), then the machine guns
+-- the gun models. 0.1.4: drone_mg is the Guard Dog's body alone (0.1.3's test: "an empty dog without the gun"), so the
+-- support weapons come first; Ctrl+F6 steps to the next loaded one
 local MODELS = {
-    'content/fac_helldivers/equipment/backpacks/drone_weapons/drone_assault_rifle/drone_assault_rifle',
-    'content/fac_helldivers/equipment/backpacks/drone_mg/drone_mg',
-    'content/fac_helldivers/equipment/backpacks/drone_weapons/drone_laser_rifle/drone_laser_rifle',
     'content/fac_helldivers/equipment/support_weapons/machinegun/machinegun',
     'content/fac_helldivers/equipment/support_weapons/heavy_mg/heavy_mg',
     'content/fac_helldivers/equipment/support_weapons/expendable_machinegun/expendable_machinegun',
+    'content/fac_helldivers/equipment/backpacks/drone_weapons/drone_assault_rifle/drone_assault_rifle',
+    'content/fac_helldivers/equipment/backpacks/drone_weapons/drone_laser_rifle/drone_laser_rifle',
+    'content/fac_helldivers/equipment/backpacks/drone_mg/drone_mg',
 }
+local pick = 0   -- 0: the first loaded; else the index Ctrl+F6 stepped to
 local function loaded(path)
     local okc, r = call('Application.can_get', 'unit', path)
     return okc and r == true
@@ -202,14 +204,21 @@ local function clear(w)
     end
     G.units = {}
 end
-local function spawn()
+local function spawn(step_model)
     local w = world()
     if not w then log('[Gun Probe] F6: no main world') return end
     local c = camera(w)
     if not c then log('[Gun Probe] F6: no view camera') return end
     clear(w)
     G.model = nil
-    for _, path in ipairs(MODELS) do if loaded(path) then G.model = path; break end end
+    if step_model then
+        for k = 1, #MODELS do
+            local i = (pick + k - 1) % #MODELS + 1
+            if loaded(MODELS[i]) then pick = i; break end
+        end
+    end
+    if pick > 0 and loaded(MODELS[pick]) then G.model = MODELS[pick]
+    else for i, path in ipairs(MODELS) do if loaded(path) then G.model = path; pick = i; break end end end
     if not G.model then log('[Gun Probe] F6: none of the gun models is loaded (bring a Guard Dog AR-23 or a machine gun)') return end
     for i, o in ipairs(OFFSETS) do
         local pos = place(c, o)
@@ -284,7 +293,7 @@ overlay:draw(function(d, dt)
     local now = down(0x75)                                   -- F6
     if now and not prev then
         if down(0x10) then local okr, err = pcall(report); if not okr then log('[Gun Probe] report failed: ' .. tostring(err)) end
-        else local oks, err = pcall(spawn); if not oks then log('[Gun Probe] spawn failed: ' .. tostring(err)) end end
+        else local oks, err = pcall(spawn, down(0x11)); if not oks then log('[Gun Probe] spawn failed: ' .. tostring(err)) end end
     end
     prev = now
     pcall(sound_step, dt)

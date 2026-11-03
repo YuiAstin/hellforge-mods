@@ -15,7 +15,9 @@
  *             each active enemy within 150 m, as floats, with every float triple's distance to her: the triple that
  *             tracks her position as she moves (a patrol walking to her) is its destination. Lemuen's sniper nest.
  *   Shift+Alt+F7  redirect: every active nav record within 150 m (up to 12) gets set_destination
- *             (game 0x5B36C0, as Nav Probe) to a point 80 m off to her side; the trace above then shows if they go
+ *             (game 0x5B36C0, as Nav Probe) to a point 80 m off to her side; the trace above then shows if they go.
+ *             0.2.4: the point is kept per enemy and sent again on every trace (2 s) for the 30 s, and the trace
+ *             logs how far each one's destination (+0x60) and the enemy are from it, and whether it is after her
  *
  * Layouts (ai-modding.md, from HellForge's behaviours.c, HD2Runtime's research and Smarter Guard Dogs; build 25480438):
  *   behaviours  [game+0x3326740]: map +0x40 (entity -> index), count +0x20, owners +0x58, records +0x60, 0x1F8 each;
@@ -35,7 +37,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.3"
+#define VERSION "0.2.4"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -113,11 +115,18 @@ static unsigned g_nseen;
 /* 0.2.1: an enemy among the spawns seen, its entity and position. 0.2.0 asked the component tables (four string lookups)
  * about every one of up to 2048 spawns on each pass, and Ctrl+F7 ran a pass every frame: seconds a frame (the freeze).
  * Now each spawn is asked once, and one that has gone is dropped. */
+static int g_classified;   /* new spawns asked about in this pass */
 static int SeenEnemy(unsigned i, Ent* e, float p[3])
 {
     if (g_seenKind[i] == 2) return 0;
     if (!Resolve(g_seenEnt[i], e) || e->resource != g_seenRes[i]) { g_seenKind[i] = 2; return 0; }
-    if (!g_seenKind[i]) g_seenKind[i] = Hostile(g_seenRes[i]) ? 1 : 2;
+    if (!g_seenKind[i])
+    {
+        /* 0.2.4: at most 24 new spawns asked about per pass (a wave of spawns cost one pass 52 ms in 0.2.3's test) */
+        if (g_classified >= 24) return 0;
+        g_classified++;
+        g_seenKind[i] = Hostile(g_seenRes[i]) ? 1 : 2;
+    }
     return g_seenKind[i] == 1 && RootOf(e->unit, p);
 }
 
@@ -233,6 +242,7 @@ typedef struct { int enemies, withBehaviour, withPerception, afterHer, seeHer, h
 static int g_forget;   /* 0.2.3: the hide is the forget (Ctrl+F7), else 0.2.2's blanking (Ctrl+Shift+F7) */
 static Tally Pass(int detail, int hide)
 {
+    g_classified = detail ? -100000 : 0;
     Tally t = {0};
     Ent me, e;
     float mp[3], p[3];
@@ -318,10 +328,18 @@ static int Boundary(uintptr_t at)
     uint8_t b[2];
     return !hf->read_code(at - 1, b, 2) && (b[0] == 0xCC || b[0] == 0xC3 || b[0] == 0x90) && b[1] != 0xCC;
 }
-static double g_traceUntil, g_traceNext;
+static double g_traceUntil, g_traceNext, g_sendUntil;
+static struct { uint32_t id; float to[3]; } g_sent[32];
+static int g_nsent;
 static float g_traceMe[3];
+static int SentIndex(uint32_t id)
+{
+    for (int s = 0; s < g_nsent; s++) if (g_sent[s].id == id) return s;
+    return -1;
+}
 static void Trace(int redirect)
 {
+    g_classified = 0;
     Ent me, e;
     float mp[3], p[3];
     uint32_t meId = atomic_load(&g_avatar);
@@ -354,17 +372,31 @@ static void Trace(int redirect)
         }
         close[w] = 0;
         Log("  enemy %u (%016llx) %.0f m away, nav record %u: triples within 30 m of you:%s", id, (unsigned long long)e.resource, d, k, w ? close : " none");
-        if (redirect && g_setDest)
+        int s = SentIndex(id);
+        if (redirect && g_setDest && s < 0 && g_nsent < 32)
         {
-            /* toward her: 80 m off to her side, square to the line from it to her */
+            /* 80 m off to her side, square to the line from it to her; kept, and sent again on every trace */
             float vx = mp[0] - p[0], vy = mp[1] - p[1], h = sqrtf(vx * vx + vy * vy);
             if (h < 1) continue;
-            _Alignas(16) float to[4] = {mp[0] - vy / h * 80, mp[1] + vx / h * 80, mp[2], 0};
+            s = g_nsent++;
+            g_sent[s].id = id;
+            g_sent[s].to[0] = mp[0] - vy / h * 80; g_sent[s].to[1] = mp[1] + vx / h * 80; g_sent[s].to[2] = mp[2];
+        }
+        if (s >= 0 && g_now < g_sendUntil && g_setDest)
+        {
+            _Alignas(16) float to[4] = {g_sent[s].to[0], g_sent[s].to[1], g_sent[s].to[2], 0};
+            const float* dest = f + 0x60 / 4;
+            float dd = sqrtf((dest[0] - to[0]) * (dest[0] - to[0]) + (dest[1] - to[1]) * (dest[1] - to[1]));
+            float de = sqrtf((p[0] - to[0]) * (p[0] - to[0]) + (p[1] - to[1]) * (p[1] - to[1]));
+            uintptr_t br = Behaviour(id);
+            uint32_t target = 0;
+            if (br) RD(br + 0x18, &target, 4);
+            Log("    sent: its destination +0x60 is %.1f m from the point, it is %.1f m from it, %s", dd, de, target == meId ? "after HER" : target ? "after something else" : "after nobody");
             g_setDest(NULL, id, to);
             sent++;
         }
     }
-    if (redirect) Log("patrols: %d sent 80 m to your side (set_destination)", sent);
+    if (sent) Log("patrols: %d sent to their points (set_destination)%s", sent, redirect ? ", again every 2 s for 30 s" : "");
 }
 /* ---- binding, events, the game thread --------------------------------------------------------------------------------- */
 static int Bind(void)
@@ -447,14 +479,17 @@ static void Tick(HfMod* mod, float dt, void* user)
     }
     if (g_now < g_traceUntil && g_now >= g_traceNext) { g_traceNext = g_now + 2; Trace(0); }
     static int prev;
-    int d = Down(VK_F7);
-    if (d && !prev && Down(VK_MENU))
+    static double keyAfter;
+    int raw = Down(VK_F7), d = raw && !prev && g_now >= keyAfter;   /* 0.2.4: at most one press a second */
+    if (d) keyAfter = g_now + 1;
+    prev = raw;
+    if (d && Down(VK_MENU))
     {
-        if (Down(VK_SHIFT)) { Log("Shift+Alt+F7: sending the patrols near you away (and tracing for 30 s)"); Trace(1); }
+        if (Down(VK_SHIFT)) { Log("Shift+Alt+F7: sending the patrols near you away, again every 2 s for 30 s"); g_nsent = 0; g_sendUntil = g_now + 30; Trace(1); }
         else Log("Alt+F7: tracing the patrols' navigation records for 30 s (move around: the destination follows you)");
         g_traceUntil = g_now + 30; g_traceNext = g_now + 2;
     }
-    else if (d && !prev)
+    else if (d)
     {
         if (Down(VK_CONTROL))
         {
@@ -466,7 +501,6 @@ static void Tick(HfMod* mod, float dt, void* user)
         else if (Down(VK_SHIFT)) { Log("Shift+F7: enemies within 60 m:"); Report("survey", Pass(1, 0)); }
         else { Log("F7: watching for 15 s"); g_watchUntil = g_now + 15; g_watchNext = g_now; }
     }
-    prev = d;
 }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
