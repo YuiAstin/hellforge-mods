@@ -34,6 +34,7 @@ kitbase/                 source of truth (header-only)
   kb_friends.h           layer 1: the friend list (what her blasts spare, what is never a target)
   kb_body.h              layer 1: the T-Doll body (health, stamina, the stamina Hellbomb)
   kb_hits.h              layer 1: the damage pipeline on the game's hit code (her hits and hits on her)
+  kb_damage.h            layer 1: HellForge's damage event routed to the kit, with shared helpers
   ...                    later layers as they are extracted
 mods/<kit>/src/kitbase/  copies, kept in sync by tools/kitbase_sync.py
 ```
@@ -117,7 +118,11 @@ between blocks.
    `kb_hit_before` / `kb_hit_after` (Faelynn's Shred; Voymastina's hand and Shred) and `kb_hit_taken` (Voymastina's
    attacker record, Hellbomb pass-through and Predation armour). Defaults per kit: `KB_OWN_SLOTS` (Leva 64,
    Voymastina 16), `KB_STEADY` (Faelynn, Voymastina 1), `KB_UNSHAKEN` (Voymastina 1).
-   Part 2: the HellForge damage event (`OnDamagePre`, 4 variants up to 115 lines) as ordered handlers.
+   **Part 2: the damage event (done, on branch `kitbase-damage-event`, needs its in-game check).** `kb_damage.h`
+   routes HellForge's damage event to `kb_damage_taken` (a hit on her), `kb_damage_dealt` (any other) and
+   `kb_damage_seen` (every hit; Leva's probe), and holds what every kit did the same way: `IsShot`, `ScaleDamage`,
+   `NoteTarget` and her last target. The rest of each kit's handler is skill logic and stays in the kit: an ordered
+   handler chain would only rename it. Revisit once AK-12 shows which rules repeat.
 4. **Settings table and the generic HUD.**
 5. **AK-12 on the base.** Layer 2 and 3 blocks move only when she needs them.
 

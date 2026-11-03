@@ -45,6 +45,7 @@
 #include "kitbase/kb_friends.h"
 #include "kitbase/kb_body.h"
 #include "kitbase/kb_hits.h"
+#include "kitbase/kb_damage.h"
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
@@ -170,9 +171,6 @@ static void LoadSettings(void)
 static int g_ci;
 static double g_cdWild, g_cdLeap, g_cdUlt;   /* ready at */
 /* the last enemy she shot */
-static uint32_t g_lastTarget;
-static float g_lastPos[3];
-static double g_lastAt;
 /* Wild Extinction's charge */
 static uint32_t g_chargeTarget;
 static int g_chargeHits, g_chargeStun;
@@ -907,48 +905,40 @@ static int NearPulse(const float at[3], double within)
     return 0;
 }
 
-static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
+/* A hit on her (HellForge's damage event; kitbase/kb_damage.h routes it here) */
+static void DamageTaken(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
-    HfDamagePreEvent* e = (HfDamagePreEvent*)(void*)info;
-    HfDamageEvent* d = &e->damage;
-    if (!g_inMission || e->cancel) return;
-    uint32_t me = atomic_load(&g_avatar);
-    if (d->target == me && me)
+    /* King's Authority: her own blasts spare her (the EMS field deals no damage: its stun rides on the hit) */
+    if (d->kind == 4 && NearPulse(d->position, 0.6)) { e->cancel = 1; g_selfSpared++; return; }
+    /* her arcs land as element-2 (or 3) hits of kind 0, 1 or 3, a little later and further out than the burst */
+    if ((d->element == 2 || d->element == 3) && (d->kind == 0 || d->kind == 1 || d->kind == 3) && NearPulseR(d->position, 1.5, 35))
+    { e->cancel = 1; g_selfSpared++; return; }
+    if (d->amount == 0) return;
+    /* Leaping Pursuit's window: no fall or landing damage (impact or flat, from nothing) */
+    if (g_now < g_drUntil && (d->kind == 5 || d->kind == 7) && !NetOk(d->dealer) && !NetOk(d->owner)) { e->cancel = 1; return; }
+    if (g_now < g_drUntil && d->amount > 0)
     {
-        /* King's Authority: her own blasts spare her (the EMS field deals no damage: its stun rides on the hit) */
-        if (d->kind == 4 && NearPulse(d->position, 0.6)) { e->cancel = 1; g_selfSpared++; return; }
-        /* her arcs land as element-2 (or 3) hits of kind 0, 1 or 3, a little later and further out than the burst */
-        if ((d->element == 2 || d->element == 3) && (d->kind == 0 || d->kind == 1 || d->kind == 3) && NearPulseR(d->position, 1.5, 35))
-        { e->cancel = 1; g_selfSpared++; return; }
-        if (d->amount == 0) return;
-        /* Leaping Pursuit's window: no fall or landing damage (impact or flat, from nothing) */
-        if (g_now < g_drUntil && (d->kind == 5 || d->kind == 7) && !NetOk(d->dealer) && !NetOk(d->owner)) { e->cancel = 1; return; }
-        if (g_now < g_drUntil && d->amount > 0)
-        {
-            double a = floor(d->amount * s_lpTaken + 0.5);
-            if (a < 1) { e->cancel = 1; return; }
-            d->amount = (int32_t)a;
-        }
-        return;
+        double a = floor(d->amount * s_lpTaken + 0.5);
+        if (a < 1) { e->cancel = 1; return; }
+        d->amount = (int32_t)a;
     }
+}
+/* Any other hit: hers on enemies, and anyone's on what her skills mark */
+static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
+{
     /* enemies her pulses hit are marked */
     if (d->kind == 4 && NearPulse(d->position, 0.6) && MarkEnemy(d->target))
         if (g_castCi < s_hsCiCap) { g_castCi++; GainCi(1); }
     if (d->amount == 0) return;
-    int mine = MineHit(d) && (d->kind == 0 || d->kind == 1 || d->kind == 3);
+    int mine = IsShot(d);
     if (mine)
     {
-        uint8_t tid[24];
-        if (Descriptor(d->target, tid) && Quad(tid) != AVATAR) AddFoe(d->target, Quad(tid));
-        g_lastTarget = d->target;
-        memcpy(g_lastPos, d->position, sizeof g_lastPos);
-        g_lastAt = g_now;
+        NoteTarget(d);
         /* Wild Extinction's charged hits */
         if ((!g_chargeTarget || d->target == g_chargeTarget) && g_chargeHits > 0 && g_now <= g_chargeUntil && d->amount > 0)
         {
             if (g_now - g_lastArc >= s_arcStep) { g_lastArc = g_now; Blast_((uint32_t)s_arcRow, d->position, "arc"); }
-            double a = floor(d->amount * g_chargeMult + 0.5);
-            d->amount = a > 2147483647.0 ? 2147483647 : (int32_t)a;
+            ScaleDamage(d, g_chargeMult);
             g_chargeHits--;
             g_boosted++;
             if (g_chargeStun)
@@ -969,8 +959,7 @@ static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
     /* Conductivity: marked enemies take more */
     if (d->amount > 0 && MarkOf(d->target))
     {
-        double a = floor(d->amount * s_markMult + 0.5);
-        d->amount = a > 2147483647.0 ? 2147483647 : (int32_t)a;
+        ScaleDamage(d, s_markMult);
     }
 }
 
@@ -1278,6 +1267,8 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
+    kb_damage_taken = DamageTaken;
+    kb_damage_dealt = DamageDealt;
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();

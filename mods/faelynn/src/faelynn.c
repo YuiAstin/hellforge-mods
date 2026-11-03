@@ -49,6 +49,7 @@
 #include "kitbase/kb_friends.h"
 #include "kitbase/kb_body.h"
 #include "kitbase/kb_hits.h"
+#include "kitbase/kb_damage.h"
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
@@ -198,9 +199,6 @@ static int HealthOf(uint32_t entity, int32_t* health, uint32_t* life)
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
 static double g_cdMaul, g_cdHunt, g_cdUlt;   /* ready at */
-static uint32_t g_lastTarget;
-static float g_lastPos[3];
-static double g_lastAt;
 static int g_cp, g_ht;
 static double g_htAt;
 
@@ -766,61 +764,58 @@ static int NearPulse(const float at[3], double within)
     return 0;
 }
 
-static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
+/* A hit on her (HellForge's damage event; kitbase/kb_damage.h routes it here) */
+static void DamageTaken(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
-    HfDamagePreEvent* e = (HfDamagePreEvent*)(void*)info;
-    HfDamageEvent* d = &e->damage;
-    if (!g_inMission || e->cancel) return;
-    uint32_t me = atomic_load(&g_avatar);
-    if (d->target == me && me)
+    /* Last Bark under way: her own gas finishes her (no toughness, no immunity) */
+    if (g_dying)
     {
-        /* Last Bark under way: her own gas finishes her (no toughness, no immunity) */
-        if (g_dying)
-        {
-            if ((d->kind == 2 || d->kind == 4) && g_barked && Dist2(d->position, g_barkAt) <= (s_barkRadius + 5) * (s_barkRadius + 5)) d->amount = -1;
-            return;
-        }
-        /* a hit that would kill her: blocked, and she barks instead (her gas then takes her) */
-        if (s_barkBlasts && g_alive)
-        {
-            int32_t hp;
-            uint32_t life;
-            if (HealthOf(me, &hp, &life) && life == 0 && hp > 0)
-            {
-                float mine4[3];
-                float taken = PlayerPose(mine4, NULL) && InMist(mine4) ? s_taken : s_takenOut;
-                int own = ((d->kind == 4 || d->kind == 2) && NearPulse(d->position, 1.5)) || (d->kind == 2 && InMist(d->position));
-                double a = d->amount < 0 ? 1e9 : d->amount * (double)taken;
-                if (!own && (d->amount < 0 || a >= hp))
-                {
-                    e->cancel = 1;
-                    g_dying = 1;
-                    g_dyingAt = g_now;
-                    g_dyingAvatar = me;
-                    g_barkPending = 1;
-                    Log("a hit for %d (kind %u) would kill her (%d health): Last Bark", d->amount, d->kind, hp);
-                    return;
-                }
-            }
-        }
-        /* her own gas spares her: its blasts, and its cloud (damage over time) inside her mist */
-        if ((d->kind == 4 || d->kind == 2) && NearPulse(d->position, 1.5)) { e->cancel = 1; g_selfSpared++; return; }
-        if (d->kind == 2 && InMist(d->position)) { e->cancel = 1; g_selfSpared++; return; }
-        if (d->amount == 0) return;
-        if (g_now < g_drUntil && (d->kind == 5 || d->kind == 7) && !NetOk(d->dealer) && !NetOk(d->owner)) { e->cancel = 1; return; }
-        /* her toughness: a share of everything, much less while she stands in her own gas; none at 0 (instant kills too) */
-        float mine3[3];
-        float taken = PlayerPose(mine3, NULL) && InMist(mine3) ? s_taken : s_takenOut;
-        if (taken <= 0.0001f) { e->cancel = 1; g_shrugged++; return; }
-        if (d->amount > 0 && taken < 0.9999f)
-        {
-            double a = floor(d->amount * taken + 0.5);
-            if (a < 1) { e->cancel = 1; g_shrugged++; return; }
-            d->amount = (int32_t)a;
-            g_shrugged++;
-        }
+        if ((d->kind == 2 || d->kind == 4) && g_barked && Dist2(d->position, g_barkAt) <= (s_barkRadius + 5) * (s_barkRadius + 5)) d->amount = -1;
         return;
     }
+    /* a hit that would kill her: blocked, and she barks instead (her gas then takes her) */
+    if (s_barkBlasts && g_alive)
+    {
+        int32_t hp;
+        uint32_t life;
+        if (HealthOf(me, &hp, &life) && life == 0 && hp > 0)
+        {
+            float mine4[3];
+            float taken = PlayerPose(mine4, NULL) && InMist(mine4) ? s_taken : s_takenOut;
+            int own = ((d->kind == 4 || d->kind == 2) && NearPulse(d->position, 1.5)) || (d->kind == 2 && InMist(d->position));
+            double a = d->amount < 0 ? 1e9 : d->amount * (double)taken;
+            if (!own && (d->amount < 0 || a >= hp))
+            {
+                e->cancel = 1;
+                g_dying = 1;
+                g_dyingAt = g_now;
+                g_dyingAvatar = me;
+                g_barkPending = 1;
+                Log("a hit for %d (kind %u) would kill her (%d health): Last Bark", d->amount, d->kind, hp);
+                return;
+            }
+        }
+    }
+    /* her own gas spares her: its blasts, and its cloud (damage over time) inside her mist */
+    if ((d->kind == 4 || d->kind == 2) && NearPulse(d->position, 1.5)) { e->cancel = 1; g_selfSpared++; return; }
+    if (d->kind == 2 && InMist(d->position)) { e->cancel = 1; g_selfSpared++; return; }
+    if (d->amount == 0) return;
+    if (g_now < g_drUntil && (d->kind == 5 || d->kind == 7) && !NetOk(d->dealer) && !NetOk(d->owner)) { e->cancel = 1; return; }
+    /* her toughness: a share of everything, much less while she stands in her own gas; none at 0 (instant kills too) */
+    float mine3[3];
+    float taken = PlayerPose(mine3, NULL) && InMist(mine3) ? s_taken : s_takenOut;
+    if (taken <= 0.0001f) { e->cancel = 1; g_shrugged++; return; }
+    if (d->amount > 0 && taken < 0.9999f)
+    {
+        double a = floor(d->amount * taken + 0.5);
+        if (a < 1) { e->cancel = 1; g_shrugged++; return; }
+        d->amount = (int32_t)a;
+        g_shrugged++;
+    }
+}
+/* Any other hit: hers on enemies, and anyone's on what her skills mark */
+static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
+{
     if (d->amount <= 0) return;
     /* Last Bark: her dying gas hits like a hellbomb */
     if (s_barkDamage > 0 && g_now < g_barkUntil && (d->kind == 2 || d->kind == 4) && d->target != me)
@@ -845,15 +840,11 @@ static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
             if (g_now - cm->stackAt >= 1.0) { cm->stackAt = g_now; if (cm->stacks < s_corrMax) cm->stacks++; }
         }
     }
-    int mine = MineHit(d) && (d->kind == 0 || d->kind == 1 || d->kind == 3);
+    int mine = IsShot(d);
     double mult = 1;
     if (mine)
     {
-        uint8_t tid[24];
-        if (Descriptor(d->target, tid) && Quad(tid) != AVATAR) AddFoe(d->target, Quad(tid));
-        g_lastTarget = d->target;
-        memcpy(g_lastPos, d->position, sizeof g_lastPos);
-        g_lastAt = g_now;
+        NoteTarget(d);
         Mark* m = MarkOf(d->target);
         if (m)
         {
@@ -871,8 +862,7 @@ static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
     if (tm && tm->stacks > 0 && d->kind == 2) { mult *= 1 + s_corrPer * (float)tm->stacks; g_stackHits++; }   /* Corrosion: gas over time */
     if (mult != 1)
     {
-        double a = floor(d->amount * mult + 0.5);
-        d->amount = a > 2147483647.0 ? 2147483647 : (int32_t)a;
+        ScaleDamage(d, mult);
     }
 }
 
@@ -1242,6 +1232,8 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
+    kb_damage_taken = DamageTaken;
+    kb_damage_dealt = DamageDealt;
     kb_hit_before = HitBefore;
     kb_hellbomb_veto = HellbombVeto;
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;

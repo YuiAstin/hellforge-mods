@@ -51,6 +51,7 @@
 #include "kitbase/kb_friends.h"
 #include "kitbase/kb_body.h"
 #include "kitbase/kb_hits.h"
+#include "kitbase/kb_damage.h"
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
@@ -207,9 +208,6 @@ static void LoadSettings(void)
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
 static double g_cdSuppress, g_cdDisrupt, g_cdUlt;   /* ready at */
-static uint32_t g_lastTarget;
-static float g_lastPos[3];
-static double g_lastAt;
 static int g_code;                       /* Superconduct Code */
 static double g_codeAt, g_pcAt;          /* the last passive Code stack, the last Positive Charge heal */
 static double g_blitzUntil;              /* Superconduct Blitz can be used until */
@@ -1352,11 +1350,9 @@ typedef struct Pop { float p[3]; } Pop;
 static Pop g_pops[16];
 static int g_npop;
 
-static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
+/* Every hit: the probe */
+static void DamageSeen(HfDamagePreEvent* e, HfDamageEvent* d)
 {
-    HfDamagePreEvent* e = (HfDamagePreEvent*)(void*)info;
-    HfDamageEvent* d = &e->damage;
-    if (!g_inMission || e->cancel) return;
     if (Probing(d->position))
     {
         uint32_t t = 9; double age = -1; float dist = -1;
@@ -1365,13 +1361,16 @@ static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
         Log("probe hit: t+%.2f entity %u, kind %u, element %u, %d damage, dealer %u owner %u (hers %u), mine %d; burst tag %u %.2f s / %.1f m",
             2.0 - (g_probeUntil - g_now), d->target, d->kind, d->element, d->amount, d->dealer, d->owner, g_avatarNet, MineHit(d), t, age, dist);
     }
-    uint32_t me = atomic_load(&g_avatar);
-    if (d->target == me && me)
-    {
-        /* her own arcs spare her */
-        if ((d->kind == 4 || d->kind == 3) && NearOwn(d->position, 1.5, 10)) { e->cancel = 1; g_selfSpared++; }
-        return;
-    }
+}
+/* A hit on her (HellForge's damage event; kitbase/kb_damage.h routes it here) */
+static void DamageTaken(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
+{
+    /* her own arcs spare her */
+    if ((d->kind == 4 || d->kind == 3) && NearOwn(d->position, 1.5, 10)) { e->cancel = 1; g_selfSpared++; }
+}
+/* Any other hit: hers on enemies, and anyone's on what her skills mark */
+static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
+{
     if (d->amount <= 0) return;
     uint32_t tag = TAG_ARC;
     /* her arcs: electric hits (element 3) near one of her bursts lately; other blasts there (a Hellbomb, a grenade) are not
@@ -1400,7 +1399,7 @@ static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
             z->until = 0;
         }
     if (arc) { static unsigned noted; if (noted++ < 6) Log("her arc hit entity %u: kind %u, element %u, %d damage", d->target, d->kind, d->element, d->amount); }
-    int shot = !arc && MineHit(d) && (d->kind == 0 || d->kind == 1 || d->kind == 3);
+    int shot = !arc && IsShot(d);
     /* the bullet that carries an arc of hers (it lands where she set the arc) counts as that arc */
     if (shot && d->kind == 0 && NearOwnTag(d->position, 0.2, 3.0f, &tag)) { shot = 0; arc = 1; }
     /* Arc Rounds: her bullet's hit on an enemy sets off an arc there (next frame) */
@@ -1413,11 +1412,7 @@ static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
     }
     if (shot)
     {
-        uint8_t tid[24];
-        if (Descriptor(d->target, tid) && Quad(tid) != AVATAR) AddFoe(d->target, Quad(tid));
-        g_lastTarget = d->target;
-        memcpy(g_lastPos, d->position, sizeof g_lastPos);
-        g_lastAt = g_now;
+        NoteTarget(d);
     }
     if (!arc && !shot) return;
     /* her own lockdown burst: its blast is already rs_damage of the burst's, and its arcs too once they are her own arc
@@ -1873,6 +1868,9 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
+    kb_damage_seen = DamageSeen;
+    kb_damage_taken = DamageTaken;
+    kb_damage_dealt = DamageDealt;
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();

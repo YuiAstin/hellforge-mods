@@ -60,6 +60,7 @@ static double HowlImmuneUntil(void);
 #include "kitbase/kb_friends.h"
 #include "kitbase/kb_body.h"
 #include "kitbase/kb_hits.h"
+#include "kitbase/kb_damage.h"
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
@@ -270,9 +271,6 @@ __attribute__((unused)) static int HealthOf(uint32_t entity, int32_t* health, ui
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
 static double g_cd[3];                 /* ready at: Sirius Fall, Eye of the White Mastiff, Pile Bunker */
-static uint32_t g_lastTarget;
-static float g_lastPos[3];
-static double g_lastAt;
 static int g_pp, g_ppReady;            /* Predation charge; 1: her next skill is empowered */
 static float g_stab = 100;             /* Stability */
 static int g_broken;
@@ -1248,27 +1246,24 @@ static void Pledge(HfDamagePreEvent* e)
     if (a < 1) { e->cancel = 1; return; }
     d->amount = (int32_t)a;
 }
-static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
+/* A hit on her (HellForge's damage event; kitbase/kb_damage.h routes it here) */
+static void DamageTaken(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
-    HfDamagePreEvent* e = (HfDamagePreEvent*)(void*)info;
-    HfDamageEvent* d = &e->damage;
-    if (!g_inMission || e->cancel) return;
-    uint32_t me = atomic_load(&g_avatar);
-    if (d->target == me && me)
-    {
-        /* her own blasts (and their shrapnel) spare her */
-        if (d->kind == 4 && NearPulse(d->position, 2.0, 18, NULL)) { e->cancel = 1; g_selfSpared++; return; }
-        if ((d->kind == 0 || d->kind == 1) && NearShrapnel(d->position)) { e->cancel = 1; g_selfSpared++; return; }
-        /* Drop-in: nothing hurts her until its blasts are out */
-        if (g_now < g_immuneUntil || (s_eyeImmune && g_now < g_eyeUntil)) { e->cancel = 1; g_immuneHits++; return; }
-        /* her own Hellbomb is meant to reach her */
-        if (d->kind == 4 && g_now - g_boomAt < 2.0 && Dist2(d->position, g_boomPos) < 25.0f * 25.0f) return;
-        if (g_now < HowlImmuneUntil() || MpbSpares(d)) { e->cancel = 1; g_immuneHits++; return; }   /* Howl; her own Hellbomb */
-        if (d->amount <= 0) return;
-        if (!MechNow() && AkWatching()) { double ev = floor(d->amount * (1.0 - s_akEyeEvasion) + 0.5); d->amount = ev < 1 ? 1 : (int32_t)ev; }
-        Pledge(e);
-        return;
-    }
+    /* her own blasts (and their shrapnel) spare her */
+    if (d->kind == 4 && NearPulse(d->position, 2.0, 18, NULL)) { e->cancel = 1; g_selfSpared++; return; }
+    if ((d->kind == 0 || d->kind == 1) && NearShrapnel(d->position)) { e->cancel = 1; g_selfSpared++; return; }
+    /* Drop-in: nothing hurts her until its blasts are out */
+    if (g_now < g_immuneUntil || (s_eyeImmune && g_now < g_eyeUntil)) { e->cancel = 1; g_immuneHits++; return; }
+    /* her own Hellbomb is meant to reach her */
+    if (d->kind == 4 && g_now - g_boomAt < 2.0 && Dist2(d->position, g_boomPos) < 25.0f * 25.0f) return;
+    if (g_now < HowlImmuneUntil() || MpbSpares(d)) { e->cancel = 1; g_immuneHits++; return; }   /* Howl; her own Hellbomb */
+    if (d->amount <= 0) return;
+    if (!MechNow() && AkWatching()) { double ev = floor(d->amount * (1.0 - s_akEyeEvasion) + 0.5); d->amount = ev < 1 ? 1 : (int32_t)ev; }
+    Pledge(e);
+}
+/* Any other hit: hers on enemies, and anyone's on what her skills mark */
+static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
+{
     if (((d->kind == 4 && NearPulse(d->position, 2.0, 18, NULL)) || ((d->kind == 0 || d->kind == 1) && NearShrapnel(d->position)) || MpbSpares(d)) &&
         HerRide(d->target))
     {
@@ -1294,13 +1289,12 @@ static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
     if (d->kind == 4 || d->kind == 0 || d->kind == 1 || d->kind == 5) NearPulse(d->position, 1.0, 10, &emp);
     if (emp && s_ppMult > 1.0001f)
     {
-        double a = floor(d->amount * (double)s_ppMult + 0.5);
-        d->amount = a > 2147483647.0 ? 2147483647 : (int32_t)a;
+        ScaleDamage(d, (double)s_ppMult);
         if (g_empHits++ < 3) Log("Predation Protocol: an empowered blast hit entity %u for %d (kind %u)", d->target, d->amount, d->kind);
     }
     /* her own shots (not her blasts, nor their shrapnel) and her melee (bayonet, stun lance, punches: kind 6 within reach,
      * as 0.2.7's log showed; impact and flat hits within reach too): Sirius Fall, Support Action and the charge take both */
-    int shot = MineHit(d) && (d->kind == 0 || d->kind == 1 || d->kind == 3) && !((d->kind == 0 || d->kind == 1) && NearShrapnel(d->position));
+    int shot = IsShot(d) && !((d->kind == 0 || d->kind == 1) && NearShrapnel(d->position));
     float mePos[3];
     int melee = !shot && MineHit(d) && (d->kind == 5 || d->kind == 6 || d->kind == 7) && d->target != atomic_load(&g_avatar) &&
                 PlayerPose(mePos, NULL) && Dist2(d->position, mePos) < 6.0f * 6.0f;
@@ -3134,6 +3128,8 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
+    kb_damage_taken = DamageTaken;
+    kb_damage_dealt = DamageDealt;
     kb_hit_before = HitBefore;
     kb_hit_after = HitAfter;
     kb_hit_taken = HitTaken;
