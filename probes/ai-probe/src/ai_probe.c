@@ -1,0 +1,309 @@
+/* AI Probe (yui.ai-probe): does the AI the sentries and guard dogs use (docs/research/ai-modding.md: perception records,
+ * behaviour records) also run the enemies, and can it hide her from them? Research only; host or solo.
+ *
+ *   Shift+F7  survey: every enemy within 60 m, its behaviour record (id, stage, target, re-pick time) and perception
+ *             record (list sizes, her entry and its sense bits), and who each one is after
+ *   F7        a watch: the survey's tally (how many enemies are after her) once a second for 15 s
+ *   Ctrl+F7   hide: for 10 s, every frame, her entries in nearby enemies' perception lists lose their sense bits (as
+ *             Smarter Guard Dogs hides targets from sentries) and their re-pick time is set to 0 (a re-pick now); the
+ *             tally runs alongside, so the log shows whether they lose her
+ *
+ * Layouts (ai-modding.md, from HellForge's behaviours.c, HD2Runtime's research and Smarter Guard Dogs; build 25480438):
+ *   behaviours  [game+0x3326740]: map +0x40 (entity -> index), count +0x20, owners +0x58, records +0x60, 0x1F8 each;
+ *               record +0 behaviour id, +0x08 stage, +0x18 target entity (a copy of a perception entry from +0x18),
+ *               +0x68 the perceiver's key, +0x78 has-target, +0x98 next re-pick time
+ *   perception  [game+0x3326548]: map +0x30, owners +0x48, records +0x50, 0x13F8 each; lists A (count +0x310, entries
+ *               +0x318), B (+0x818 / +0x820), C (+0xD20 / +0xD28), 0x50 per entry (+0 entity, +0x48 flags, +0x4C sense
+ *               bits), singles at +0x1228 / +0x1278 / +0x12C8; +0x13E8 its own faction mask
+ * Credit: these layouts are HD2Runtime's research (SkyeShade), HellForge's turret code and Smarter Guard Dogs' (chef,
+ * ported by giblett); nothing of their code is copied. */
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+#include <stdatomic.h>
+#include <windows.h>
+#include "hellforge_mod.h"
+
+#define BUILD "25480438"
+#define VERSION "0.1.0"
+static const HfApi* hf;
+static HfMod* self;
+static uintptr_t game, exe;
+static atomic_uint g_avatar;
+static int g_ready;
+static double g_now;
+#define Log(...) hf->log(self, __VA_ARGS__)
+static int RD(uintptr_t a, void* out, size_t n) { return a >= 0x10000 && a < 0x7FFFFFFF0000ull && hf->read(a, out, n) == 0; }
+static uintptr_t P(uintptr_t a) { uintptr_t v = 0; return RD(a, &v, 8) && v >= 0x10000 && v < 0x7FFFFFFF0000ull ? v : 0; }
+static uint32_t U32(const uint8_t* p) { uint32_t v; memcpy(&v, p, 4); return v; }
+static uint64_t U64(const uint8_t* p) { uint64_t v; memcpy(&v, p, 8); return v; }
+
+static int Lookup(uintptr_t at, uint32_t key, uint32_t* index)
+{
+    uint8_t h[20], row[8];
+    if (!RD(at, h, sizeof h)) return 0;
+    uintptr_t entries; memcpy(&entries, h, 8);
+    uint32_t n = U32(h + 8), empty = U32(h + 12), mult = U32(h + 16);
+    if (!entries || !n || n > 1048576 || (n & (n - 1)) || key == empty) return 0;
+    for (unsigned i = 0; i < n && i < 128; i++)
+    {
+        if (!RD(entries + 8u * ((key * mult + i) & (n - 1)), row, 8)) return 0;
+        if (U32(row) == key) { *index = U32(row + 4); return *index != UINT32_MAX; }
+        if (U32(row) == empty) return 0;
+    }
+    return 0;
+}
+
+/* ---- entities: resource, unit, position (as Nav Probe) ------------------------------------------------------------- */
+typedef void* (*ResolveFn)(uint32_t);
+typedef const float* (*LocalPosFn)(uint32_t, uint32_t);
+static ResolveFn g_entityResolve, g_unitResolve;
+static LocalPosFn g_localPosition;
+typedef struct { uint64_t resource; uint32_t entity, unit; } Ent;
+static int Resolve(uint32_t entity, Ent* e)
+{
+    if (!entity || !g_entityResolve) return 0;
+    void* o = g_entityResolve(entity);
+    uint8_t h[24];
+    if (!o || !RD((uintptr_t)o, h, 24) || U32(h + 8) != entity) return 0;
+    e->resource = U64(h); e->entity = entity; e->unit = U32(h + 12);
+    return 1;
+}
+static int RootOf(uint32_t unit, float out[3])
+{
+    if (!g_localPosition || !g_unitResolve || !g_unitResolve(unit)) return 0;
+    const float* p = g_localPosition(unit, 0);
+    return p && RD((uintptr_t)p, out, 12) && isfinite(out[0]) && isfinite(out[2]);
+}
+static int Hostile(uint64_t res)
+{
+    uint32_t stride;
+    return res && hf->component_record("BehaviorComponentData", res, &stride) && !hf->component_record("AvatarComponentData", res, &stride) &&
+           !hf->component_record("TurretComponentData", res, &stride) && !hf->component_record("SeatCollectionComponentData", res, &stride);
+}
+#define AVATAR UINT64_C(0x4D1C334D294DFA97)
+static const char* Who(uint32_t target, uint32_t me)
+{
+    Ent t;
+    if (!target) return "nobody";
+    if (target == me) return "HER";
+    if (!Resolve(target, &t)) return "unknown";
+    if (t.resource == AVATAR) return "another Helldiver";
+    uint32_t stride;
+    if (hf->component_record("TurretComponentData", t.resource, &stride)) return "a turret";
+    if (hf->component_record("SeatCollectionComponentData", t.resource, &stride)) return "a vehicle";
+    return Hostile(t.resource) ? "an enemy (?)" : "something else";
+}
+
+#define SEEN 2048
+static uint32_t g_seenEnt[SEEN];
+static uint64_t g_seenRes[SEEN];
+static unsigned g_nseen;
+
+/* ---- the two records ------------------------------------------------------------------------------------------------- */
+static uintptr_t Behaviour(uint32_t e)
+{
+    uintptr_t m = P(game + 0x3326740), recs;
+    uint32_t i, count;
+    if (!m || !Lookup(m + 0x40, e, &i) || !RD(m + 0x20, &count, 4) || i >= count || i >= 16384 || !(recs = P(m + 0x60))) return 0;
+    return recs + 0x1F8ull * i;
+}
+static uintptr_t Perception(uint32_t e)
+{
+    uintptr_t m = P(game + 0x3326548), recs;
+    uint32_t i;
+    if (!m || !Lookup(m + 0x30, e, &i) || i >= 16384 || !(recs = P(m + 0x50))) return 0;
+    return recs + 0x13F8ull * i;
+}
+static const struct { uint32_t count, entries; const char* name; } kLists[3] = {{0x310, 0x318, "A"}, {0x818, 0x820, "B"}, {0xD20, 0xD28, "C"}};
+static const uint32_t kSingles[3] = {0x1228, 0x1278, 0x12C8};
+/* her entries in a perception record: how many, and the sense bits of the first */
+static int HerEntries(uintptr_t pr, uint32_t me, uint32_t* sense, int counts[3])
+{
+    int found = 0;
+    for (int l = 0; l < 3; l++)
+    {
+        uint32_t n = 0;
+        counts[l] = RD(pr + kLists[l].count, &n, 4) && n <= 16 ? (int)n : -1;
+        for (uint32_t k = 0; counts[l] > 0 && k < n; k++)
+        {
+            uint8_t ent[0x50];
+            if (!RD(pr + kLists[l].entries + 0x50u * k, ent, sizeof ent)) break;
+            if (U32(ent) == me) { if (!found) *sense = U32(ent + 0x4C); found++; }
+        }
+    }
+    for (int s = 0; s < 3; s++)
+    {
+        uint8_t ent[0x50];
+        if (RD(pr + kSingles[s], ent, sizeof ent) && U32(ent + 0x48) && U32(ent) == me) { if (!found) *sense = U32(ent + 0x4C); found++; }
+    }
+    return found;
+}
+/* her entries' sense bits cleared: 1 per entry cleared */
+static int HideIn(uintptr_t pr, uint32_t me)
+{
+    int n = 0;
+    static const uint32_t zero = 0;
+    for (int l = 0; l < 3; l++)
+    {
+        uint32_t c = 0;
+        if (!RD(pr + kLists[l].count, &c, 4) || c > 16) continue;
+        for (uint32_t k = 0; k < c; k++)
+        {
+            uintptr_t at = pr + kLists[l].entries + 0x50u * k;
+            uint32_t id = 0, sense = 0;
+            if (RD(at, &id, 4) && id == me && RD(at + 0x4C, &sense, 4) && sense && !hf->write(at + 0x4C, &zero, 4)) n++;
+        }
+    }
+    for (int s = 0; s < 3; s++)
+    {
+        uintptr_t at = pr + kSingles[s];
+        uint32_t id = 0, sense = 0;
+        if (RD(at, &id, 4) && id == me && RD(at + 0x4C, &sense, 4) && sense && !hf->write(at + 0x4C, &zero, 4)) n++;
+    }
+    return n;
+}
+
+/* ---- the survey ------------------------------------------------------------------------------------------------------ */
+typedef struct { int enemies, withBehaviour, withPerception, afterHer, seeHer, hidden, kicked; } Tally;
+static Tally Pass(int detail, int hide)
+{
+    Tally t = {0};
+    Ent me, e;
+    float mp[3], p[3];
+    uint32_t meId = atomic_load(&g_avatar);
+    if (!Resolve(meId, &me) || !RootOf(me.unit, mp)) { if (detail) Log("survey: your position is unknown"); return t; }
+    unsigned n = g_nseen < SEEN ? g_nseen : SEEN;
+    int told = 0;
+    for (unsigned i = 0; i < n; i++)
+    {
+        uint32_t id = g_seenEnt[i];
+        if (!Hostile(g_seenRes[i]) || !Resolve(id, &e) || !RootOf(e.unit, p)) continue;
+        float d = sqrtf((p[0] - mp[0]) * (p[0] - mp[0]) + (p[1] - mp[1]) * (p[1] - mp[1]));
+        if (d > 60) continue;
+        t.enemies++;
+        uintptr_t br = Behaviour(id), pr = Perception(id);
+        uint8_t b[0xA0] = {0};
+        int hb = br && RD(br, b, sizeof b);
+        uint32_t target = hb ? U32(b + 0x18) : 0, sense = 0;
+        int counts[3] = {-1, -1, -1}, mine = pr ? HerEntries(pr, meId, &sense, counts) : 0;
+        if (hb) t.withBehaviour++;
+        if (pr) t.withPerception++;
+        if (hb && target == meId) t.afterHer++;
+        if (mine && sense) t.seeHer++;
+        if (hide)
+        {
+            if (pr) t.hidden += HideIn(pr, meId);
+            static const uint64_t zero = 0;
+            if (hb && target == meId && !hf->write(br + 0x98, &zero, 8)) t.kicked++;
+        }
+        if (detail && told < 30)
+        {
+            told++;
+            uint32_t mask = 0;
+            if (pr) RD(pr + 0x13E8, &mask, 4);
+            Log("  enemy %u (type %016llx) %.0f m: behaviour %s (id %u, stage %u, has-target %u, re-pick %llu, perceiver %u) after %s (%u); "
+                "perception %s (lists A %d B %d C %d, faction %08x), her entries %d (sense bits %08x)",
+                id, (unsigned long long)e.resource, d, hb ? "yes" : "none", hb ? U32(b) : 0, hb ? U32(b + 0x08) : 0, hb ? U32(b + 0x78) : 0,
+                hb ? (unsigned long long)U64(b + 0x98) : 0ull, hb ? U32(b + 0x68) : 0, hb ? Who(target, meId) : "-", target,
+                pr ? "yes" : "none", counts[0], counts[1], counts[2], mask, mine, sense);
+        }
+    }
+    return t;
+}
+static void Report(const char* what, Tally t)
+{
+    Log("%s: %d enemies within 60 m; %d with a behaviour record, %d with a perception record; %d after her, %d see her%s", what,
+        t.enemies, t.withBehaviour, t.withPerception, t.afterHer, t.seeHer, "");
+    if (t.hidden || t.kicked) Log("  hide: %d of her perception entries blanked, %d re-picks forced", t.hidden, t.kicked);
+}
+
+/* ---- binding, events, the game thread --------------------------------------------------------------------------------- */
+static int Bind(void)
+{
+    if (!hf->code_matches(game + 0xFD9D40, "48 83 ec 08 3b 0d 02 9f 4a 02 0f 84 9b 00 00 00") ||
+        !hf->code_matches(exe + 0x9D8C0, "48 89 5c 24 08 48 89 74 24 10 57 48 83 ec 20")) { Log("REFUSED: entity/unit lookups are not the reviewed code"); return 0; }
+    g_entityResolve = (ResolveFn)(game + 0xFD9D40);
+    g_unitResolve = (ResolveFn)(exe + 0x9D8C0);
+    uintptr_t script = P(game + 0x3326308), units = script ? P(script + 0x18) : 0;
+    if (!units || P(units) != exe + 0x1fc450) { Log("the unit API is not filled yet"); return 0; }
+    g_localPosition = (LocalPosFn)(exe + 0x1fc450);
+    uintptr_t bm = P(game + 0x3326740), pm = P(game + 0x3326548);
+    uint32_t bc = 0;
+    if (bm) RD(bm + 0x20, &bc, 4);
+    Log("bound: behaviours [game+0x3326740] = %llx (%u records), perception [game+0x3326548] = %llx", (unsigned long long)bm, bc, (unsigned long long)pm);
+    return bm && pm;
+}
+static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
+{
+    const HfSpawnEvent* e = (const HfSpawnEvent*)info;
+    g_seenEnt[g_nseen % SEEN] = e->entity; g_seenRes[g_nseen % SEEN] = e->resource; g_nseen++;
+}
+static void OnWeapon(HfMod* mod, const HfEventInfo* info, void* user)
+{
+    const HfWeaponEvent* w = (const HfWeaponEvent*)info;
+    if (w->avatar) atomic_store(&g_avatar, w->avatar);
+}
+static void Loaded(HfMod* mod, HfEvent event, void* user)
+{
+    size_t gs = 0, xs = 0;
+    game = hf->module_base("game.dll", &gs);
+    exe = hf->module_base("helldivers2.exe", &xs);
+    if (!game || !exe || gs != 74727424u || xs != 60719104u) { g_ready = -1; Log("REFUSED: not build " BUILD "'s modules"); return; }
+    g_ready = 0;
+}
+static int Down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
+static double g_watchUntil, g_watchNext, g_hideUntil;
+static Tally g_hideSum;
+static void Tick(HfMod* mod, float dt, void* user)
+{
+    g_now += dt > 0 && dt < 1 ? dt : 0;
+    if (g_ready < 0 || hf->game_state(self) != HF_STATE_MISSION) return;
+    if (g_ready == 0)
+    {
+        static double nextTry;
+        static int tries;
+        if (g_now < nextTry) return;
+        nextTry = g_now + 3;
+        if (Bind()) g_ready = 1;
+        else if (++tries >= 10) { g_ready = -1; Log("REFUSED after 10 tries in a mission"); }
+        if (g_ready != 1) return;
+    }
+    if (g_now < g_hideUntil)
+    {
+        Tally t = Pass(0, 1);
+        g_hideSum.hidden += t.hidden;
+        g_hideSum.kicked += t.kicked;
+    }
+    if (g_now < g_watchUntil && g_now >= g_watchNext)
+    {
+        g_watchNext = g_now + 1;
+        Tally t = Pass(0, 0);
+        char what[64];
+        snprintf(what, sizeof what, "%s t+%.0f s", g_now < g_hideUntil ? "hiding" : "watch", 15 - (g_watchUntil - g_now));
+        t.hidden = g_hideSum.hidden; t.kicked = g_hideSum.kicked;
+        g_hideSum.hidden = g_hideSum.kicked = 0;
+        Report(what, t);
+    }
+    static int prev;
+    int d = Down(VK_F7);
+    if (d && !prev)
+    {
+        if (Down(VK_SHIFT)) { Log("Shift+F7: enemies within 60 m:"); Report("survey", Pass(1, 0)); }
+        else if (Down(VK_CONTROL)) { Log("Ctrl+F7: hiding her from nearby enemies for 10 s (and watching for 15 s)"); g_hideUntil = g_now + 10; g_watchUntil = g_now + 15; g_watchNext = g_now; }
+        else { Log("F7: watching for 15 s"); g_watchUntil = g_now + 15; g_watchNext = g_now; }
+    }
+    prev = d;
+}
+HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
+{
+    hf = api;
+    self = mod;
+    if (!api || api->version < 15 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
+    Log("AI Probe " VERSION ": research only; Shift+F7 survey the enemies' AI records, F7 watch who is after her, Ctrl+F7 try hiding her from them");
+    if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
+    int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->on_game_thread(mod, Tick, NULL);
+    if (!ok) Log("events or the game thread are unavailable");
+    return 0;
+}
