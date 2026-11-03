@@ -167,3 +167,8 @@ There is no base mod to install. Each kit joins a roster kept in named shared me
   `KB_ROSTER_EXPORTS(id)` once (the HUD's `<id>_roster` and `<id>_pick`). Event handlers with side effects of their
   own (Leva's OnDamage and OnExplosion, Voymastina's weapon tuning) return when it is off.
 - **Co-op:** each machine picks for its own Helldiver, as before.
+- **Later (after the test round):** the Active Character row works for a few kits, but a Mod Options choice row gets
+  cluttered past 6 or so characters. Move the picker to an overlay of its own on a key (F8, say): the installed kits
+  as a grid with icon and name, the picked one marked, the rest of the roster unchanged (`<id>_roster` / `<id>_pick`).
+- **Later:** standing-by kits still write the shared hit-holder diagnostic (`kb_player.h`, "a hit dealt by entity ...");
+  log only from the kit that acts.
