@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "AI Probe HUD",
+  "resource": "mods/yui/ai_probe_hud",
+  "guid": "79a46477-c05f-5788-9c90-bc6f3b02f761",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.50.1",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}

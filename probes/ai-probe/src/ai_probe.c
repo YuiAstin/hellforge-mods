@@ -43,7 +43,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.2"
+#define VERSION "0.3.3"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -478,8 +478,11 @@ static void Trace(int redirect)
 static int g_auto;
 static const double s_lose = 3.0;
 static struct { int lost, after, sensing, nearby, chasing, passes; } g_autoSum;
+/* 0.3.3: what the HUD shows (ai_probe_hud): the latest pass's counts */
+static struct { int nearby, chasing, sensing, unsensed, lostTotal; } g_hud;
 static void AutoPass(void)
 {
+    int nNear = 0, nChase = 0, nSense = 0, nUnsensed = 0;
     Ent me, e;
     float mp[3], p[3];
     uint32_t meId = atomic_load(&g_avatar);
@@ -492,7 +495,7 @@ static void AutoPass(void)
         if (!LiveEnemy(j, &e, p)) continue;
         float d = sqrtf((p[0] - mp[0]) * (p[0] - mp[0]) + (p[1] - mp[1]) * (p[1] - mp[1]));
         if (d > 80) { g_liveUnseen[j] = 0; continue; }
-        g_autoSum.nearby++;
+        g_autoSum.nearby++; nNear++;
         uintptr_t br = Behaviour(id), pr = Perception(id);
         uint8_t b[0xA0];
         if (!br || !RD(br, b, sizeof b)) continue;
@@ -501,20 +504,20 @@ static void AutoPass(void)
         int counts[3], mine = pr ? HerEntries(pr, meId, &sense, counts) : 0, sqMine = sq ? HerEntries(sq, meId, &sqSense, counts) : 0;
         if ((mine && sense) || (sqMine && sqSense))
         {
-            if (target == meId) g_autoSum.chasing++;
+            if (target == meId) { g_autoSum.chasing++; nChase++; nSense++; }
             memcpy(g_liveLast[j], mp, sizeof mp); g_liveHasLast[j] = 1;
             g_liveUnseen[j] = 0;
             g_autoSum.sensing++;
             continue;
         }
-        if (target == meId) g_autoSum.chasing++;   /* counted before the sensing check below would skip it */
+        if (target == meId) { g_autoSum.chasing++; nChase++; nUnsensed++; }
         if (target != meId) { g_liveUnseen[j] = 0; continue; }
         g_autoSum.after++;
         if (!g_liveUnseen[j]) { g_liveUnseen[j] = g_now; continue; }
         if (g_now - g_liveUnseen[j] < s_lose) continue;
         /* 0.3.2: observe mode (g_auto 2) counts the ones that would lose her and leaves them be: the game's own
          * give-up (reinforcements despawn when they cannot find a solo Helldiver for a while) is the baseline */
-        if (g_auto == 2) { g_liveUnseen[j] = g_now; g_autoSum.lost++; continue; }
+        if (g_auto == 2) { g_liveUnseen[j] = g_now; g_autoSum.lost++; g_hud.lostTotal++; continue; }
         /* it lost her */
         if (pr) ForgetIn(pr, meId);
         if (sq) ForgetIn(sq, meId);
@@ -529,7 +532,9 @@ static void AutoPass(void)
         }
         g_liveUnseen[j] = 0;
         g_autoSum.lost++;
+        g_hud.lostTotal++;
     }
+    g_hud.nearby = nNear; g_hud.chasing = nChase; g_hud.sensing = nSense; g_hud.unsensed = nUnsensed;
 }
 /* ---- binding, events, the game thread --------------------------------------------------------------------------------- */
 static int Bind(void)
@@ -648,6 +653,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     else if (d && Down(VK_MENU) && Down(VK_CONTROL))
     {
         g_auto = (g_auto + 1) % 3;   /* 0.3.2: off -> on -> observe only -> off */
+        memset(&g_hud, 0, sizeof g_hud);
         memset(&g_autoSum, 0, sizeof g_autoSum);
         for (int j = 0; j < g_nlive; j++) g_liveUnseen[j] = 0;
         Log(g_auto == 1 ? "Ctrl+Alt+F7: auto break-contact ON: an enemy after her that has not sensed her for %.0f s loses her and searches where it last saw her"
@@ -672,6 +678,18 @@ static void Tick(HfMod* mod, float dt, void* user)
         else if (Down(VK_SHIFT)) { Log("Shift+F7: enemies within 60 m:"); Report("survey", Pass(1, 0)); }
         else { Log("F7: watching for 15 s"); g_watchUntil = g_now + 15; g_watchNext = g_now; }
     }
+}
+/* 0.3.3: the AI Probe HUD (hud-src) reads this every frame: out[0] auto mode (0 off, 1 on, 2 observe), out[1..4]
+ * the latest pass's enemies within 80 m / after her / of those sensing her / not sensing her, out[5] lost her (or
+ * would have, observing) since the mode was set, out[6] 1 while a hide or forget runs, out[7] 1 while patrols are
+ * traced or sent, out[8] 1 in a mission with the probe bound. Answers how many it wrote. */
+HF_MOD_EXPORT int ai_probe_hud(unsigned version, int* out, int n)
+{
+    if (version != 1 || !out || n < 9) return 0;
+    out[0] = g_auto; out[1] = g_hud.nearby; out[2] = g_hud.chasing; out[3] = g_hud.sensing; out[4] = g_hud.unsensed;
+    out[5] = g_hud.lostTotal; out[6] = g_now < g_hideUntil; out[7] = g_now < g_traceUntil;
+    out[8] = g_ready == 1 && hf && hf->game_state(self) == HF_STATE_MISSION;
+    return 9;
 }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
