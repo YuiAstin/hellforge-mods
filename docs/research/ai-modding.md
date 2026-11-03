@@ -333,3 +333,12 @@ game's give-up, see the baseline caveat above), and break-contact has not been t
 So unsensed chasers drop off in about 5 s with break-contact on, against 40 s or more without it. One mission, against
 bots (Yui: in observe they chased unreasonably after contact broke, even where they should not have been able
 to follow), different fights: a direction, not a measurement. Next: the same fight shape both ways.
+
+**0.3.4 again, bots, a bot drop in each phase (2026-11-04 00:18 session):**
+- **Observe (17:23:46 to 17:26:33):** from 17:24:41 for 55 s, 4 to 7 bots were after her with **nobody sensing her
+  (0.0)**, and they kept coming: at 17:25:37 they had found her again (6.0 sensing). Yui: without it they "give
+  chase and pretty much know where you are across the map". A second wave reached 13.6 after her.
+- **On (17:26:34 on):** 6.6 after her, 5.1 unsensed → 9 lost her → **0 within 5 s**. 9.1 after her → 10 lost her →
+  0.1 within 5 s. Every later group of 1 to 3 unsensed chasers dropped to 0 in 5 to 10 s.
+**Conclusion: break-contact works against bots.** Without it, bots off sight keep a target and track her; with it,
+they drop her once unsensed for 3 s. Still open: bugs and Illuminate, co-op (other Helldivers), defence objectives.
