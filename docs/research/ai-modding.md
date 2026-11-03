@@ -305,3 +305,9 @@ second. While it or its squad senses her, her position is kept as its last sight
 sensing her it loses her: entries removed, target cleared, re-pick due, and set_destination to where it last saw
 her, so it goes and searches there instead of freezing. The probe now keeps a list of live enemies as they spawn
 (enemy types classified a few per pass) instead of walking all 2048 spawns, the cause of the 20 to 70 ms passes.
+
+**0.3.0 in game against bots (Yui's account; the probe's log said nothing, see 0.3.1):** a patrol spotted her and
+called a bot drop. With auto break-contact on, once she broke contact the drop's bots despawned after about a
+minute. Normally a bot drop or bug breach chases her across the map until she dies at least once. Despawning is
+the game's own clean-up of enemies with nothing to do, so the cleared targets and the search at her last seen spot
+let the game's own logic finish the job. 0.3.1 logs the counts every 5 s to confirm it.
