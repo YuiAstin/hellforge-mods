@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.lemuen",
   "name": "Lemuen",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Lemuen's kit from Arknights for your Helldiver: a long-range sniper. Persecution marks the tough enemies she keeps in her sights; Salve Etiam empowers a sniper or marksman rifle until she reloads, Honesta Missio builds up damage on whatever she holds in her scope, and Memento Mori drops an Orbital 120mm shell on every enemy she has marked. Solo or host. Keys in lemuen.ini; every number also on the escape menu's MODS tab (Mod Options Menu). HUD (needs Bingus Shared Loader and HD2Runtime): skills beside the stratagem list. Installs beside the author's other character kits (pick one on the MODS tab). No character model included.",
   "gameplay": true,
   "code": {

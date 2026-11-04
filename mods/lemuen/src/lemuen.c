@@ -34,7 +34,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.4"
+#define VERSION "0.1.5"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -50,7 +50,7 @@
 KB_ROSTER_EXPORTS(lemuen)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
-/* 0.1.4: a damage number only for a hit the on-hit multipliers (mark, Modus, Honesta Missio) raised to numbers_at times
+/* 0.1.4: a damage number only for a hit the on-hit multipliers (mark, Honesta Missio; 0.1.5: not Modus) raised to numbers_at times
  * or more, as Arknights shows its red number when the final damage is 50% over the damage from her visible ATK and the
  * target's DEF (arknights.wiki.gg/wiki/Damage): Salve Etiam stands for an ATK buff and Memento Mori's shells for her
  * ATK, so neither shows one, as her S1 and S3 show none in Arknights. 0 shows every hit */
@@ -104,8 +104,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint. hellbomb_on_exhaustion 1 sets off a\n"
                "; Hellbomb on her if she runs her stamina dry (a T-Doll's price; off for her).\n"
                "hp_mult = 1.1\nstamina_mult = 1\nhellbomb_on_exhaustion = 0\n"
-               "; Damage numbers (the HUD): shown for a hit her on-hit multipliers (mark, Modus, Honesta Missio) raised numbers_at\n"
-               "; times or more, as Arknights' red numbers (Salve Etiam and the shells count as her ATK: no number). 0: every hit.\n"
+               "; Damage numbers (the HUD): shown for a hit her on-hit multipliers (mark, Honesta Missio) raised numbers_at times or\n"
+               "; more, as Arknights' red numbers (Modus and Salve Etiam are ATK buffs, the shells her ATK: no number). 0: every hit.\n"
                "numbers_at = %g\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_markRange, (double)s_markCone, (double)s_markSeconds,
             (double)s_markLast, (double)s_markMult, s_markArmour, s_markHealth, s_markMax, (double)s_modusAfter, (double)s_modusMult, (double)s_s1Cd,
@@ -525,7 +525,8 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
         NoteTarget(d);
     }
     if (mult != 1) ScaleDamage(d, mult);
-    if (kb_kit_on && g_inMission && xMark * xModus * xS2 >= s_numbersAt - 0.0001) NoteHit(d, xS2 != 1);
+    /* 0.1.5: Modus Extraditio is +10% ATK in Arknights (a stat buff: no number), Persecution "+18% damage taken" (counts) */
+    if (kb_kit_on && g_inMission && xMark * xS2 >= s_numbersAt - 0.0001) NoteHit(d, xS2 != 1);
     /* 0.1.1: her boosted shots in numbers (0.1.0's log said a skill was on, never what a hit dealt): the first 16 hits
      * of a mission that a skill raised, base -> dealt, and each multiplier */
     static unsigned shown;
