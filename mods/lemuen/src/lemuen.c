@@ -278,7 +278,7 @@ static float FirstWall(uint32_t id, const float from[3], const float dir[3], flo
         float d;
         memcpy(&d, hits + 44u * i + 24, 4);
         uint32_t hu = Word(hits + 44u * i + 28);
-        if (!isfinite(d) || d < 0.05f || d >= best || (hu && hu == me)) continue;
+        if (!isfinite(d) || d < 1.2f || d >= best || (hu && hu == me)) continue;   /* 0.1.6d: within 1.2 m of the camera is her own gun or scope */
         if (hu && hu == tu) { best = d; target = 1; continue; }
         uint32_t filt = ActorFilter(Word(hits + 44u * i + 32), hu);
         if (filt == FILTER_FOLIAGE || (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u || FoeUnit(hu)))) continue;   /* leaves; bodies */
