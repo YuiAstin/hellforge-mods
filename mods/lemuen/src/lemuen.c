@@ -34,7 +34,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.3"
+#define VERSION "0.1.4"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -50,6 +50,11 @@
 KB_ROSTER_EXPORTS(lemuen)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
+/* 0.1.4: a damage number only for a hit the on-hit multipliers (mark, Modus, Honesta Missio) raised to numbers_at times
+ * or more, as Arknights shows its red number when the final damage is 50% over the damage from her visible ATK and the
+ * target's DEF (arknights.wiki.gg/wiki/Damage): Salve Etiam stands for an ATK buff and Memento Mori's shells for her
+ * ATK, so neither shows one, as her S1 and S3 show none in Arknights. 0 shows every hit */
+static float s_numbersAt = 1.5f;
 static int s_markMax = 5;   /* 0.1.2: at most this many marked at once; a new mark replaces the oldest (Yui) */
 static float s_markRange = 600, s_markCone = 20, s_markSeconds = 6, s_markLast = 30, s_markMult = 1.18f;
 static int s_markArmour = 3, s_markHealth = 750;
@@ -62,7 +67,7 @@ static int s_s3Max = 8, s_s3Shell = 194;
 
 static const KbSetting kSettings[] = {
     KB_F("mark_range", s_markRange, 10, 1000), KB_F("mark_cone", s_markCone, 1, 90), KB_F("mark_seconds", s_markSeconds, 0, 30),
-    KB_F("mark_last", s_markLast, 1, 600), KB_F("mark_mult", s_markMult, 1, 5), KB_I("mark_armour", s_markArmour, 0, 10), KB_I("mark_max", s_markMax, 1, 32),
+    KB_F("mark_last", s_markLast, 1, 600), KB_F("mark_mult", s_markMult, 1, 5), KB_I("mark_armour", s_markArmour, 0, 10), KB_I("mark_max", s_markMax, 1, 32), KB_F("numbers_at", s_numbersAt, 0, 20),
     KB_I("mark_health", s_markHealth, 0, 100000),
     KB_F("modus_after", s_modusAfter, 0, 600), KB_F("modus_mult", s_modusMult, 1, 3),
     KB_F("s1_cooldown", s_s1Cd, 0, 600), KB_F("s1_mult", s_s1Mult, 1, 20), KB_I("s1_any_gun", s_s1AnyGun, 0, 1),
@@ -98,11 +103,14 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "s3_cooldown = %g\ns3_every = %g\ns3_height = %g\ns3_max = %d\ns3_shell = %d\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint. hellbomb_on_exhaustion 1 sets off a\n"
                "; Hellbomb on her if she runs her stamina dry (a T-Doll's price; off for her).\n"
-               "hp_mult = 1.1\nstamina_mult = 1\nhellbomb_on_exhaustion = 0\n",
+               "hp_mult = 1.1\nstamina_mult = 1\nhellbomb_on_exhaustion = 0\n"
+               "; Damage numbers (the HUD): shown for a hit her on-hit multipliers (mark, Modus, Honesta Missio) raised numbers_at\n"
+               "; times or more, as Arknights' red numbers (Salve Etiam and the shells count as her ATK: no number). 0: every hit.\n"
+               "numbers_at = %g\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_markRange, (double)s_markCone, (double)s_markSeconds,
             (double)s_markLast, (double)s_markMult, s_markArmour, s_markHealth, s_markMax, (double)s_modusAfter, (double)s_modusMult, (double)s_s1Cd,
             (double)s_s1Mult, s_s1AnyGun, (double)s_s2Cd, (double)s_s2Min, (double)s_s2Max, (double)s_s2Hold, (double)s_s2Cone,
-            (double)s_s2Range, (double)s_fpDistance, (double)s_s3Cd, (double)s_s3Every, (double)s_s3Height, s_s3Max, s_s3Shell);
+            (double)s_s2Range, (double)s_fpDistance, (double)s_s3Cd, (double)s_s3Every, (double)s_s3Height, s_s3Max, s_s3Shell, (double)s_numbersAt);
 }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
@@ -517,7 +525,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
         NoteTarget(d);
     }
     if (mult != 1) ScaleDamage(d, mult);
-    if (kb_kit_on && g_inMission) NoteHit(d, xS1 != 1 || xS2 != 1);
+    if (kb_kit_on && g_inMission && xMark * xModus * xS2 >= s_numbersAt - 0.0001) NoteHit(d, xS2 != 1);
     /* 0.1.1: her boosted shots in numbers (0.1.0's log said a skill was on, never what a hit dealt): the first 16 hits
      * of a mission that a skill raised, base -> dealt, and each multiplier */
     static unsigned shown;
