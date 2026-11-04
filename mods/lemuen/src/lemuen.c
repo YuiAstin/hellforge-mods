@@ -346,23 +346,46 @@ static int Elite(uint32_t e, uint64_t res)
 static Mark* MarkOf(uint32_t e) { for (int i = 0; i < MARKS; i++) if (e && (g_marks[i].e == e || g_marks[i].mate == e)) return &g_marks[i]; return NULL; }
 static int Marked(uint32_t e) { Mark* m = MarkOf(e); return m && m->until > g_now; }
 static unsigned MarkedCount(void) { unsigned n = 0; for (int i = 0; i < MARKS; i++) n += g_marks[i].e && g_marks[i].until > g_now; return n; }
-/* a rider and its vehicle: spawned together (entity numbers within 4), a different kind, alive, within 3 m */
+/* a rider and its vehicle: spawned together (entity numbers within 4), a different kind, alive, within 3 m; the NEAREST
+ * such enemy (0.1.6d took the first, and paired a strider's pilot with a trooper beside it, then with its walker as
+ * well: two marks on one strider). One already in a pair is taken only if this mark is nearer to it than its partner;
+ * one with a mark of its own (no partner) joins this one and its mark is freed */
 static void FindMate(Mark* m, const float q[3])
 {
+    uint32_t best = 0;
+    uint64_t bestRes = 0;
+    float bestD2 = 3.0f * 3.0f;
     for (int k = 0; k < FOES; k++)
     {
         uint32_t f = g_foe[k];
-        float p[3];
+        float p[3], d2;
         int32_t hp;
         uint32_t life;
         if (!f || f == m->e || g_foeRes[k] == m->res || (f > m->e ? f - m->e : m->e - f) > 4) continue;
-        if (!TargetPos(f, g_foeRes[k], p) || Dist2(p, q) > 3.0f * 3.0f || !HealthOf(f, &hp, &life) || hp <= 0) continue;
-        for (int i = 0; i < MARKS; i++) if (&g_marks[i] != m && g_marks[i].e == f) memset(&g_marks[i], 0, sizeof g_marks[i]);   /* its own entry goes */
-        m->mate = f; m->mateRes = g_foeRes[k];
-        static unsigned told;
-        if (told++ < 10) Log("Persecution: entity %u (%016llx) rides with entity %u: one mark for both", f, (unsigned long long)g_foeRes[k], m->e);
-        return;
+        if (!TargetPos(f, g_foeRes[k], p) || (d2 = Dist2(p, q)) >= bestD2 || !HealthOf(f, &hp, &life) || hp <= 0) continue;
+        int taken = 0;
+        for (int i = 0; i < MARKS && !taken; i++)
+        {
+            Mark* o = &g_marks[i];
+            float op[3];
+            if (o == m || !o->e || o->until <= g_now) continue;
+            if (o->mate == f && TargetPos(o->e, o->res, op) && Dist2(op, p) <= d2) taken = 1;   /* nearer to its partner */
+            if (o->e == f && o->mate) taken = 1;                                             /* leads a pair already */
+        }
+        if (taken) continue;
+        best = f; bestRes = g_foeRes[k]; bestD2 = d2;
     }
+    if (!best) return;
+    for (int i = 0; i < MARKS; i++)
+    {
+        Mark* o = &g_marks[i];
+        if (o == m) continue;
+        if (o->e == best) memset(o, 0, sizeof *o);   /* its own entry or mark goes: one mark for both */
+        else if (o->mate == best) o->mate = 0;       /* it leaves a farther partner */
+    }
+    m->mate = best; m->mateRes = bestRes;
+    static unsigned told;
+    if (told++ < 16) Log("Persecution: entity %u (%016llx) rides with entity %u (%.1f m): one mark for both", best, (unsigned long long)bestRes, m->e, sqrtf(bestD2));
 }
 static void MarkFrame(void)
 {
@@ -581,6 +604,13 @@ static void SpotsFrame(void)
         int32_t hp;
         uint32_t life;
         if (m->mate && (!HealthOf(m->mate, &hp, &life) || hp <= 0)) m->mate = 0;
+        float mp[3];
+        if (m->mate && TargetPos(m->mate, m->mateRes, mp) && TargetPos(m->e, m->res, q) && Dist2(mp, q) > 6.0f * 6.0f)
+        {
+            static unsigned toldApart;
+            if (toldApart++ < 8) Log("Persecution: entity %u and %u are apart (not riding together): the mark keeps %u", m->e, m->mate, m->e);
+            m->mate = 0;
+        }
         if (!TargetPos(m->e, m->res, q) || !HealthOf(m->e, &hp, &life) || hp <= 0)
         {
             if (m->mate) { m->e = m->mate; m->res = m->mateRes; m->mate = 0; i--; continue; }   /* the rider or the vehicle lives on */
