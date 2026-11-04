@@ -13,3 +13,6 @@ __pycache__/
 
 # game code dumps (the game's own code: never commit or share)
 *.dump
+
+# the notes index's local cache (MiniLM model, index)
+tools/notes-index/.index/
