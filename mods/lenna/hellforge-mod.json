@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.lenna",
   "name": "Lenna",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "Lenna's kit from Girls' Frontline 2 for your Helldiver: Wild Extinction (charged shots that set off arcs), Leaping Pursuit (a teleport along your aim with an arc burst and stuns) and Hunting Strategy (an arc zap that stuns every enemy around you), on keys or key combos, with her CI resource and King's Authority. Her body: more health and stamina, and a Hellbomb if she ever runs her stamina dry (with a warning; can be turned off). Solo or host. Keys in lenna.ini; every number also on the escape menu's MODS tab (Mod Options Menu). HUD (needs Bingus Shared Loader and HD2Runtime): skills beside the stratagem list, CI and effects at the bottom middle. Research from Helldiver Survival Rework by enochlophobianumerophobia (MIT), More Plasma Stratagems by HadePasianax (MIT) and HD2Runtime by SkyeShade. No character model included.",
   "icon": "icon.png",
   "gameplay": true,

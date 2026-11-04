@@ -23,3 +23,18 @@ re-pointing every decoded site and bound (its `native_plasma_explosions.h`), ada
 kept in LICENSE-More-Plasma-Stratagems.txt. The explosion-to-arc link (ExplosionInfo +120) and the arc's damage
 (ArcInfo +36) are from HD2Runtime's research. The damage list's current place is read from the first site in
 HellForge's own damage_sites.h.
+
+## Beelzebub's Strat Pack (explosion_request.c)
+
+Leva's lockdown burst is requested through the game's own explosion request, adapted from Beelzebub's Strat Pack 1.8.3
+(`src/explosion_request.c`, by Beelzebub), reused with his permission (2026-11-02).
+
+## Explosives Library (HadePasianax, MIT)
+
+The explosion kick's guard at game.dll+0x13C551E was found by HadePasianax's Explosives Library 0.1.0
+(https://github.com/HadePasianax/hd2-explosives-library, MIT).
+
+## Apache - Rise Above (Riggs, after Khi)
+
+The camera pose read (World + 0x230920) follows Apache - Rise Above by RSNLRiggs (its gunner turret, after Khi's
+first integration), reused with his permission.

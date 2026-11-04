@@ -3,7 +3,7 @@
  *
  *   Persecution (passive): a heavily armoured or tough enemy (armour mark_armour+, or mark_health+ health) that she
  *     keeps in her sights (within mark_cone degrees of her view, mark_range m) for mark_seconds is marked for
- *     mark_last s (renewed while she watches it). Marked enemies take mark_mult times the damage from her.
+ *     mark_last s (0, the default: until a newer mark replaces it or it dies). Marked enemies take mark_mult times the damage from her.
  *   Modus Extraditio (passive): modus_after s after she lands, her shots deal modus_mult times their damage.
  *   Salvē Etiam (key_s1, default Z): with a sniper or marksman rifle in hand, her shots deal s1_mult times their damage
  *     until she reloads.
@@ -34,7 +34,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.5"
+#define VERSION "0.1.6f"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -55,24 +55,26 @@ KB_ROSTER_EXPORTS(lemuen)
  * target's DEF (arknights.wiki.gg/wiki/Damage): Salve Etiam stands for an ATK buff and Memento Mori's shells for her
  * ATK, so neither shows one, as her S1 and S3 show none in Arknights. 0 shows every hit */
 static float s_numbersAt = 1.5f;
-static int s_markMax = 5;   /* 0.1.2: at most this many marked at once; a new mark replaces the oldest (Yui) */
-static float s_markRange = 600, s_markCone = 20, s_markSeconds = 6, s_markLast = 30, s_markMult = 1.18f;
+static int s_markMax = 5;
+static float s_markAim = 2.5f, s_markRewatch = 30;   /* 0.1.6d: first person, crosshair within mark_aim degrees marks at once; a mark given way is not re-marked by watching for mark_rewatch s */   /* 0.1.2: at most this many marked at once; a new mark replaces the oldest (Yui) */
+static float s_markRange = 600, s_markCone = 20, s_markSeconds = 6, s_markLast = 0, s_markMult = 1.18f;
 static int s_markArmour = 3, s_markHealth = 750;
 static float s_modusAfter = 20, s_modusMult = 1.10f;
 static float s_s1Cd = 15, s_s1Mult = 3.1f;
 static int s_s1AnyGun = 0;
+static int s_sight = 1;   /* 0.1.6: marks and Honesta Missio's lock need a clear view (0: through walls, as 0.1.5) */
 static float s_s2Cd = 20, s_s2Min = 1.8f, s_s2Max = 4.25f, s_s2Hold = 3.5f, s_s2Cone = 4, s_s2Range = 600, s_fpDistance = 0.45f;
 static float s_s3Cd = 90, s_s3Every = 0.35f, s_s3Height = 120;
 static int s_s3Max = 8, s_s3Shell = 194;
 
 static const KbSetting kSettings[] = {
     KB_F("mark_range", s_markRange, 10, 1000), KB_F("mark_cone", s_markCone, 1, 90), KB_F("mark_seconds", s_markSeconds, 0, 30),
-    KB_F("mark_last", s_markLast, 1, 600), KB_F("mark_mult", s_markMult, 1, 5), KB_I("mark_armour", s_markArmour, 0, 10), KB_I("mark_max", s_markMax, 1, 32), KB_F("numbers_at", s_numbersAt, 0, 20),
+    KB_F("mark_last", s_markLast, 0, 600), KB_F("mark_mult", s_markMult, 1, 5), KB_I("mark_armour", s_markArmour, 0, 10), KB_I("mark_max", s_markMax, 1, 32), KB_F("mark_aim", s_markAim, 0, 20), KB_F("mark_rewatch", s_markRewatch, 0, 600), KB_F("numbers_at", s_numbersAt, 0, 20),
     KB_I("mark_health", s_markHealth, 0, 100000),
     KB_F("modus_after", s_modusAfter, 0, 600), KB_F("modus_mult", s_modusMult, 1, 3),
     KB_F("s1_cooldown", s_s1Cd, 0, 600), KB_F("s1_mult", s_s1Mult, 1, 20), KB_I("s1_any_gun", s_s1AnyGun, 0, 1),
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("s2_min", s_s2Min, 1, 20), KB_F("s2_max", s_s2Max, 1, 20), KB_F("s2_hold", s_s2Hold, 0.1, 30),
-    KB_F("s2_cone", s_s2Cone, 0.5, 30), KB_F("s2_range", s_s2Range, 10, 1000), KB_F("first_person", s_fpDistance, 0.1, 2),
+    KB_F("s2_cone", s_s2Cone, 0.5, 30), KB_I("line_of_sight", s_sight, 0, 1), KB_F("s2_range", s_s2Range, 10, 1000), KB_F("first_person", s_fpDistance, 0.1, 2),
     KB_F("s3_cooldown", s_s3Cd, 0, 3600), KB_F("s3_every", s_s3Every, 0.05, 5), KB_F("s3_height", s_s3Height, 20, 500),
     KB_I("s3_max", s_s3Max, 1, 32), KB_I("s3_shell", s_s3Shell, 1, 100000),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
@@ -87,9 +89,12 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; combo (Shift+Q). The game still sees the keys too (Shift sprints, R reloads), so pick ones it leaves alone.\n"
                "key_s1 = %s\nkey_s2 = %s\nkey_s3 = %s\n"
                "; Persecution: an enemy with armour mark_armour+ or mark_health+ health she keeps within mark_cone degrees of her\n"
-               "; view (mark_range m) for mark_seconds is marked for mark_last s (renewed while she watches it); marked enemies\n"
+               "; view (mark_range m) for mark_seconds is marked for mark_last s (0: until replaced or killed); marked enemies\n"
                "; take mark_mult times the damage from her. At most mark_max are marked at once: a new mark replaces the oldest.\n"
                "mark_range = %g\nmark_cone = %g\nmark_seconds = %g\nmark_last = %g\nmark_mult = %g\nmark_armour = %d\nmark_health = %d\nmark_max = %d\n"
+               "; In first person, the enemy under her crosshair (within mark_aim degrees, any enemy she can see) is marked at once.\n"
+               "; A mark that gave way to a newer one is not marked again by watching for mark_rewatch s (aiming at it still does).\n"
+               "mark_aim = %g\nmark_rewatch = %g\n"
                "; Modus Extraditio: modus_after s after she lands, her shots deal modus_mult times their damage.\n"
                "modus_after = %g\nmodus_mult = %g\n"
                "; Salve Etiam: cooldown; with a sniper or marksman rifle in hand (any gun: s1_any_gun 1) her shots deal s1_mult\n"
@@ -106,11 +111,13 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "hp_mult = 1.1\nstamina_mult = 1\nhellbomb_on_exhaustion = 0\n"
                "; Damage numbers (the HUD): shown for a hit her on-hit multipliers (mark, Honesta Missio) raised numbers_at times or\n"
                "; more, as Arknights' red numbers (Modus and Salve Etiam are ATK buffs, the shells her ATK: no number). 0: every hit.\n"
-               "numbers_at = %g\n",
+               "numbers_at = %g\n"
+               "; Line of sight: 1, marks and Honesta Missio's lock only on enemies she can see (no walls or terrain between);\n"
+               "; 0 through walls (0.1.5's way).\nline_of_sight = %d\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_markRange, (double)s_markCone, (double)s_markSeconds,
-            (double)s_markLast, (double)s_markMult, s_markArmour, s_markHealth, s_markMax, (double)s_modusAfter, (double)s_modusMult, (double)s_s1Cd,
+            (double)s_markLast, (double)s_markMult, s_markArmour, s_markHealth, s_markMax, (double)s_markAim, (double)s_markRewatch, (double)s_modusAfter, (double)s_modusMult, (double)s_s1Cd,
             (double)s_s1Mult, s_s1AnyGun, (double)s_s2Cd, (double)s_s2Min, (double)s_s2Max, (double)s_s2Hold, (double)s_s2Cone,
-            (double)s_s2Range, (double)s_fpDistance, (double)s_s3Cd, (double)s_s3Every, (double)s_s3Height, s_s3Max, s_s3Shell, (double)s_numbersAt);
+            (double)s_s2Range, (double)s_fpDistance, (double)s_s3Cd, (double)s_s3Every, (double)s_s3Height, s_s3Max, s_s3Shell, (double)s_numbersAt, s_sight);
 }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
@@ -203,9 +210,138 @@ static float Off(const float cam[3], const float fwd[3], const float p[3], float
     return acosf(c < -1 ? -1 : c > 1 ? 1 : c) * 57.29578f;
 }
 
+
+/* ---- 0.1.6: line of sight. 0.1.5 marked and locked through walls and terrain (its pick was a cone only). The game's
+ * raycast, as Voymastina's teleport calls it (Helldiver Survival Rework's cover check), from her camera to the target's
+ * chest: blocked by anything but leaves, bodies (enemies, corpses), her and the target itself, ignoring the last 1.5 m
+ * (the target's own cover lip). Without the raycast (another build) everything counts as in sight, as before. */
+typedef uint32_t (*WorldFn)(const void*);
+typedef uint32_t (*RayFn)(uint32_t, const void*, const void*, float, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, void*, uint32_t);
+static WorldFn g_worldId;
+static RayFn g_raycast;
+static float s_sightSlack = 1.5f;
+static unsigned g_blocked, g_clear;
+static uint32_t g_lastWallFilter, g_lastWallUnit;
+static uint32_t ActorFilter(uint32_t id, uint32_t unit)
+{
+    uint32_t world = id >> 30, layout, stride, key_offset, data_offset, key, index, name = 0;
+    uintptr_t pool = exe + 0x2369B00 + 64u * ((id >> 28 & 3) + 10 * world);
+    uint8_t header[56], record[40], body[160];
+    if (!ReadAt(pool, header, 56)) return 0;
+    layout = Word(header + 28); stride = layout & 65535; key_offset = layout >> 16 & 255; data_offset = layout >> 24;
+    index = id & Word(header + 40);
+    if (index >= Word(header + 36) || !(id & Word(header + 52)) || stride < 40 || stride > 512 || key_offset + 4 > stride || data_offset + 40 > stride) return 0;
+    uintptr_t entry = (uintptr_t)Quad(header) + (uintptr_t)index * stride;
+    if (!ReadAt(entry + key_offset, &key, 4) || key != id || !ReadAt(entry + data_offset, record, 40) || Word(record + 12) != unit || !(Word(record + 16) & 1)) return 0;
+    uintptr_t physics = Pointer(exe + 0x27BA8A8 + 176u * world), bodies = physics ? Pointer(physics + 24) : 0;
+    uint32_t body_index = Word(record + 20) & 0xFFFFFF;
+    if (!bodies || body_index >= 262144 || !ReadAt(bodies + 160u * body_index, body, 160) || Word(body + 144) != id || Word(body + 148) != unit) return 0;
+    uintptr_t filters = Pointer(exe + 0x27C5E48), names;
+    uint32_t count, filter = Word(body + 108) & 127;
+    if (!filters || !ReadAt(filters + 248, &count, 4) || count > 128 || filter >= count || !(names = Pointer(filters + 256)) || !ReadAt(names + 4u * filter, &name, 4)) return 0;
+    return name;
+}
+#define FILTER_FOLIAGE 0x04A8FBF9u
+static uint32_t UnitOf(uint32_t e)
+{
+    uint8_t d[24];
+    return Descriptor(e, d) ? Word(d + 12) : 0;
+}
+/* the units of the enemies she knows (refreshed every 0.25 s): an enemy's or a corpse's body is no wall (0.1.6 counted
+ * bodies whose actor filter it could not read, filter 0, as walls) */
+static uint32_t g_foeUnit[FOES];
+static int g_nfoeUnit;
+static double g_foeUnitAt = -1;
+static int FoeUnit(uint32_t u)
+{
+    if (g_now - g_foeUnitAt > 0.25 || g_foeUnitAt < 0)
+    {
+        g_foeUnitAt = g_now;
+        g_nfoeUnit = 0;
+        for (int k = 0; k < FOES; k++) if (g_foe[k]) { uint32_t fu = UnitOf(g_foe[k]); if (fu) g_foeUnit[g_nfoeUnit++] = fu; }
+    }
+    for (int i = 0; i < g_nfoeUnit; i++) if (g_foeUnit[i] == u) return 1;
+    return 0;
+}
+/* the first thing in the way along a ray (its distance; len + 1 when clear), skipping her, leaves and bodies; *hitUnit
+ * gets the target's unit when the ray meets it first */
+static float FirstWall(uint32_t id, const float from[3], const float dir[3], float len, uint32_t me, uint32_t tu, int* hitTarget)
+{
+    uint8_t hits[16 * 44];
+    memset(hits, 0, sizeof hits);
+    uint32_t n = g_raycast(id, from, dir, len, 2, 1, 0, 0x80000009u, me, hits, 16);
+    if (n > 16) n = 16;                       /* 0.1.6d: more hits than room (0.1.6c then let it through as in sight) */
+    float best = len + 1;
+    int target = 0;
+    for (uint32_t i = 0; i < n; i++)
+    {
+        float d;
+        memcpy(&d, hits + 44u * i + 24, 4);
+        uint32_t hu = Word(hits + 44u * i + 28);
+        if (!isfinite(d) || d < 1.2f || d >= best || (hu && hu == me)) continue;   /* 0.1.6d: within 1.2 m of the camera is her own gun or scope */
+        if (hu && hu == tu) { best = d; target = 1; continue; }
+        uint32_t filt = ActorFilter(Word(hits + 44u * i + 32), hu);
+        if (filt == FILTER_FOLIAGE || (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u || FoeUnit(hu)))) continue;   /* leaves; bodies */
+        best = d; target = 0;
+        g_lastWallFilter = filt; g_lastWallUnit = hu;
+    }
+    if (hitTarget) *hitTarget = target;
+    return best;
+}
+/* 0.1.6b: in sight if any of three rays gets there: to her chest, to her head, or (for an enemy under the crosshair,
+ * within 4 degrees) the aim itself reaching the enemy or past it. 0.1.6 tried the chest alone and refused enemies Yui
+ * could plainly see */
+static int InSight(const float cam[3], const float fwd[3], const float q[3], uint32_t target)
+{
+    if (!s_sight || !g_raycast || !g_worldId) return 1;
+    uintptr_t world = Pointer(game + 0x346BFA0);
+    if (!world) return 1;
+    uint32_t id = g_worldId((const void*)world);
+    if (id >= 4) return 1;
+    uint32_t me = UnitOf(atomic_load(&g_avatar)), tu = UnitOf(target);
+    float wall = 0, dist = 0;
+    for (int r = 0; r < 3; r++)
+    {
+        float to[3] = {q[0], q[1], q[2] + (r == 1 ? 0.7f : 0)}, dir[3], len;
+        if (r < 2)
+        {
+            for (int k = 0; k < 3; k++) dir[k] = to[k] - cam[k];
+            len = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+            if (!(len > s_sightSlack + 0.5f)) return 1;
+            for (int k = 0; k < 3; k++) dir[k] /= len;
+        }
+        else
+        {
+            float d;
+            if (Off(cam, fwd, q, &d) > 4) break;
+            memcpy(dir, fwd, sizeof dir);
+            len = d + 2;
+        }
+        int hitTarget = 0;
+        float w = FirstWall(id, cam, dir, len, me, tu, &hitTarget);
+        if (w < 0) return 1;
+        float reach = r < 2 ? len : len - 2;
+        if (hitTarget || w > reach - s_sightSlack) { g_clear++; return 1; }
+        if (r == 0) { wall = w; dist = len; }
+    }
+    g_blocked++;
+    static unsigned told;
+    if (told++ < 6) Log("line of sight: entity %u hidden at %.0f m (chest ray stopped at %.1f m on unit %08x, filter %08x; head and crosshair rays too)", target, dist, wall, g_lastWallUnit, g_lastWallFilter);
+    return 0;
+}
+
 /* ---- Persecution: her marks --------------------------------------------------------------------------------------- */
 #define MARKS 64
-typedef struct Mark { uint32_t e; uint64_t res; double seen, last, until, made; } Mark;
+/* 0.1.6d: mate, an enemy riding with it (a rider and its vehicle): one mark, both marked. noMark: a mark replaced by a
+ * newer one is not marked again by watching until then (0.1.6c's queue swapped six enemies every 0.2 s) */
+#define MATES 3   /* 0.1.6e: a strider is three entities (walker, pilot, its seat): a mark holds the one it was made on and up to three riding with it */
+typedef struct Mark { uint32_t e, mate[MATES]; uint64_t res, mateRes[MATES]; double seen, last, until, made, noMark; } Mark;
+static int MateIndex(const Mark* m, uint32_t e) { for (int j = 0; j < MATES; j++) if (e && m->mate[j] == e) return j; return -1; }
+static int Mates(const Mark* m) { int n = 0; for (int j = 0; j < MATES; j++) n += m->mate[j] != 0; return n; }
+static void DropMate(Mark* m, int j) { for (; j < MATES - 1; j++) { m->mate[j] = m->mate[j + 1]; m->mateRes[j] = m->mateRes[j + 1]; } m->mate[MATES - 1] = 0; m->mateRes[MATES - 1] = 0; }
+/* the first mate takes the lead (the one it was made on died) */
+static int Promote(Mark* m) { if (!m->mate[0]) return 0; m->e = m->mate[0]; m->res = m->mateRes[0]; DropMate(m, 0); return 1; }
+static float Flat2(const float a[3], const float b[3]) { float x = a[0] - b[0], y = a[1] - b[1]; return x * x + y * y; }
 static Mark g_marks[MARKS];
 static int Elite(uint32_t e, uint64_t res)
 {
@@ -214,9 +350,55 @@ static int Elite(uint32_t e, uint64_t res)
     if (ArmourOf(res) >= s_markArmour) return 1;
     return s_markHealth > 0 && HealthOf(e, &hp, &life) && hp >= s_markHealth;
 }
-static Mark* MarkOf(uint32_t e) { for (int i = 0; i < MARKS; i++) if (g_marks[i].e == e) return &g_marks[i]; return NULL; }
+static Mark* MarkOf(uint32_t e) { for (int i = 0; i < MARKS; i++) if (e && (g_marks[i].e == e || MateIndex(&g_marks[i], e) >= 0)) return &g_marks[i]; return NULL; }
 static int Marked(uint32_t e) { Mark* m = MarkOf(e); return m && m->until > g_now; }
 static unsigned MarkedCount(void) { unsigned n = 0; for (int i = 0; i < MARKS; i++) n += g_marks[i].e && g_marks[i].until > g_now; return n; }
+/* the enemies riding with it (a strider's walker, pilot and seat; a rider and its vehicle): spawned together (entity
+ * numbers within 4), another kind, alive, within 2.5 m across the ground and 6 m up or down (0.1.6d measured in 3D
+ * from each one's root, and a walker's root on the ground was over 3 m from its pilot: a second mark). One already in
+ * a group is taken only if this mark is nearer to it; one with a mark of its own and no group joins, its mark freed */
+static void FindMates(Mark* m, const float q[3])
+{
+    for (int pass = 0; pass < MATES && Mates(m) < MATES; pass++)
+    {
+        uint32_t best = 0;
+        uint64_t bestRes = 0;
+        float bestD2 = 2.5f * 2.5f;
+        for (int k = 0; k < FOES; k++)
+        {
+            uint32_t f = g_foe[k];
+            float p[3], d2;
+            int32_t hp;
+            uint32_t life;
+            if (!f || f == m->e || MateIndex(m, f) >= 0 || g_foeRes[k] == m->res || (f > m->e ? f - m->e : m->e - f) > 4) continue;
+            if (!TargetPos(f, g_foeRes[k], p) || (d2 = Flat2(p, q)) >= bestD2 || fabsf(p[2] - q[2]) > 6 || !HealthOf(f, &hp, &life) || hp <= 0) continue;
+            int taken = 0;
+            for (int i = 0; i < MARKS && !taken; i++)
+            {
+                Mark* o = &g_marks[i];
+                float op[3];
+                if (o == m || !o->e || o->until <= g_now) continue;
+                if (MateIndex(o, f) >= 0 && TargetPos(o->e, o->res, op) && Flat2(op, p) <= d2) taken = 1;   /* nearer to its group */
+                if (o->e == f && Mates(o)) taken = 1;                                                    /* leads a group already */
+            }
+            if (taken) continue;
+            best = f; bestRes = g_foeRes[k]; bestD2 = d2;
+        }
+        if (!best) return;
+        for (int i = 0; i < MARKS; i++)
+        {
+            Mark* o = &g_marks[i];
+            int j;
+            if (o == m) continue;
+            if (o->e == best) memset(o, 0, sizeof *o);          /* its own entry or mark goes: one mark for the group */
+            else if ((j = MateIndex(o, best)) >= 0) DropMate(o, j);   /* it leaves a farther group */
+        }
+        int slot = Mates(m);
+        m->mate[slot] = best; m->mateRes[slot] = bestRes;
+        static unsigned told;
+        if (told++ < 16) Log("Persecution: entity %u (%016llx) rides with entity %u (%.1f m across): one mark for the group", best, (unsigned long long)bestRes, m->e, sqrtf(bestD2));
+    }
+}
 static void MarkFrame(void)
 {
     static double next;
@@ -226,6 +408,23 @@ static void MarkFrame(void)
     float cam[3], fwd[3], q[3];
     int fp;
     if (!View(cam, fwd, &fp)) return;
+    /* 0.1.6d: in first person, the enemy under her crosshair (within mark_aim degrees, in sight, any enemy) is marked at
+     * once (Yui) */
+    uint32_t aimed = 0;
+    if (fp)
+    {
+        float bestOff = s_markAim;
+        for (int k = 0; k < FOES; k++)
+        {
+            uint32_t e = g_foe[k];
+            int32_t hp;
+            uint32_t life;
+            float d, o;
+            if (!e || !TargetPos(e, g_foeRes[k], q) || (o = Off(cam, fwd, q, &d)) >= bestOff || d > s_markRange) continue;
+            if (!HealthOf(e, &hp, &life) || hp <= 0 || !InSight(cam, fwd, q, e)) continue;
+            bestOff = o; aimed = e;
+        }
+    }
     for (int k = 0; k < FOES; k++)
     {
         uint32_t e = g_foe[k];
@@ -233,8 +432,12 @@ static void MarkFrame(void)
         uint32_t life;
         if (!e || !TargetPos(e, g_foeRes[k], q)) continue;
         float d;
-        if (Off(cam, fwd, q, &d) > s_markCone || d > s_markRange) continue;
-        if (!HealthOf(e, &hp, &life) || hp <= 0 || !Elite(e, g_foeRes[k])) continue;
+        if (e != aimed)
+        {
+            if (Off(cam, fwd, q, &d) > s_markCone || d > s_markRange) continue;
+            if (!HealthOf(e, &hp, &life) || hp <= 0 || !Elite(e, g_foeRes[k])) continue;
+            if (!InSight(cam, fwd, q, e)) continue;                                         /* 0.1.6: not through walls */
+        }
         Mark* m = MarkOf(e);
         if (!m)
         {
@@ -245,6 +448,8 @@ static void MarkFrame(void)
         }
         m->seen = g_now - m->last <= 2 * step + 0.05 ? m->seen + step : step;   /* in sight without a break */
         m->last = g_now;
+        if (e == aimed && m->until <= g_now) m->seen = s_markSeconds, m->noMark = 0;
+        else if (m->until <= g_now && g_now < m->noMark) continue;
         if (m->seen >= s_markSeconds)
         {
             if (m->until <= g_now)
@@ -258,13 +463,20 @@ static void MarkFrame(void)
                         standing++;
                         if (!oldest || g_marks[i].made < oldest->made) oldest = &g_marks[i];
                     }
-                if (standing >= s_markMax && oldest) oldest->until = 0;
+                if (standing >= s_markMax && oldest)
+                {
+                    oldest->until = 0; oldest->seen = 0; oldest->noMark = g_now + s_markRewatch;
+                    static unsigned toldOut;
+                    if (toldOut++ < 10) Log("Persecution: entity %u gives way to a newer mark (mark_max %d)", oldest->e, s_markMax);
+                }
                 m->made = g_now;
+                memset(m->mate, 0, sizeof m->mate);
+                FindMates(m, q);
                 g_marksMade++;
                 static unsigned told;
-                if (told++ < 10) Log("Persecution: entity %u (%016llx) marked", e, (unsigned long long)m->res);
+                if (told++ < 16) Log("Persecution: entity %u (%016llx) marked%s", e, (unsigned long long)m->res, e == aimed ? " (aimed at)" : "");
             }
-            m->until = g_now + s_markLast;
+            m->until = s_markLast > 0 ? g_now + s_markLast : 1e18;   /* 0.1.6b: mark_last 0, a mark stands until it is replaced or dies (Yui) */
         }
     }
 }
@@ -286,6 +498,11 @@ static int Rifle(uint64_t res)
                                        HF_ENTITY_R2_AMENDMENT, HF_ENTITY_R2124_CONSTITUTION, HF_ENTITY_R40K_HOTSHOT_MARKSMAN_RIFLE,
                                        HF_ENTITY_PLAS39_ACCELERATOR_RIFLE, HF_ENTITY_RS422_RAILGUN};
     for (unsigned i = 0; i < sizeof kRifles / sizeof kRifles[0]; i++) if (res == kRifles[i]) return 1;
+    /* 0.1.6: other mods' marksman rifles with rounds of their own (no vanilla round to match): giblett's Scope of
+     * Authority R-40 Sightliner (a copy of the R-63CS, round 353 in Yui's 2026-11-04 test, refused by 0.1.5) and LAS-44 Nova
+     * (a sniper laser, built on the LAS-99; round 352) */
+    static const uint64_t kModRifles[] = {0x41F2DEF484634B59ull, 0x245CB793C32F3FBCull};
+    for (unsigned i = 0; i < sizeof kModRifles / sizeof kModRifles[0]; i++) if (res == kModRifles[i]) return 1;
     /* 0.1.2: by its round as well, so a mod's copy of a sniper (a new resource, the same round) counts too: 0.1.1's test
      * refused S1 five times with a rifle the list did not name. The APW-1 (a support weapon) is known this way too */
     uint32_t r = RoundOf(res);
@@ -370,7 +587,7 @@ static void ScopeFrame(double dt)
         float d;
         if (!e || !TargetPos(e, g_foeRes[k], q)) continue;
         float o = Off(cam, fwd, q, &d);
-        if (o < bestOff && d <= s_s2Range) { bestOff = o; best = e; }
+        if (o < bestOff && d <= s_s2Range && InSight(cam, fwd, q, e)) { bestOff = o; best = e; }   /* 0.1.6: in sight only */
     }
     if (best == g_s2Target) { if (best) { g_s2Held += dt; g_s2Off = 0; } return; }
     if (!best && g_s2Target)
@@ -395,13 +612,45 @@ static void SpotsFrame(void)
     for (int i = 0; i < MARKS && n < 32; i++)
     {
         Mark* m = &g_marks[i];
-        if (!m->e || m->until <= g_now || !TargetPos(m->e, m->res, q)) continue;
+        if (!m->e || m->until <= g_now) continue;
+        int32_t hp;
+        uint32_t life;
+        for (int j = MATES - 1; j >= 0; j--)
+        {
+            float mp[3];
+            if (!m->mate[j]) continue;
+            if (!HealthOf(m->mate[j], &hp, &life) || hp <= 0) { DropMate(m, j); continue; }
+            if (TargetPos(m->mate[j], m->mateRes[j], mp) && TargetPos(m->e, m->res, q) && Flat2(mp, q) > 6.0f * 6.0f)
+            {
+                static unsigned toldApart;
+                if (toldApart++ < 8) Log("Persecution: entity %u and %u are apart (not riding together): the mark keeps %u", m->e, m->mate[j], m->e);
+                DropMate(m, j);
+            }
+        }
+        if (!TargetPos(m->e, m->res, q) || !HealthOf(m->e, &hp, &life) || hp <= 0)
+        {
+            if (Promote(m)) { i--; continue; }   /* the rest of its group lives on */
+            m->until = 0; continue;                                                        /* 0.1.6b: dead or gone, its place is free */
+        }
         g_spots[n].x = q[0]; g_spots[n].y = q[1]; g_spots[n].z = q[2];
         g_spots[n].left = (float)(m->until - g_now);
         g_spots[n].heavy = ArmourOf(m->res) >= 4;
         n++;
     }
     g_nspots = n;
+}
+
+/* 0.1.6c: her view for the HUD (lemuen_view), refreshed on the game thread: the HUD picks the engine camera standing
+ * here (0.1.6b's HUD took a camera 6 km under the map, so every marker and number was "behind" it) */
+static float g_viewOut[6];
+static volatile int g_viewOk;
+static void ViewFrame(void)
+{
+    float c[3], f[3];
+    int fp;
+    if (!View(c, f, &fp)) { g_viewOk = 0; return; }
+    memcpy(g_viewOut, c, 12); memcpy(g_viewOut + 3, f, 12);
+    g_viewOk = 1;
 }
 
 /* ---- the skills --------------------------------------------------------------------------------------------------- */
@@ -540,10 +789,33 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 }
 
 /* ---- events ------------------------------------------------------------------------------------------------------ */
+/* 0.1.6f: the enemy's turrets (an Automaton base's cannon and AA guns, Illuminate towers): the kit base leaves every
+ * turret out of its enemies (so sentries are never targets), so 0.1.6e could not mark one (Yui). A turret that runs a
+ * behaviour and is no friend (the kit base's list of Helldiver sentries, emplacements and their mods' copies) is one */
+static int EnemyTurret(uint64_t res)
+{
+    static uint64_t keys[128];
+    static int8_t vals[128];
+    unsigned h = (unsigned)(res ^ (res >> 31)) & 127;
+    for (unsigned i = 0; i < 128; i++)
+    {
+        unsigned k = (h + i) & 127;
+        if (keys[k] == res) return vals[k];
+        if (keys[k]) continue;
+        uint32_t stride;
+        int t = hf->component_record("TurretComponentData", res, &stride) != 0 && hf->component_record("BehaviorComponentData", res, &stride) != 0 &&
+                !hf->component_record("AvatarComponentData", res, &stride) && !FriendRes(res);
+        vals[k] = (int8_t)t;
+        keys[k] = res;
+        if (t) { static unsigned told; if (told++ < 8) Log("an enemy turret kind: %016llx (markable)", (unsigned long long)res); }
+        return t;
+    }
+    return 0;
+}
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
-    if (s->resource != AVATAR) { if (FoeKind(s->resource)) AddFoe(s->entity, s->resource); return; }
+    if (s->resource != AVATAR) { if (FoeKind(s->resource) || EnemyTurret(s->resource)) AddFoe(s->entity, s->resource); return; }
     if (!s->authority) return;
     g_spawnEntity[g_spawnNext % 8] = s->entity;
     g_spawnNet[g_spawnNext % 8] = s->network;
@@ -555,7 +827,9 @@ static void OnKill(HfMod* mod, const HfEventInfo* info, void* user)
     const HfKillEvent* k = (const HfKillEvent*)info;
     DropFoe(k->victim);
     Mark* m = MarkOf(k->victim);
-    if (m) memset(m, 0, sizeof *m);
+    int j = m ? MateIndex(m, k->victim) : -1;
+    if (j >= 0) DropMate(m, j);
+    else if (m && !Promote(m)) memset(m, 0, sizeof *m);
     if (k->victim == g_s2Target) { g_s2Target = 0; g_s2Held = 0; }
     if (k->victim == g_lastTarget) g_lastTarget = 0;
 }
@@ -611,6 +885,14 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     game = g;
     exe = x;
     HitsInstall("own-blast guard");
+    if (hf->code_matches(exe + 0x79F860, "33 c0 4c 8d 05 c7 b2 01 02 0f 1f 80 00 00 00 00 49 39 0c c0 74 0c ff c0 83 f8 04 75 f3") &&
+        hf->code_matches(exe + 0x7F4590, "48 8b c4 f3 0f 11 58 20 89 48 08 55 53 56 57 41 54 41 55 41 56 41 57 48"))
+    {
+        g_worldId = (WorldFn)(exe + 0x79F860);
+        g_raycast = (RayFn)(exe + 0x7F4590);
+        Log("line of sight ready (the game's raycast): marks and Honesta Missio's lock need a clear view");
+    }
+    else Log("line of sight off: the raycast is not the reviewed code (marks and locks go through walls)");
     g_staminaOk = hf->code_matches(game + 0xA50E2D, "f3 42 0f 11 8c 11 54 78 54 00");
 }
 
@@ -639,6 +921,13 @@ HF_MOD_EXPORT int lemuen_marks(unsigned version, float* out, int max)
         out[i * 5 + 3] = g_spots[i].left; out[i * 5 + 4] = (float)g_spots[i].heavy;
     }
     return n;
+}
+/* 0.1.6c: her camera, 6 floats (position, forward); 1 when known */
+HF_MOD_EXPORT int lemuen_view(unsigned version, float* out)
+{
+    if (version != 1 || !out || !g_viewOk || !g_inMission) return 0;
+    memcpy(out, g_viewOut, 24);
+    return 1;
 }
 /* 0.1.3: her hits since *seq (the HUD's last), 5 floats each: x, y, z of the impact, damage dealt, 1 if S1 or S2
  * raised it. *seq becomes the newest. A HUD that fell behind gets the latest HITRING */
@@ -725,6 +1014,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     {
         MarkFrame();
         SpotsFrame();
+        ViewFrame();
         ReloadFrame();
         ScopeFrame(step);
         ShellFrame();
