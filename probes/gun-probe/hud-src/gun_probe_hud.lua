@@ -286,12 +286,17 @@ end
 -- 0.1.8: carriers. The Guard Dog's body floated where it was put (0.1.3); the guns fell first. A gun linked to a dog
 -- is placed by the dog, so only the dogs are moved; the dogs are hidden so only the guns are seen.
 local DOG = 'content/fac_helldivers/equipment/backpacks/drone_mg/drone_mg'
+-- 0.1.9: 0.1.8's carried machine gun (a dropped-weapon pickup) kept its physics: linked to a dog that held still, it
+-- jumped 5-7 m up and fell, ending 1-11 m from its dog. The Guard Dog's own gun is a unit made to ride the dog,
+-- drone_mg_weapon (HD2Runtime's catalogue), so the drone weapons come first and the pickups last.
 local GUNS = {
+    'content/fac_helldivers/equipment/backpacks/drone_mg/drone_mg_weapon',
+    'content/fac_helldivers/equipment/backpacks/drone_weapons/drone_laser_rifle/drone_laser_rifle_mount',
+    'content/fac_helldivers/equipment/backpacks/drone_weapons/drone_laser_rifle/drone_laser_rifle',
     'content/fac_helldivers/equipment/backpacks/drone_weapons/drone_assault_rifle/drone_assault_rifle',
     'content/fac_helldivers/equipment/support_weapons/machinegun/machinegun',
     'content/fac_helldivers/equipment/support_weapons/heavy_mg/heavy_mg',
     'content/fac_helldivers/equipment/support_weapons/expendable_machinegun/expendable_machinegun',
-    'content/fac_helldivers/equipment/backpacks/drone_weapons/drone_laser_rifle/drone_laser_rifle',
 }
 local function hide(u)
     if call('Unit.set_unit_visibility', u, false) then return 'set_unit_visibility' end
@@ -428,6 +433,22 @@ local function report()
         log('[Gun Probe]   ' .. p .. ': ' .. (fn(p) and 'yes' or 'no'))
     end
     for _, path in ipairs(MODELS) do log('[Gun Probe]   loaded ' .. tostring(loaded(path)) .. ': ' .. path) end
+    for _, path in ipairs(GUNS) do log('[Gun Probe]   carrier gun loaded ' .. tostring(loaded(path)) .. ': ' .. path) end
+    -- 0.1.9: Unit.num_actors was not reachable; list what the engine's tables offer for physics, links and visibility
+    local libs = {}
+    if type(S) == 'table' then for k, v in pairs(S) do if type(v) == 'table' then libs[#libs + 1] = k end end end
+    table.sort(libs)
+    log('[Gun Probe]   stingray tables: ' .. table.concat(libs, ' '))
+    for _, lib in ipairs(libs) do
+        local t, hits = S[lib], {}
+        for k, v in pairs(t) do
+            if type(v) == 'function' and type(k) == 'string' and (k:find('actor') or k:find('physic') or k:find('kinemat') or k:find('link')
+                or k:find('gravity') or k:find('sleep') or k:find('visib') or k:find('collision') or k:find('mover') or k:find('dynamic')) then
+                hits[#hits + 1] = k
+            end
+        end
+        if #hits > 0 then table.sort(hits); log('[Gun Probe]   ' .. lib .. ': ' .. table.concat(hits, ' ')) end
+    end
     local snd = hd2.sounds
     log('[Gun Probe]   hd2.sounds: ' .. type(snd) .. (type(snd) == 'table' and (', play ' .. type(snd.play) .. ', available ' .. type(snd.available)) or ''))
     if type(snd) == 'table' and type(snd.available) == 'function' then
@@ -457,4 +478,4 @@ overlay:draw(function(d, dt)
     end
 end)
 
-log('[Gun Probe] 0.1.8 ready: F6 two hidden Guard Dog bodies carrying a gun each (Alt+F6 dogs visible, Ctrl+F6 0.1.7 bare guns) for 10 s; Shift+F6 logs what the engine lets this addon reach')
+log('[Gun Probe] 0.1.9 ready: F6 two hidden Guard Dog bodies carrying a gun each (Alt+F6 dogs visible, Ctrl+F6 0.1.7 bare guns) for 10 s; Shift+F6 logs what the engine lets this addon reach')
