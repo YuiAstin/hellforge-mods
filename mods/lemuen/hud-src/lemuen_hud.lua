@@ -519,7 +519,8 @@ end
 -- frame), projecting a world point with Camera.world_to_screen (bottom-left origin) and the behind-the-camera check
 -- (the point's offset along the camera's forward), with Th3chef's permission. lemuen.dll's lemuen_marks gives where
 -- each mark stands (5 floats: x, y, z, seconds left, heavy).
-pcall(ffi.cdef, [[ typedef int (*lemmarks1)(unsigned int version, float *out, int max); ]])
+pcall(ffi.cdef, [[ typedef int (*lemmarks1)(unsigned int version, float *out, int max);
+typedef int (*lemhits1)(unsigned int version, float *out, int max, uint32_t *seq); ]])
 local MK = {fn = nil, buf = ffi.new('float[160]'), look = 0, failed = false, told = false}
 local CAM = {unit = nil, list = nil, i = 0, retry = 0}
 local function S() return rawget(_G, 'stingray') end
@@ -551,8 +552,39 @@ local function cam_unit(s, t)
     return nil
 end
 local mk_t = 0
-local function marks_draw(d, dt)
-    mk_t = mk_t + dt
+-- (0.1.3: her damage numbers, below, share this frame's view)
+local HN = {fn = nil, buf = ffi.new('float[320]'), seq = ffi.new('uint32_t[1]'), live = {}, primed = false}
+local function view(d)
+    local s = S()
+    if type(s) ~= 'table' or not (s.Unit and s.Camera and s.Vector3 and s.Quaternion and s.World and s.Application) then return nil end
+    local u = cam_unit(s, mk_t)
+    if not u then return nil end
+    local c = s.Unit.camera(u, 1)
+    if not c then return nil end
+    local cx, cy, cz = s.Vector3.to_elements(s.Camera.world_position(c))
+    local fx, fy, fz = s.Vector3.to_elements(s.Quaternion.forward(s.Camera.world_rotation(c)))
+    local W, H = d.width, d.height or (d.width * 9 / 16)
+    -- the engine's screen pixels against the overlay's (the same at most resolutions; scaled if not)
+    local bw, bh = W, H
+    if s.Application.back_buffer_size then
+        local okb, a, b = pcall(s.Application.back_buffer_size)
+        if okb and type(a) == 'number' and a > 0 then bw, bh = a, b end
+    end
+    local kx, ky = W / bw, H / bh
+    if not MK.told then MK.told = true; log(('[Lemuen HUD] view: overlay %dx%d, screen %dx%d'):format(W, H, bw, bh)) end
+    return {s = s, c = c, cx = cx, cy = cy, cz = cz, fx = fx, fy = fy, fz = fz, W = W, H = H, kx = kx, ky = ky}
+end
+-- a world point on the overlay, or nil when behind the camera or off screen
+local function project(v, x, y, z)
+    local ax, ay, az = x - v.cx, y - v.cy, z - v.cz
+    if ax * v.fx + ay * v.fy + az * v.fz <= 0.5 then return nil end
+    local sx, sy = v.s.Vector3.to_elements(v.s.Camera.world_to_screen(v.c, v.s.Vector3(x, y, z)))
+    if type(sx) ~= 'number' then return nil end
+    sx, sy = sx * v.kx, v.H - sy * v.ky                    -- the overlay's origin is its top-left
+    if sx <= 0 or sx >= v.W or sy <= 0 or sy >= v.H then return nil end
+    return sx, sy, math.sqrt(ax * ax + ay * ay + az * az)
+end
+local function marks_draw(d, dt, v)
     if MK.failed then return end
     if not MK.fn then
         if mk_t < MK.look then return end
@@ -564,42 +596,61 @@ local function marks_draw(d, dt)
     end
     local n = MK.fn(1, MK.buf, 32)
     if n <= 0 then return end
-    local s = S()
-    if type(s) ~= 'table' or not (s.Unit and s.Camera and s.Vector3 and s.Quaternion and s.World and s.Application) then return end
-    local u = cam_unit(s, mk_t)
-    if not u then return end
-    local c = s.Unit.camera(u, 1)
-    if not c then return end
-    local cx, cy, cz = s.Vector3.to_elements(s.Camera.world_position(c))
-    local fx, fy, fz = s.Vector3.to_elements(s.Quaternion.forward(s.Camera.world_rotation(c)))
-    local W, H = d.width, d.height or (d.width * 9 / 16)
-    -- the engine's screen pixels against the overlay's (the same at most resolutions; scaled if not)
-    local bw, bh = W, H
-    if s.Application.back_buffer_size then
-        local okb, a, b = pcall(s.Application.back_buffer_size)
-        if okb and type(a) == 'number' and a > 0 then bw, bh = a, b end
-    end
-    local kx, ky = W / bw, H / bh
-    if not MK.told then MK.told = true; log(('[Lemuen HUD] markers: %d marks, overlay %dx%d, screen %dx%d'):format(n, W, H, bw, bh)) end
+    local s, W, H = v.s, v.W, v.H
     local sc = d.scale or 1
     for i = 0, n - 1 do
         local x, y, z, left, heavy = MK.buf[i * 5], MK.buf[i * 5 + 1], MK.buf[i * 5 + 2], MK.buf[i * 5 + 3], MK.buf[i * 5 + 4] > 0.5
         z = z + (heavy and 3.5 or 2.2)
-        local ax, ay, az = x - cx, y - cy, z - cz
-        if ax * fx + ay * fy + az * fz > 0.5 then          -- in front of the camera
-            local sx, sy = s.Vector3.to_elements(s.Camera.world_to_screen(c, s.Vector3(x, y, z)))
-            if type(sx) == 'number' then
-                sx, sy = sx * kx, H - sy * ky                  -- the overlay's origin is its top-left
-                if sx > 0 and sx < W and sy > 0 and sy < H then
+        local sx, sy, dist = project(v, x, y, z)
+        if sx then
+            do
+                do
                     local half = (heavy and 11 or 8) * sc
                     local col = {230, 60, 50, left < 5 and math.floor(120 + 135 * (math.sin(mk_t * 8) * 0.5 + 0.5)) or 235}
                     local tk = math.max(1, 2 * sc)
                     d:rect(sx - half, sy - half, 2 * half, tk, col, 6); d:rect(sx - half, sy + half - tk, 2 * half, tk, col, 6)
                     d:rect(sx - half, sy - half, tk, 2 * half, col, 6); d:rect(sx + half - tk, sy - half, tk, 2 * half, col, 6)
                     d:rect(sx - 2 * sc, sy - 2 * sc, 4 * sc, 4 * sc, col, 6)
-                    local dist = math.sqrt(ax * ax + ay * ay + az * az)
                     d:text(('%dm'):format(math.floor(dist + 0.5)), sx, sy + half + 2 * sc, {size = 13 * sc, colour = col, z = 6, align = 'center'})
                 end
+            end
+        end
+    end
+end
+
+-- ---- her damage numbers (0.1.3): an orange-red number over each hit, rising fast then easing off, ~2 s ------------
+local HN_LIFE, HN_RISE, HN_MAX = 2.2, 46, 48
+local function numbers_draw(d, dt, v)
+    if not HN.fn then
+        local module = k32.lemhud1_GetModuleHandleA('lemuen.dll')
+        local proc = module ~= nil and k32.lemhud1_GetProcAddress(module, 'lemuen_hits') or nil
+        if proc == nil then return end
+        HN.fn = ffi.cast('lemhits1', proc)
+    end
+    local n = HN.fn(1, HN.buf, 64, HN.seq)
+    if not HN.primed then HN.primed = true; n = 0 end    -- (not the hits from before the HUD looked)
+    for i = 0, n - 1 do
+        if #HN.live >= HN_MAX then table.remove(HN.live, 1) end
+        HN.live[#HN.live + 1] = {x = HN.buf[i * 5], y = HN.buf[i * 5 + 1], z = HN.buf[i * 5 + 2] + 0.6, amount = HN.buf[i * 5 + 3],
+                                 boosted = HN.buf[i * 5 + 4] > 0.5, t = 0, jx = (math.random() - 0.5) * 18}
+    end
+    local sc = d.scale or 1
+    for i = #HN.live, 1, -1 do
+        local h = HN.live[i]
+        h.t = h.t + dt
+        if h.t >= HN_LIFE then table.remove(HN.live, i)
+        elseif v then
+            local sx, sy = project(v, h.x, h.y, h.z)
+            if sx then
+                local rise = HN_RISE * (1 - math.exp(-h.t * 7))  -- fast, then slowing to a stop
+                local pop = h.t < 0.12 and (1.35 - h.t / 0.12 * 0.35) or 1
+                local a = h.t > HN_LIFE - 0.45 and (HN_LIFE - h.t) / 0.45 or 1
+                local size = (h.boosted and 24 or 18) * sc * pop
+                local col = h.boosted and {255, 120, 40} or {255, 95, 60}
+                local str = tostring(math.floor(h.amount + 0.5))
+                local px, py = sx + h.jx * sc, sy - (rise + 6) * sc
+                d:text(str, px + 2 * sc, py + 2 * sc, {size = size, colour = {20, 10, 5, math.floor(200 * a)}, z = 7, align = 'center'})
+                d:text(str, px, py, {size = size, colour = {col[1], col[2], col[3], math.floor(255 * a)}, z = 8, align = 'center'})
             end
         end
     end
@@ -616,8 +667,17 @@ overlay:draw(function(d, dt)
     end
     if not find(dt) then return end
     if state.in_mission == 0 then return end
-    local okM, errM = pcall(marks_draw, d, dt)
-    if not okM then MK.failed = true; log('[Lemuen HUD] markers failed, off for this session: ' .. tostring(errM)) end
+    mk_t = mk_t + dt
+    local okV, v = pcall(view, d)
+    if not okV then v = nil end
+    if v then
+        local okM, errM = pcall(marks_draw, d, dt, v)
+        if not okM then MK.failed = true; log('[Lemuen HUD] markers failed, off for this session: ' .. tostring(errM)) end
+    end
+    if not HN.failed then
+        local okN, errN = pcall(numbers_draw, d, dt, v)
+        if not okN then HN.failed = true; log('[Lemuen HUD] damage numbers failed, off for this session: ' .. tostring(errN)) end
+    end
     local okA, errA = pcall(ammo_step)
     if not okA then A.failed = true; log('[Lemuen HUD] ammo failed: ' .. tostring(errA)) end
     status_bar(d)

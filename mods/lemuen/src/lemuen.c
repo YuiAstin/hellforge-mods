@@ -34,7 +34,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.2"
+#define VERSION "0.1.3"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -471,6 +471,21 @@ static void DamageTaken(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     (void)e; (void)d; (void)me;
 }
+/* 0.1.3: her hits for the HUD's damage numbers (lemuen_hits): a ring the game thread writes, the HUD reads by
+ * sequence number */
+#define HITRING 64
+typedef struct { float x, y, z, amount; uint32_t boosted, seq; } HitNote;
+static HitNote g_ring[HITRING];
+static volatile uint32_t g_ringSeq;
+static void NoteHit(const HfDamageEvent* d, int boosted)
+{
+    uint32_t s = g_ringSeq + 1;
+    HitNote* h = &g_ring[s % HITRING];
+    h->x = d->position[0]; h->y = d->position[1]; h->z = d->position[2];
+    h->amount = (float)d->amount; h->boosted = (uint32_t)boosted;
+    h->seq = s;
+    g_ringSeq = s;
+}
 static int g_hitLogReset;
 static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
@@ -502,6 +517,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
         NoteTarget(d);
     }
     if (mult != 1) ScaleDamage(d, mult);
+    if (kb_kit_on && g_inMission) NoteHit(d, xS1 != 1 || xS2 != 1);
     /* 0.1.1: her boosted shots in numbers (0.1.0's log said a skill was on, never what a hit dealt): the first 16 hits
      * of a mission that a skill raised, base -> dealt, and each multiplier */
     static unsigned shown;
@@ -613,6 +629,24 @@ HF_MOD_EXPORT int lemuen_marks(unsigned version, float* out, int max)
         out[i * 5] = g_spots[i].x; out[i * 5 + 1] = g_spots[i].y; out[i * 5 + 2] = g_spots[i].z;
         out[i * 5 + 3] = g_spots[i].left; out[i * 5 + 4] = (float)g_spots[i].heavy;
     }
+    return n;
+}
+/* 0.1.3: her hits since *seq (the HUD's last), 5 floats each: x, y, z of the impact, damage dealt, 1 if S1 or S2
+ * raised it. *seq becomes the newest. A HUD that fell behind gets the latest HITRING */
+HF_MOD_EXPORT int lemuen_hits(unsigned version, float* out, int max, uint32_t* seq)
+{
+    if (version != 1 || !out || !seq || max <= 0) return 0;
+    uint32_t now = g_ringSeq, from = *seq;
+    if (now - from > HITRING) from = now - HITRING;
+    int n = 0;
+    for (uint32_t s = from + 1; s - 1 != now && n < max; s++)
+    {
+        HitNote h = g_ring[s % HITRING];
+        if (h.seq != s) continue;
+        out[n * 5] = h.x; out[n * 5 + 1] = h.y; out[n * 5 + 2] = h.z; out[n * 5 + 3] = h.amount; out[n * 5 + 4] = (float)h.boosted;
+        n++;
+    }
+    *seq = now;
     return n;
 }
 HF_MOD_EXPORT LemuenHud* lemuen_hud_state(void)
