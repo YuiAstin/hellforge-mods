@@ -1904,6 +1904,14 @@ static void MpbFire(void)
         int tp = pick[a]; pick[a] = pick[best]; pick[best] = tp;
         uint8_t d[24];
         if (!Descriptor(g_foe[pick[a]], d)) continue;
+        /* 0.4.1b: only an enemy this machine simulates (its descriptor's authority bit): the warp setter crashed twice on
+         * entities numbered 0x400000 and up (4195360, 4195381: not this machine's), 2026-11-05 */
+        if (!(Word(d + 20) & 1) || g_foe[pick[a]] >= 0x400000u)
+        {
+            static unsigned toldSkip;
+            if (toldSkip++ < 8) Log("Pile Bunker follow-up: entity %u (%016llx) is not simulated here: not dragged", g_foe[pick[a]], (unsigned long long)Quad(d));
+            continue;
+        }
         Dragged* r = &g_drag[g_ndrag++];
         r->e = g_foe[pick[a]]; r->unit = Word(d + 12);
         float ang = (float)g_ndrag * 2.39996f, rad = 1.5f + 0.5f * (float)(g_ndrag % 4);   /* a ring around the end */
