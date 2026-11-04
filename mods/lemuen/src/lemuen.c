@@ -922,6 +922,13 @@ HF_MOD_EXPORT int lemuen_marks(unsigned version, float* out, int max)
     }
     return n;
 }
+/* Lost Contact (yui.lost-contact) asks the active kit what it allows: -1 not the active kit; else bit 0 break contact,
+ * bit 1 patrols. Hers: patrols only (Yui: enemies that saw her keep hunting her; patrols are not walked into her) */
+HF_MOD_EXPORT int lost_contact_rules(unsigned version)
+{
+    if (version != 1 || !kb_kit_on) return -1;
+    return 2;
+}
 /* 0.1.6c: her camera, 6 floats (position, forward); 1 when known */
 HF_MOD_EXPORT int lemuen_view(unsigned version, float* out)
 {

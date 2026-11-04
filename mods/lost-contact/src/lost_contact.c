@@ -13,8 +13,12 @@
  * has a target or senses you, it is left alone. With no outpost known yet it is sent away from you.
  *
  * Each runs on, observe (counts only, touches nothing) or off: the ini, or the keys (Ctrl+F9 / Ctrl+F10) in a
- * mission. 0.2.0, the release: patrols only, on by default (Yui: redirecting the patrols away is enough). Break contact
- * is built only with LC_BREAK_CONTACT=1 (research builds), and the debug HUD is not shipped (its source stays in git).
+ * mission. Both on by default; the debug HUD is not shipped (its source stays in git). LC_BREAK_CONTACT=0 builds it
+ * without break contact.
+ *
+ * Character kits: a kit that exports lost_contact_rules(1) (its answer: -1 when it is not the active kit, else a mask,
+ * bit 0 break contact, bit 1 patrols) limits what runs while it acts. Lemuen allows patrols only (Yui: a sniper's
+ * stealth is in not being walked into; enemies that saw her keep hunting her). Checked every 2 s.
  *
  * Layouts (build 25480438): behaviours [game+0x3326740]: map +0x40, count +0x20, records +0x60, 0x1F8 each; +0x18 target,
  * +0x68 the perceiver's key, +0x78 has-target, +0x98 next re-pick. Perception [game+0x3326548]: map +0x30, records
@@ -121,7 +125,7 @@ static int KindOf(uint64_t res)
 }
 /* ---- settings ------------------------------------------------------------------------------------------------------- */
 #ifndef LC_BREAK_CONTACT
-#define LC_BREAK_CONTACT 0   /* 0.2.0: the release has no break contact */
+#define LC_BREAK_CONTACT 1
 #endif
 static int s_breakMode = LC_BREAK_CONTACT ? 1 : 0, s_patrolMode = 1;   /* 0 off, 1 on, 2 observe */
 static float s_loseAfter = 3, s_breakRange = 80;
@@ -183,6 +187,27 @@ static void LoadSettings(void)
         else if (!strcmp(k, "key_patrol")) { if (!ParseKey(v, &s_keyPatrol)) Log("settings: key_patrol \"%s\" is not a key", v); }
     }
     fclose(f);
+}
+/* ---- what the active character kit allows ---------------------------------------------------------------------- */
+typedef int (*RulesFn)(unsigned version);
+static const char* const kKits[] = {"lemuen.dll", "voymastina.dll", "exusiai.dll", "lenna.dll", "leva.dll", "faelynn.dll"};
+static int g_rules = 3;          /* bit 0 break contact, bit 1 patrols */
+static const char* g_rulesBy;
+static void KitRules(void)
+{
+    int rules = 3;
+    const char* by = NULL;
+    for (unsigned i = 0; i < sizeof kKits / sizeof kKits[0]; i++)
+    {
+        HMODULE m = GetModuleHandleA(kKits[i]);
+        RulesFn f = m ? (RulesFn)(void*)GetProcAddress(m, "lost_contact_rules") : NULL;
+        int r = f ? f(1) : -1;
+        if (r >= 0) { rules &= r; by = kKits[i]; }
+    }
+    if (rules != g_rules || by != g_rulesBy)
+        Log("rules: break contact %s, patrols %s (%s)", rules & 1 ? "allowed" : "OFF", rules & 2 ? "allowed" : "OFF",
+            by ? by : "no kit limits them");
+    g_rules = rules; g_rulesBy = by;
 }
 static const char* ModeName(int m) { return m == 1 ? "on" : m == 2 ? "observe" : "off"; }
 
@@ -672,8 +697,10 @@ static void Tick(HfMod* mod, float dt, void* user)
     }
     prevB = kb; prevP = kp;
     static double bcNext, ptNext, told;
-    if (LC_BREAK_CONTACT && s_breakMode && g_now >= bcNext) { bcNext = g_now + 0.25; BreakPass(); }
-    if (s_patrolMode && g_now >= ptNext) { ptNext = g_now + 1.0; PatrolPass(); }
+    static double rulesNext;
+    if (g_now >= rulesNext) { rulesNext = g_now + 2; KitRules(); }
+    if (LC_BREAK_CONTACT && s_breakMode && (g_rules & 1) && g_now >= bcNext) { bcNext = g_now + 0.25; BreakPass(); }
+    if (s_patrolMode && (g_rules & 2) && g_now >= ptNext) { ptNext = g_now + 1.0; PatrolPass(); }
     if (g_now - told >= 5)
     {
         told = g_now;

@@ -19,6 +19,7 @@
   - Memento Mori (S3): an Orbital 120mm shell on each marked enemy.
   - Damage numbers over her hits, by Arknights' rule: only hits her on-hit multipliers raised by half or more (Honesta Missio, the marks).
   - Skill icons on the HUD.
+  - With Lost Contact installed, only its patrol redirect runs while she is the active kit: enemies that saw her keep hunting her.
 
 ### Lenna 0.3.0 · Faelynn 0.4.0
 - Her dash goes the way she is moving, so kiting carries her away from what she shoots at; standing still or just hit, it goes where she faces (dash_move 0: always where she faces).
@@ -28,7 +29,11 @@
 - The lockdown's burst is requested from the game directly, so its lightning starts at the burst instead of running to and from her; the burst has its own arc again. Explosion request adapted from Beelzebub's Strat Pack (with permission); the explosion kick guard from HadePasianax's Explosives Library (MIT); the camera read after Apache - Rise Above (with permission).
 
 ### Lost Contact 0.2.0
-- First release: patrols walk between their own outposts instead of being sent straight at you. A patrol the game aims at you is sent to an outpost at least 100 m from you; one that finds you fights as usual. On, observe (counts in the log only) or off: lost-contact.ini, or Ctrl+F10 in a mission. Host or solo.
+- First release.
+  - Break contact: an enemy after you that, with its squad, has not sensed you for 3 s loses you and searches where it last saw you, instead of tracking you across the map. Seeing you again brings it back. Works against bots and Illuminate; bugs (Stalkers) still find you.
+  - Patrols walk between their own outposts instead of being sent straight at you: a patrol the game aims at you is sent to an outpost at least 100 m from you; one that finds you fights as usual.
+  - Each on, observe (counts in the log only) or off: lost-contact.ini, or Ctrl+F9 / Ctrl+F10 in a mission. Host or solo.
+  - A character kit can limit them while it is the active kit: Lemuen allows patrols only.
 
 ## 2026-11-03: Voymastina 0.4.0
 - First release: the Sinbreaker (her own exosuit, a copy of the EXO-55 Breakthrough, granted every mission outside the loadout; needs the Exo Experts warbond) with her GFL2 kit (Sirius Fall, Eye of the White Mastiff, Pile Bunker), the Pile Bunker Hellbomb follow-up on her shield bash, her AK-15 kit on foot (Rage, Eye with overload, Blood-Curdling Howl) with +50 ergonomics, half reload time and 30% less recoil on her guns, Mastiff's Pledge on her and the suit, and a HUD that follows her kit.

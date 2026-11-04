@@ -4,7 +4,7 @@
   "name": "Lost Contact",
   "version": "0.2.0",
   "icon": "icon.png",
-  "description": "Patrols walk between their own outposts instead of being sent straight at you: a patrol the game aims at you is sent to an outpost away from you, so you meet patrols where they belong, not wherever you go. One that finds you fights as usual. On, observe (counts in the log only) or off: lost-contact.ini, or Ctrl+F10 in a mission. Host or solo.",
+  "description": "Enemies that lose sight of you for a few seconds stop knowing where you are: they search where they last saw you instead of tracking you across the map. Patrols walk between their own outposts instead of being sent straight at you; one that finds you fights as usual. Each on, observe (counts in the log only) or off: lost-contact.ini, or Ctrl+F9 / Ctrl+F10 in a mission. A character kit can limit them while it acts (Lemuen: patrols only). Host or solo.",
   "gameplay": true,
   "code": {
     "dll": "lost_contact.dll",
