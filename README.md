@@ -29,6 +29,7 @@ python tools/package.py leva         # ../Releases/leva-<version>.zip, ready for
 ## Tools
 
 - `tools/deploy.py`, `tools/package.py`, `tools/inigen.py`: above.
+- `tools/notes-index/`: hybrid search (MiniLM + keywords) over the research notes, as a CLI and an MCP server for the Claude desktop app ([README](tools/notes-index/README.md)).
 - `tools/hotreload/`: an experimental hot-reload host (a fixed "socket" mod that reloads a mod's logic DLL while the game runs). Untested in game.
 
 ## Docs and probes
