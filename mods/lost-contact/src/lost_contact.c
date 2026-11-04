@@ -716,11 +716,11 @@ static void Options(void)
 {
     const Hd2ModOptionsApi* api = hd2_mod_options();
     if (!api) return;
+    /* (at most 400 characters: the menu refuses longer descriptions) */
     static const char* const kText =
-        "Break contact: an enemy that loses sight of you stops tracking you and searches where it last saw you. Patrols: a "
-        "patrol sent at you walks to an outpost away from you instead. A character kit can turn one off while it is your "
-        "active kit (Lemuen: patrols only, so enemies that saw her keep hunting her); turn Character kits can limit off to "
-        "keep both as set here. The two Now rows show what runs. Choices here are saved beside the game's settings.";
+        "Break contact: an enemy that loses sight of you stops tracking you. Patrols rerouted: a patrol sent at you walks "
+        "to an outpost away from you. A character kit can turn one off while it is your active kit (Lemuen: patrols only). "
+        "Turn Character kits can limit off to keep both as set here. The Now rows show what runs.";
     if (!g_optsDone)
     {
         Hd2ModOption rows[5] = {

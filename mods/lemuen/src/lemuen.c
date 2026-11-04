@@ -926,7 +926,9 @@ HF_MOD_EXPORT int lemuen_marks(unsigned version, float* out, int max)
  * bit 1 patrols. Hers: patrols only (Yui: enemies that saw her keep hunting her; patrols are not walked into her) */
 HF_MOD_EXPORT int lost_contact_rules(unsigned version)
 {
-    if (version != 1 || !kb_kit_on) return -1;
+    if (version != 1) return -1;
+    /* in a mission, this mission's answer; on the ship, the kit picked for the next one */
+    if (!(g_inMission ? kb_kit_on : KitActive())) return -1;
     return 2;
 }
 /* 0.1.6c: her camera, 6 floats (position, forward); 1 when known */
