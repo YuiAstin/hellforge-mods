@@ -2,8 +2,8 @@
   "format": 1,
   "id": "yui.stim-probe",
   "name": "Stim Probe (research)",
-  "version": "0.1.0",
-  "description": "Research for Executor (no self-stim, but stimming others): logs your Helldiver's action starts, abilities, inventory counts and heals. Log only, changes nothing. Throw a grenade, stim yourself hurt and at full health, take a resupply. Host or solo. Turn off when done.",
+  "version": "0.2.0",
+  "description": "Research for Executor (no self-stim, but stimming others): logs your Helldiver's action starts, abilities, inventory counts and heals; changes nothing in the game. The test runs itself 10 s after you land (Ctrl+F12 again any time): it throws a grenade, hurts your left arm a little, stims you, and stims again at full health. Keys in stim-probe.ini. Stand somewhere safe. Host or solo. Turn off when done.",
   "gameplay": false,
   "code": {
     "dll": "stim_probe.dll",

@@ -10,9 +10,12 @@
  *   every update  the local Helldiver's inventory record and counts row ([game+0x3326738]: map +0x28, records +0x50,
  *                 0x30 each, counts +0x58, 8 each; counts +0 is the grenades), each change with the update number
  *   every heal    HF_ON_HEAL's fields
- * Test: throw a grenade (the control: counts +0 drops), get hurt and stim yourself, stim at full health, take a
- * resupply; a Supply Pack used on yourself if you have one (ability 2629, a known control). Co-op later: stim a hurt
- * teammate, and be stimmed.
+ * 0.2.0, the test runs itself: 10 s after you land (or Ctrl+F12 again any time), it presses the grenade key
+ * (a control: counts +0 must drop), hurts your left arm a little (HellForge's injure), presses the stim key (a
+ * self-stim, hurt), waits, presses it again (a stim at full health), and logs "test done". Keys: stim-probe.ini,
+ * key_grenade and key_stim (default G and V, the game's defaults: set yours if you rebound them). Stand somewhere
+ * safe; throw the grenade away from you (it is thrown where you look). Also: take a resupply, and a Supply Pack on
+ * yourself if you have one (ability 2629, a known control). Co-op later: stim a hurt teammate, and be stimmed.
  * Credit: the action pipeline, the context layout and the inventory layout are HD2Runtime's research (SkyeShade); the
  * two pins are HellForge's own (actions.c, abilities.c). Nothing of their code is copied. */
 #include <stdint.h>
@@ -23,7 +26,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.0"
+#define VERSION "0.2.0"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game;
@@ -140,6 +143,62 @@ static void Inventory(void)
     have = 1;
 }
 
+/* ---- 0.2.0: the self-running test ---------------------------------------------------------------------------------- */
+static int s_keyGrenade = 'G', s_keyStim = 'V';
+static void LoadKeys(void)
+{
+    char path[MAX_PATH * 2], line[128];
+    snprintf(path, sizeof path, "%s\\stim-probe.ini", hf->mod_folder(self));
+    FILE* f = fopen(path, "r");
+    if (!f) return;
+    while (fgets(line, sizeof line, f))
+    {
+        char k[32], v[32];
+        if (sscanf(line, " %31[a-z_] = %31s", k, v) != 2) continue;
+        int vk = 0;
+        if ((v[0] == 'F' || v[0] == 'f') && v[1] >= '1' && v[1] <= '9') vk = VK_F1 + atoi(v + 1) - 1;
+        else if (v[0] && !v[1]) vk = (v[0] >= 'a' && v[0] <= 'z') ? v[0] - 32 : v[0];
+        if (!vk) continue;
+        if (!strcmp(k, "key_grenade")) s_keyGrenade = vk;
+        else if (!strcmp(k, "key_stim")) s_keyStim = vk;
+    }
+    fclose(f);
+}
+/* a key as the keyboard sends it (scan code: the game reads raw input) */
+static void Key(int vk, int down)
+{
+    INPUT in;
+    memset(&in, 0, sizeof in);
+    in.type = INPUT_KEYBOARD;
+    in.ki.wScan = (WORD)MapVirtualKeyA((UINT)vk, MAPVK_VK_TO_VSC);
+    in.ki.dwFlags = KEYEVENTF_SCANCODE | (down ? 0 : KEYEVENTF_KEYUP);
+    SendInput(1, &in, sizeof in);
+}
+static double g_t, g_testAt, g_stepAt;
+static int g_step = -1;
+static void Test(void)
+{
+    if (g_step < 0 || g_t < g_stepAt) return;
+    switch (g_step)
+    {
+    case 0: Log("[%llu] TEST: grenade (key %c)", g_update, s_keyGrenade); Key(s_keyGrenade, 1); g_stepAt = g_t + 0.15; break;
+    case 1: Key(s_keyGrenade, 0); g_stepAt = g_t + 4; break;
+    case 2:
+    {
+        int r = hf->injure ? hf->injure(self, HF_LIMB_LEFT_ARM, 25) : 0;
+        Log("[%llu] TEST: left arm hurt by 25 (%s)", g_update, r == 0 ? "done" : "refused");
+        g_stepAt = g_t + 2;
+        break;
+    }
+    case 3: Log("[%llu] TEST: stim, hurt (key %c)", g_update, s_keyStim); Key(s_keyStim, 1); g_stepAt = g_t + 0.15; break;
+    case 4: Key(s_keyStim, 0); g_stepAt = g_t + 6; break;
+    case 5: Log("[%llu] TEST: stim at full health (key %c)", g_update, s_keyStim); Key(s_keyStim, 1); g_stepAt = g_t + 0.15; break;
+    case 6: Key(s_keyStim, 0); g_stepAt = g_t + 6; break;
+    case 7: Log("[%llu] TEST: done (the lines above, from the first TEST, are the run)", g_update); g_step = -2; return;
+    }
+    g_step++;
+}
+
 /* ---- events, the game thread --------------------------------------------------------------------------------------- */
 static void OnWeapon(HfMod* mod, const HfEventInfo* info, void* user)
 {
@@ -166,17 +225,30 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
 }
 static void Tick(HfMod* mod, float dt, void* user)
 {
-    (void)mod; (void)dt; (void)user;
+    (void)mod; (void)user;
     g_update++;
-    if (g_ready != 1 || hf->game_state(self) != HF_STATE_MISSION) return;
+    g_t += dt > 0 && dt < 1 ? dt : 0;
+    static int inMission;
+    int m = g_ready == 1 && hf->game_state(self) == HF_STATE_MISSION;
+    if (m != inMission) { inMission = m; g_step = -1; g_testAt = m ? g_t + 10 : 0; }
+    if (!m) return;
     Inventory();
+    /* the test: 10 s after landing (once she is known), or Ctrl+F12 */
+    if (g_testAt > 0 && g_t >= g_testAt && atomic_load(&g_avatar)) { g_testAt = 0; g_step = 0; g_stepAt = g_t; Log("[%llu] TEST: starting (stand somewhere safe)", g_update); }
+    static int prev;
+    int d = (GetAsyncKeyState(VK_F12) & 0x8000) && (GetAsyncKeyState(VK_CONTROL) & 0x8000);
+    if (d && !prev && g_step < 0) { g_step = 0; g_stepAt = g_t; Log("[%llu] TEST: starting (Ctrl+F12)", g_update); }
+    prev = d;
+    Test();
 }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
     if (!api || api->version < 15 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
-    Log("Stim Probe " VERSION ": log only; your actions, abilities, inventory and heals (Executor's no-self-stim research)");
+    LoadKeys();
+    Log("Stim Probe " VERSION ": log only; your actions, abilities, inventory and heals (Executor's no-self-stim research); the test runs 10 s after landing (grenade %c, stim %c)",
+        s_keyGrenade, s_keyStim);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_HEAL, OnHeal, NULL, 0) &&
              api->on_game_thread(mod, Tick, NULL);
