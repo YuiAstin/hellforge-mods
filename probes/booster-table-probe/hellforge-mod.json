@@ -2,8 +2,8 @@
   "format": 1,
   "id": "yui.booster-table-probe",
   "name": "Booster Table Probe (research)",
-  "version": "0.2.0",
-  "description": "Research only, no gameplay effect: logs the game's booster rows and every instruction that reads them, for adding a new booster, and writes the unpacked game.dll to its folder for offline analysis (about 75 MB; keep it private). Turn off when done.",
+  "version": "0.2.1",
+  "description": "Research only, no gameplay effect: logs the game's booster rows and every instruction that reads them, for adding a new booster, and writes the unpacked game.dll to the session's logs folder for offline analysis (about 75 MB; keep it private). Turn off when done.",
   "gameplay": false,
   "code": {
     "dll": "booster_table_probe.dll",

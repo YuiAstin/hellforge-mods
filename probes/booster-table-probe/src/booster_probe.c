@@ -12,7 +12,7 @@
  *   4. every 8-byte pointer in the data sections that points into the rows;
  *   5. the bytes of the booster-active check (+0x856D40, from PSS) and the booster ownership check (+0x136FDB0, from
  *      Diver Kit and PSS), to read by hand;
- *   6. then writes the unpacked game.dll to game.dll.25480438.dump in this mod's folder, for offline analysis.
+ *   6. then writes the unpacked game.dll to game.dll.25480438.dump in the session's logs folder, for offline analysis.
  * Everything else goes to modloader.log under this mod's name. Turn it off when done. Build 25480438 only. */
 #include <stdint.h>
 #include <stdio.h>
@@ -161,11 +161,13 @@ static void Dump(const char* what, uint32_t rva, uint32_t n)
 
 /* game.dll as it is in memory, laid out by RVA (file offset = RVA), unpacked: code through read_code (the bytes before
  * any hook), the rest through read; a page neither can read is left zero and listed in the log. Written once to
- * <this mod's folder>/game.dll.25480438.dump, skipped if that file is already there. It is the game's code: keep it
+ * <the session's logs folder>/game.dll.25480438.dump, skipped if that file is already there. It is the game's code: keep it
  * on your own disk (the repo's .gitignore leaves *.dump out). */
 static void WriteImage(size_t size)
 {
-    const char* folder = hf->mod_folder(self);
+    /* the session's logs folder: HellForge keeps mod folders read-only while a session runs, and switches off a mod
+     * whose folder gained files */
+    const char* folder = hf->size >= offsetof(HfApi, logs_folder) + sizeof hf->logs_folder ? hf->logs_folder(self) : NULL;
     char path[MAX_PATH * 3];
     wchar_t wide[MAX_PATH * 2];
     if (!folder || !*folder || snprintf(path, sizeof path, "%s\\game.dll." BUILD ".dump", folder) >= (int)sizeof path ||
@@ -250,6 +252,6 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, read_code) + sizeof api->read_code) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
-    api->log(mod, "Booster Table Probe 0.2.0 (research only, no gameplay effect)");
+    api->log(mod, "Booster Table Probe 0.2.1 (research only, no gameplay effect)");
     return 0;
 }
