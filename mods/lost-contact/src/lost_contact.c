@@ -13,7 +13,8 @@
  * has a target or senses you, it is left alone. With no outpost known yet it is sent away from you.
  *
  * Each runs on, observe (counts only, touches nothing) or off: the ini, or the keys (Ctrl+F9 / Ctrl+F10) in a
- * mission; the HUD (hud-src, Bingus Shared Loader and HD2Runtime) shows both modes and their counts.
+ * mission. 0.2.0, the release: patrols only, on by default (Yui: redirecting the patrols away is enough). Break contact
+ * is built only with LC_BREAK_CONTACT=1 (research builds), and the debug HUD is not shipped (its source stays in git).
  *
  * Layouts (build 25480438): behaviours [game+0x3326740]: map +0x40, count +0x20, records +0x60, 0x1F8 each; +0x18 target,
  * +0x68 the perceiver's key, +0x78 has-target, +0x98 next re-pick. Perception [game+0x3326548]: map +0x30, records
@@ -32,7 +33,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.1"
+#define VERSION "0.2.0"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -119,7 +120,10 @@ static int KindOf(uint64_t res)
     return 2;
 }
 /* ---- settings ------------------------------------------------------------------------------------------------------- */
-static int s_breakMode = 1, s_patrolMode = 2;   /* 0 off, 1 on, 2 observe */
+#ifndef LC_BREAK_CONTACT
+#define LC_BREAK_CONTACT 0   /* 0.2.0: the release has no break contact */
+#endif
+static int s_breakMode = LC_BREAK_CONTACT ? 1 : 0, s_patrolMode = 1;   /* 0 off, 1 on, 2 observe */
 static float s_loseAfter = 3, s_breakRange = 80;
 static float s_seekRadius = 50, s_keepAway = 100, s_patrolRange = 300, s_resend = 3;
 typedef struct { int vk, ctrl, shift, alt; char label[24]; } Key;
@@ -167,7 +171,7 @@ static void LoadSettings(void)
         while (*v == ' ' || *v == '\t') v++;
         for (char* e = v + strlen(v) - 1; e >= v && (*e == '\r' || *e == '\n' || *e == ' ' || *e == '\t'); e--) *e = 0;
         double x = atof(v);
-        if (!strcmp(k, "break_mode")) s_breakMode = (int)x >= 0 && (int)x <= 2 ? (int)x : s_breakMode;
+        if (LC_BREAK_CONTACT && !strcmp(k, "break_mode")) s_breakMode = (int)x >= 0 && (int)x <= 2 ? (int)x : s_breakMode;
         else if (!strcmp(k, "lose_after")) s_loseAfter = x >= 0.5 && x <= 60 ? (float)x : s_loseAfter;
         else if (!strcmp(k, "break_range")) s_breakRange = x >= 10 && x <= 500 ? (float)x : s_breakRange;
         else if (!strcmp(k, "patrol_mode")) s_patrolMode = (int)x >= 0 && (int)x <= 2 ? (int)x : s_patrolMode;
@@ -642,7 +646,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         static int tries;
         if (g_now < nextTry) return;
         nextTry = g_now + 3;
-        if (Bind()) { g_ready = 1; Log("ready: break contact %s, patrols %s (%s / %s)", ModeName(s_breakMode), ModeName(s_patrolMode), s_keyBreak.label, s_keyPatrol.label); }
+        if (Bind()) { g_ready = 1; if (LC_BREAK_CONTACT) Log("ready: break contact %s, patrols %s (%s / %s)", ModeName(s_breakMode), ModeName(s_patrolMode), s_keyBreak.label, s_keyPatrol.label); else Log("ready: patrols %s (%s)", ModeName(s_patrolMode), s_keyPatrol.label); }
         else if (++tries >= 10) { g_ready = -1; Log("REFUSED after 10 tries in a mission"); }
         if (g_ready != 1) return;
     }
@@ -650,7 +654,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     static int prevB, prevP;
     static double keyAfter;
     int kb = KeyPressed(&s_keyBreak), kp = KeyPressed(&s_keyPatrol);
-    if (kb && !prevB && g_now >= keyAfter)
+    if (LC_BREAK_CONTACT && kb && !prevB && g_now >= keyAfter)
     {
         keyAfter = g_now + 0.5;
         s_breakMode = s_breakMode == 1 ? 2 : s_breakMode == 2 ? 0 : 1;
@@ -668,7 +672,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     }
     prevB = kb; prevP = kp;
     static double bcNext, ptNext, told;
-    if (s_breakMode && g_now >= bcNext) { bcNext = g_now + 0.25; BreakPass(); }
+    if (LC_BREAK_CONTACT && s_breakMode && g_now >= bcNext) { bcNext = g_now + 0.25; BreakPass(); }
     if (s_patrolMode && g_now >= ptNext) { ptNext = g_now + 1.0; PatrolPass(); }
     if (g_now - told >= 5)
     {
@@ -710,9 +714,13 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     self = mod;
     if (!api || api->version < 15 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
     LoadSettings();
-    Log("Lost Contact " VERSION ": break contact %s (lose after %.0f s, within %.0f m), patrols %s (seek %.0f m, keep away %.0f m); keys %s / %s",
-        ModeName(s_breakMode), (double)s_loseAfter, (double)s_breakRange, ModeName(s_patrolMode), (double)s_seekRadius, (double)s_keepAway,
-        s_keyBreak.label, s_keyPatrol.label);
+    if (LC_BREAK_CONTACT)
+        Log("Lost Contact " VERSION " (research build): break contact %s (lose after %.0f s, within %.0f m), patrols %s (seek %.0f m, keep away %.0f m); keys %s / %s",
+            ModeName(s_breakMode), (double)s_loseAfter, (double)s_breakRange, ModeName(s_patrolMode), (double)s_seekRadius, (double)s_keepAway,
+            s_keyBreak.label, s_keyPatrol.label);
+    else
+        Log("Lost Contact " VERSION ": patrols %s (seek %.0f m, keep away %.0f m); key %s", ModeName(s_patrolMode), (double)s_seekRadius,
+            (double)s_keepAway, s_keyPatrol.label);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) &&
              api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) && api->on_game_thread(mod, Tick, NULL);
