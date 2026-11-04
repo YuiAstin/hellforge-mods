@@ -3,7 +3,7 @@
  *
  *   Persecution (passive): a heavily armoured or tough enemy (armour mark_armour+, or mark_health+ health) that she
  *     keeps in her sights (within mark_cone degrees of her view, mark_range m) for mark_seconds is marked for
- *     mark_last s (renewed while she watches it). Marked enemies take mark_mult times the damage from her.
+ *     mark_last s (0, the default: until a newer mark replaces it or it dies). Marked enemies take mark_mult times the damage from her.
  *   Modus Extraditio (passive): modus_after s after she lands, her shots deal modus_mult times their damage.
  *   Salvē Etiam (key_s1, default Z): with a sniper or marksman rifle in hand, her shots deal s1_mult times their damage
  *     until she reloads.
@@ -56,7 +56,7 @@ KB_ROSTER_EXPORTS(lemuen)
  * ATK, so neither shows one, as her S1 and S3 show none in Arknights. 0 shows every hit */
 static float s_numbersAt = 1.5f;
 static int s_markMax = 5;   /* 0.1.2: at most this many marked at once; a new mark replaces the oldest (Yui) */
-static float s_markRange = 600, s_markCone = 20, s_markSeconds = 6, s_markLast = 30, s_markMult = 1.18f;
+static float s_markRange = 600, s_markCone = 20, s_markSeconds = 6, s_markLast = 0, s_markMult = 1.18f;
 static int s_markArmour = 3, s_markHealth = 750;
 static float s_modusAfter = 20, s_modusMult = 1.10f;
 static float s_s1Cd = 15, s_s1Mult = 3.1f;
@@ -68,7 +68,7 @@ static int s_s3Max = 8, s_s3Shell = 194;
 
 static const KbSetting kSettings[] = {
     KB_F("mark_range", s_markRange, 10, 1000), KB_F("mark_cone", s_markCone, 1, 90), KB_F("mark_seconds", s_markSeconds, 0, 30),
-    KB_F("mark_last", s_markLast, 1, 600), KB_F("mark_mult", s_markMult, 1, 5), KB_I("mark_armour", s_markArmour, 0, 10), KB_I("mark_max", s_markMax, 1, 32), KB_F("numbers_at", s_numbersAt, 0, 20),
+    KB_F("mark_last", s_markLast, 0, 600), KB_F("mark_mult", s_markMult, 1, 5), KB_I("mark_armour", s_markArmour, 0, 10), KB_I("mark_max", s_markMax, 1, 32), KB_F("numbers_at", s_numbersAt, 0, 20),
     KB_I("mark_health", s_markHealth, 0, 100000),
     KB_F("modus_after", s_modusAfter, 0, 600), KB_F("modus_mult", s_modusMult, 1, 3),
     KB_F("s1_cooldown", s_s1Cd, 0, 600), KB_F("s1_mult", s_s1Mult, 1, 20), KB_I("s1_any_gun", s_s1AnyGun, 0, 1),
@@ -88,7 +88,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; combo (Shift+Q). The game still sees the keys too (Shift sprints, R reloads), so pick ones it leaves alone.\n"
                "key_s1 = %s\nkey_s2 = %s\nkey_s3 = %s\n"
                "; Persecution: an enemy with armour mark_armour+ or mark_health+ health she keeps within mark_cone degrees of her\n"
-               "; view (mark_range m) for mark_seconds is marked for mark_last s (renewed while she watches it); marked enemies\n"
+               "; view (mark_range m) for mark_seconds is marked for mark_last s (0: until replaced or killed); marked enemies\n"
                "; take mark_mult times the damage from her. At most mark_max are marked at once: a new mark replaces the oldest.\n"
                "mark_range = %g\nmark_cone = %g\nmark_seconds = %g\nmark_last = %g\nmark_mult = %g\nmark_armour = %d\nmark_health = %d\nmark_max = %d\n"
                "; Modus Extraditio: modus_after s after she lands, her shots deal modus_mult times their damage.\n"
@@ -217,6 +217,7 @@ static WorldFn g_worldId;
 static RayFn g_raycast;
 static float s_sightSlack = 1.5f;
 static unsigned g_blocked, g_clear;
+static uint32_t g_lastWallFilter;
 static uint32_t ActorFilter(uint32_t id, uint32_t unit)
 {
     uint32_t world = id >> 30, layout, stride, key_offset, data_offset, key, index, name = 0;
@@ -242,37 +243,87 @@ static uint32_t UnitOf(uint32_t e)
     uint8_t d[24];
     return Descriptor(e, d) ? Word(d + 12) : 0;
 }
-static int InSight(const float cam[3], const float q[3], uint32_t target)
+/* the units of the enemies she knows (refreshed every 0.25 s): an enemy's or a corpse's body is no wall (0.1.6 counted
+ * bodies whose actor filter it could not read, filter 0, as walls) */
+static uint32_t g_foeUnit[FOES];
+static int g_nfoeUnit;
+static double g_foeUnitAt = -1;
+static int FoeUnit(uint32_t u)
+{
+    if (g_now - g_foeUnitAt > 0.25 || g_foeUnitAt < 0)
+    {
+        g_foeUnitAt = g_now;
+        g_nfoeUnit = 0;
+        for (int k = 0; k < FOES; k++) if (g_foe[k]) { uint32_t fu = UnitOf(g_foe[k]); if (fu) g_foeUnit[g_nfoeUnit++] = fu; }
+    }
+    for (int i = 0; i < g_nfoeUnit; i++) if (g_foeUnit[i] == u) return 1;
+    return 0;
+}
+/* the first thing in the way along a ray (its distance; len + 1 when clear), skipping her, leaves and bodies; *hitUnit
+ * gets the target's unit when the ray meets it first */
+static float FirstWall(uint32_t id, const float from[3], const float dir[3], float len, uint32_t me, uint32_t tu, int* hitTarget)
+{
+    uint8_t hits[16 * 44];
+    memset(hits, 0, sizeof hits);
+    uint32_t n = g_raycast(id, from, dir, len, 2, 1, 0, 0x80000009u, me, hits, 16);
+    if (n > 16) return -1;
+    float best = len + 1;
+    int target = 0;
+    for (uint32_t i = 0; i < n; i++)
+    {
+        float d;
+        memcpy(&d, hits + 44u * i + 24, 4);
+        uint32_t hu = Word(hits + 44u * i + 28);
+        if (!isfinite(d) || d < 0.05f || d >= best || (hu && hu == me)) continue;
+        if (hu && hu == tu) { best = d; target = 1; continue; }
+        uint32_t filt = ActorFilter(Word(hits + 44u * i + 32), hu);
+        if (filt == FILTER_FOLIAGE || (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u || FoeUnit(hu)))) continue;   /* leaves; bodies */
+        best = d; target = 0;
+        g_lastWallFilter = filt;
+    }
+    if (hitTarget) *hitTarget = target;
+    return best;
+}
+/* 0.1.6b: in sight if any of three rays gets there: to her chest, to her head, or (for an enemy under the crosshair,
+ * within 4 degrees) the aim itself reaching the enemy or past it. 0.1.6 tried the chest alone and refused enemies Yui
+ * could plainly see */
+static int InSight(const float cam[3], const float fwd[3], const float q[3], uint32_t target)
 {
     if (!s_sight || !g_raycast || !g_worldId) return 1;
     uintptr_t world = Pointer(game + 0x346BFA0);
     if (!world) return 1;
     uint32_t id = g_worldId((const void*)world);
     if (id >= 4) return 1;
-    float dir[3] = {q[0] - cam[0], q[1] - cam[1], q[2] - cam[2]};
-    float len = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
-    if (!(len > s_sightSlack + 0.5f)) return 1;
-    for (int k = 0; k < 3; k++) dir[k] /= len;
     uint32_t me = UnitOf(atomic_load(&g_avatar)), tu = UnitOf(target);
-    uint8_t hits[16 * 44];
-    memset(hits, 0, sizeof hits);
-    uint32_t n = g_raycast(id, cam, dir, len, 2, 1, 0, 0x80000009u, me, hits, 16);
-    if (n > 16) return 1;
-    for (uint32_t i = 0; i < n; i++)
+    float wall = 0, dist = 0;
+    for (int r = 0; r < 3; r++)
     {
-        float d;
-        memcpy(&d, hits + 44u * i + 24, 4);
-        uint32_t hu = Word(hits + 44u * i + 28);
-        if (!isfinite(d) || d < 0.05f || d > len - s_sightSlack || (hu && (hu == me || hu == tu))) continue;
-        uint32_t filt = ActorFilter(Word(hits + 44u * i + 32), hu);
-        if (filt == FILTER_FOLIAGE || (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u))) continue;   /* leaves; bodies */
-        g_blocked++;
-        static unsigned told;
-        if (told++ < 4) Log("line of sight: entity %u hidden at %.0f m (in the way at %.1f m, filter %08x)", target, len, d, filt);
-        return 0;
+        float to[3] = {q[0], q[1], q[2] + (r == 1 ? 0.7f : 0)}, dir[3], len;
+        if (r < 2)
+        {
+            for (int k = 0; k < 3; k++) dir[k] = to[k] - cam[k];
+            len = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+            if (!(len > s_sightSlack + 0.5f)) return 1;
+            for (int k = 0; k < 3; k++) dir[k] /= len;
+        }
+        else
+        {
+            float d;
+            if (Off(cam, fwd, q, &d) > 4) break;
+            memcpy(dir, fwd, sizeof dir);
+            len = d + 2;
+        }
+        int hitTarget = 0;
+        float w = FirstWall(id, cam, dir, len, me, tu, &hitTarget);
+        if (w < 0) return 1;
+        float reach = r < 2 ? len : len - 2;
+        if (hitTarget || w > reach - s_sightSlack) { g_clear++; return 1; }
+        if (r == 0) { wall = w; dist = len; }
     }
-    g_clear++;
-    return 1;
+    g_blocked++;
+    static unsigned told;
+    if (told++ < 6) Log("line of sight: entity %u hidden at %.0f m (chest ray stopped at %.1f m, filter %08x; head and crosshair rays too)", target, dist, wall, g_lastWallFilter);
+    return 0;
 }
 
 /* ---- Persecution: her marks --------------------------------------------------------------------------------------- */
@@ -307,7 +358,7 @@ static void MarkFrame(void)
         float d;
         if (Off(cam, fwd, q, &d) > s_markCone || d > s_markRange) continue;
         if (!HealthOf(e, &hp, &life) || hp <= 0 || !Elite(e, g_foeRes[k])) continue;
-        if (!InSight(cam, q, e)) continue;                                             /* 0.1.6: not through walls */
+        if (!InSight(cam, fwd, q, e)) continue;                                             /* 0.1.6: not through walls */
         Mark* m = MarkOf(e);
         if (!m)
         {
@@ -337,7 +388,7 @@ static void MarkFrame(void)
                 static unsigned told;
                 if (told++ < 10) Log("Persecution: entity %u (%016llx) marked", e, (unsigned long long)m->res);
             }
-            m->until = g_now + s_markLast;
+            m->until = s_markLast > 0 ? g_now + s_markLast : 1e18;   /* 0.1.6b: mark_last 0, a mark stands until it is replaced or dies (Yui) */
         }
     }
 }
@@ -448,7 +499,7 @@ static void ScopeFrame(double dt)
         float d;
         if (!e || !TargetPos(e, g_foeRes[k], q)) continue;
         float o = Off(cam, fwd, q, &d);
-        if (o < bestOff && d <= s_s2Range && InSight(cam, q, e)) { bestOff = o; best = e; }   /* 0.1.6: in sight only */
+        if (o < bestOff && d <= s_s2Range && InSight(cam, fwd, q, e)) { bestOff = o; best = e; }   /* 0.1.6: in sight only */
     }
     if (best == g_s2Target) { if (best) { g_s2Held += dt; g_s2Off = 0; } return; }
     if (!best && g_s2Target)
@@ -473,7 +524,10 @@ static void SpotsFrame(void)
     for (int i = 0; i < MARKS && n < 32; i++)
     {
         Mark* m = &g_marks[i];
-        if (!m->e || m->until <= g_now || !TargetPos(m->e, m->res, q)) continue;
+        if (!m->e || m->until <= g_now) continue;
+        int32_t hp;
+        uint32_t life;
+        if (!TargetPos(m->e, m->res, q) || !HealthOf(m->e, &hp, &life) || hp <= 0) { m->until = 0; continue; }   /* 0.1.6b: dead or gone, its place is free */
         g_spots[n].x = q[0]; g_spots[n].y = q[1]; g_spots[n].z = q[2];
         g_spots[n].left = (float)(m->until - g_now);
         g_spots[n].heavy = ArmourOf(m->res) >= 4;
