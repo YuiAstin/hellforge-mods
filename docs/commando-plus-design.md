@@ -26,3 +26,15 @@ so each player picks how much help they want. Host or solo.
 ## Not in scope
 
 The timer and the free Resupply are small. The rest waits for the probe.
+
+## Mission Probe findings (2026-11-04, a normal mission then a Commando mission)
+
+- **The Super Destroyer call-in is a stratagem with uses.** The Commando mission's record had a slot the normal one didn't:
+  type 123, Call In Destroyer, `uses 1`, granted. So #3 (`extra_calls`) is the uses field on that slot (raise it to 2), or
+  a second grant through the same path as #2. No mission rule is needed.
+- The Commando mission also had type 42, Dropoff Hellbomb (unlimited, granted), which the normal mission didn't.
+- Both missions: Reinforcement Beacon (124, unlimited) and SOS Beacon (145, 1 use) are on the record too, so the
+  Reinforce slot is type 124 and its count is not this record's uses field (unlimited 0 here): reinforcements are
+  counted elsewhere.
+- The hive mind was not logged in either mission (Mission Probe 0.1.0 cleared its list as the mission started; fixed in 0.1.1).
+
