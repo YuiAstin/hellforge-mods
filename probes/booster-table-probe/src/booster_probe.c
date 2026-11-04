@@ -11,8 +11,9 @@
  *      imul by 56 (6B ?? 38 / 69 ?? 38 00 00 00) within 48 bytes before it;
  *   4. every 8-byte pointer in the data sections that points into the rows;
  *   5. the bytes of the booster-active check (+0x856D40, from PSS) and the booster ownership check (+0x136FDB0, from
- *      Diver Kit and PSS), to read by hand.
- * Everything goes to modloader.log under this mod's name. Turn it off when done. Build 25480438 only. */
+ *      Diver Kit and PSS), to read by hand;
+ *   6. then writes the unpacked game.dll to game.dll.25480438.dump in this mod's folder, for offline analysis.
+ * Everything else goes to modloader.log under this mod's name. Turn it off when done. Build 25480438 only. */
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -158,6 +159,42 @@ static void Dump(const char* what, uint32_t rva, uint32_t n)
     }
 }
 
+/* game.dll as it is in memory, laid out by RVA (file offset = RVA), unpacked: code through read_code (the bytes before
+ * any hook), the rest through read; a page neither can read is left zero and listed in the log. Written once to
+ * <this mod's folder>/game.dll.25480438.dump, skipped if that file is already there. It is the game's code: keep it
+ * on your own disk (the repo's .gitignore leaves *.dump out). */
+static void WriteImage(size_t size)
+{
+    const char* folder = hf->mod_folder(self);
+    char path[MAX_PATH * 3];
+    wchar_t wide[MAX_PATH * 2];
+    if (!folder || !*folder || snprintf(path, sizeof path, "%s\\game.dll." BUILD ".dump", folder) >= (int)sizeof path ||
+        !MultiByteToWideChar(CP_UTF8, 0, path, -1, wide, MAX_PATH * 2))
+    {
+        hf->log(self, "dump: no path");
+        return;
+    }
+    if (GetFileAttributesW(wide) != INVALID_FILE_ATTRIBUTES) { hf->log(self, "dump: already there (%s)", path); return; }
+    HANDLE f = CreateFileW(wide, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f == INVALID_HANDLE_VALUE) { hf->log(self, "dump: cannot create %s", path); return; }
+    static uint8_t page[0x1000];
+    unsigned missing = 0;
+    int ok = 1;
+    for (size_t o = 0; o < size && ok; o += sizeof page)
+    {
+        if (hf->read_code(game + o, page, sizeof page) && hf->read(game + o, page, sizeof page))
+        {
+            memset(page, 0, sizeof page);
+            if (++missing <= 64) hf->log(self, "  dump: page +0x%07X unreadable, zeroed", (unsigned)o);
+        }
+        DWORD put = 0;
+        ok = WriteFile(f, page, sizeof page, &put, NULL) && put == sizeof page;
+    }
+    CloseHandle(f);
+    if (!ok) { DeleteFileW(wide); hf->log(self, "dump: write failed, removed"); return; }
+    hf->log(self, "dump: %s, 0x%zX bytes, %u unreadable pages", path, size, missing);
+}
+
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {
     (void)mod; (void)event; (void)user;
@@ -201,6 +238,9 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     Dump("booster active (PSS)", 0x856D40, 0x80);
     Dump("booster owned (Diver Kit, PSS)", 0x136FDB0, 0x80);
     hf->log(self, "done: %u code sites. Send modloader.log.", g_sites);
+
+    /* 6. the unpacked image, for offline analysis */
+    WriteImage(size);
 }
 
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
@@ -210,6 +250,6 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, read_code) + sizeof api->read_code) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
-    api->log(mod, "Booster Table Probe 0.1.0 (research only, no gameplay effect)");
+    api->log(mod, "Booster Table Probe 0.2.0 (research only, no gameplay effect)");
     return 0;
 }
