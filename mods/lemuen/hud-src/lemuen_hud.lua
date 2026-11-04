@@ -656,6 +656,35 @@ local function numbers_draw(d, dt, v)
     end
 end
 
+-- 0.1.6: why nothing was drawn. 0.1.5's test drew no marker and no number with marks standing and boosted hits, and
+-- logged nothing: every few seconds in a mission (12 times at most) this logs how far the drawing got
+local DG = {next = 5, told = 0, view_nil = 0, view_ok = 0}
+local function diag(v)
+    if DG.told >= 12 or mk_t < DG.next then return end
+    DG.next = mk_t + 5
+    DG.told = DG.told + 1
+    local parts = {('view %s (ok %d, none %d)'):format(v and 'yes' or 'no', DG.view_ok, DG.view_nil)}
+    parts[#parts + 1] = 'marks fn ' .. (MK.fn and 'yes' or 'no') .. (MK.failed and ' (failed)' or '')
+    parts[#parts + 1] = 'hits fn ' .. (HN.fn and 'yes' or 'no') .. ', seq ' .. tostring(HN.seq[0]) .. ', live ' .. #HN.live
+    if MK.fn then
+        local n = MK.fn(1, MK.buf, 32)
+        parts[#parts + 1] = 'marks ' .. tostring(n)
+        if n > 0 and v then
+            local x, y, z = MK.buf[0], MK.buf[1], MK.buf[2] + 2.2
+            local ax, ay, az = x - v.cx, y - v.cy, z - v.cz
+            local ahead = ax * v.fx + ay * v.fy + az * v.fz
+            local okw, r = pcall(v.s.Camera.world_to_screen, v.c, v.s.Vector3(x, y, z))
+            local rx, ry, rz
+            if okw and r ~= nil then rx, ry, rz = v.s.Vector3.to_elements(r) end
+            local sx, sy = project(v, x, y, z)
+            parts[#parts + 1] = ('first mark at %.1f %.1f %.1f, camera %.1f %.1f %.1f, ahead %.1f m, raw %s, drawn at %s'):format(
+                x, y, z, v.cx, v.cy, v.cz, ahead, okw and (rx and ('%.1f %.1f %.1f'):format(rx, ry, rz or 0) or tostring(r)) or ('error ' .. tostring(r)),
+                sx and ('%.0f %.0f'):format(sx, sy) or 'nowhere (behind or off screen)')
+        end
+    end
+    log('[Lemuen HUD] draw check: ' .. table.concat(parts, '; '))
+end
+
 local overlay = hd2.ui.overlay({id = 'kit', owner = OWNER})
 overlay:draw(function(d, dt)
     dt = tonumber(dt) or 0
@@ -669,7 +698,12 @@ overlay:draw(function(d, dt)
     if state.in_mission == 0 then return end
     mk_t = mk_t + dt
     local okV, v = pcall(view, d)
-    if not okV then v = nil end
+    if not okV then
+        if not DG.view_err then DG.view_err = true; log('[Lemuen HUD] view failed: ' .. tostring(v)) end
+        v = nil
+    end
+    if v then DG.view_ok = DG.view_ok + 1 else DG.view_nil = DG.view_nil + 1 end
+    pcall(diag, v)
     if v then
         local okM, errM = pcall(marks_draw, d, dt, v)
         if not okM then MK.failed = true; log('[Lemuen HUD] markers failed, off for this session: ' .. tostring(errM)) end

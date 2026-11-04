@@ -34,7 +34,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.5"
+#define VERSION "0.1.6"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -61,6 +61,7 @@ static int s_markArmour = 3, s_markHealth = 750;
 static float s_modusAfter = 20, s_modusMult = 1.10f;
 static float s_s1Cd = 15, s_s1Mult = 3.1f;
 static int s_s1AnyGun = 0;
+static int s_sight = 1;   /* 0.1.6: marks and Honesta Missio's lock need a clear view (0: through walls, as 0.1.5) */
 static float s_s2Cd = 20, s_s2Min = 1.8f, s_s2Max = 4.25f, s_s2Hold = 3.5f, s_s2Cone = 4, s_s2Range = 600, s_fpDistance = 0.45f;
 static float s_s3Cd = 90, s_s3Every = 0.35f, s_s3Height = 120;
 static int s_s3Max = 8, s_s3Shell = 194;
@@ -72,7 +73,7 @@ static const KbSetting kSettings[] = {
     KB_F("modus_after", s_modusAfter, 0, 600), KB_F("modus_mult", s_modusMult, 1, 3),
     KB_F("s1_cooldown", s_s1Cd, 0, 600), KB_F("s1_mult", s_s1Mult, 1, 20), KB_I("s1_any_gun", s_s1AnyGun, 0, 1),
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("s2_min", s_s2Min, 1, 20), KB_F("s2_max", s_s2Max, 1, 20), KB_F("s2_hold", s_s2Hold, 0.1, 30),
-    KB_F("s2_cone", s_s2Cone, 0.5, 30), KB_F("s2_range", s_s2Range, 10, 1000), KB_F("first_person", s_fpDistance, 0.1, 2),
+    KB_F("s2_cone", s_s2Cone, 0.5, 30), KB_I("line_of_sight", s_sight, 0, 1), KB_F("s2_range", s_s2Range, 10, 1000), KB_F("first_person", s_fpDistance, 0.1, 2),
     KB_F("s3_cooldown", s_s3Cd, 0, 3600), KB_F("s3_every", s_s3Every, 0.05, 5), KB_F("s3_height", s_s3Height, 20, 500),
     KB_I("s3_max", s_s3Max, 1, 32), KB_I("s3_shell", s_s3Shell, 1, 100000),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
@@ -106,11 +107,13 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "hp_mult = 1.1\nstamina_mult = 1\nhellbomb_on_exhaustion = 0\n"
                "; Damage numbers (the HUD): shown for a hit her on-hit multipliers (mark, Honesta Missio) raised numbers_at times or\n"
                "; more, as Arknights' red numbers (Modus and Salve Etiam are ATK buffs, the shells her ATK: no number). 0: every hit.\n"
-               "numbers_at = %g\n",
+               "numbers_at = %g\n"
+               "; Line of sight: 1, marks and Honesta Missio's lock only on enemies she can see (no walls or terrain between);\n"
+               "; 0 through walls (0.1.5's way).\nline_of_sight = %d\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_markRange, (double)s_markCone, (double)s_markSeconds,
             (double)s_markLast, (double)s_markMult, s_markArmour, s_markHealth, s_markMax, (double)s_modusAfter, (double)s_modusMult, (double)s_s1Cd,
             (double)s_s1Mult, s_s1AnyGun, (double)s_s2Cd, (double)s_s2Min, (double)s_s2Max, (double)s_s2Hold, (double)s_s2Cone,
-            (double)s_s2Range, (double)s_fpDistance, (double)s_s3Cd, (double)s_s3Every, (double)s_s3Height, s_s3Max, s_s3Shell, (double)s_numbersAt);
+            (double)s_s2Range, (double)s_fpDistance, (double)s_s3Cd, (double)s_s3Every, (double)s_s3Height, s_s3Max, s_s3Shell, (double)s_numbersAt, s_sight);
 }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
@@ -203,6 +206,75 @@ static float Off(const float cam[3], const float fwd[3], const float p[3], float
     return acosf(c < -1 ? -1 : c > 1 ? 1 : c) * 57.29578f;
 }
 
+
+/* ---- 0.1.6: line of sight. 0.1.5 marked and locked through walls and terrain (its pick was a cone only). The game's
+ * raycast, as Voymastina's teleport calls it (Helldiver Survival Rework's cover check), from her camera to the target's
+ * chest: blocked by anything but leaves, bodies (enemies, corpses), her and the target itself, ignoring the last 1.5 m
+ * (the target's own cover lip). Without the raycast (another build) everything counts as in sight, as before. */
+typedef uint32_t (*WorldFn)(const void*);
+typedef uint32_t (*RayFn)(uint32_t, const void*, const void*, float, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, void*, uint32_t);
+static WorldFn g_worldId;
+static RayFn g_raycast;
+static float s_sightSlack = 1.5f;
+static unsigned g_blocked, g_clear;
+static uint32_t ActorFilter(uint32_t id, uint32_t unit)
+{
+    uint32_t world = id >> 30, layout, stride, key_offset, data_offset, key, index, name = 0;
+    uintptr_t pool = exe + 0x2369B00 + 64u * ((id >> 28 & 3) + 10 * world);
+    uint8_t header[56], record[40], body[160];
+    if (!ReadAt(pool, header, 56)) return 0;
+    layout = Word(header + 28); stride = layout & 65535; key_offset = layout >> 16 & 255; data_offset = layout >> 24;
+    index = id & Word(header + 40);
+    if (index >= Word(header + 36) || !(id & Word(header + 52)) || stride < 40 || stride > 512 || key_offset + 4 > stride || data_offset + 40 > stride) return 0;
+    uintptr_t entry = (uintptr_t)Quad(header) + (uintptr_t)index * stride;
+    if (!ReadAt(entry + key_offset, &key, 4) || key != id || !ReadAt(entry + data_offset, record, 40) || Word(record + 12) != unit || !(Word(record + 16) & 1)) return 0;
+    uintptr_t physics = Pointer(exe + 0x27BA8A8 + 176u * world), bodies = physics ? Pointer(physics + 24) : 0;
+    uint32_t body_index = Word(record + 20) & 0xFFFFFF;
+    if (!bodies || body_index >= 262144 || !ReadAt(bodies + 160u * body_index, body, 160) || Word(body + 144) != id || Word(body + 148) != unit) return 0;
+    uintptr_t filters = Pointer(exe + 0x27C5E48), names;
+    uint32_t count, filter = Word(body + 108) & 127;
+    if (!filters || !ReadAt(filters + 248, &count, 4) || count > 128 || filter >= count || !(names = Pointer(filters + 256)) || !ReadAt(names + 4u * filter, &name, 4)) return 0;
+    return name;
+}
+#define FILTER_FOLIAGE 0x04A8FBF9u
+static uint32_t UnitOf(uint32_t e)
+{
+    uint8_t d[24];
+    return Descriptor(e, d) ? Word(d + 12) : 0;
+}
+static int InSight(const float cam[3], const float q[3], uint32_t target)
+{
+    if (!s_sight || !g_raycast || !g_worldId) return 1;
+    uintptr_t world = Pointer(game + 0x346BFA0);
+    if (!world) return 1;
+    uint32_t id = g_worldId((const void*)world);
+    if (id >= 4) return 1;
+    float dir[3] = {q[0] - cam[0], q[1] - cam[1], q[2] - cam[2]};
+    float len = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+    if (!(len > s_sightSlack + 0.5f)) return 1;
+    for (int k = 0; k < 3; k++) dir[k] /= len;
+    uint32_t me = UnitOf(atomic_load(&g_avatar)), tu = UnitOf(target);
+    uint8_t hits[16 * 44];
+    memset(hits, 0, sizeof hits);
+    uint32_t n = g_raycast(id, cam, dir, len, 2, 1, 0, 0x80000009u, me, hits, 16);
+    if (n > 16) return 1;
+    for (uint32_t i = 0; i < n; i++)
+    {
+        float d;
+        memcpy(&d, hits + 44u * i + 24, 4);
+        uint32_t hu = Word(hits + 44u * i + 28);
+        if (!isfinite(d) || d < 0.05f || d > len - s_sightSlack || (hu && (hu == me || hu == tu))) continue;
+        uint32_t filt = ActorFilter(Word(hits + 44u * i + 32), hu);
+        if (filt == FILTER_FOLIAGE || (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u))) continue;   /* leaves; bodies */
+        g_blocked++;
+        static unsigned told;
+        if (told++ < 4) Log("line of sight: entity %u hidden at %.0f m (in the way at %.1f m, filter %08x)", target, len, d, filt);
+        return 0;
+    }
+    g_clear++;
+    return 1;
+}
+
 /* ---- Persecution: her marks --------------------------------------------------------------------------------------- */
 #define MARKS 64
 typedef struct Mark { uint32_t e; uint64_t res; double seen, last, until, made; } Mark;
@@ -235,6 +307,7 @@ static void MarkFrame(void)
         float d;
         if (Off(cam, fwd, q, &d) > s_markCone || d > s_markRange) continue;
         if (!HealthOf(e, &hp, &life) || hp <= 0 || !Elite(e, g_foeRes[k])) continue;
+        if (!InSight(cam, q, e)) continue;                                             /* 0.1.6: not through walls */
         Mark* m = MarkOf(e);
         if (!m)
         {
@@ -286,6 +359,10 @@ static int Rifle(uint64_t res)
                                        HF_ENTITY_R2_AMENDMENT, HF_ENTITY_R2124_CONSTITUTION, HF_ENTITY_R40K_HOTSHOT_MARKSMAN_RIFLE,
                                        HF_ENTITY_PLAS39_ACCELERATOR_RIFLE, HF_ENTITY_RS422_RAILGUN};
     for (unsigned i = 0; i < sizeof kRifles / sizeof kRifles[0]; i++) if (res == kRifles[i]) return 1;
+    /* 0.1.6: other mods' marksman rifles with rounds of their own (no vanilla round to match): giblett's Scope of
+     * Authority R-40 Sightliner (a copy of the R-63CS, round 353 in Yui's 2026-11-04 test, refused by 0.1.5) */
+    static const uint64_t kModRifles[] = {0x41F2DEF484634B59ull};
+    for (unsigned i = 0; i < sizeof kModRifles / sizeof kModRifles[0]; i++) if (res == kModRifles[i]) return 1;
     /* 0.1.2: by its round as well, so a mod's copy of a sniper (a new resource, the same round) counts too: 0.1.1's test
      * refused S1 five times with a rifle the list did not name. The APW-1 (a support weapon) is known this way too */
     uint32_t r = RoundOf(res);
@@ -370,7 +447,7 @@ static void ScopeFrame(double dt)
         float d;
         if (!e || !TargetPos(e, g_foeRes[k], q)) continue;
         float o = Off(cam, fwd, q, &d);
-        if (o < bestOff && d <= s_s2Range) { bestOff = o; best = e; }
+        if (o < bestOff && d <= s_s2Range && InSight(cam, q, e)) { bestOff = o; best = e; }   /* 0.1.6: in sight only */
     }
     if (best == g_s2Target) { if (best) { g_s2Held += dt; g_s2Off = 0; } return; }
     if (!best && g_s2Target)
@@ -611,6 +688,14 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     game = g;
     exe = x;
     HitsInstall("own-blast guard");
+    if (hf->code_matches(exe + 0x79F860, "33 c0 4c 8d 05 c7 b2 01 02 0f 1f 80 00 00 00 00 49 39 0c c0 74 0c ff c0 83 f8 04 75 f3") &&
+        hf->code_matches(exe + 0x7F4590, "48 8b c4 f3 0f 11 58 20 89 48 08 55 53 56 57 41 54 41 55 41 56 41 57 48"))
+    {
+        g_worldId = (WorldFn)(exe + 0x79F860);
+        g_raycast = (RayFn)(exe + 0x7F4590);
+        Log("line of sight ready (the game's raycast): marks and Honesta Missio's lock need a clear view");
+    }
+    else Log("line of sight off: the raycast is not the reviewed code (marks and locks go through walls)");
     g_staminaOk = hf->code_matches(game + 0xA50E2D, "f3 42 0f 11 8c 11 54 78 54 00");
 }
 
