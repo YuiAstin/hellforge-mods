@@ -1862,6 +1862,16 @@ typedef struct { uint32_t actor; float dir[3]; } Pushed;
 static Pushed g_push[256];
 static int g_npush;
 static double g_pushUntil;
+/* 0.4.1b: whether an enemy moves on its own: it has an active navigation record ([game+0x3326418]: map +0x30, records
+ * +0x50, 0xA8 each, +0x10 active; Lost Contact's layout). A strider's pilot or seat rides its walker and has none, and the
+ * warp setter crashed on one (entity 1414, f96257fcae258caa, 2026-11-05) */
+static int Walks(uint32_t e)
+{
+    uintptr_t m = Pointer(game + 0x3326418), recs;
+    uint32_t index, active = 0;
+    if (!m || !Lookup(m + 0x30, e, 1048576, &index) || index > 65535 || !(recs = Pointer(m + 0x50))) return 0;
+    return ReadAt(recs + 0xA8u * index + 0x10, &active, 4) && (active & 0xFF) != 0;
+}
 static void MpbFire(void)
 {
     float p[3], dir[2], down[3] = {0, 0, -1};
@@ -1906,10 +1916,11 @@ static void MpbFire(void)
         if (!Descriptor(g_foe[pick[a]], d)) continue;
         /* 0.4.1b: only an enemy this machine simulates (its descriptor's authority bit): the warp setter crashed twice on
          * entities numbered 0x400000 and up (4195360, 4195381: not this machine's), 2026-11-05 */
-        if (!(Word(d + 20) & 1) || g_foe[pick[a]] >= 0x400000u)
+        if (!(Word(d + 20) & 1) || g_foe[pick[a]] >= 0x400000u || !Walks(g_foe[pick[a]]))
         {
             static unsigned toldSkip;
-            if (toldSkip++ < 8) Log("Pile Bunker follow-up: entity %u (%016llx) is not simulated here: not dragged", g_foe[pick[a]], (unsigned long long)Quad(d));
+            if (toldSkip++ < 8) Log("Pile Bunker follow-up: entity %u (%016llx) %s: not dragged", g_foe[pick[a]], (unsigned long long)Quad(d),
+                                    Walks(g_foe[pick[a]]) ? "is not simulated here" : "has no navigation record of its own (a rider)");
             continue;
         }
         Dragged* r = &g_drag[g_ndrag++];
