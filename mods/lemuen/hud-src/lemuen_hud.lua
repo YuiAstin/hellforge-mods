@@ -520,14 +520,46 @@ end
 -- (the point's offset along the camera's forward), with Th3chef's permission. lemuen.dll's lemuen_marks gives where
 -- each mark stands (5 floats: x, y, z, seconds left, heavy).
 pcall(ffi.cdef, [[ typedef int (*lemmarks1)(unsigned int version, float *out, int max);
-typedef int (*lemhits1)(unsigned int version, float *out, int max, uint32_t *seq); ]])
+typedef int (*lemhits1)(unsigned int version, float *out, int max, uint32_t *seq);
+typedef int (*lemview1)(unsigned int version, float *out); ]])
 local MK = {fn = nil, buf = ffi.new('float[160]'), look = 0, failed = false, told = false}
 local CAM = {unit = nil, list = nil, i = 0, retry = 0}
 local function S() return rawget(_G, 'stingray') end
+-- 0.1.6c: the camera standing where her view is (lemuen.dll's lemuen_view), checked every second. 0.1.6b took the first
+-- unit with a camera, which in a mission was one 6 km under the map (the ship's or a menu's, still alive), so every
+-- marker and number was "behind" it. Without lemuen_view (an older lemuen.dll) the first camera, as before.
+local VW = {fn = nil, buf = ffi.new('float[6]'), look = 0, checked = 0, told = 0}
+local function her_view(t)
+    if not VW.fn then
+        if t < VW.look then return nil end
+        VW.look = t + 2
+        local module = k32.lemhud1_GetModuleHandleA('lemuen.dll')
+        local proc = module ~= nil and k32.lemhud1_GetProcAddress(module, 'lemuen_view') or nil
+        if proc == nil then return nil end
+        VW.fn = ffi.cast('lemview1', proc)
+    end
+    if VW.fn(1, VW.buf) ~= 1 then return nil end
+    return VW.buf[0], VW.buf[1], VW.buf[2]
+end
+local function cam_gap(s, u, hx, hy, hz)
+    local okc, c = pcall(s.Unit.camera, u, 1)
+    if not (okc and c) then return nil end
+    local okp, p = pcall(s.Camera.world_position, c)
+    if not (okp and p) then return nil end
+    local x, y, z = s.Vector3.to_elements(p)
+    if type(x) ~= 'number' then return nil end
+    return math.sqrt((x - hx) ^ 2 + (y - hy) ^ 2 + (z - hz) ^ 2), x, y, z
+end
 local function cam_unit(s, t)
+    local hx, hy, hz = her_view(t)
     if CAM.unit then
         local ok, alive = pcall(s.Unit.alive, CAM.unit)
-        if ok and alive == true then return CAM.unit end
+        if ok and alive == true then
+            if not hx or t < VW.checked then return CAM.unit end
+            VW.checked = t + 1
+            local gap = cam_gap(s, CAM.unit, hx, hy, hz)
+            if gap and gap < 4 then return CAM.unit end
+        end
         CAM.unit = nil
     end
     if not CAM.list then
@@ -536,7 +568,7 @@ local function cam_unit(s, t)
         if not (okw and w) then CAM.retry = t + 2; return nil end
         local oku, units = pcall(s.World.units, w)
         if not (oku and type(units) == 'table') then CAM.retry = t + 2; return nil end
-        CAM.list, CAM.i = units, 0
+        CAM.list, CAM.i, CAM.best, CAM.gap, CAM.seen = units, 0, nil, nil, 0
     end
     local last = math.min(#CAM.list, CAM.i + 500)
     for i = CAM.i + 1, last do
@@ -544,11 +576,26 @@ local function cam_unit(s, t)
         local oka, alive = pcall(s.Unit.alive, u)
         if oka and alive == true then
             local okn, n = pcall(s.Unit.num_cameras, u)
-            if okn and type(n) == 'number' and n > 0 then CAM.unit, CAM.list = u, nil; return u end
+            if okn and type(n) == 'number' and n > 0 then
+                CAM.seen = CAM.seen + 1
+                if not hx then CAM.unit, CAM.list = u, nil; return u end
+                local gap = cam_gap(s, u, hx, hy, hz)
+                if gap and (not CAM.gap or gap < CAM.gap) then CAM.best, CAM.gap = u, gap end
+            end
         end
     end
     CAM.i = last
-    if last >= #CAM.list then CAM.list = nil; CAM.retry = t + 2 end
+    if last >= #CAM.list then
+        local found = CAM.best and CAM.gap and CAM.gap < 4
+        if VW.told < 6 then
+            VW.told = VW.told + 1
+            log(('[Lemuen HUD] camera: %d cameras in the world, nearest to her view %s'):format(CAM.seen,
+                CAM.gap and ('%.1f m away%s'):format(CAM.gap, found and ' (taken)' or ' (too far: none taken)') or 'none'))
+        end
+        CAM.list = nil
+        if found then CAM.unit = CAM.best; VW.checked = t + 1; return CAM.unit end
+        CAM.retry = t + 2
+    end
     return nil
 end
 local mk_t = 0

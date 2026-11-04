@@ -217,7 +217,7 @@ static WorldFn g_worldId;
 static RayFn g_raycast;
 static float s_sightSlack = 1.5f;
 static unsigned g_blocked, g_clear;
-static uint32_t g_lastWallFilter;
+static uint32_t g_lastWallFilter, g_lastWallUnit;
 static uint32_t ActorFilter(uint32_t id, uint32_t unit)
 {
     uint32_t world = id >> 30, layout, stride, key_offset, data_offset, key, index, name = 0;
@@ -279,7 +279,7 @@ static float FirstWall(uint32_t id, const float from[3], const float dir[3], flo
         uint32_t filt = ActorFilter(Word(hits + 44u * i + 32), hu);
         if (filt == FILTER_FOLIAGE || (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u || FoeUnit(hu)))) continue;   /* leaves; bodies */
         best = d; target = 0;
-        g_lastWallFilter = filt;
+        g_lastWallFilter = filt; g_lastWallUnit = hu;
     }
     if (hitTarget) *hitTarget = target;
     return best;
@@ -322,7 +322,7 @@ static int InSight(const float cam[3], const float fwd[3], const float q[3], uin
     }
     g_blocked++;
     static unsigned told;
-    if (told++ < 6) Log("line of sight: entity %u hidden at %.0f m (chest ray stopped at %.1f m, filter %08x; head and crosshair rays too)", target, dist, wall, g_lastWallFilter);
+    if (told++ < 6) Log("line of sight: entity %u hidden at %.0f m (chest ray stopped at %.1f m on unit %08x, filter %08x; head and crosshair rays too)", target, dist, wall, g_lastWallUnit, g_lastWallFilter);
     return 0;
 }
 
@@ -534,6 +534,19 @@ static void SpotsFrame(void)
         n++;
     }
     g_nspots = n;
+}
+
+/* 0.1.6c: her view for the HUD (lemuen_view), refreshed on the game thread: the HUD picks the engine camera standing
+ * here (0.1.6b's HUD took a camera 6 km under the map, so every marker and number was "behind" it) */
+static float g_viewOut[6];
+static volatile int g_viewOk;
+static void ViewFrame(void)
+{
+    float c[3], f[3];
+    int fp;
+    if (!View(c, f, &fp)) { g_viewOk = 0; return; }
+    memcpy(g_viewOut, c, 12); memcpy(g_viewOut + 3, f, 12);
+    g_viewOk = 1;
 }
 
 /* ---- the skills --------------------------------------------------------------------------------------------------- */
@@ -780,6 +793,13 @@ HF_MOD_EXPORT int lemuen_marks(unsigned version, float* out, int max)
     }
     return n;
 }
+/* 0.1.6c: her camera, 6 floats (position, forward); 1 when known */
+HF_MOD_EXPORT int lemuen_view(unsigned version, float* out)
+{
+    if (version != 1 || !out || !g_viewOk || !g_inMission) return 0;
+    memcpy(out, g_viewOut, 24);
+    return 1;
+}
 /* 0.1.3: her hits since *seq (the HUD's last), 5 floats each: x, y, z of the impact, damage dealt, 1 if S1 or S2
  * raised it. *seq becomes the newest. A HUD that fell behind gets the latest HITRING */
 HF_MOD_EXPORT int lemuen_hits(unsigned version, float* out, int max, uint32_t* seq)
@@ -865,6 +885,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     {
         MarkFrame();
         SpotsFrame();
+        ViewFrame();
         ReloadFrame();
         ScopeFrame(step);
         ShellFrame();
