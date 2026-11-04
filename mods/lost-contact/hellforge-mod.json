@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.lost-contact",
+  "name": "Lost Contact",
+  "version": "0.1.0",
+  "description": "Enemies that lose sight of you for a few seconds stop knowing where you are: they search where they last saw you instead of tracking you across the map. Patrols walk between their own outposts instead of being sent straight at you. Each can be on, observe (counts only) or off: lost-contact.ini, or Ctrl+F9 / Ctrl+F10 in a mission; a HUD shows both. Host or solo. The HUD needs Bingus Shared Loader and HD2Runtime.",
+  "gameplay": true,
+  "code": {
+    "dll": "lost_contact.dll",
+    "sdk": 15
+  }
+}

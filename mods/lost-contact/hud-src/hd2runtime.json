@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "Lost Contact HUD",
+  "resource": "mods/yui/lost_contact_hud",
+  "guid": "358dc95d-b647-5941-87b6-c82c85d2295d",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.50.1",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}

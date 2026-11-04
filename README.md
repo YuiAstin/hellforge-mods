@@ -11,6 +11,7 @@ Code mods for HellForge (offline Helldivers 2). Each folder under `mods/` is one
 | Fire Mission | `mods/fire-mission` | A stratagem that calls mortar sentries onto a spot. |
 | Primed Sure Footed | `mods/primed-sure-footed` | No knockdown or ragdoll on your Helldiver; flinch and push stay. |
 | Stat Tuner | `mods/stat-tuner` | Per-item stat sliders on the in-game MODS tab, with presets. |
+| Lost Contact | `mods/lost-contact` | Enemies that lose sight of you stop tracking you and search where they last saw you; patrols walk between their outposts instead of straight at you. On / observe / off, with a HUD. |
 
 The GFL2 kits and Veterancy System have HUDs drawn with HD2Runtime (Bingus Shared Loader + HD2Runtime). Their Lua sources sit in each mod's `hud-src/` (Veterancy System's in `huds/field-promotions-hud/`); the built HUD ships in the mod's `data/`.
 
