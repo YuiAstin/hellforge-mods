@@ -419,6 +419,12 @@ local function passive(d, j, x, y, size, a)
     else heavy(d, string.format('%.0fs', math.ceil(left)), tx, y + size * 0.5, ksize, 'title', rgba(TEXT, a * 0.8)) end
 end
 
+-- Pile Bunker's key as the list shows it ('C'): pressed again while it recharges, it sets off the follow-up
+local function pile_key()
+    local bound = X.labels[3]
+    if bound and bound ~= 'UNBOUND' then return bound end
+    return ffi.string(state.key_label[2])   -- the .ini's key, which works either way
+end
 -- the kit's other passives (version 3): {short, name, lit, text}
 local function kit_passives()
     local list = {}
@@ -430,7 +436,7 @@ local function kit_passives()
         list[#list + 1] = {'HWL', 'BLOOD-CURDLING HOWL', howl > 0, icon = ICON.howl, howl >= 98 and 'IMMUNE: GETTING UP' or howl > 0 and string.format('IMMUNE %.1fs', howl) or 'WHEN THE EYE SEES MANY'}
     elseif state.mpb_on ~= 0 then
         local ready = state.mpb_ready ~= 0
-        list[#list + 1] = {'HB', 'PILE BUNKER: HELLBOMB', ready, ready and 'READY: SHIELD BASH' or 'KILL A HEAVY WITH PILE BUNKER'}
+        list[#list + 1] = {'HB', 'PILE BUNKER: HELLBOMB', ready, ready and ('READY: ' .. pile_key() .. ' AGAIN') or 'KILL A HEAVY WITH PILE BUNKER'}
     end
     return list
 end
@@ -550,7 +556,7 @@ local function status_bar(d)
             if state.rage > 0 then bits[#bits + 1] = 'RAGE' end
             if state.howl > 0 then bits[#bits + 1] = 'HOWL: IMMUNE' end
         elseif state.mpb_on ~= 0 and state.mpb_ready ~= 0 then
-            bits[#bits + 1] = 'HELLBOMB READY: SHIELD BASH'
+            bits[#bits + 1] = 'HELLBOMB READY: ' .. pile_key() .. ' AGAIN'
         end
     end
     local effects_y = y - 34 * s
