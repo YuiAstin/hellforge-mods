@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.booster-table-probe",
+  "name": "Booster Table Probe (research)",
+  "version": "0.1.0",
+  "description": "Research only, no gameplay effect: logs the game's booster rows and every instruction that reads them, for adding a new booster. Turn off when done.",
+  "gameplay": false,
+  "code": {
+    "dll": "booster_table_probe.dll",
+    "sdk": 13
+  }
+}
