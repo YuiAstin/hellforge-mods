@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "id": "yui.alva",
+  "name": "Alva",
+  "version": "0.1.0",
+  "icon": "icon.png",
+  "description": "Alva's kit from Girls' Frontline 2 for your Helldiver: a support who shields every ally around her and deals freeze damage. Brumal Barrier gives every ally in range (Helldivers, sentries, emplacements, dogs, exosuits, SEAF) a 500 shield that stacks with no cap, on every skill and every 20 s; her hits build Confectance and chill enemies until they freeze. Snow Wolf's Heart shoots any enemy that hits an ally near her, Frosted Echo drops EMS bursts and a slowing nitrogen field where she aims, and Nix Requiem fires heavy rounds at her target, freezing it at 5 Confectance. Solo or host. Keys in alva.ini; numbers on the MODS tab (Mod Options Menu). HUD needs Bingus Shared Loader and HD2Runtime. Installs beside the author's other character kits (pick one on the MODS tab). No character model included.",
+  "gameplay": true,
+  "code": {
+    "dll": "alva.dll",
+    "sdk": 13
+  }
+}
