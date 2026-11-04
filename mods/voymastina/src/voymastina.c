@@ -1909,6 +1909,7 @@ static void MpbFire(void)
         float ang = (float)g_ndrag * 2.39996f, rad = 1.5f + 0.5f * (float)(g_ndrag % 4);   /* a ring around the end */
         r->to[0] = end[0] + cosf(ang) * rad; r->to[1] = end[1] + sinf(ang) * rad; r->to[2] = end[2];
         live++;
+        { static unsigned told; if (told++ < 24) Log("Pile Bunker follow-up: drags entity %u (%016llx)", r->e, (unsigned long long)Quad(d)); }
     }
     g_npush = 0;
     if (g_ndrag < s_mpbDrag)
@@ -1963,7 +1964,18 @@ static void MpbFrame(void)
         {
             Dragged* r = &g_drag[i];
             float q[3];
+            int32_t hp; uint32_t life;
+            uint8_t d[24];
             if (!r->e || !UnitNode(r->unit, 0, q)) { r->e = 0; continue; }
+            /* 0.4.1b: only while it lives and is still the same unit: one that died on the line has no movement record
+             * left, and the warp setter crashed on it (2026-11-05, game.dll+0x5A2C69, 8 dragged); a corpse stays put */
+            if (!HealthOf(r->e, &hp, &life) || hp <= 0 || !Descriptor(r->e, d) || Word(d + 12) != r->unit)
+            {
+                static unsigned told;
+                if (told++ < 6) Log("Pile Bunker follow-up: entity %u left the drag (%s)", r->e, !HealthOf(r->e, &hp, &life) || hp <= 0 ? "dead" : "gone");
+                r->e = 0;
+                continue;
+            }
             float v[2] = {r->to[0] - q[0], r->to[1] - q[1]}, h = sqrtf(v[0] * v[0] + v[1] * v[1]);
             if (h < 0.3f) continue;
             float left = (float)(g_dragUntil - g_now), speed = h / (left > 0.2f ? left : 0.2f);
