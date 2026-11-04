@@ -32,7 +32,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -194,7 +194,22 @@ typedef struct
     int16_t to;              /* patrols: the outpost it is sent to (-1: away from you) */
     double sentAt;
     float away[3];           /* patrols: the point away from you, when no outpost is known */
+    /* 0.1.1: what became of it (despawn research): a patrol is one that was ever aimed at you */
+    uint8_t patrol;
+    float lastPos[3], lastDist;
+    double lastSeen;
 } Foe;
+/* 0.1.1: entities the game reported killed (HF_ON_KILL), so a foe that is gone can be told killed from despawned */
+#define KILLS 256
+static uint32_t g_kills[KILLS];
+static volatile unsigned g_nkills;
+static int WasKilled(uint32_t id)
+{
+    unsigned n = g_nkills < KILLS ? g_nkills : KILLS;
+    for (unsigned i = 0; i < n; i++) if (g_kills[i] == id) return 1;
+    return 0;
+}
+static struct { int patrolDespawned, routedDespawned, patrolKilled, otherDespawned; } g_gone;   /* this mission */
 static Foe g_foes[LIVE];
 static int g_nfoes;
 static unsigned g_cursor;
@@ -218,10 +233,25 @@ static void Refresh(void)
     }
 }
 /* the enemy at j and where it stands; a gone one is dropped (the last moved into its place: walk j down) */
+static void Gone(const Foe* f)
+{
+    if (WasKilled(f->id)) { if (f->patrol) g_gone.patrolKilled++; return; }
+    if (!f->patrol) { g_gone.otherDespawned++; return; }
+    g_gone.patrolDespawned++;
+    if (f->routed) g_gone.routedDespawned++;
+    static unsigned told;
+    if (told++ < 30)
+        hf->log(self, "despawned: patrol %u (type %016llx), last %.0f m from you %.1f s ago, %s%s", f->id, (unsigned long long)f->res,
+                (double)f->lastDist, g_now - f->lastSeen,
+                f->routed ? (s_patrolMode == 1 ? "routed" : "would be routed (observe)") : "not routed (it had a target, or it walked elsewhere)", "");
+}
 static int FoeAt(int j, Ent* e, float p[3])
 {
-    if (!Resolve(g_foes[j].id, e) || e->resource != g_foes[j].res) { g_foes[j] = g_foes[--g_nfoes]; return 0; }
-    return RootOf(e->unit, p);
+    if (!Resolve(g_foes[j].id, e) || e->resource != g_foes[j].res) { Gone(&g_foes[j]); g_foes[j] = g_foes[--g_nfoes]; return 0; }
+    if (!RootOf(e->unit, p)) return 0;
+    memcpy(g_foes[j].lastPos, p, 12);
+    g_foes[j].lastSeen = g_now;
+    return 1;
 }
 static float Dist2D(const float* a, const float* b) { return sqrtf((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1])); }
 static uintptr_t Behaviour(uint32_t e)
@@ -473,7 +503,8 @@ static void PatrolPass(void)
         Ent e;
         if (!FoeAt(j, &e, p)) continue;
         Foe* f = &g_foes[j];
-        if (Dist2D(p, mp) > s_patrolRange) { f->routed = 0; continue; }
+        f->lastDist = Dist2D(p, mp);
+        if (f->lastDist > s_patrolRange) { f->routed = 0; continue; }
         uintptr_t br = Behaviour(f->id);
         uint32_t target = 0, perceiver = 0, k;
         if (br) { RD(br + 0x18, &target, 4); RD(br + 0x68, &perceiver, 4); }
@@ -492,7 +523,7 @@ static void PatrolPass(void)
         /* searching where it lost you (break contact sent it there): left to search for 20 s */
         if (f->forgot > 0 && g_now - f->forgot < 20) continue;
         int seeking = Dist2D(dest, mp) < s_seekRadius;
-        if (seeking) nSeek++;
+        if (seeking) { nSeek++; f->patrol = 1; }
         if (f->routed)
         {
             nRouted++;
@@ -567,6 +598,14 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     if (!game || !exe || gs != 74727424u || xs != 60719104u) { g_ready = -1; Log("REFUSED: not build " BUILD "'s modules"); return; }
     g_ready = 0;
 }
+static void OnKill(HfMod* mod, const HfEventInfo* info, void* user)
+{
+    (void)mod; (void)user;
+    const HfKillEvent* k = (const HfKillEvent*)info;
+    unsigned i = g_nkills;
+    g_kills[i % KILLS] = k->victim;
+    g_nkills = i + 1;
+}
 static int Down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
 /* ---- the game thread ---------------------------------------------------------------------------------------------- */
 static int KeyPressed(const Key* k)
@@ -580,6 +619,7 @@ static void MissionStart(void)
     g_nposts = g_realPosts = 0;
     memset(&g_bc, 0, sizeof g_bc); memset(&g_bcSum, 0, sizeof g_bcSum);
     memset(&g_pt, 0, sizeof g_pt); memset(&g_ptSum, 0, sizeof g_ptSum);
+    memset(&g_gone, 0, sizeof g_gone);
 }
 static void Tick(HfMod* mod, float dt, void* user)
 {
@@ -591,8 +631,8 @@ static void Tick(HfMod* mod, float dt, void* user)
     {
         g_inMission = inMission;
         if (!inMission && (g_bc.lost || g_pt.sent))
-            Log("mission end: break contact lost you %d times (%d after you again unsensed); patrols: %d sends, %d re-aimed at you, %d outposts",
-                g_bc.lost, g_bc.blind, g_pt.sent, g_pt.reaimed, g_realPosts);
+            Log("mission end: break contact lost you %d times (%d after you again unsensed); patrols: %d sends, %d re-aimed at you, %d outposts; %d patrols despawned (%d routed), %d killed",
+                g_bc.lost, g_bc.blind, g_pt.sent, g_pt.reaimed, g_realPosts, g_gone.patrolDespawned, g_gone.routedDespawned, g_gone.patrolKilled);
         if (inMission) MissionStart();
     }
     if (!inMission) return;
@@ -643,8 +683,9 @@ static void Tick(HfMod* mod, float dt, void* user)
         if (s_patrolMode && g_ptSum.passes)
         {
             double n = g_ptSum.passes;
-            Log("patrols (%s): %d outposts known; aimed at you %.1f, %s %.1f; %d sends, %d re-aimed at you", ModeName(s_patrolMode), g_realPosts,
-                g_ptSum.seeking / n, s_patrolMode == 2 ? "would be routed" : "routed", g_ptSum.routed / n, g_pt.sent, g_pt.reaimed);
+            Log("patrols (%s): %d outposts known; aimed at you %.1f, %s %.1f; %d sends, %d re-aimed at you; this mission %d patrols despawned (%d routed), %d killed, %d other enemies despawned",
+                ModeName(s_patrolMode), g_realPosts, g_ptSum.seeking / n, s_patrolMode == 2 ? "would be routed" : "routed", g_ptSum.routed / n, g_pt.sent,
+                g_pt.reaimed, g_gone.patrolDespawned, g_gone.routedDespawned, g_gone.patrolKilled, g_gone.otherDespawned);
         }
         memset(&g_bcSum, 0, sizeof g_bcSum);
         memset(&g_ptSum, 0, sizeof g_ptSum);
@@ -673,7 +714,8 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         ModeName(s_breakMode), (double)s_loseAfter, (double)s_breakRange, ModeName(s_patrolMode), (double)s_seekRadius, (double)s_keepAway,
         s_keyBreak.label, s_keyPatrol.label);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
-    int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->on_game_thread(mod, Tick, NULL);
+    int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) &&
+             api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) && api->on_game_thread(mod, Tick, NULL);
     if (!ok) Log("events or the game thread are unavailable");
     return 0;
 }
