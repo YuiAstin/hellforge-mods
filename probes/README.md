@@ -10,3 +10,4 @@ Research code with no gameplay purpose, kept for what it found. Build 25480438 o
 | `data/faelynn-hit-probe.log` | A Faelynn probe build's log of raw hit records before and after the hit calculation; it located the armour-penetration floats at `+0x9C/+0xA0/+0xA4` that Corrosion raises. |
 
 Leva's lockdown damage probe (every hit and kill near her first lockdown of a mission) is still in `mods/leva/src/leva.c`; its findings on arc hits are in [docs/research/game-notes.md](../docs/research/game-notes.md).
+| `mission-probe/` | (0.1.0, to run) Commando Plus research: the mission's hive mind (its mode) at mission start, the stratagem record (uses, granted, cooldowns) 8 s after landing and on Ctrl+F11; Ctrl+Shift+F11 dumps game.dll's loaded image to the logs folder (the despawn research). |
