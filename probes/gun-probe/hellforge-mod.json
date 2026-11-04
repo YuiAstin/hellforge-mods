@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.gun-probe",
   "name": "Gun Probe (research)",
-  "version": "0.1.7",
-  "description": "Research for Exusiai's summoned guns: can a HUD addon spawn one of the game's own gun models as a visual only and keep it hovering beside the view? F6 spawns two for 10 s, each playing the Guard Dog's firing sound; Shift+F6 logs what the engine lets the addon reach. Bring a Guard Dog (AR-23) or a machine gun so a gun model is loaded. Needs Bingus Shared Loader and HD2Runtime. Turn off when done.",
+  "version": "0.1.8",
+  "description": "Research for Exusiai's summoned guns: can a HUD addon show one of the game's own gun models hovering beside the view? F6 (0.1.8) spawns two Guard Dog bodies, hidden, each carrying a gun model linked to it, for 10 s (Alt+F6: dogs visible; Ctrl+F6: bare guns as in 0.1.7). Shift+F6 logs what the engine lets the addon reach. Bring an AX/AR-23 Guard Dog so its body and gun are loaded. Needs Bingus Shared Loader and HD2Runtime. Turn off when done.",
   "gameplay": false
 }

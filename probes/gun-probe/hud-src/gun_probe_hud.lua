@@ -2,7 +2,10 @@
 -- own gun models as a visual only (no gameplay), keep it hovering beside the view and turn it, through the engine's own
 -- Lua calls (World.spawn_unit, Unit.set_local_position / rotation, the view camera as Treasure Radar finds it)?
 --
---   F6        spawn two guns (Ctrl+F6: the next loaded gun model; Alt+F6: linked to the view camera's unit, 0.1.6's try) beside the view for 10 s (left and right of the camera, a little ahead), then remove them;
+--   F6        0.1.8: two carriers beside the view for 10 s: each a Guard Dog body (drone_mg, which floats: 0.1.3's test)
+--             made invisible, with a gun model linked to it; the probe moves only the dogs. Alt+F6: the same with the dogs
+--             left visible (to see the link). Ctrl+F6: 0.1.7's two bare guns (the next loaded gun model)
+--             beside the view for 10 s (left and right of the camera, a little ahead), then remove them;
 --             while they are out each "fires" the Guard Dog's firing sound (hd2.sounds, HD2Runtime's sound API, marked
 --             offline-tested only) on its own model every 0.5 s, the two a quarter-second apart
 --   Shift+F6  log which engine calls this addon can reach, which gun models are loaded right now, and what HD2Runtime's
@@ -20,7 +23,10 @@ local function log(message)
     pcall(print, message)
     if not sink_tried then
         sink_tried = true
-        local ok, result = pcall(function() return CowboyBingusModLoader.open_log('GunProbe.log') end)
+        -- 0.1.8: a log of its own each game start (GunProbe-<time>.log), so a run is not lost at the next launch
+        local okt, t = pcall(os.time)
+        local name = okt and t and ('GunProbe-' .. tostring(t) .. '.log') or 'GunProbe.log'
+        local ok, result = pcall(function() return CowboyBingusModLoader.open_log(name) end)
         if ok then sink = result end
     end
     if sink then
@@ -277,8 +283,111 @@ local function spawn(step_model, link)
     local okp, err = pcall(sound_prepare)
     if not okp then log('[Gun Probe] sound: prepare failed: ' .. tostring(err)) end
 end
+-- 0.1.8: carriers. The Guard Dog's body floated where it was put (0.1.3); the guns fell first. A gun linked to a dog
+-- is placed by the dog, so only the dogs are moved; the dogs are hidden so only the guns are seen.
+local DOG = 'content/fac_helldivers/equipment/backpacks/drone_mg/drone_mg'
+local GUNS = {
+    'content/fac_helldivers/equipment/backpacks/drone_weapons/drone_assault_rifle/drone_assault_rifle',
+    'content/fac_helldivers/equipment/support_weapons/machinegun/machinegun',
+    'content/fac_helldivers/equipment/support_weapons/heavy_mg/heavy_mg',
+    'content/fac_helldivers/equipment/support_weapons/expendable_machinegun/expendable_machinegun',
+    'content/fac_helldivers/equipment/backpacks/drone_weapons/drone_laser_rifle/drone_laser_rifle',
+}
+local function hide(u)
+    if call('Unit.set_unit_visibility', u, false) then return 'set_unit_visibility' end
+    local okn, n = call('Unit.num_meshes', u)
+    if okn and type(n) == 'number' and n > 0 then
+        local hidden = 0
+        for i = 1, n do
+            local okm, m = call('Unit.mesh', u, i)
+            if okm and m and call('Unit.set_mesh_visibility', u, m, false) then hidden = hidden + 1
+            elseif call('Unit.set_mesh_visibility', u, i, false) then hidden = hidden + 1 end
+        end
+        return ('%d of %d meshes hidden'):format(hidden, n)
+    end
+    return 'NOT hidden (no visibility call worked)'
+end
+local function height(u)
+    local okx, at = call('Unit.world_position', u, 1)
+    local _, _, z = xyz(okx and at or nil)
+    return z
+end
+local K = {dogs = {}, guns = {}, until_t = 0, trace = {}, next_trace = 0, started = 0}
+local function carriers_clear(w)
+    for i, g in ipairs(K.guns) do call('World.unlink_unit', w, g); call('World.destroy_unit', w, g) end
+    for i, d in ipairs(K.dogs) do call('World.destroy_unit', w, d) end
+    if #K.dogs > 0 then log(('[Gun Probe] carriers removed (%d dogs, %d guns)'):format(#K.dogs, #K.guns)) end
+    K.dogs, K.guns = {}, {}
+end
+local function carriers(show_dog)
+    local w = world()
+    if not w then log('[Gun Probe] F6: no main world') return end
+    local c = camera(w)
+    if not c then log('[Gun Probe] F6: no view camera') return end
+    clear(w); carriers_clear(w)
+    if not loaded(DOG) then log('[Gun Probe] F6: the Guard Dog body is not loaded (bring an AX/AR-23 Guard Dog)') return end
+    local gun
+    for _, path in ipairs(GUNS) do if loaded(path) then gun = path; break end end
+    if not gun then log('[Gun Probe] F6: no gun model is loaded (bring a Guard Dog or a machine gun)') return end
+    log(('[Gun Probe] F6 carriers (dogs %s): dog %s, gun %s'):format(show_dog and 'visible' or 'hidden', DOG, gun))
+    for i, o in ipairs(OFFSETS) do
+        local pos = place(c, o)
+        if not pos then log('[Gun Probe]   no position for carrier ' .. i) return end
+        local okd, dog = call('World.spawn_unit', w, DOG, pos, c.rot)
+        if not (okd and dog) then log('[Gun Probe]   carrier ' .. i .. ': dog NOT spawned') return end
+        K.dogs[#K.dogs + 1] = dog
+        if not show_dog then log('[Gun Probe]   carrier ' .. i .. ': dog ' .. hide(dog)) end
+        local okg, g = call('World.spawn_unit', w, gun, pos, c.rot)
+        if not (okg and g) then log('[Gun Probe]   carrier ' .. i .. ': gun NOT spawned') return end
+        K.guns[#K.guns + 1] = g
+        local okq, err = pcall(still, g)
+        if not okq then log('[Gun Probe]   physics: ' .. tostring(err)) end
+        local okl, why = call('World.link_unit', w, g, 1, dog, 1)
+        if okl then
+            call('Unit.set_local_position', g, 1, vec(0, 0, 0))
+            log('[Gun Probe]   carrier ' .. i .. ': gun linked to the dog')
+        else log('[Gun Probe]   carrier ' .. i .. ': link FAILED: ' .. tostring(why)) end
+        log(('[Gun Probe]   carrier %d spawned: dog z %.2f, gun z %.2f, camera z %.2f'):format(i, height(dog) or -1, height(g) or -1, c.p[3]))
+    end
+    still_told = false
+    K.until_t, K.started, K.next_trace, K.moved = G.t + 10, G.t, G.t + 0.25, 0
+end
+local function carriers_step(c, w, dt)
+    if #K.dogs == 0 then return end
+    if G.t >= K.until_t then
+        log(('[Gun Probe] carriers 10 s up: dogs moved %d frames'):format(K.moved))
+        carriers_clear(w)
+        return
+    end
+    local all = true
+    for i, d in ipairs(K.dogs) do
+        local pos = place(c, OFFSETS[i])
+        all = (pos and call('Unit.set_local_position', d, 1, pos) and call('Unit.set_local_rotation', d, 1, c.rot)) and all
+    end
+    if all then K.moved = K.moved + 1 end
+    -- the first 2 s: where each gun is against where its dog is and where it should be (a gun falling shows as a gap)
+    if G.t >= K.next_trace and G.t - K.started <= 2.01 then
+        K.next_trace = G.t + 0.25
+        local parts = {}
+        for i, d in ipairs(K.dogs) do
+            local want = place(c, OFFSETS[i])
+            local _, _, wz = xyz(want)
+            parts[#parts + 1] = ('%d: want z %.2f, dog %.2f, gun %.2f'):format(i, wz or -1, height(d) or -1, K.guns[i] and height(K.guns[i]) or -1)
+        end
+        log(('[Gun Probe]   t+%.2f s  %s'):format(G.t - K.started, table.concat(parts, ' | ')))
+    end
+    for i, g in ipairs(K.guns) do
+        G.beat[i] = (G.beat[i] or 0) - dt
+        if G.beat[i] <= 0 then G.beat[i] = 0.5; sound_at(g, nil) end
+    end
+end
 local function step(dt)
     G.t = G.t + dt
+    if #K.dogs > 0 then
+        local w = world()
+        local c = w and camera(w)
+        if c then carriers_step(c, w, dt) end
+    end
     if #G.units == 0 then return end
     local w = world()
     if not w then G.units = {}; return end
@@ -314,7 +423,7 @@ local function report()
     log('[Gun Probe] stingray: ' .. type(S))
     for _, n in ipairs(NAMES) do log('[Gun Probe] ' .. n .. ': ' .. type(E[n])) end
     for _, p in ipairs({'Application.main_world', 'Application.can_get', 'World.units', 'World.spawn_unit', 'World.destroy_unit', 'Unit.alive',
-        'Unit.num_cameras', 'Unit.camera', 'Unit.set_local_position', 'Unit.set_local_rotation', 'Unit.num_actors', 'Unit.actor', 'Actor.set_kinematic', 'Actor.set_collision_enabled', 'Unit.destroy_actor', 'Unit.disable_physics', 'World.link_unit', 'World.unlink_unit', 'Camera.world_position',
+        'Unit.num_cameras', 'Unit.camera', 'Unit.set_local_position', 'Unit.set_local_rotation', 'Unit.num_actors', 'Unit.actor', 'Actor.set_kinematic', 'Actor.set_collision_enabled', 'Unit.destroy_actor', 'Unit.disable_physics', 'World.link_unit', 'World.unlink_unit', 'Unit.set_unit_visibility', 'Unit.num_meshes', 'Unit.mesh', 'Unit.set_mesh_visibility', 'Camera.world_position',
         'Camera.world_rotation', 'Quaternion.forward', 'Quaternion.right', 'Quaternion.up', 'Vector3', 'Vector3.to_elements'}) do
         log('[Gun Probe]   ' .. p .. ': ' .. (fn(p) and 'yes' or 'no'))
     end
@@ -334,16 +443,18 @@ overlay:draw(function(d, dt)
     local now = down(0x75)                                   -- F6
     if now and not prev then
         if down(0x10) then local okr, err = pcall(report); if not okr then log('[Gun Probe] report failed: ' .. tostring(err)) end
-        else local oks, err = pcall(spawn, down(0x11), down(0x12)); if not oks then log('[Gun Probe] spawn failed: ' .. tostring(err)) end end
+        elseif down(0x11) then local oks, err = pcall(spawn, true, false); if not oks then log('[Gun Probe] spawn failed: ' .. tostring(err)) end
+        else local oks, err = pcall(carriers, down(0x12)); if not oks then log('[Gun Probe] carriers failed: ' .. tostring(err)) end end
     end
     prev = now
     pcall(sound_step, dt)
     local okt, err = pcall(step, dt)
     if not okt then log('[Gun Probe] step failed: ' .. tostring(err)); G.units = {} end
-    if #G.units > 0 then
-        d:text(('GUN PROBE: %d guns, %.0f s'):format(#G.units, math.max(0, G.until_t - G.t)), d.width / 2, 120 * (d.scale or 1),
+    if #G.units > 0 or #K.dogs > 0 then
+        local n, t = #G.units > 0 and #G.units or #K.guns, #G.units > 0 and G.until_t or K.until_t
+        d:text(('GUN PROBE: %d %s, %.0f s'):format(n, #K.dogs > 0 and 'carried guns' or 'guns', math.max(0, t - G.t)), d.width / 2, 120 * (d.scale or 1),
             {size = 20 * (d.scale or 1), colour = {255, 232, 0, 255}, z = 5, align = 'center'})
     end
 end)
 
-log('[Gun Probe] ready: F6 spawns two gun models beside the view for 10 s; Shift+F6 logs what the engine lets this addon reach')
+log('[Gun Probe] 0.1.8 ready: F6 two hidden Guard Dog bodies carrying a gun each (Alt+F6 dogs visible, Ctrl+F6 0.1.7 bare guns) for 10 s; Shift+F6 logs what the engine lets this addon reach')

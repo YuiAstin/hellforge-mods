@@ -13,5 +13,7 @@
       "api": 1,
       "module": "mods/skyeshade/hd2runtime"
     }
-  }
+  },
+  "sdk": "../../ext/hd2rt/sdk",
+  "ide_library": "../../ext/hd2rt/sdk/stubs"
 }
