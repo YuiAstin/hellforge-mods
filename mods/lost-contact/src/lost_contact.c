@@ -838,7 +838,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 15 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
     LoadSettings();
     if (LC_BREAK_CONTACT)
-        Log("Lost Contact " VERSION " (research build): break contact %s (lose after %.0f s, within %.0f m), patrols %s (seek %.0f m, keep away %.0f m); keys %s / %s",
+        Log("Lost Contact " VERSION ": break contact %s (lose after %.0f s, within %.0f m), patrols %s (seek %.0f m, keep away %.0f m); keys %s / %s",
             ModeName(s_breakMode), (double)s_loseAfter, (double)s_breakRange, ModeName(s_patrolMode), (double)s_seekRadius, (double)s_keepAway,
             s_keyBreak.label, s_keyPatrol.label);
     else
