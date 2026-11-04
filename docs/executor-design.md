@@ -11,7 +11,7 @@ piece is already proven (Lemuen's rounds-until-done skills, Exusiai's free round
 | Arknights | In HD2 | Built from |
 |---|---|---|
 | **Trait:** attacks deal AoE; recovers 50 HP per enemy hit, up to his Block | Every enemy his shot hits heals him **50% of his max health** (Helldivers are made of tissue paper), up to 2 or 3 enemies a shot (the ini). **Each heal also mends every injured limb in full**: a full health pool on a broken leg is no use | Hit events; HellForge's `heal` and `heal_limb` (the local Helldiver; `limb_state` says which are injured) |
-| **Trait:** cannot be healed by allies | **Left out** (Yui): stims work on him as on anyone | |
+| **Trait:** cannot be healed by allies | **He cannot stim at all** (Yui): his heal is his hits. Best: his stims are taken away (none carried, or the stim action refused); fallback: a stim's heal is undone at once (the heal event, then damage of the same amount), the stim wasted | Research: the stim count or the stim action. Fallback: the heal event (HF_ON_HEAL) |
 | **The Chosen One:** 20% chance to attack twice; +5% per round spent while a skill is on | Each shot has a chance to fire a free extra round, rising while a skill runs | Exusiai's free rounds |
 | **Empathy by Shotgun:** +1 skill ammo per Laterano operator deployed (up to +4) | +1 skill round per other Laterano kit installed (Exusiai, Lemuen, Exusiai the New Covenant), from the roster | The roster |
 | **S1, Testament Exacted:** 8 rounds, ATK +50%, ignores 400 DEF | 8 shots x1.5, more armour penetration | The damage pipeline; the hit pipeline's AP edit |
@@ -24,4 +24,5 @@ gun's fire rate and pump already set the pace (Yui). If he is too strong, the in
 ## Open items
 
 1. The heal cap per shot (2 or 3 enemies). The heal: 50% of max health a hit, limbs mended in full (settled).
-2. S2's dodge: settled as any hit. Open: whether a negated explosion or a hit over time counts (the damage kind).
+2. No stims: where his stim count lives, or how to refuse the stim action, so a stim is not spent for nothing.
+3. S2's dodge: settled as any hit. Open: whether a negated explosion or a hit over time counts (the damage kind).
