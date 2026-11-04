@@ -34,7 +34,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.6e"
+#define VERSION "0.1.6f"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -789,10 +789,33 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 }
 
 /* ---- events ------------------------------------------------------------------------------------------------------ */
+/* 0.1.6f: the enemy's turrets (an Automaton base's cannon and AA guns, Illuminate towers): the kit base leaves every
+ * turret out of its enemies (so sentries are never targets), so 0.1.6e could not mark one (Yui). A turret that runs a
+ * behaviour and is no friend (the kit base's list of Helldiver sentries, emplacements and their mods' copies) is one */
+static int EnemyTurret(uint64_t res)
+{
+    static uint64_t keys[128];
+    static int8_t vals[128];
+    unsigned h = (unsigned)(res ^ (res >> 31)) & 127;
+    for (unsigned i = 0; i < 128; i++)
+    {
+        unsigned k = (h + i) & 127;
+        if (keys[k] == res) return vals[k];
+        if (keys[k]) continue;
+        uint32_t stride;
+        int t = hf->component_record("TurretComponentData", res, &stride) != 0 && hf->component_record("BehaviorComponentData", res, &stride) != 0 &&
+                !hf->component_record("AvatarComponentData", res, &stride) && !FriendRes(res);
+        vals[k] = (int8_t)t;
+        keys[k] = res;
+        if (t) { static unsigned told; if (told++ < 8) Log("an enemy turret kind: %016llx (markable)", (unsigned long long)res); }
+        return t;
+    }
+    return 0;
+}
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
-    if (s->resource != AVATAR) { if (FoeKind(s->resource)) AddFoe(s->entity, s->resource); return; }
+    if (s->resource != AVATAR) { if (FoeKind(s->resource) || EnemyTurret(s->resource)) AddFoe(s->entity, s->resource); return; }
     if (!s->authority) return;
     g_spawnEntity[g_spawnNext % 8] = s->entity;
     g_spawnNet[g_spawnNext % 8] = s->network;
