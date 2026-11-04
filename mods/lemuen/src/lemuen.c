@@ -360,8 +360,9 @@ static int Rifle(uint64_t res)
                                        HF_ENTITY_PLAS39_ACCELERATOR_RIFLE, HF_ENTITY_RS422_RAILGUN};
     for (unsigned i = 0; i < sizeof kRifles / sizeof kRifles[0]; i++) if (res == kRifles[i]) return 1;
     /* 0.1.6: other mods' marksman rifles with rounds of their own (no vanilla round to match): giblett's Scope of
-     * Authority R-40 Sightliner (a copy of the R-63CS, round 353 in Yui's 2026-11-04 test, refused by 0.1.5) */
-    static const uint64_t kModRifles[] = {0x41F2DEF484634B59ull};
+     * Authority R-40 Sightliner (a copy of the R-63CS, round 353 in Yui's 2026-11-04 test, refused by 0.1.5) and LAS-44 Nova
+     * (a sniper laser, built on the LAS-99; round 352) */
+    static const uint64_t kModRifles[] = {0x41F2DEF484634B59ull, 0x245CB793C32F3FBCull};
     for (unsigned i = 0; i < sizeof kModRifles / sizeof kModRifles[0]; i++) if (res == kModRifles[i]) return 1;
     /* 0.1.2: by its round as well, so a mod's copy of a sniper (a new resource, the same round) counts too: 0.1.1's test
      * refused S1 five times with a rifle the list did not name. The APW-1 (a support weapon) is known this way too */
