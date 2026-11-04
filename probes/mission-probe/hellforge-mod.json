@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.mission-probe",
   "name": "Mission Probe (research)",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Research for Commando Plus: logs the mission's hive mind (its mode) at mission start and your stratagem record (uses, granted, cooldowns) 8 s after landing; Ctrl+F11 logs the record again; Ctrl+Shift+F11 writes game.dll's loaded image (about 75 MB) to the session's logs folder. Host or solo. Turn off when done.",
   "gameplay": false,
   "code": {

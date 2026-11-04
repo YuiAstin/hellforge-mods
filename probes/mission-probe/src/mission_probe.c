@@ -20,7 +20,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game;
@@ -33,16 +33,17 @@ static uintptr_t P(uintptr_t a) { uintptr_t v = 0; return RD(a, &v, 8) && v >= 0
 
 /* ---- the hive mind: which mission mode ------------------------------------------------------------------------------ */
 static volatile uint64_t g_hive[8];
-static volatile unsigned g_nhive;
+static volatile unsigned g_nhive, g_spawns, g_hiveState;
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     (void)mod; (void)user;
     const HfSpawnEvent* e = (const HfSpawnEvent*)info;
     uint32_t stride;
+    g_spawns++;
     if (!e->resource || !hf->component_record("HiveMindComponentData", e->resource, &stride)) return;
     unsigned n = g_nhive;
     for (unsigned i = 0; i < n && i < 8; i++) if (g_hive[i] == e->resource) return;
-    if (n < 8) { g_hive[n] = e->resource; g_nhive = n + 1; }
+    if (n < 8) { g_hive[n] = e->resource; g_nhive = n + 1; g_hiveState = (unsigned)hf->game_state(self); }
 }
 
 /* ---- the stratagem record ------------------------------------------------------------------------------------------- */
@@ -135,14 +136,16 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (m != inMission)
     {
         inMission = m;
-        if (m) { recordAt = g_now + 8; hiveTold = 0; g_nhive = 0; Log("mission start"); }
-        else Log("mission end");
+        /* 0.1.1: 0.1.0 cleared the list here and logged no hive mind in two missions: it spawns while the mission loads,
+         * before the state turns to mission. The list is cleared when a mission ends instead. */
+        if (m) { recordAt = g_now + 8; Log("mission start (%u spawns seen so far, %u hive minds)", (unsigned)g_spawns, (unsigned)g_nhive); }
+        else { Log("mission end (%u spawns seen)", (unsigned)g_spawns); hiveTold = 0; g_nhive = 0; g_spawns = 0; }
     }
     if (m)
     {
         unsigned n = g_nhive;
         for (; hiveTold < n && hiveTold < 8; hiveTold++)
-            Log("hive mind: %016llx (the mission's mode; tell which mission this was)", (unsigned long long)g_hive[hiveTold]);
+            Log("hive mind: %016llx (the mission's mode; tell which mission this was; first seen in game state %u)", (unsigned long long)g_hive[hiveTold], (unsigned)g_hiveState);
         if (recordAt > 0 && g_now >= recordAt) { if (Record("after landing")) recordAt = 0; else recordAt = g_now + 3; }
     }
     static int prev;
