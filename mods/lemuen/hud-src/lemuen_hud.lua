@@ -620,6 +620,7 @@ end
 
 -- ---- her damage numbers (0.1.3): an orange-red number over each hit, rising fast then easing off, ~2 s ------------
 local HN_LIFE, HN_RISE, HN_MAX = 2.2, 46, 48
+local DG = {next = 5, told = 0, view_nil = 0, view_ok = 0, quiet = 0, seq = 0}
 local function numbers_draw(d, dt, v)
     if not HN.fn then
         local module = k32.lemhud1_GetModuleHandleA('lemuen.dll')
@@ -630,6 +631,14 @@ local function numbers_draw(d, dt, v)
     local n = HN.fn(1, HN.buf, 64, HN.seq)
     if not HN.primed then HN.primed = true; n = 0 end    -- (not the hits from before the HUD looked)
     for i = 0, n - 1 do
+        if (DG.hits or 0) < 8 then
+            DG.hits = (DG.hits or 0) + 1
+            local hx, hy, hz = HN.buf[i * 5], HN.buf[i * 5 + 1], HN.buf[i * 5 + 2] + 0.6
+            local sx, sy = nil, nil
+            if v then sx, sy = project(v, hx, hy, hz) end
+            log(('[Lemuen HUD] number %d: %.0f at %.1f %.1f %.1f, %s'):format(DG.hits, HN.buf[i * 5 + 3], hx, hy, hz,
+                not v and 'no view this frame' or sx and ('drawn at %.0f %.0f'):format(sx, sy) or 'nowhere (behind or off screen)'))
+        end
         if #HN.live >= HN_MAX then table.remove(HN.live, 1) end
         HN.live[#HN.live + 1] = {x = HN.buf[i * 5], y = HN.buf[i * 5 + 1], z = HN.buf[i * 5 + 2] + 0.6, amount = HN.buf[i * 5 + 3],
                                  boosted = HN.buf[i * 5 + 4] > 0.5, t = 0, jx = (math.random() - 0.5) * 18}
@@ -658,10 +667,17 @@ end
 
 -- 0.1.6: why nothing was drawn. 0.1.5's test drew no marker and no number with marks standing and boosted hits, and
 -- logged nothing: every few seconds in a mission (12 times at most) this logs how far the drawing got
-local DG = {next = 5, told = 0, view_nil = 0, view_ok = 0}
 local function diag(v)
-    if DG.told >= 12 or mk_t < DG.next then return end
-    DG.next = mk_t + 5
+    -- (0.1.6b: 0.1.6's twelve checks ran out a minute into the mission, before her first mark: now a check is logged
+    -- when a mark stands or a new hit came in, 16 of them, and once a minute otherwise)
+    if DG.told >= 16 or mk_t < DG.next then return end
+    DG.next = mk_t + 1
+    local busy = (MK.fn and MK.fn(1, MK.buf, 32) or 0) > 0 or HN.seq[0] ~= DG.seq
+    if not busy then
+        if mk_t < DG.quiet then return end
+        DG.quiet = mk_t + 60
+    else DG.next = mk_t + 3 end
+    DG.seq = HN.seq[0]
     DG.told = DG.told + 1
     local parts = {('view %s (ok %d, none %d)'):format(v and 'yes' or 'no', DG.view_ok, DG.view_nil)}
     parts[#parts + 1] = 'marks fn ' .. (MK.fn and 'yes' or 'no') .. (MK.failed and ' (failed)' or '')
