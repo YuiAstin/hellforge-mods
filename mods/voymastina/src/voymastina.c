@@ -40,10 +40,8 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.0"
-static int WielderOf(uint32_t e, uint32_t* by);
+#define VERSION "0.4.1"
 static int HerRide(uint32_t target);
-static int FriendRes(uint64_t res);
 /* her two kits (p8): the Sinbreaker's GFL2 kit, the AK-15 kit on foot */
 static void AkHit(HfDamageEvent* d);
 static int AkWatching(void);
@@ -53,20 +51,23 @@ static uint32_t MechNow(void);
 static int MechPart(uint32_t target);
 static double HowlImmuneUntil(void);
 #define BUILD "25480438"
-#define AVATAR UINT64_C(0x4D1C334D294DFA97)
-#define NODE_HEAD 90u
-#define NODE_HEAD_AIM 91u
 
-static const HfApi* hf;
-static HfMod* self;
-static uintptr_t game, exe;
+#define KB_OWN_SLOTS 16
+#define KB_STEADY 1
+#define KB_UNSHAKEN 1
+#include "kitbase/kb_core.h"
+#include "kitbase/kb_player.h"
+#include "kitbase/kb_friends.h"
+#include "kitbase/kb_body.h"
+#include "kitbase/kb_hits.h"
+#include "kitbase/kb_damage.h"
+#include "kitbase/kb_settings.h"
+#include "kitbase/kb_roster.h"
+
+/* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
+KB_ROSTER_EXPORTS(voymastina)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
-#define KM_SHIFT 1
-#define KM_CTRL 2
-#define KM_ALT 4
-typedef struct Key { int vk, mods; char label[24]; } Key;
-static Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
 static float s_sfCd = 6, s_sfRange = 40, s_sfWindow = 10;
 /* (not in the .ini's text) */
 static float s_bareDamage = 5000, s_bareStagger = 80, s_bareAp = 9, s_bareDemolition = 60, s_bareSpeed = 1.2f, s_bareReach = 3.5f, s_bareBlastEvery = 0.5f;
@@ -88,7 +89,7 @@ static unsigned g_tooHigh;
 static int s_pbpOn = 1, s_pbpPoints = 3, s_pbpRow = 343;
 static float s_pbpRadius = 10, s_pbpDistance = 6, s_pbpStep = 4, s_pbpEvery = 6;
 static float s_ripple = 0.3f;    /* s between the blasts of a line, rippling out from her (0: all at once) */
-static int s_steady = 1, s_unshaken = 1, s_noStaminaHits = 1, s_ppArmor = 4;
+static int s_noStaminaHits = 1, s_ppArmor = 4;
 static float s_ppArmorEqual = 0.35f, s_ppArmorAfter = 5;
 static float s_drBase = 0.3f, s_drStable = 0.8f;
 static float s_stabMax = 100, s_stabPer = 0.5f, s_stabMin = 5, s_stabRegen = 20, s_stabDelay = 3;
@@ -96,11 +97,8 @@ static int s_apBonus = 1;
 static int s_ppPer = 2, s_ppMax = 6, s_ppAp = 2;
 static float s_ppMult = 1.5f;
 static float s_lpClimb = 6, s_lpDrop = 12;
-static int s_hellbomb = 1, s_hellbombRow = 125;
-static float s_hpMult = 1.5f, s_staminaMult = 2.0f;
-static float s_hellbombHold = 0.5f;
 /* the Sinbreaker (her mech, the GFL2 kit) and its earned Pile Bunker follow-up */
-static int s_sinOn = 1, s_sinUses = -1, s_mechAny = 0, s_sinGrant = 1, s_sinLoadout = 1;
+static int s_sinOn = 1, s_sinUses = -1, s_mechAny = 0, s_sinGrant = 1, s_sinLoadout = 1, s_sinFallback = 1, s_sinFreeBase = 2;
 static float s_sinCd = 120, s_mechLunge = 8;
 static int s_mpbOn = 1, s_mpbUnlock = 2, s_mpbDrag = 10, s_mpbRow = 242, s_mpbFallback = 125;
 static float s_mpbLength = 30, s_mpbWidth = 4, s_mpbHold = 0.4f, s_mpbDelay = 0.7f;
@@ -114,208 +112,95 @@ static float s_akErgo = 50, s_akReload = 0.5f, s_akRecoil = 0.7f;
 static float s_sinTurn = 1.6f, s_sinSpeed = 1.4f;   /* the Sinbreaker: turning x, walking x */
 static int s_sinArmor = 5, s_akZeroTest = 3;   /* her guns on foot: + ergonomics, x reload time */
 
-static int s_badKey;
-static void Setting(const char* key, double v)
-{
-#define CL(x, lo, hi) ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))
-#define F(name, var, lo, hi) else if (!strcmp(key, name)) var = (float)CL(v, lo, hi)
-#define I(name, var, lo, hi) else if (!strcmp(key, name)) var = (int)CL(v, lo, hi)
-    if (0) {}
-    F("sf_cooldown", s_sfCd, 0, 600); F("sf_range", s_sfRange, 5, 200); F("sf_window", s_sfWindow, 0.5, 120);
-    I("bare", s_bare, 0, 1); F("bare_damage", s_bareDamage, 0, 1e6); F("bare_stagger", s_bareStagger, 0, 1000); F("bare_ap", s_bareAp, 0, 10); F("bare_demolition", s_bareDemolition, 0, 1000); F("bare_speed", s_bareSpeed, 0.1, 3); F("bare_reach", s_bareReach, 0.5, 10); I("bare_blast", s_bareBlast, 0, 100000); F("bare_blast_every", s_bareBlastEvery, 0, 5); I("bare_bolt", s_bareBolt, 0, 1); I("sf_explosion", s_sfRow, 0, 100000);
-    I("sa_on", s_saOn, 0, 1); F("sa_every", s_saEvery, 0.2, 60); I("sa_explosion", s_saRow, 0, 100000);
-    F("eye_cooldown", s_eyeCd, 0, 600); F("eye_seconds", s_eyeSeconds, 1, 60); F("eye_radius", s_eyeRadius, 5, 100);
-    F("eye_move", s_eyeMove, 0.2, 20); F("eye_every", s_eyeEvery, 0.5, 30); I("eye_max", s_eyeMax, 0, 200); I("eye_immune", s_eyeImmune, 0, 1); I("eye_explosion", s_eyeRow, 0, 100000);
-    I("drop_on", s_dropOn, 0, 1); I("drop_targets", s_dropTargets, 0, 12); F("drop_radius", s_dropRadius, 5, 100);
-    F("drop_shield", s_dropShield, 0, 10); I("drop_explosion", s_dropRow, 0, 100000);
-    F("pb_cooldown", s_pbCd, 0, 600); F("pb_lunge", s_pbLunge, 0, 15); F("pb_window", s_pbWindow, 0, 15); F("pb_dash", s_pbDash, 1, 30);
-    I("pb_explosion", s_pbRow, 0, 100000); I("pb_points", s_pbPoints, 0, 8); F("pb_step", s_pbStep, 0.5, 20); F("pb_climb", s_pbClimb, 0, 20); I("rail_explosion", s_railRow, 0, 100000); I("pb_fallback", s_pbFallback, 0, 100000);
-    I("pbp_on", s_pbpOn, 0, 1); F("pbp_radius", s_pbpRadius, 2, 60); F("pbp_distance", s_pbpDistance, 1, 20); I("pbp_points", s_pbpPoints, 1, 8);
-    F("pbp_step", s_pbpStep, 0.5, 10); F("pbp_every", s_pbpEvery, 0.5, 120); F("pb_ripple", s_ripple, 0, 1); I("pbp_explosion", s_pbpRow, 0, 100000);
-    I("steady", s_steady, 0, 1); I("dash_move", s_dashMove, 0, 1); I("unshaken", s_unshaken, 0, 1); I("no_stamina_hits", s_noStaminaHits, 0, 1); I("pp_armor", s_ppArmor, 0, 10); F("pp_armor_equal", s_ppArmorEqual, 0, 1); F("pp_armor_after", s_ppArmorAfter, 0, 60); F("dr_base", s_drBase, 0, 1); F("dr_stable", s_drStable, 0, 1);
-    F("stab_max", s_stabMax, 1, 1000); F("stab_per_damage", s_stabPer, 0, 10); F("stab_min_hit", s_stabMin, 0, 100);
-    F("stab_regen", s_stabRegen, 0, 500); F("stab_delay", s_stabDelay, 0, 30); I("ap_bonus", s_apBonus, 0, 6);
-    I("pp_per", s_ppPer, 0, 10); I("pp_max", s_ppMax, 1, 20); I("pp_ap", s_ppAp, 0, 6); F("pp_mult", s_ppMult, 1, 10);
-    F("lp_climb", s_lpClimb, 0.5, 30); F("lp_drop", s_lpDrop, 0.5, 50);
-    I("sin_on", s_sinOn, 0, 1); F("sin_cooldown", s_sinCd, 1, 3600); I("sin_uses", s_sinUses, -1, 100); I("mech_any", s_mechAny, 0, 1); I("sin_grant", s_sinGrant, 0, 1); I("sin_loadout", s_sinLoadout, 0, 1); F("mech_lunge", s_mechLunge, 0, 30);
-    I("mpb_on", s_mpbOn, 0, 1); I("mpb_unlock", s_mpbUnlock, 0, 2); F("mpb_length", s_mpbLength, 5, 80); F("mpb_width", s_mpbWidth, 1, 20); I("mpb_drag", s_mpbDrag, 0, 32);
-    I("mpb_explosion", s_mpbRow, 0, 100000); I("mpb_fallback", s_mpbFallback, 0, 100000); F("mpb_hold", s_mpbHold, 0, 5); F("mpb_delay", s_mpbDelay, 0, 5);
-    F("rage_chance", s_rageChance, 0, 1); F("rage_seconds", s_rageSeconds, 0, 60); F("rage_bonus", s_rageBonus, 0, 10);
-    F("ak_eye_seconds", s_akEyeSeconds, 0.5, 60); F("ak_eye_cooldown", s_akEyeCd, 0, 300); F("ak_eye_range", s_akEyeRange, 5, 300); F("ak_eye_bonus", s_akEyeBonus, 0, 10); F("ak_eye_evasion", s_akEyeEvasion, 0, 1);
-    F("overload_max", s_overloadMax, 1, 1000); F("overload_seconds", s_overloadSeconds, 0, 60); F("overload_penalty", s_overloadPenalty, 0, 1);
-    F("sin_turn", s_sinTurn, 0.5, 4); F("sin_speed", s_sinSpeed, 1, 3); I("sin_armor", s_sinArmor, 0, 10); I("ak_zero_test", s_akZeroTest, 0, 3); F("ak_ergo", s_akErgo, -100, 200); F("ak_reload", s_akReload, 0.1, 2); F("ak_recoil", s_akRecoil, 0, 2); I("howl_targets", s_howlTargets, 0, 100); F("howl_immune", s_howlImmune, 0, 30); I("howl_from_control", s_howlFromControl, 0, 1); F("howl_range", s_howlRange, 5, 300); I("howl_explosion", s_howlRow, 0, 100000);
-    F("hp_mult", s_hpMult, 0.1, 10); F("stamina_mult", s_staminaMult, 0.1, 20); I("hellbomb_on_exhaustion", s_hellbomb, 0, 1); I("hellbomb_explosion", s_hellbombRow, 0, 100000); F("hellbomb_hold", s_hellbombHold, 0, 10);
-#undef F
-#undef I
-#undef CL
-}
+/* Every setting: its .ini / Mod Options Menu name, variable and range (kitbase/kb_settings.h) */
+static const KbSetting kSettings[] = {
+    KB_F("sf_cooldown", s_sfCd, 0, 600), KB_F("sf_range", s_sfRange, 5, 200), KB_F("sf_window", s_sfWindow, 0.5, 120),
+    KB_I("bare", s_bare, 0, 1), KB_F("bare_damage", s_bareDamage, 0, 1e6), KB_F("bare_stagger", s_bareStagger, 0, 1000), KB_F("bare_ap", s_bareAp, 0, 10), KB_F("bare_demolition", s_bareDemolition, 0, 1000), KB_F("bare_speed", s_bareSpeed, 0.1, 3), KB_F("bare_reach", s_bareReach, 0.5, 10), KB_I("bare_blast", s_bareBlast, 0, 100000), KB_F("bare_blast_every", s_bareBlastEvery, 0, 5), KB_I("bare_bolt", s_bareBolt, 0, 1), KB_I("sf_explosion", s_sfRow, 0, 100000),
+    KB_I("sa_on", s_saOn, 0, 1), KB_F("sa_every", s_saEvery, 0.2, 60), KB_I("sa_explosion", s_saRow, 0, 100000),
+    KB_F("eye_cooldown", s_eyeCd, 0, 600), KB_F("eye_seconds", s_eyeSeconds, 1, 60), KB_F("eye_radius", s_eyeRadius, 5, 100),
+    KB_F("eye_move", s_eyeMove, 0.2, 20), KB_F("eye_every", s_eyeEvery, 0.5, 30), KB_I("eye_max", s_eyeMax, 0, 200), KB_I("eye_immune", s_eyeImmune, 0, 1), KB_I("eye_explosion", s_eyeRow, 0, 100000),
+    KB_I("drop_on", s_dropOn, 0, 1), KB_I("drop_targets", s_dropTargets, 0, 12), KB_F("drop_radius", s_dropRadius, 5, 100),
+    KB_F("drop_shield", s_dropShield, 0, 10), KB_I("drop_explosion", s_dropRow, 0, 100000),
+    KB_F("pb_cooldown", s_pbCd, 0, 600), KB_F("pb_lunge", s_pbLunge, 0, 15), KB_F("pb_window", s_pbWindow, 0, 15), KB_F("pb_dash", s_pbDash, 1, 30),
+    KB_I("pb_explosion", s_pbRow, 0, 100000), KB_I("pb_points", s_pbPoints, 0, 8), KB_F("pb_step", s_pbStep, 0.5, 20), KB_F("pb_climb", s_pbClimb, 0, 20), KB_I("rail_explosion", s_railRow, 0, 100000), KB_I("pb_fallback", s_pbFallback, 0, 100000),
+    KB_I("pbp_on", s_pbpOn, 0, 1), KB_F("pbp_radius", s_pbpRadius, 2, 60), KB_F("pbp_distance", s_pbpDistance, 1, 20), KB_I("pbp_points", s_pbpPoints, 1, 8),
+    KB_F("pbp_step", s_pbpStep, 0.5, 10), KB_F("pbp_every", s_pbpEvery, 0.5, 120), KB_F("pb_ripple", s_ripple, 0, 1), KB_I("pbp_explosion", s_pbpRow, 0, 100000),
+    KB_I("steady", s_steady, 0, 1), KB_I("dash_move", s_dashMove, 0, 1), KB_I("unshaken", s_unshaken, 0, 1), KB_I("no_stamina_hits", s_noStaminaHits, 0, 1), KB_I("pp_armor", s_ppArmor, 0, 10), KB_F("pp_armor_equal", s_ppArmorEqual, 0, 1), KB_F("pp_armor_after", s_ppArmorAfter, 0, 60), KB_F("dr_base", s_drBase, 0, 1), KB_F("dr_stable", s_drStable, 0, 1),
+    KB_F("stab_max", s_stabMax, 1, 1000), KB_F("stab_per_damage", s_stabPer, 0, 10), KB_F("stab_min_hit", s_stabMin, 0, 100),
+    KB_F("stab_regen", s_stabRegen, 0, 500), KB_F("stab_delay", s_stabDelay, 0, 30), KB_I("ap_bonus", s_apBonus, 0, 6),
+    KB_I("pp_per", s_ppPer, 0, 10), KB_I("pp_max", s_ppMax, 1, 20), KB_I("pp_ap", s_ppAp, 0, 6), KB_F("pp_mult", s_ppMult, 1, 10),
+    KB_F("lp_climb", s_lpClimb, 0.5, 30), KB_F("lp_drop", s_lpDrop, 0.5, 50),
+    KB_I("sin_on", s_sinOn, 0, 1), KB_F("sin_cooldown", s_sinCd, 1, 3600), KB_I("sin_uses", s_sinUses, -1, 100), KB_I("mech_any", s_mechAny, 0, 1), KB_I("sin_grant", s_sinGrant, 0, 1), KB_I("sin_loadout", s_sinLoadout, 0, 1), KB_I("sin_fallback", s_sinFallback, 0, 2), KB_I("sin_free_base", s_sinFreeBase, 1, 2), KB_F("mech_lunge", s_mechLunge, 0, 30),
+    KB_I("mpb_on", s_mpbOn, 0, 1), KB_I("mpb_unlock", s_mpbUnlock, 0, 2), KB_F("mpb_length", s_mpbLength, 5, 80), KB_F("mpb_width", s_mpbWidth, 1, 20), KB_I("mpb_drag", s_mpbDrag, 0, 32),
+    KB_I("mpb_explosion", s_mpbRow, 0, 100000), KB_I("mpb_fallback", s_mpbFallback, 0, 100000), KB_F("mpb_hold", s_mpbHold, 0, 5), KB_F("mpb_delay", s_mpbDelay, 0, 5),
+    KB_F("rage_chance", s_rageChance, 0, 1), KB_F("rage_seconds", s_rageSeconds, 0, 60), KB_F("rage_bonus", s_rageBonus, 0, 10),
+    KB_F("ak_eye_seconds", s_akEyeSeconds, 0.5, 60), KB_F("ak_eye_cooldown", s_akEyeCd, 0, 300), KB_F("ak_eye_range", s_akEyeRange, 5, 300), KB_F("ak_eye_bonus", s_akEyeBonus, 0, 10), KB_F("ak_eye_evasion", s_akEyeEvasion, 0, 1),
+    KB_F("overload_max", s_overloadMax, 1, 1000), KB_F("overload_seconds", s_overloadSeconds, 0, 60), KB_F("overload_penalty", s_overloadPenalty, 0, 1),
+    KB_F("sin_turn", s_sinTurn, 0.5, 4), KB_F("sin_speed", s_sinSpeed, 1, 3), KB_I("sin_armor", s_sinArmor, 0, 10), KB_I("ak_zero_test", s_akZeroTest, 0, 3), KB_F("ak_ergo", s_akErgo, -100, 200), KB_F("ak_reload", s_akReload, 0.1, 2), KB_F("ak_recoil", s_akRecoil, 0, 2), KB_I("howl_targets", s_howlTargets, 0, 100), KB_F("howl_immune", s_howlImmune, 0, 30), KB_I("howl_from_control", s_howlFromControl, 0, 1), KB_F("howl_range", s_howlRange, 5, 300), KB_I("howl_explosion", s_howlRow, 0, 100000),
+    KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1), KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
+};
 
-static int ParseKey(const char* text, Key* out)
+/* The default voymastina.ini: tools/inigen.py writes the file from this text (the mod never writes it) */
+static __attribute__((unused)) void DefaultIni(FILE* f)
 {
-    Key k = {0, 0, ""};
-    char buf[64];
-    snprintf(buf, sizeof buf, "%s", text);
-    for (char* tok = strtok(buf, "+ \t\r\n"); tok; tok = strtok(NULL, "+ \t\r\n"))
-    {
-        char t[24];
-        size_t n = 0;
-        for (; tok[n] && n < sizeof t - 1; n++) t[n] = (char)toupper((unsigned char)tok[n]);
-        t[n] = 0;
-        if (!strcmp(t, "SHIFT")) k.mods |= KM_SHIFT;
-        else if (!strcmp(t, "CTRL") || !strcmp(t, "CONTROL")) k.mods |= KM_CTRL;
-        else if (!strcmp(t, "ALT")) k.mods |= KM_ALT;
-        else if (k.vk) return 0;  /* two main keys */
-        else if (n == 1 && ((t[0] >= 'A' && t[0] <= 'Z') || (t[0] >= '0' && t[0] <= '9'))) k.vk = t[0];
-        else if (t[0] == 'F' && n <= 3 && atoi(t + 1) >= 1 && atoi(t + 1) <= 24) k.vk = VK_F1 + atoi(t + 1) - 1;
-        else if (!strcmp(t, "MOUSE4")) k.vk = VK_XBUTTON1;
-        else if (!strcmp(t, "MOUSE5")) k.vk = VK_XBUTTON2;
-        else if (!strcmp(t, "MOUSE3") || !strcmp(t, "MIDDLEMOUSE")) k.vk = VK_MBUTTON;
-        else if (t[0] == '#' && atoi(t + 1) > 0 && atoi(t + 1) < 255) k.vk = atoi(t + 1);
-        else if (n >= 2 && strspn(t, "0123456789") == n && atoi(t) > 0 && atoi(t) < 255) k.vk = atoi(t);  /* 0.1.0's codes */
-        else return 0;
-    }
-    if (!k.vk)  /* a modifier alone is a key of its own: Ctrl, Alt or Shift */
-    {
-        if (k.mods == KM_SHIFT) k.vk = VK_SHIFT;
-        else if (k.mods == KM_CTRL) k.vk = VK_CONTROL;
-        else if (k.mods == KM_ALT) k.vk = VK_MENU;
-        else return 0;
-        k.mods = 0;
-    }
-    char name[24];
-    if ((k.vk >= 'A' && k.vk <= 'Z') || (k.vk >= '0' && k.vk <= '9')) snprintf(name, sizeof name, "%c", k.vk);
-    else if (k.vk >= VK_F1 && k.vk <= VK_F24) snprintf(name, sizeof name, "F%d", k.vk - VK_F1 + 1);
-    else if (k.vk == VK_XBUTTON1) snprintf(name, sizeof name, "M4");
-    else if (k.vk == VK_XBUTTON2) snprintf(name, sizeof name, "M5");
-    else if (k.vk == VK_MBUTTON) snprintf(name, sizeof name, "M3");
-    else if (k.vk == VK_SHIFT) snprintf(name, sizeof name, "Shift");
-    else if (k.vk == VK_CONTROL) snprintf(name, sizeof name, "Ctrl");
-    else if (k.vk == VK_MENU) snprintf(name, sizeof name, "Alt");
-    else snprintf(name, sizeof name, "#%d", k.vk);
-    snprintf(k.label, sizeof k.label, "%s%s%s%s", k.mods & KM_CTRL ? "Ctrl+" : "", k.mods & KM_ALT ? "Alt+" : "",
-        k.mods & KM_SHIFT ? "Shift+" : "", name);
-    *out = k;
-    return 1;
-}
-
-/* The settings file, opened by its UTF-8 path as Windows reads it (plain fopen reads the path in the ANSI code page, so a
- * folder with a non-English letter in it fails). HellForge holds mod folders read-only while the game runs, so the mod
- * never writes it: the release ships it with the defaults (made from the text below by inigen/gen.py). */
-static FILE* OpenUtf8(const char* path, const wchar_t* mode)
-{
-    wchar_t w[MAX_PATH * 2];
-    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, w, MAX_PATH * 2)) return NULL;
-    return _wfopen(w, mode);
-}
-
-static void LoadSettings(void)
-{
-    char path[MAX_PATH * 2], line[256];
-    snprintf(path, sizeof path, "%s\\voymastina.ini", hf->mod_folder(self));
-    FILE* f = OpenUtf8(path, L"r");
-    if (f) hf->log(self, "settings: read %s", path);
-    else
-    {
-        hf->log(self, "settings: no voymastina.ini in %s (it ships with the mod), so the built-in defaults; the MODS tab still changes them", path);
-        FILE* w = NULL;   /* never written while the game runs (see OpenUtf8); the text stays as the defaults' source */
-        if ((f = w) != NULL)
-        {
-            fprintf(f, "; Voymastina %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for\n"
-                       "; a combo (Shift+Q), or Shift, Ctrl or Alt alone. The game still sees the keys too, so pick ones it leaves alone.\n"
-                       "key_sirius = %s\nkey_eye = %s\nkey_pile = %s\n"
-                       "; Explosions are ExplosionSettings rows (build 25480438): 361 GL-21 grenade launcher impact, 175 G-12 High\n"
-                       "; Explosive, 404 AC-8 autocannon impact, 158 R-36 Eruptor impact, 127 P-34 Breacher detonation, 19 CQC-20\n"
-                       "; Breaching Hammer, 294 GR-8 Recoilless Rifle (its special round), 343 Orbital Precision Strike, 52 Orbital Railcannon. 0: no blast.\n"
-                       "; Sirius Fall: cooldown; her next shot that hits an enemy within sf_window s sets off sf_explosion where it lands\n"
-                       "; (one per use). sf_range: how far along her aim Pile Bunker's railcannon finds its target.\n"
-                       "sf_cooldown = %g\nsf_window = %g\nsf_range = %g\nsf_explosion = %d\n"
-                       "; Support Action: her own shots on an enemy set off a blast on it, at most once every sa_every s (sa_on 0: off).\n"
-                       "sa_on = %d\nsa_every = %g\nsa_explosion = %d\n"
-                       "; Eye of the White Mastiff: cooldown, length, reach; an enemy that moves eye_move m between two looks (half a\n"
-                       "; second apart) or hits her takes a Lock On blast, once per enemy every eye_every s, at most eye_max per cast.\n"
-                       "; eye_immune 1: nothing hurts her while it lasts.\n"
-                       "eye_cooldown = %g\neye_seconds = %g\neye_radius = %g\neye_move = %g\neye_every = %g\neye_max = %d\neye_explosion = %d\neye_immune = %d\n"
-                       "; Drop-in: once she stands after a Hellpod drop, the drop_targets nearest enemies within drop_radius m take a\n"
-                       "; blast each; nothing hurts her until they have gone off (drop_shield s at most). drop_on 0: off.\n"
-                       "drop_on = %d\ndrop_targets = %d\ndrop_radius = %g\ndrop_shield = %g\ndrop_explosion = %d\n"
-                       "; Pile Bunker: cooldown, the lunge along her aim, then pb_points blasts pb_step m apart ahead (pb_fallback when the\n"
-                       "; game refuses pb_explosion) and rail_explosion on the enemy she aims at (the charge: on the enemy she charges);\n"
-                       "; pressed again within pb_window s: a dash of pb_dash m. The lunge and the charge stop in front of the enemy and land\n"
-                       "; at most pb_climb m above her.\n"
-                       "pb_cooldown = %g\npb_lunge = %g\npb_window = %g\npb_dash = %g\npb_explosion = %d\npb_fallback = %d\npb_points = %d\npb_step = %g\npb_climb = %g\nrail_explosion = %d\n"
-                       "; Pile Bunker charge: when her shot or melee hits an enemy within pbp_radius m, she drives a line of\n"
-                       "; pbp_points blasts pbp_step m apart from where she stands toward it (and a railcannon on it), without moving,\n"
-                       "; at most every pbp_every s.\n"
-                       "pbp_on = %d\npbp_radius = %g\npbp_points = %d\npbp_step = %g\npbp_every = %g\npbp_explosion = %d\n"
-                       "; Mastiff's Pledge: steady 1 never knocked down. Damage kept off her: dr_base always, dr_stable while her\n"
-                       "; Stability holds (0.8: 80%% less). Stability: stab_max points; a hit drains stab_per_damage per damage point (at\n"
-                       "; least stab_min_hit); it refills stab_regen a second after stab_delay s unhurt, and in full with Pile Bunker.\n"
-                       "; ap_bonus: extra armour penetration on her hits. unshaken 1: no stagger, push or flinch from hits either;\n"
-                       "; no_stamina_hits 1: hits take none of her stamina.\n"
-                       "steady = %d\nunshaken = %d\nno_stamina_hits = %d\ndr_base = %g\ndr_stable = %g\nstab_max = %g\nstab_per_damage = %g\nstab_min_hit = %g\nstab_regen = %g\nstab_delay = %g\nap_bonus = %d\n"
-                       "; Predation Protocol: each skill adds pp_per; at pp_max her next skill is empowered: pp_ap more armour\n"
-                       "; penetration and pp_mult times the damage on its blasts. While it waits (and pp_armor_after s after that skill)\n"
-                       "; she has heavy armour: armour value pp_armor (4: heavy): a hit with less armour penetration glances off, an\n"
-                       "; equal one deals pp_armor_equal of its damage (0: off).\n"
-                       "pp_per = %d\npp_max = %d\npp_ap = %d\npp_mult = %g\npp_armor = %d\npp_armor_equal = %g\npp_armor_after = %g\n"
-                       "; Where her teleports may land: lp_climb m higher or lp_drop m lower than she stands.\n"
-                       "lp_climb = %g\nlp_drop = %g\n"
-                       "; The T-Doll's body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties.\n"
-                       "hp_mult = %g\nstamina_mult = %g\n"
-                       "; If her stamina ever runs out, hellbomb_on_exhaustion (1) sets off hellbomb_explosion (125: the B-100 Portable\n"
-                       "; Hellbomb's) on her, once the bar has stayed empty hellbomb_hold s (it flickers to 0 at times).\n"
-                       "hellbomb_on_exhaustion = %d\nhellbomb_explosion = %d\nhellbomb_hold = %g\n",
-                VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label,
-                (double)s_sfCd, (double)s_sfWindow, (double)s_sfRange, s_sfRow, s_saOn, (double)s_saEvery, s_saRow,
-                (double)s_eyeCd, (double)s_eyeSeconds, (double)s_eyeRadius, (double)s_eyeMove, (double)s_eyeEvery, s_eyeMax, s_eyeRow, s_eyeImmune,
-                s_dropOn, s_dropTargets, (double)s_dropRadius, (double)s_dropShield, s_dropRow,
-                (double)s_pbCd, (double)s_pbLunge, (double)s_pbWindow, (double)s_pbDash, s_pbRow, s_pbFallback, s_pbPoints, (double)s_pbStep, (double)s_pbClimb, s_railRow,
-                s_pbpOn, (double)s_pbpRadius, s_pbpPoints, (double)s_pbpStep, (double)s_pbpEvery, s_pbpRow,
-                s_steady, s_unshaken, s_noStaminaHits, (double)s_drBase, (double)s_drStable, (double)s_stabMax, (double)s_stabPer, (double)s_stabMin, (double)s_stabRegen, (double)s_stabDelay, s_apBonus,
-                s_ppPer, s_ppMax, s_ppAp, (double)s_ppMult, s_ppArmor, (double)s_ppArmorEqual, (double)s_ppArmorAfter, (double)s_lpClimb, (double)s_lpDrop,
-                (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
-            fclose(f);
-        }
-        return;
-    }
-    while (fgets(line, sizeof line, f))
-    {
-        char* c = strchr(line, ';');
-        if (c) *c = 0;
-        if (line[strspn(line, " \t")] == '#') continue;
-        char* eq = strchr(line, '=');
-        if (!eq) continue;
-        *eq = 0;
-        char key[64];
-        if (sscanf(line, " %63s", key) != 1) continue;
-        int k = !strcmp(key, "key_sirius") ? 0 : !strcmp(key, "key_eye") ? 1 : !strcmp(key, "key_pile") ? 2 : -1;
-        if (k >= 0)
-        {
-            Key parsed;
-            if (ParseKey(eq + 1, &parsed)) s_keys[k] = parsed;
-            else s_badKey |= 1 << k;
-            continue;
-        }
-        char* end;
-        double v = strtod(eq + 1, &end);
-        if (end != eq + 1) Setting(key, v);
-    }
-    fclose(f);
+fprintf(f, "; Voymastina %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for\n"
+               "; a combo (Shift+Q), or Shift, Ctrl or Alt alone. The game still sees the keys too, so pick ones it leaves alone.\n"
+               "key_sirius = %s\nkey_eye = %s\nkey_pile = %s\n"
+               "; Explosions are ExplosionSettings rows (build 25480438): 361 GL-21 grenade launcher impact, 175 G-12 High\n"
+               "; Explosive, 404 AC-8 autocannon impact, 158 R-36 Eruptor impact, 127 P-34 Breacher detonation, 19 CQC-20\n"
+               "; Breaching Hammer, 294 GR-8 Recoilless Rifle (its special round), 343 Orbital Precision Strike, 52 Orbital Railcannon. 0: no blast.\n"
+               "; Sirius Fall: cooldown; her next shot that hits an enemy within sf_window s sets off sf_explosion where it lands\n"
+               "; (one per use). sf_range: how far along her aim Pile Bunker's railcannon finds its target.\n"
+               "sf_cooldown = %g\nsf_window = %g\nsf_range = %g\nsf_explosion = %d\n"
+               "; Support Action: her own shots on an enemy set off a blast on it, at most once every sa_every s (sa_on 0: off).\n"
+               "sa_on = %d\nsa_every = %g\nsa_explosion = %d\n"
+               "; Eye of the White Mastiff: cooldown, length, reach; an enemy that moves eye_move m between two looks (half a\n"
+               "; second apart) or hits her takes a Lock On blast, once per enemy every eye_every s, at most eye_max per cast.\n"
+               "; eye_immune 1: nothing hurts her while it lasts.\n"
+               "eye_cooldown = %g\neye_seconds = %g\neye_radius = %g\neye_move = %g\neye_every = %g\neye_max = %d\neye_explosion = %d\neye_immune = %d\n"
+               "; Drop-in: once she stands after a Hellpod drop, the drop_targets nearest enemies within drop_radius m take a\n"
+               "; blast each; nothing hurts her until they have gone off (drop_shield s at most). drop_on 0: off.\n"
+               "drop_on = %d\ndrop_targets = %d\ndrop_radius = %g\ndrop_shield = %g\ndrop_explosion = %d\n"
+               "; Pile Bunker: cooldown, the lunge along her aim, then pb_points blasts pb_step m apart ahead (pb_fallback when the\n"
+               "; game refuses pb_explosion) and rail_explosion on the enemy she aims at (the charge: on the enemy she charges);\n"
+               "; pressed again within pb_window s: a dash of pb_dash m. The lunge and the charge stop in front of the enemy and land\n"
+               "; at most pb_climb m above her.\n"
+               "pb_cooldown = %g\npb_lunge = %g\npb_window = %g\npb_dash = %g\npb_explosion = %d\npb_fallback = %d\npb_points = %d\npb_step = %g\npb_climb = %g\nrail_explosion = %d\n"
+               "; Pile Bunker charge: when her shot or melee hits an enemy within pbp_radius m, she drives a line of\n"
+               "; pbp_points blasts pbp_step m apart from where she stands toward it (and a railcannon on it), without moving,\n"
+               "; at most every pbp_every s.\n"
+               "pbp_on = %d\npbp_radius = %g\npbp_points = %d\npbp_step = %g\npbp_every = %g\npbp_explosion = %d\n"
+               "; Mastiff's Pledge: steady 1 never knocked down. Damage kept off her: dr_base always, dr_stable while her\n"
+               "; Stability holds (0.8: 80%% less). Stability: stab_max points; a hit drains stab_per_damage per damage point (at\n"
+               "; least stab_min_hit); it refills stab_regen a second after stab_delay s unhurt, and in full with Pile Bunker.\n"
+               "; ap_bonus: extra armour penetration on her hits. unshaken 1: no stagger, push or flinch from hits either;\n"
+               "; no_stamina_hits 1: hits take none of her stamina.\n"
+               "steady = %d\nunshaken = %d\nno_stamina_hits = %d\ndr_base = %g\ndr_stable = %g\nstab_max = %g\nstab_per_damage = %g\nstab_min_hit = %g\nstab_regen = %g\nstab_delay = %g\nap_bonus = %d\n"
+               "; Predation Protocol: each skill adds pp_per; at pp_max her next skill is empowered: pp_ap more armour\n"
+               "; penetration and pp_mult times the damage on its blasts. While it waits (and pp_armor_after s after that skill)\n"
+               "; she has heavy armour: armour value pp_armor (4: heavy): a hit with less armour penetration glances off, an\n"
+               "; equal one deals pp_armor_equal of its damage (0: off).\n"
+               "pp_per = %d\npp_max = %d\npp_ap = %d\npp_mult = %g\npp_armor = %d\npp_armor_equal = %g\npp_armor_after = %g\n"
+               "; Where her teleports may land: lp_climb m higher or lp_drop m lower than she stands.\n"
+               "lp_climb = %g\nlp_drop = %g\n"
+               "; The T-Doll's body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties.\n"
+               "hp_mult = %g\nstamina_mult = %g\n"
+               "; If her stamina ever runs out, hellbomb_on_exhaustion (1) sets off hellbomb_explosion (125: the B-100 Portable\n"
+               "; Hellbomb's) on her, once the bar has stayed empty hellbomb_hold s (it flickers to 0 at times).\n"
+               "hellbomb_on_exhaustion = %d\nhellbomb_explosion = %d\nhellbomb_hold = %g\n",
+        VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label,
+        (double)s_sfCd, (double)s_sfWindow, (double)s_sfRange, s_sfRow, s_saOn, (double)s_saEvery, s_saRow,
+        (double)s_eyeCd, (double)s_eyeSeconds, (double)s_eyeRadius, (double)s_eyeMove, (double)s_eyeEvery, s_eyeMax, s_eyeRow, s_eyeImmune,
+        s_dropOn, s_dropTargets, (double)s_dropRadius, (double)s_dropShield, s_dropRow,
+        (double)s_pbCd, (double)s_pbLunge, (double)s_pbWindow, (double)s_pbDash, s_pbRow, s_pbFallback, s_pbPoints, (double)s_pbStep, (double)s_pbClimb, s_railRow,
+        s_pbpOn, (double)s_pbpRadius, s_pbpPoints, (double)s_pbpStep, (double)s_pbpEvery, s_pbpRow,
+        s_steady, s_unshaken, s_noStaminaHits, (double)s_drBase, (double)s_drStable, (double)s_stabMax, (double)s_stabPer, (double)s_stabMin, (double)s_stabRegen, (double)s_stabDelay, s_apBonus,
+        s_ppPer, s_ppMax, s_ppAp, (double)s_ppMult, s_ppArmor, (double)s_ppArmorEqual, (double)s_ppArmorAfter, (double)s_lpClimb, (double)s_lpDrop,
+        (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
 }
 
 /* ---- the clock, the player ------------------------------------------------------------------------------------ */
-static double g_now;
-static atomic_uint g_avatar;      /* her Helldiver's entity (0: none) */
-static uint32_t g_avatarNet;      /* its network id */
-static int g_alive, g_inMission;
-static uint32_t g_weapon[4];      /* the held weapons by selection (1 primary, 2 secondary, 3 support): entities */
-static uint64_t g_weaponRes[4];
 
-static uint32_t Word(const uint8_t* p) { uint32_t v; memcpy(&v, p, 4); return v; }
-static uint64_t Quad(const uint8_t* p) { uint64_t v; memcpy(&v, p, 8); return v; }
-static int AddressOk(uintptr_t a, size_t n) { return n && a >= 0x10000 && a < UINT64_C(0x800000000000) && n <= UINT64_C(0x800000000000) - a; }
-static int ReadAt(uintptr_t a, void* out, size_t n) { return AddressOk(a, n) && hf->read(a, out, n) == 0; }
-static uintptr_t Pointer(uintptr_t a) { uintptr_t v = 0; return ReadAt(a, &v, 8) && AddressOk(v, 1) ? v : 0; }
 /* An entity's health record (HD2Runtime's research: the health manager at game+0x3326688, its open-addressed entity
  * hash, 440-byte records with health at +20 and life at +412, 0 alive). 1 with *health and *life filled */
 __attribute__((unused)) static int HealthOf(uint32_t entity, int32_t* health, uint32_t* life)
@@ -343,71 +228,9 @@ __attribute__((unused)) static int HealthOf(uint32_t entity, int32_t* health, ui
     }
     return 0;
 }
-static int Lookup(uintptr_t at, uint32_t key, uint32_t limit, uint32_t* index)
-{
-    uint8_t h[20], row[8];
-    if (!ReadAt(at, h, sizeof h)) return 0;
-    uintptr_t entries = (uintptr_t)Quad(h);
-    uint32_t n = Word(h + 8), empty = Word(h + 12), mult = Word(h + 16);
-    if (!AddressOk(entries, 8) || !n || n > limit || (n & (n - 1)) || key == empty) return 0;
-    for (unsigned i = 0; i < n && i < 128; i++)
-    {
-        if (!ReadAt(entries + 8u * ((key * mult + i) & (n - 1)), row, 8)) return 0;
-        if (Word(row) == key) { *index = Word(row + 4); return *index != UINT32_MAX; }
-        if (Word(row) == empty) return 0;
-    }
-    return 0;
-}
-/* An entity's descriptor: its resource (+0), entity (+8), unit (+12), flags (+20, bit 0: this machine's authority) */
-static int Descriptor(uint32_t entity, uint8_t out[24])
-{
-    if (!game || !entity || entity == UINT32_MAX || entity == 0x7FFF) return 0;
-    uintptr_t root = Pointer(game + 0x346BF98);
-    uint32_t index;
-    if (!root || !Lookup(root + 0xF1AEB0, entity, 1048576, &index) || index >= 262144) return 0;
-    return ReadAt(root + 0xF32F18 + 24u * index, out, 24) && Word(out + 8) == entity;
-}
-/* A node's world position in a unit's scene graph (64-byte matrices, translation at +0x30) */
-static int UnitNode(uint32_t unit, uint32_t node, float out[3])
-{
-    if (!exe) return 0;
-    uintptr_t registry = Pointer(exe + 0x1A100F0), generations, objects, object, nodes;
-    uint32_t count, id, slot = unit & 0x3FFFFF;
-    uint8_t generation;
-    if (!registry || !ReadAt(registry + 0x98, &count, 4) || count > 0x400000 || slot >= count ||
-        !(generations = Pointer(registry + 0xA0)) || !ReadAt(generations + slot, &generation, 1) || generation != (uint8_t)(unit >> 22) ||
-        !(objects = Pointer(registry + 0x88)) || !(object = Pointer(objects + 8u * slot)) || !ReadAt(object + 8, &id, 4) || id != unit ||
-        !ReadAt(object + 0x70, &count, 4) || node >= count || count > 4096 || !(nodes = Pointer(object + 0x88)))
-        return 0;
-    if (!ReadAt(nodes + 64u * node + 48, out, 12)) return 0;
-    for (int i = 0; i < 3; i++) if (!isfinite(out[i]) || fabsf(out[i]) > 100000) return 0;
-    return 1;
-}
-static int PlayerPose(float pos[3], float aim[3])
-{
-    uint8_t id[24];
-    uint32_t avatar = atomic_load(&g_avatar);
-    if (!Descriptor(avatar, id) || Quad(id) != AVATAR) return 0;
-    uint32_t unit = Word(id + 12);
-    if (!UnitNode(unit, 0, pos)) return 0;
-    if (aim)
-    {
-        float head[3], ahead[3];
-        if (!UnitNode(unit, NODE_HEAD, head) || !UnitNode(unit, NODE_HEAD_AIM, ahead)) return 0;
-        float d[3] = {ahead[0] - head[0], ahead[1] - head[1], ahead[2] - head[2]};
-        float n = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-        if (!(n > 0.1f)) return 0;
-        for (int i = 0; i < 3; i++) aim[i] = d[i] / n;
-    }
-    return 1;
-}
-static float Dist2(const float* a, const float* b) { float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2]; return x * x + y * y + z * z; }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
 static double g_cd[3];                 /* ready at: Sirius Fall, Eye of the White Mastiff, Pile Bunker */
-static uint32_t g_lastTarget;
-static float g_lastPos[3];
-static double g_lastAt;
 static int g_pp, g_ppReady;            /* Predation charge; 1: her next skill is empowered */
 static float g_stab = 100;             /* Stability */
 static int g_broken;
@@ -417,7 +240,6 @@ static int g_eyeShots, g_eyeEmp;
 static double g_pbFollowUntil;         /* Pile Bunker's free follow-up dash, until */
 static double g_saAt = -100, g_pbpAt = -100;
 static double g_immuneUntil;           /* drop-in: nothing hurts her until then */
-static atomic_ullong g_shieldUntilMs;  /* the same, for the hit hook (no knockdown either) */
 static _Atomic unsigned long long g_boomMs, g_hitMs;
 static atomic_int g_ppArmorOn;
 static _Atomic unsigned g_armorHits;
@@ -430,28 +252,6 @@ static float g_boomPos[3];
 static unsigned g_casts[3], g_follow, g_support, g_lockOns, g_dropBlasts, g_charges, g_empCasts, g_empHits, g_ppFull;
 static unsigned g_breaks, g_reducedHits, g_immuneHits, g_selfSpared, g_knockdowns;
 static double g_reduced;
-static void LearnNet(void);
-
-static void Log(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-static void Log(const char* fmt, ...)
-{
-    char buf[512];
-    va_list a;
-    va_start(a, fmt);
-    vsnprintf(buf, sizeof buf, fmt, a);
-    va_end(a);
-    hf->log(self, "%s", buf);
-}
-
-/* An action's answer: done, requested or queued count as done; the log says why one was not */
-static int Act(const char* what, int r)
-{
-    if (r == HF_ACT_DONE || r == HF_ACT_REQUESTED || r == HF_ACT_QUEUED) return 1;
-    static unsigned noted;
-    if (noted++ < 20)
-        Log("%s: %s (%s)", what, r == HF_ACT_WAITING ? "waiting for its packages" : "refused", hf->last_log ? hf->last_log(self) : "");
-    return 0;
-}
 
 /* ---- Predation Protocol ------------------------------------------------------------------------------------------ */
 /* A skill commits: 1 when it is the empowered one (the charge was full) */
@@ -484,14 +284,6 @@ typedef uint32_t (*RayFn)(uint32_t, const void*, const void*, float, uint32_t, u
 static SetVecFn g_setPosition, g_setVelocity;
 static WorldFn g_worldId;
 static RayFn g_raycast;
-static int QueryIdle(void)
-{
-    uintptr_t scheduler = Pointer(game + 0x347D7E0);
-    uint32_t count, jobs[72];
-    if (!scheduler || !ReadAt(scheduler, &count, 4) || count || !ReadAt(scheduler + 0x40008, jobs, sizeof jobs)) return 0;
-    for (unsigned i = 0; i < 24; i++) if (jobs[3 * i + 2] != 1) return 0;
-    return 1;
-}
 /* The nearest static obstruction along a ray (static actors only, so enemies are not walls): its distance, len + 1
  * when clear, or -1 when the query cannot be made */
 static float RayWith(uint32_t unit, const float from[3], const float dir[3], float len, uint32_t filter, uint32_t flags, unsigned* count);
@@ -614,14 +406,10 @@ static int Fits(uint32_t unit, float x, float y, float z)
 enum { TAG_NONE, TAG_SIRIUS, TAG_SUPPORT, TAG_LOCKON, TAG_DROP, TAG_PILE, TAG_CHARGE, TAG_FIST, TAGS };
 static const char* const kTagName[TAGS] = {"a blast", "Sirius Fall", "Support Action", "Lock On", "Drop-in", "Pile Bunker", "Pile Bunker charge", "her hand"};
 #define OWN 32
-#define OWN_HOOK 16
+#define OWN_HOOK KB_OWN_SLOTS
 typedef struct Pulse { float p[3]; double at; uint32_t row; int tag, emp; } Pulse;
 static Pulse g_pulses[OWN];            /* her blasts lately (OnDamagePre's attribution) */
 static unsigned g_npulse;
-static _Atomic unsigned long long g_ownMs[OWN_HOOK];   /* the same for the hit hook (another thread): when, where, empowered */
-static float g_ownPos[OWN_HOOK][3];
-static atomic_int g_ownEmp[OWN_HOOK];
-static unsigned g_ownNext;
 typedef struct Retry { float p[3]; double until; uint32_t row, fallback; int tag, emp; } Retry;
 static Retry g_retry[24];              /* blasts waiting for their packages */
 static int g_retryCount;
@@ -737,48 +525,6 @@ static int NearShrapnel(const float at[3])
 }
 /* ---- enemies around her (her area attacks): spawned entities whose kind runs a behaviour and is no turret or
  * Helldiver, and anything her own hits landed on; dropped on death or when the entity id is reused ------------------ */
-#define FOES 1024
-static uint32_t g_foe[FOES];
-static uint64_t g_foeRes[FOES];
-static unsigned g_foeNext;
-typedef struct Kind { uint64_t res; int foe; } Kind;
-static Kind g_kinds[256];
-static int FoeKind(uint64_t res)
-{
-    if (!res || res == AVATAR) return 0;
-    unsigned h = (unsigned)(res ^ (res >> 29)) & 255;
-    for (unsigned i = 0; i < 256; i++)
-    {
-        Kind* k = &g_kinds[(h + i) & 255];
-        if (k->res == res) return k->foe;
-        if (!k->res)
-        {
-            uint32_t stride;
-            k->res = res;
-            k->foe = hf->component_record("BehaviorComponentData", res, &stride) != 0 && !hf->component_record("TurretComponentData", res, &stride) &&
-                     !hf->component_record("AvatarComponentData", res, &stride) && !hf->component_record("SeatCollectionComponentData", res, &stride) && !FriendRes(res); /* no friend: exosuits and their parts, dog drones, sentries, SEAF, the Pelican (FriendRes) */
-            return k->foe;
-        }
-    }
-    return 0;
-}
-static void AddFoe(uint32_t entity, uint64_t res)
-{
-    uint32_t holder = 0; if (!entity || entity == atomic_load(&g_avatar) || res == AVATAR || (WielderOf(entity, &holder) && holder != entity && holder)) return;   /* nothing a Helldiver holds or wears */
-    int free_ = -1;
-    for (int i = 0; i < FOES; i++)
-    {
-        if (g_foe[i] == entity) { g_foeRes[i] = res; return; }
-        if (!g_foe[i] && free_ < 0) free_ = i;
-    }
-    unsigned slot = free_ >= 0 ? (unsigned)free_ : g_foeNext++ % FOES;
-    g_foe[slot] = entity;
-    g_foeRes[slot] = res;
-}
-static void DropFoe(uint32_t entity)
-{
-    for (int i = 0; i < FOES; i++) if (g_foe[i] == entity) g_foe[i] = 0;
-}
 
 /* ---- targets ---------------------------------------------------------------------------------------------------- */
 /* An enemy's position (its root), 1 when it is still the tracked entity */
@@ -868,31 +614,6 @@ static int SpotAt(uint32_t unit, const float pos[3], const float dir[2], float d
         return 1;
     }
     return 0;
-}
-/* Her own hits. The game's hit code (hooked) names the entity that dealt or owns each hit: one owned or dealt by her
- * Helldiver is hers (the hook records its target). Damage events name network ids instead: her Helldiver's is learned
- * from the first such hit (its spawn carries none), then matched directly. */
-static atomic_uint g_hookTarget;
-static _Atomic unsigned long long g_hookMs;
-static float g_hookPos[3];
-static unsigned g_hitNotes;
-static int NetOk(uint32_t n) { return n && n != 0x7FFF && n != UINT32_MAX; }
-static int MineHit(const HfDamageEvent* d)
-{
-    int match = NetOk(g_avatarNet) && (d->dealer == g_avatarNet || (d->owner == g_avatarNet && !NetOk(d->dealer)));   /* not a sentry's or a dog's: theirs name their own dealer */
-    int hooked = d->target && d->target == atomic_load(&g_hookTarget) && GetTickCount64() - atomic_load(&g_hookMs) <= 250;
-    if (hooked && !NetOk(g_avatarNet) && NetOk(d->owner))
-    {
-        g_avatarNet = d->owner;
-        Log("her hits: owned by network %u (dealer %u), learned from the game's hit code", d->owner, d->dealer);
-    }
-    if (d->creditor && g_hitNotes < 6 && (d->kind == 0 || d->kind == 1 || d->kind == 3))
-    {
-        g_hitNotes++;
-        Log("credited hit: kind %u, dealer %u, owner %u (hers: network %u%s): %s", d->kind, d->dealer, d->owner, g_avatarNet,
-            hooked ? ", the hook saw it" : "", match || hooked ? "hers" : "not hers");
-    }
-    return match || hooked;
 }
 
 /* ---- the abilities ---------------------------------------------------------------------------------------------- */
@@ -1445,112 +1166,6 @@ static atomic_int g_bareOn;
 /* What her blasts spare besides her: any exosuit and its parts (hers or not, piloted or empty, still dropping: 0.2.19
  * only spared one within 6 m of her, and an empty or second Breakthrough went down), the arms she holds, the dog drones
  * (all of them), SEAF and the Pelican. None of these is ever a Lock On target. */
-static int WielderOf(uint32_t e, uint32_t* by);
-/* Helldiver- and Super Earth-faction units (HD2Runtime's entity catalogue, enemy_controls.lua: 0.2.20's log showed the
- * Hot Dog and Dog Breath drones taken for enemies), the exosuits and their parts (the Breakthrough's, Mech Probe) and
- * the Pelican; structures left out (her blasts still break those) */
-static const uint64_t kFriends[] = {   /* + what friends mount (the catalogue's mount chains: the FRV's B/FLAM-80 Cremator flamer, the exosuits' arms) */
-    0x019544309FAC4508ULL, 0x01FFBFA7671EDFADULL, 0x021EAECF4CA267DCULL, 0x03C74D93700C884DULL, 0x0736BEE2D6328726ULL,
-    0x07ABC11F4596A788ULL, 0x0800B8C12FF96A8EULL, 0x0801B6B3C5D12EBCULL, 0x0807D288AD22601BULL, 0x085C1EDB038EC24EULL,
-    0x08F6089289C83D22ULL, 0x09183066C4EBCE28ULL, 0x0A03761D50BA5121ULL, 0x0A60397B7409995EULL, 0x0AC9CDDBE8C64851ULL,
-    0x0BCE5532D5D5E3EBULL, 0x0BD0F9D59048E9D1ULL, 0x0C8257D1C0255593ULL, 0x0DC7A18342B62BECULL, 0x0E8C2515261E0325ULL,
-    0x0E977C49DB7604F9ULL, 0x0E9D35CD5C0217C2ULL, 0x0FD8B759412815DDULL, 0x11332832C10681BCULL, 0x12C8D71AC3897A5CULL,
-    0x130574E0FFFE0058ULL, 0x14453B8FCB040099ULL, 0x16474112801385B6ULL, 0x17C5D12D8D5DEE2CULL, 0x1980D92B619FF5FEULL,
-    0x1B3BCADABC7EF8D6ULL, 0x1B9AC59697006337ULL, 0x1D42A8677882F1CDULL, 0x1D5943301A29C940ULL, 0x1E592FE6DAED807FULL,
-    0x1EAD9F7191BFC50AULL, 0x1FA1F596769225C2ULL, 0x20225DEE487C9F5FULL, 0x20AAFC3A504D2E5FULL, 0x23A60681DD4383ECULL,
-    0x24510E7B16B5F7A5ULL, 0x25A2FD037B6ED25CULL, 0x263817187B7CE092ULL, 0x27BB558C893383CCULL, 0x27EE1ED8F6FB6356ULL,
-    0x299C0D3DFD2F0994ULL, 0x29AE906EA485A7FAULL, 0x2AB2507588D54B8BULL, 0x2ADE442313B5B7B3ULL, 0x2B11C9E4980EC479ULL,
-    0x2C66C201B2543D2CULL, 0x2D85BFE3D8717FE5ULL, 0x2EA01CB1676ACA29ULL, 0x2F67BF9C4F560C02ULL, 0x31400A6A3003E29CULL,
-    0x31C4DD88C1450282ULL, 0x32C7063B4BCC4208ULL, 0x34DA42A01BDC971AULL, 0x35DBF54F016F3624ULL, 0x37079568DC86E9C6ULL,
-    0x37BACD53809F3A77ULL, 0x37CDE43876BA26BBULL, 0x38ACA665AB1D872DULL, 0x397792815583DA29ULL, 0x3A061009AA31E9CBULL,
-    0x3A50B58B0553056AULL, 0x3CAABAD4D5C09D33ULL, 0x3CB772E481DBE9F8ULL, 0x3D4970D1C4E640EEULL, 0x3E3A31261A124454ULL,
-    0x3EC790806D0B0540ULL, 0x3F2C34C69CFC94B2ULL, 0x3F8734AEC15B82ADULL, 0x41436D438139F786ULL, 0x423FF97D57AB04F5ULL,
-    0x439F9E65C18567DAULL, 0x444880F62CA7EAE8ULL, 0x44D72A2C4D5F0507ULL, 0x44FD108C1BA32019ULL, 0x4676BD9A16D3AC28ULL,
-    0x46B9E3BE0AE9972EULL, 0x486522867199D7F3ULL, 0x491E961533AFFC15ULL, 0x4932CBF33CD47EF9ULL, 0x4ABCF54464695EFAULL,
-    0x4B071633584E4594ULL, 0x4C63119F69165321ULL, 0x4C7E4680FF843A1BULL, 0x4CF9D9B3F6813F52ULL, 0x4D1C334D294DFA97ULL,
-    0x4DF41F84668D07FBULL, 0x4E52F730432CDB1EULL, 0x4E69B56270226250ULL, 0x5052EC6A928CCF1AULL, 0x51A0812E3BCE2D74ULL,
-    0x526A3C003F2EA8DDULL, 0x52DCE8A110418742ULL, 0x5429EE4183CC2C2FULL, 0x548136F66F5C9B5CULL, 0x54D86057F5DACFB9ULL,
-    0x56070F36CFFFA8A8ULL, 0x57F27CBD5B71B0CBULL, 0x5BEEC97F4C7F4AE9ULL, 0x5CA062D2FA1F76B9ULL, 0x5CAF553BA7EA1429ULL,
-    0x5F41C4DCABE95421ULL, 0x5F9AEAC72B738298ULL, 0x60778A2CFFB6E47FULL, 0x61353DF120F27732ULL, 0x61EFB2D6A167F285ULL,
-    0x6293CAF0559BACF6ULL, 0x6454186A40F772F0ULL, 0x65489809A8181B96ULL, 0x65CD4325BA23F3C6ULL, 0x67AC082FF6D142F3ULL,
-    0x68A34D32A1025F04ULL, 0x694C059E2BAB805EULL, 0x6B22AE8E5F669D4FULL, 0x6B6E7FE1B931393CULL, 0x6FB1E73E00A84329ULL,
-    0x72DB04413D4AB0F0ULL, 0x73B63D637973C7A4ULL, 0x73F8498BFFDCF415ULL, 0x74599E56F72F9D7EULL, 0x74F33BD19068A439ULL,
-    0x75BE82ED8592A6B3ULL, 0x75F7E96AF7DCD303ULL, 0x776A8FD06099E43CULL, 0x77C52E494527AA8AULL, 0x78DABC7344E50234ULL,
-    0x7956C174E9FAEFE0ULL, 0x79E4B3D2DA5E45E3ULL, 0x79EB2092EBE7CDDCULL, 0x7B0F8449CA9D2DA0ULL, 0x7B2326F6FD9C8069ULL,
-    0x7FA006885812A756ULL, 0x7FF0FD4572F5996FULL, 0x820CC3BAFE962858ULL, 0x821D035AA47E3E75ULL, 0x824B7E0C4C879EB5ULL,
-    0x8365609B35EF6672ULL, 0x840590F468D65A1BULL, 0x847A06CA8885C6ABULL, 0x84E683468C0BCA1AULL, 0x85DCE14563448A5FULL,
-    0x8633FF89EF4F6788ULL, 0x87F46B6D12BB016AULL, 0x888EAAFD58C03C75ULL, 0x891ADA7D553B69DBULL, 0x89CFD784797A7621ULL,
-    0x8A9E543022C18092ULL, 0x8AFF7F0793A5BCEDULL, 0x8CA4DFA795A473C8ULL, 0x8DB8B823889324F9ULL, 0x92BCC263E751BD45ULL,
-    0x94C5114EBA59AA21ULL, 0x9579D47B23904246ULL, 0x96615499993B1E16ULL, 0x967ED15E0BAE363BULL, 0x968211C0033DCE64ULL,
-    0x979E9BC6D48D1FC6ULL, 0x9872EEB31A5F88FDULL, 0x9B2140378640432EULL, 0x9B75217D8312DD67ULL, 0x9CC8C7AE4CEDB109ULL,
-    0x9D4F7CB4EB34515DULL, 0x9D90F5CD1A00A353ULL, 0x9DE2C3A3C9A6353EULL, 0x9E83637BB077E782ULL, 0xA00331F24DEEF2EEULL,
-    0xA0532C3616528CBFULL, 0xA0E691598F32932FULL, 0xA0FF2F9A0CA6992AULL, 0xA20683199DFC19E8ULL, 0xA32621E3BDE13379ULL,
-    0xA4E796F84801B40AULL, 0xA6A8273F408D0309ULL, 0xA6B6C68624AB47ECULL, 0xA6DCC225E1263606ULL, 0xA8D4030E707A49B4ULL,
-    0xA970CBA66FBEAA11ULL, 0xA9982969137F3D77ULL, 0xAA4564F90CDBF5F1ULL, 0xAE38F34B101315DDULL, 0xAF04113302F5621DULL,
-    0xB0C9FAF4AF8903F9ULL, 0xB2053A1838092F8BULL, 0xB3F6EC87073AAFECULL, 0xB52BEAAE4F85C391ULL, 0xB56FA3F5510000ABULL,
-    0xB62620AE2CD89F49ULL, 0xB729A2BA153BCAEDULL, 0xB7791DA91F13488CULL, 0xB9BAF571FC8F9959ULL, 0xBB3AFFFB572C3488ULL,
-    0xBBD57DF3E5B15ED8ULL, 0xBC650C081EAB0735ULL, 0xBCFC57848F206106ULL, 0xBF32E12923A9A252ULL, 0xBF4167FD26917AB1ULL,
-    0xBFB5C88D557595D8ULL, 0xC18C1301580FA0C4ULL, 0xC2D449ECF7FACAB1ULL, 0xC30B36E82086D814ULL, 0xC47287D738BE91C3ULL,
-    0xC57F85252B7D853BULL, 0xC6A87C428FD3C7A3ULL, 0xC734373E4B3E1DF7ULL, 0xC87555EED1E9F092ULL, 0xC87AADA6F7B9DCDEULL,
-    0xCA4F3FC268F449D5ULL, 0xCA6E81E2B3E22B18ULL, 0xCC21C7FFD3EBEFB9ULL, 0xCDCA29C351EA71D8ULL, 0xD00A26BA08786344ULL,
-    0xD23393AF036CC727ULL, 0xD25291CB6BBEAE8BULL, 0xD336BA1CAD16769FULL, 0xD4D4EAE659BC671CULL, 0xD58AE6A04EDB10DEULL,
-    0xD7F32C2DF7934784ULL, 0xD87D04AACBC0269CULL, 0xD8E278355CF29EF4ULL, 0xD9C51B722B223BC4ULL, 0xD9E5D03FF013187FULL,
-    0xDB6676E595797E8AULL, 0xDBB286AD7ED9DF96ULL, 0xDC0B7C25253A8255ULL, 0xDDDB2910FF2B24E9ULL, 0xDDEE9646723E09D3ULL,
-    0xDE18775FA447A9BFULL, 0xDE6CD49631940A14ULL, 0xDE6F09BC8EAEBE27ULL, 0xDF51FE8D62F294BEULL, 0xDFBB9A0D8FA27D85ULL,
-    0xE0E257B37526DBE3ULL, 0xE310DABABD5E36AFULL, 0xE44B691DC039A505ULL, 0xE5F64DCC3BFE9DD1ULL, 0xE753849CDD977D10ULL,
-    0xE86BAA795FA4E457ULL, 0xE90F771A36FB441EULL, 0xE9CD1D0D118886AFULL, 0xEA534432474985A0ULL, 0xEB91B90EEC279745ULL,
-    0xEB95609DCBAD53FEULL, 0xEBB32D4A2A4154B6ULL, 0xED13DDC480EC6910ULL, 0xEE4C107B941AB7F4ULL, 0xEF6BDEED79DB2999ULL,
-    0xEF85D6CF58E31D70ULL, 0xF00C349422E8E320ULL, 0xF5C67AED5CB5ACA0ULL, 0xF800D5F62789246CULL, 0xF88D61A8FE1E0766ULL,
-    0xF9D5219640D65EF9ULL, 0xFA75F8DCBFFBA877ULL, 0xFCE722B5EF57E4B6ULL, 0xFDE262593307CA2FULL, 0xFF9878576A4C543BULL,
-};
-static int FriendTable(uint64_t res)
-{
-    size_t lo = 0, hi = sizeof kFriends / sizeof kFriends[0];
-    while (lo < hi)
-    {
-        size_t mid = (lo + hi) / 2;
-        if (kFriends[mid] == res) return 1;
-        if (kFriends[mid] < res) lo = mid + 1; else hi = mid;
-    }
-    return 0;
-}
-/* a friend, or a copy a mod made of one (the incendiary FRV "Cremator" is a mod's copy of the FRV: 0.2.21's overwatch
- * took it for an enemy); the answers kept per resource */
-static int FriendRes(uint64_t res)
-{
-    static uint64_t keys[256];
-    static int8_t vals[256];
-    if (!res) return 0;
-    if (FriendTable(res)) return 1;
-    unsigned h = (unsigned)(res ^ (res >> 33)) & 255;
-    for (unsigned i = 0; i < 256; i++)
-    {
-        unsigned k = (h + i) & 255;
-        if (keys[k] == res) return vals[k];
-        if (keys[k]) continue;
-        uint64_t at = res;
-        int friend_ = 0;
-        for (int depth = 0; depth < 4 && !friend_; depth++)
-        {
-            uint64_t base = 0;
-            HfContent c;
-            for (uint32_t n = 0; n < 4096; n++)
-            {
-                memset(&c, 0, sizeof c);
-                c.size = sizeof c;
-                if (!hf->content(self, n, &c)) break;
-                if (c.kind == HF_KIND_ENTITY && c.id == at) { base = c.base; break; }
-            }
-            if (!base || base == at) break;
-            if (FriendTable(base)) { friend_ = 1; Log("a mod's copy %016llx of a friend (%016llx): spared and never a target", (unsigned long long)res, (unsigned long long)base); }
-            at = base;
-        }
-        vals[k] = (int8_t)friend_;   /* the answer before the key: a hit read on another thread never sees a key without it */
-        keys[k] = res;
-        return friend_;
-    }
-    return 0;
-}
 static int HerRide(uint32_t target)
 {
     uint32_t me = atomic_load(&g_avatar), by = 0;
@@ -1591,27 +1206,24 @@ static void Pledge(HfDamagePreEvent* e)
     if (a < 1) { e->cancel = 1; return; }
     d->amount = (int32_t)a;
 }
-static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
+/* A hit on her (HellForge's damage event; kitbase/kb_damage.h routes it here) */
+static void DamageTaken(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
-    HfDamagePreEvent* e = (HfDamagePreEvent*)(void*)info;
-    HfDamageEvent* d = &e->damage;
-    if (!g_inMission || e->cancel) return;
-    uint32_t me = atomic_load(&g_avatar);
-    if (d->target == me && me)
-    {
-        /* her own blasts (and their shrapnel) spare her */
-        if (d->kind == 4 && NearPulse(d->position, 2.0, 18, NULL)) { e->cancel = 1; g_selfSpared++; return; }
-        if ((d->kind == 0 || d->kind == 1) && NearShrapnel(d->position)) { e->cancel = 1; g_selfSpared++; return; }
-        /* Drop-in: nothing hurts her until its blasts are out */
-        if (g_now < g_immuneUntil || (s_eyeImmune && g_now < g_eyeUntil)) { e->cancel = 1; g_immuneHits++; return; }
-        /* her own Hellbomb is meant to reach her */
-        if (d->kind == 4 && g_now - g_boomAt < 2.0 && Dist2(d->position, g_boomPos) < 25.0f * 25.0f) return;
-        if (g_now < HowlImmuneUntil() || MpbSpares(d)) { e->cancel = 1; g_immuneHits++; return; }   /* Howl; her own Hellbomb */
-        if (d->amount <= 0) return;
-        if (!MechNow() && AkWatching()) { double ev = floor(d->amount * (1.0 - s_akEyeEvasion) + 0.5); d->amount = ev < 1 ? 1 : (int32_t)ev; }
-        Pledge(e);
-        return;
-    }
+    /* her own blasts (and their shrapnel) spare her */
+    if (d->kind == 4 && NearPulse(d->position, 2.0, 18, NULL)) { e->cancel = 1; g_selfSpared++; return; }
+    if ((d->kind == 0 || d->kind == 1) && NearShrapnel(d->position)) { e->cancel = 1; g_selfSpared++; return; }
+    /* Drop-in: nothing hurts her until its blasts are out */
+    if (g_now < g_immuneUntil || (s_eyeImmune && g_now < g_eyeUntil)) { e->cancel = 1; g_immuneHits++; return; }
+    /* her own Hellbomb is meant to reach her */
+    if (d->kind == 4 && g_now - g_boomAt < 2.0 && Dist2(d->position, g_boomPos) < 25.0f * 25.0f) return;
+    if (g_now < HowlImmuneUntil() || MpbSpares(d)) { e->cancel = 1; g_immuneHits++; return; }   /* Howl; her own Hellbomb */
+    if (d->amount <= 0) return;
+    if (!MechNow() && AkWatching()) { double ev = floor(d->amount * (1.0 - s_akEyeEvasion) + 0.5); d->amount = ev < 1 ? 1 : (int32_t)ev; }
+    Pledge(e);
+}
+/* Any other hit: hers on enemies, and anyone's on what her skills mark */
+static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
+{
     if (((d->kind == 4 && NearPulse(d->position, 2.0, 18, NULL)) || ((d->kind == 0 || d->kind == 1) && NearShrapnel(d->position)) || MpbSpares(d)) &&
         HerRide(d->target))
     {
@@ -1637,13 +1249,12 @@ static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
     if (d->kind == 4 || d->kind == 0 || d->kind == 1 || d->kind == 5) NearPulse(d->position, 1.0, 10, &emp);
     if (emp && s_ppMult > 1.0001f)
     {
-        double a = floor(d->amount * (double)s_ppMult + 0.5);
-        d->amount = a > 2147483647.0 ? 2147483647 : (int32_t)a;
+        ScaleDamage(d, (double)s_ppMult);
         if (g_empHits++ < 3) Log("Predation Protocol: an empowered blast hit entity %u for %d (kind %u)", d->target, d->amount, d->kind);
     }
     /* her own shots (not her blasts, nor their shrapnel) and her melee (bayonet, stun lance, punches: kind 6 within reach,
      * as 0.2.7's log showed; impact and flat hits within reach too): Sirius Fall, Support Action and the charge take both */
-    int shot = MineHit(d) && (d->kind == 0 || d->kind == 1 || d->kind == 3) && !((d->kind == 0 || d->kind == 1) && NearShrapnel(d->position));
+    int shot = IsShot(d) && !((d->kind == 0 || d->kind == 1) && NearShrapnel(d->position));
     float mePos[3];
     int melee = !shot && MineHit(d) && (d->kind == 5 || d->kind == 6 || d->kind == 7) && d->target != atomic_load(&g_avatar) &&
                 PlayerPose(mePos, NULL) && Dist2(d->position, mePos) < 6.0f * 6.0f;
@@ -1763,19 +1374,6 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
         g_dropArmed = 0;
     }
 }
-/* Helldivers this machine spawned: entity -> network id (the spawn may come before the player event) */
-static uint32_t g_spawnEntity[8], g_spawnNet[8];
-static unsigned g_spawnNext;
-static void LearnNet(void)
-{
-    uint32_t me = atomic_load(&g_avatar);
-    for (int i = 0; i < 8; i++)
-        if (g_spawnEntity[i] && g_spawnEntity[i] == me && NetOk(g_spawnNet[i]) && g_spawnNet[i] != g_avatarNet)
-        {
-            g_avatarNet = g_spawnNet[i];
-            Log("her Helldiver: entity %u, network %u", me, g_avatarNet);
-        }
-}
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
@@ -1785,92 +1383,6 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     g_spawnNet[g_spawnNext % 8] = s->network;
     g_spawnNext++;
     LearnNet();
-}
-static void OnWeapon(HfMod* mod, const HfEventInfo* info, void* user)
-{
-    const HfWeaponEvent* w = (const HfWeaponEvent*)info;
-    if (w->avatar && w->avatar != atomic_load(&g_avatar)) { atomic_store(&g_avatar, w->avatar); g_avatarNet = 0; g_alive = 1; LearnNet(); }
-    if (w->selection >= 1 && w->selection <= 3 && w->entity) { g_weapon[w->selection] = w->entity; g_weaponRes[w->selection] = w->resource; }
-}
-/* Her stamina, live (0 empty .. 1 full): the action manager [game.dll+0x3326D20] holds it per Helldiver at +0x547854,
- * 0x78 apart (game.dll+0xA50E2D: movss [rcx+r10+0x547854], xmm1, rcx = index x 0x78; found with Cheat Engine), by the
- * same index as the action records at +0x53E170 (HellForge's resupply: its avatar map at +0xF8). */
-static int g_staminaOk;
-static int HashFind(uintptr_t header, uint32_t key, uint32_t* value)
-{
-    uint8_t h[20];
-    if (!key || !ReadAt(header, h, sizeof h)) return 0;
-    uintptr_t buckets = (uintptr_t)Quad(h);
-    uint32_t cap = Word(h + 8), empty = Word(h + 12), mult = Word(h + 16);
-    if (!AddressOk(buckets, 8) || !cap || cap > 1048576) return 0;
-    for (uint32_t i = 0; i < cap && i < 4096; i++)
-    {
-        uint32_t row[2];
-        if (!ReadAt(buckets + 8u * ((key * mult + i) % cap), row, 8)) return 0;
-        if (row[0] == key) { *value = row[1]; return row[1] != UINT32_MAX; }
-        if (row[0] == empty) return 0;
-    }
-    return 0;
-}
-/* The T-Doll's body (as Lenna's): more health and a longer sprint, for the mission */
-static int g_bodyOn;
-static void Body(int on)
-{
-    HfField hp = HF_FIELD(Health, health), sd = HF_FIELD(Avatar, sprint_duration);
-    if (!on)
-    {
-        if (g_bodyOn) { hf->set_live(self, AVATAR, &hp, NULL, HF_LIVE_SHARED); hf->set_live(self, AVATAR, &sd, NULL, HF_LIVE_SHARED); }
-        g_bodyOn = 0;
-        return;
-    }
-    HfLiveValue a, b;
-    memset(&a, 0, sizeof a);
-    memset(&b, 0, sizeof b);
-    if (!hf->get_live(self, AVATAR, &hp, &a) || !hf->get_live(self, AVATAR, &sd, &b)) { Log("body: her health or stamina cannot be read"); return; }
-    HfValue h = HF_I32((int32_t)floor(a.base.number * s_hpMult + 0.5)), d = HF_F32((float)(b.base.number * s_staminaMult));
-    int r1 = fabsf(s_hpMult - 1) > 0.001f ? hf->set_live(self, AVATAR, &hp, &h, HF_LIVE_SHARED) : -1;
-    int r2 = fabsf(s_staminaMult - 1) > 0.001f ? hf->set_live(self, AVATAR, &sd, &d, HF_LIVE_SHARED) : -1;
-    Log("body: health %.0f -> %d, sprint %.0f -> %.0f s before the bar empties (applies: %d / %d; 1 = now, 2 = next spawn)", a.base.number,
-        (int)h.number, b.base.number, d.number, r1, r2);
-    g_bodyOn = 1;
-}
-static float StaminaNow(void)
-{
-    uint32_t me = atomic_load(&g_avatar), ai, named;
-    uintptr_t actions = Pointer(game + 0x3326D20), d;
-    if (!g_staminaOk || !actions || !HashFind(actions + 0xF8, me, &ai) || ai >= 64 || !(d = Pointer(actions + 0x110 + 8u * ai)) ||
-        !ReadAt(d + 8, &named, 4) || named != me) return -1;
-    float v;
-    if (!ReadAt(actions + 0x547854 + (uintptr_t)ai * 0x78, &v, 4) || !isfinite(v) || v < -0.01f || v > 1.01f) return -1;
-    return v;
-}
-/* The T-Doll's price (as Lenna's): one Hellbomb per run-out, armed while her bar is above a fifth, fired once it has
- * sat at 0 for hellbomb_hold s, spawned once its packages are in. */
-static double g_boomPending;
-static int g_boomArmed;
-static void Exhaustion(void)
-{
-    if (!s_hellbomb || !g_alive) { g_boomPending = 0; return; }
-    float v = StaminaNow();
-    static int noted;
-    if (v >= 0 && !noted) { noted = 1; Log("stamina: %.2f (read live)", (double)v); }
-    if (v > 0.2f) g_boomArmed = 1;
-    static double emptySince;
-    if (v >= 0 && v <= 0.001f) { if (emptySince <= 0) emptySince = g_now; }
-    else emptySince = 0;
-    if (g_boomArmed && emptySince > 0 && g_now - emptySince >= s_hellbombHold) { g_boomArmed = 0; g_boomPending = g_now + 3; }
-    if (g_boomPending <= 0) return;
-    if (g_now > g_boomPending) { g_boomPending = 0; Log("out of stamina: the Hellbomb's packages did not load in time"); return; }
-    float pos[3];
-    if (!PlayerPose(pos, NULL)) return;
-    pos[2] += 0.3f;
-    int r = hf->spawn_explosion(self, (uint32_t)s_hellbombRow, pos);   /* not one of her own blasts: it is meant to reach her */
-    if (r == HF_ACT_WAITING) return;
-    g_boomPending = 0;
-    g_boomAt = g_now;
-    atomic_store(&g_boomMs, GetTickCount64());
-    memcpy(g_boomPos, pos, sizeof pos);
-    Log("out of stamina: HELLBOMB (row %d, answer %d)", s_hellbombRow, r);
 }
 
 /* The packages of the explosions she uses, loaded ahead at mission start (HellForge's references.json, build 25480438);
@@ -1902,6 +1414,7 @@ static unsigned g_pierced;
 static void Speed(int on);
 static void Reset(const char* why)
 {
+    if (!strcmp(why, "mission start")) KitDecide();   /* with several kits installed: is this one picked? */
     if (atomic_load(&g_bareOn)) { atomic_store(&g_bareOn, 0); Speed(0); }
     int start = !strcmp(why, "mission start");
     if (g_casts[0] || g_casts[1] || g_casts[2] || g_support || g_dropBlasts || g_charges)
@@ -1940,82 +1453,7 @@ static void Reset(const char* why)
 }
 
 /* ---- the hit code: hooks (as Primed Sure Footed) ---------------------------------------------------------------------- */
-#define HIT_SIZE 0x118u
-#define RESULT_SIZE 0x24u
-static atomic_int g_hooked;
-static _Atomic unsigned g_kdStopped;
-static _Atomic unsigned g_ownStopped;
 static _Atomic unsigned g_piercedHook;
-/* An explosion hit (hit +0 type 4, its origin at +0x40) from one of her own blasts: one she set off within 14 m in the
- * last 1.2 s; *emp: an empowered one */
-static int OwnBlast(const uint8_t* h, int* emp)
-{
-    if (Word(h) != 4) return 0;
-    float origin[3];
-    memcpy(origin, h + 0x40, sizeof origin);
-    unsigned long long now = GetTickCount64();
-    int any = 0;
-    for (int i = 0; i < OWN_HOOK; i++)
-    {
-        unsigned long long at = atomic_load(&g_ownMs[i]);
-        if (!at || now - at > 1200) continue;
-        float dx = origin[0] - g_ownPos[i][0], dy = origin[1] - g_ownPos[i][1], dz = origin[2] - g_ownPos[i][2];
-        if (dx * dx + dy * dy + dz * dz <= 14.0f * 14.0f) { any = 1; if (emp && atomic_load(&g_ownEmp[i])) *emp = 1; }
-    }
-    return any;
-}
-/* A hit on her: one of her own blasts does nothing to her (its result is cleared: damage, stagger, push, knockdown,
- * reaction). With steady (Mastiff's Pledge) or under the drop-in shield, any hit's knockdown is cleared. Who dealt it
- * is noted for the Eye of the White Mastiff. */
-static void Steady(const void* hit, void* result)
-{
-    if (!atomic_load(&g_hooked) || !hit || !result) return;
-    uint8_t h[HIT_SIZE], r[RESULT_SIZE];
-    uint32_t me = atomic_load(&g_avatar);
-    if (!me || !ReadAt((uintptr_t)hit, h, sizeof h) || Word(h + 0x20) != me) return;
-    unsigned long long now = GetTickCount64();
-    if (OwnBlast(h, NULL))
-    {
-        memset(result, 0, RESULT_SIZE);
-        atomic_fetch_add(&g_ownStopped, 1);
-        return;
-    }
-    uint32_t dealer = Word(h + 0x80), owner = Word(h + 0x100);
-    if ((dealer && dealer != me) || (owner && owner != me))
-    {
-        unsigned slot = atomic_fetch_add(&g_atkNext, 1) % 8;
-        atomic_store(&g_atkWho[slot][0], dealer);
-        atomic_store(&g_atkWho[slot][1], owner);
-        atomic_store(&g_atkMs[slot], now);
-    }
-    /* her own Hellbomb is meant to reach her as it is */
-    if (now - atomic_load(&g_boomMs) < 2000) return;
-    atomic_store(&g_hitMs, now);   /* the stamina guard (Tick): a hit's stamina loss is put back */
-    if (!ReadAt((uintptr_t)result, r, sizeof r)) return;
-    /* Predation Protocol: heavy armour (armour value pp_armor) while the buff holds: a hit whose armour penetration is
-     * below it glances off (no damage), one equal to it deals pp_armor_equal of its damage */
-    if (s_ppArmor > 0 && atomic_load(&g_ppArmorOn))
-    {
-        float ap, dmg;
-        memcpy(&ap, h + 0x9C, 4);
-        memcpy(&dmg, r, 4);
-        if (isfinite(ap) && isfinite(dmg) && dmg > 0)
-        {
-            float keep = ap < (float)s_ppArmor - 0.5f ? 0.0f : ap < (float)s_ppArmor + 0.5f ? s_ppArmorEqual : 1.0f;
-            if (keep < 1.0f) { dmg *= keep; memcpy(result, &dmg, 4); atomic_fetch_add(&g_armorHits, 1); }
-        }
-    }
-    /* Mastiff's Pledge (steady): no knockdown, and with unshaken no stagger, push or flinch either */
-    if (!s_steady && now > atomic_load(&g_shieldUntilMs)) return;
-    if (r[0x1E]) { ((uint8_t*)result)[0x1E] = 0; atomic_fetch_add(&g_kdStopped, 1); }
-    if (s_unshaken)
-    {
-        static const uint8_t zero[8] = {0};
-        memcpy((uint8_t*)result + 0x0C, zero, 4);   /* stagger */
-        memcpy((uint8_t*)result + 0x10, zero, 4);   /* push */
-        ((uint8_t*)result)[0x1F] = 0;               /* hit reaction (the flinch) */
-    }
-}
 /* Her stamina written (0..1), where StaminaNow reads it */
 static void StaminaSet(float v)
 {
@@ -2041,26 +1479,6 @@ static void StaminaGuard(void)
     }
     last = v;
 }
-/* Every hit she deals: its target and where it struck (hit +0x20 target, +0x34 point, +0x80 dealer, +0x100 owner) */
-static int Mine(uint32_t dealer);
-static void Observe(const void* hit)
-{
-    uint32_t me = atomic_load(&g_avatar);
-    if (!atomic_load(&g_hooked) || !hit || !me) return;
-    uint8_t h[HIT_SIZE];
-    if (!ReadAt((uintptr_t)hit, h, sizeof h)) return;
-    uint32_t target = Word(h + 0x20), dealer = Word(h + 0x80), owner = Word(h + 0x100);
-    if (target == me || !target || !(dealer == me || (owner == me && (!dealer || Mine(dealer))))) return;   /* dealt by her or her weapon: a sentry's or a dog's hits are dealt by it */
-    memcpy(g_hookPos, h + 0x34, sizeof g_hookPos);
-    atomic_store(&g_hookTarget, target);
-    atomic_store(&g_hookMs, GetTickCount64());
-}
-typedef uintptr_t (*CalculateFn)(uintptr_t, void*, const void*);
-typedef void (*BlastFn)(uintptr_t, void*, const void*);
-typedef uintptr_t (*EmitFn)(uintptr_t, void*, const void*, uint32_t);
-static CalculateFn original_calculate;
-static BlastFn original_blast;
-static EmitFn original_emit;
 /* ---- her armour penetration: a hit she deals (or one of her blasts) pierces ap_bonus more armour, an empowered
  * blast's pp_ap more on top. The hit (as its calculation gets it) carries its armour penetration at +0x9C, +0xA0, +0xA4
  * (floats, by impact angle; +0xA8 the extreme angle), found with a probe run for Faelynn's Corrosion; it is raised for
@@ -2085,7 +1503,6 @@ static float Shred(const void* hit, float saved[3])
     atomic_fetch_add(&g_piercedHook, 1);
     return bonus;
 }
-static void Unshred(const void* hit, const float saved[3]) { memcpy((uint8_t*)hit + 0x9C, saved, 12); }
 /* Her bare hands: with her primary and secondary empty and her Stability whole, a hit she deals at arm's reach (no blast
  * of hers) pierces bare_ap, and its result gains bare_damage, bare_demolition and bare_stagger (result +0 damage,
  * +0x08 demolition, +0x0C stagger: the layout Faelynn's hit probe read) */
@@ -2105,42 +1522,6 @@ static int BareHit(const void* hit)
     if (told < 12) { told++; Log("her hand? a hit of hers %.1f m away (type %u): %s", (double)d, Word(h), no ? no : "yes"); }
     return no == NULL;
 }
-static uintptr_t Calculate(uintptr_t a, void* out, const void* hit)
-{
-    Observe(hit);
-    float saved[3];
-    int bare = BareHit(hit);
-    float shred = 0;
-    if (bare)
-    {
-        memcpy(saved, (const uint8_t*)hit + 0x9C, 12);
-        float ap[3] = {s_bareAp, s_bareAp, s_bareAp};
-        memcpy((uint8_t*)hit + 0x9C, ap, 12);
-        shred = 1;
-    }
-    else shred = Shred(hit, saved);
-    uintptr_t r = original_calculate(a, out, hit);
-    if (shred > 0) Unshred(hit, saved);
-    if (bare && out)
-    {
-        float dmg;
-        int32_t demo, stag;
-        memcpy(&dmg, out, 4);
-        memcpy(&demo, (uint8_t*)out + 0x08, 4);
-        memcpy(&stag, (uint8_t*)out + 0x0C, 4);
-        float before = dmg;
-        if (isfinite(dmg)) dmg += s_bareDamage;
-        demo += (int32_t)s_bareDemolition;
-        stag += (int32_t)s_bareStagger;
-        memcpy(out, &dmg, 4);
-        memcpy((uint8_t*)out + 0x08, &demo, 4);
-        memcpy((uint8_t*)out + 0x0C, &stag, 4);
-        unsigned n = atomic_fetch_add(&g_bareHits, 1);
-        if (n < 5) Log("her hand: %.0f -> %.0f damage, demolition %d, stagger %d", (double)before, (double)dmg, demo, stag);
-    }
-    Steady(hit, out);
-    return r;
-}
 /* One of her fist's blasts (its origin within 1 m of one, 1.2 s at most): its result gains bare_demolition */
 static int FistOrigin(const void* hit)
 {
@@ -2156,32 +1537,6 @@ static int FistOrigin(const void* hit)
     }
     return 0;
 }
-static void Blast(uintptr_t a, void* out, const void* hit)
-{
-    Observe(hit);
-    float saved[3];
-    float shred = Shred(hit, saved);
-    original_blast(a, out, hit);
-    if (shred > 0) Unshred(hit, saved);
-    if (out && s_bareDemolition > 0 && FistOrigin(hit) && Word((const uint8_t*)hit + 0x20) != atomic_load(&g_avatar))
-    {
-        int32_t demo;
-        memcpy(&demo, (uint8_t*)out + 0x08, 4);
-        int32_t before = demo;
-        demo += (int32_t)s_bareDemolition;
-        memcpy((uint8_t*)out + 0x08, &demo, 4);
-        static atomic_uint told;
-        if (atomic_fetch_add(&told, 1) < 4) Log("her hand: its blast's demolition %d -> %d", before, demo);
-    }
-    Steady(hit, out);
-}
-static uintptr_t Emit(uintptr_t a, void* result, const void* hit, uint32_t mode) { Steady(hit, result); return original_emit(a, result, hit, mode); }
-
-static const struct { uint32_t rva; const char* hex; } kPins[] = {
-    {0x129DC30u, "48 89 5c 24 08 57 48 83 ec 30 33 c0 0f 57 c0 0f 11 02 49 8b f8 48 8b da 0f 11 42 10 89 42 20 41"},
-    {0x129D180u, "48 89 4c 24 08 53 55 56 57 41 55 48 83 ec 60 41 8b 40 20 33 f6 3b 05 85 6a 1e 02 49 8b f8 44 0f"},
-    {0x129DD30u, "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 20 57 41 54 41 55 41 56 41 57 48 81 ec a0 00 00 00 44"},
-};
 
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {
@@ -2190,14 +1545,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     if (!g || !x || gameSize != 74727424u || exeSize != 60719104u) { Log("REFUSED: the game's modules are not build " BUILD "'s: no aim, no knockdown guard"); return; }
     game = g;
     exe = x;
-    for (unsigned i = 0; i < sizeof kPins / sizeof kPins[0]; i++)
-        if (!hf->code_matches(game + kPins[i].rva, kPins[i].hex)) { Log("knockdown guard off: game.dll+0x%X is not the reviewed code", kPins[i].rva); return; }
-    if (hf->hook(self, game + 0x129DC30, (void*)Calculate, (void**)&original_calculate) ||
-        hf->hook(self, game + 0x129D180, (void*)Blast, (void**)&original_blast) ||
-        hf->hook(self, game + 0x129DD30, (void*)Emit, (void**)&original_emit))
-    { Log("knockdown guard off: a hook could not be placed"); return; }
-    atomic_store(&g_hooked, 1);
-    Log("knockdown guard ready (hit calculation, explosion dispatch and emission hooked)");
+    if (!HitsInstall("knockdown guard")) return;
     if (hf->code_matches(game + 0x5A2BB0, "48 89 5c 24 08 48 89 6c 24 10 56 57 41 54 41 56 41 57 48 83 ec 40") &&
         hf->code_matches(game + 0x4A7550, "48 89 5c 24 18 57 48 83 ec 20 3b 15 ?? ?? ?? ?? 48 8b 1d") &&
         hf->code_matches(exe + 0x79F860, "33 c0 4c 8d 05 c7 b2 01 02 0f 1f 80 00 00 00 00 49 39 0c c0 74 0c ff c0 83 f8 04 75 f3") &&
@@ -2219,11 +1567,14 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
 /* ---- the Sinbreaker: her exosuit (a copy of the EXO-55 Breakthrough) and its stratagem (hellforge_mod_init) -------- */
 static uint64_t g_sinRes;
 static uint32_t g_sinType;
+/* The free Sinbreaker, for players without the Exo Experts warbond: a copy of the EXO-49 Emancipator (or EXO-45 Patriot) */
+static uint64_t g_sinFreeRes;
+static uint32_t g_sinFreeType;
 static int IsExosuit(uint64_t r)
 {
     return r == 0x79E4B3D2DA5E45E3ull || r == 0xC2D449ECF7FACAB1ull || r == 0x7B2326F6FD9C8069ull || r == 0x35DBF54F016F3624ull;
 }
-static int HerMechKind(uint64_t r) { return r && ((g_sinRes && r == g_sinRes) || (s_mechAny && IsExosuit(r))); }
+static int HerMechKind(uint64_t r) { return r && ((g_sinRes && r == g_sinRes) || (g_sinFreeRes && r == g_sinFreeRes) || (s_mechAny && IsExosuit(r))); }
 
 /* ---- the seat (Khi's reading, as Apache - Rise Above and Mech Probe do it: the command bus game+0x3326E68, entry 117) */
 typedef struct { int found; uint32_t vehicle, role, node; int changing; } Seat;
@@ -2402,11 +1753,12 @@ static void MechLungeFrame(void)
     MechStrike(g_mlunge.emp);
 }
 
-/* ---- the earned follow-up: Pile Bunker kills a heavily armoured enemy (armour 4+) -> her next shield bash sends a
+/* ---- the earned follow-up: Pile Bunker kills a heavily armoured enemy (armour 4+) -> Pile Bunker's key again while it
+ * recharges (or, in the Breakthrough Sinbreaker, the shield bash) sends a
  * precision-strike line mpb_length m out from the suit, enemies and corpses on it are dragged to its end, and a Hellbomb
  * goes off there ---------------------------------------------------------------------------------------------------- */
 static int g_mpbReady;
-static double g_mpbFireAt;   /* the follow-up waits mpb_delay s after the bash starts: the swing finishes first */
+static double g_mpbFireAt;   /* when it goes: the key's, at once; the bash's, mpb_delay s after it starts (the swing finishes first) */
 static double g_mpbBoomAt;
 static float g_mpbBoomPos[3];
 static unsigned g_mpbFired, g_mpbEarned;
@@ -2449,7 +1801,7 @@ static void MpbKill(const HfKillEvent* k)
     if (s_mpbUnlock >= 2 && !heavy) { static unsigned told; if (told++ < 6) Log("Pile Bunker killed %016llx (%s): not heavily armoured, no follow-up", (unsigned long long)res, why); return; }
     g_mpbReady = 1;
     g_mpbEarned++;
-    Log("Pile Bunker killed %016llx (%s): follow-up ready on her next shield bash", (unsigned long long)res, why);
+    Log("Pile Bunker killed %016llx (%s): follow-up ready (Pile Bunker's key again, or the shield bash)", (unsigned long long)res, why);
 }
 /* the drag: living enemies stepped along the ground (the warp setter, as Mech Probe's Ctrl+F10), corpses pushed */
 typedef struct { uint32_t e, unit; float to[3]; } Dragged;
@@ -2796,7 +2148,7 @@ static void KitFrame(void)
                 g_mech = mech; g_mechUnit = Word(d + 12);
                 MechParts(mech);
                 g_akEyeUntil = 0;
-                Log("she pilots the %s (entity %u, %d parts): her GFL2 kit", Quad(d) == g_sinRes ? "Sinbreaker" : "exosuit", mech, g_nMechParts);
+                Log("she pilots the %s (entity %u, %d parts): her GFL2 kit", Quad(d) == g_sinRes ? "Sinbreaker" : Quad(d) == g_sinFreeRes ? "free Sinbreaker" : "exosuit", mech, g_nMechParts);
             }
             else
             {
@@ -2881,42 +2233,59 @@ static int KitKey(int i)
 {
     if (g_mech)
     {
-        if (i == 2) { MechPileBunker(); return 1; }
+        if (i == 2)
+        {
+            /* while Pile Bunker recharges, C again sets off its earned follow-up (the Breakthrough's shield bash does too) */
+            if (g_now < g_cd[2] && !g_mlunge.on && s_mpbOn && g_mpbFireAt <= 0)
+            {
+                if (g_mpbReady || s_mpbUnlock == 0) { g_mpbFireAt = g_now; Log("Pile Bunker follow-up: set off with the key"); }
+                else { static unsigned told; if (told++ < 5) Log("Pile Bunker again: no follow-up earned (Pile Bunker must kill a heavily armoured enemy)"); }
+                return 1;
+            }
+            MechPileBunker();
+            return 1;
+        }
         return 0;   /* Sirius Fall and the GFL2 Eye as before */
     }
     if (i == 1) AkEye();
     else { static unsigned told; if (told++ < 3) Log("%s works in the Sinbreaker (on foot: X is her AK-15 Eye)", i == 0 ? "Sirius Fall" : "Pile Bunker"); }
     return 1;
 }
-static void SinbreakerInit(const HfApi* api, HfMod* mod)
+/* One Sinbreaker: an entity copied from base (its turn speed and main armour its own) and its LRRRR stratagem, dropped
+ * by Pelican. turn: the base's own turn speed (the Breakthrough's 65, read in 0.3.2). */
+static void SinbreakerAdd(const HfApi* api, HfMod* mod, uint64_t base, uint32_t baseStratagem, uint64_t package, float turnBase,
+                          const char* name, const char* designation, const char* what, uint64_t* res, uint32_t* type)
 {
-    if (!s_sinOn || api->size < offsetof(HfApi, add_stratagem) + sizeof api->add_stratagem || !api->add_entity || !api->add_stratagem) return;
+    char ename[64], sname[64];
+    snprintf(ename, sizeof ename, "yui/voymastina/%s", name);
+    snprintf(sname, sizeof sname, "yui/voymastina/%s_drop", name);
     HfEntity sin = {sizeof sin};
-    sin.base = HF_ENTITY_EXO55_BREAKTHROUGH_EXOSUIT;
+    sin.base = base;
     /* (no own_all: 0.3.5 crashed the game, helldivers2.exe+0xD3E4AC, the moment a Sinbreaker with records of its own in
      * every component spawned; the edits below give it its own Rotation and Health records only) */
-    sin.name = "yui/voymastina/sinbreaker";
+    sin.name = ename;
     sin.title = "Sinbreaker";
-    sin.designation = "EXO-55V";
+    sin.designation = designation;
     sin.description = "Voymastina's exoskeleton, built for her by Nele, with a pile bunker for an arm. While she pilots it she fights with "
                       "her full kit; if it falls she is thrown clear with a Blood-Curdling Howl.";
-    g_sinRes = api->add_entity(mod, &sin);
-    if (!g_sinRes) { api->log(mod, "the Sinbreaker could not be added (see the log above): her mech kit runs in no exosuit"); return; }
+    *res = api->add_entity(mod, &sin);
+    if (!*res) { api->log(mod, "the %s could not be added (see the log above)", what); return; }
     /* its own Rotation and Health records come only from edits made here (0.3.2's live edits were refused: "no record of
-     * its own"): its turn speed (the Breakthrough's 65, read in 0.3.2) and its main armour; the zones follow live */
+     * its own"): its turn speed and its main armour; the zones follow live */
     if (api->set_field)
     {
         HfField turn = HF_FIELD(Rotation, rotation_turn_speed), armour = HF_FIELD(Health, armor_118);
-        HfValue t = HF_F32(65.0f * s_sinTurn), a = HF_U32((uint32_t)(s_sinArmor > 0 ? s_sinArmor : 4));
-        int rt = s_sinTurn != 1 ? api->set_field(mod, g_sinRes, &turn, &t) : 0, ra = s_sinArmor > 0 ? api->set_field(mod, g_sinRes, &armour, &a) : 0;
-        api->log(mod, "the Sinbreaker: turn speed %.0f%s, main armour %d%s", 65.0 * s_sinTurn, rt ? " (refused)" : "", s_sinArmor, ra ? " (refused)" : "");
+        HfValue tv = HF_F32(turnBase * s_sinTurn), a = HF_U32((uint32_t)(s_sinArmor > 0 ? s_sinArmor : 4));
+        int rt = s_sinTurn != 1 ? api->set_field(mod, *res, &turn, &tv) : 0, ra = s_sinArmor > 0 ? api->set_field(mod, *res, &armour, &a) : 0;
+        api->log(mod, "the %s: turn speed %.0f%s, main armour %d%s", what, (double)(turnBase * s_sinTurn), rt ? " (refused)" : "", s_sinArmor, ra ? " (refused)" : "");
     }
-    static uint64_t payload[2];
-    payload[0] = g_sinRes;
+    static uint64_t payloads[2][2];
+    uint64_t* payload = payloads[base == HF_ENTITY_EXO55_BREAKTHROUGH_EXOSUIT ? 0 : 1];
+    payload[0] = *res;
     payload[1] = HF_ENTITY_PELICAN_TRANSPORT;
     HfStratagem st = {sizeof st};
-    st.base = HF_STRATAGEM_EXO55_BREAKTHROUGH_EXOSUIT;
-    st.name = "yui/voymastina/sinbreaker_drop";
+    st.base = baseStratagem;
+    st.name = sname;
     st.title = "Sinbreaker";
     st.description = "Voymastina's own exosuit, dropped by Pelican. Her GFL2 kit runs while she pilots it.";
     st.code = "LRRRR";
@@ -2924,11 +2293,28 @@ static void SinbreakerInit(const HfApi* api, HfMod* mod)
     st.uses = s_sinUses;
     st.payload = payload;
     st.payload_count = 2;
-    /* the Breakthrough's own package (its stratagem row's, HD2Runtime's stratagem catalogue): left 0, HellForge took the
+    /* the base suit's own package (its stratagem row's, HD2Runtime's stratagem catalogue): left 0, HellForge took the
      * Pelican's (131fe264b7380717), and a Sinbreaker called outside the loadout landed as a purple question mark */
-    st.package = 0x7DE417DB7552D9FCull;
-    g_sinType = api->add_stratagem(mod, &st);
-    api->log(mod, "the Sinbreaker: entity %016llx, stratagem %u (LRRRR, %.0f s, %d uses)", (unsigned long long)g_sinRes, g_sinType, (double)s_sinCd, s_sinUses);
+    st.package = package;
+    *type = api->add_stratagem(mod, &st);
+    api->log(mod, "the %s: entity %016llx, stratagem %u (LRRRR, %.0f s, %d uses)", what, (unsigned long long)*res, *type, (double)s_sinCd, s_sinUses);
+}
+/* The Sinbreaker on the EXO-55 Breakthrough (premium: the Exo Experts warbond; the shield bash also sets off Pile
+ * Bunker's follow-up), and the free one for everyone else on the EXO-49 Emancipator (sin_free_base 2) or the EXO-45
+ * Patriot (1). Each mission she is granted the one her profile may have (GrantFrame). */
+static void SinbreakerInit(const HfApi* api, HfMod* mod)
+{
+    if (!s_sinOn || api->size < offsetof(HfApi, add_stratagem) + sizeof api->add_stratagem || !api->add_entity || !api->add_stratagem) return;
+    SinbreakerAdd(api, mod, HF_ENTITY_EXO55_BREAKTHROUGH_EXOSUIT, HF_STRATAGEM_EXO55_BREAKTHROUGH_EXOSUIT,
+                  0x7DE417DB7552D9FCull /* packages/generated/loadout/combat_walker_breacher */, 65.0f, "sinbreaker", "EXO-55V", "Sinbreaker", &g_sinRes, &g_sinType);
+    if (!s_sinFallback) return;
+    /* the free bases' turn speed is not read yet: taken as the Breakthrough's (SinTune logs the base's own) */
+    if (s_sinFreeBase == 1)
+        SinbreakerAdd(api, mod, HF_ENTITY_EXO45_PATRIOT_EXOSUIT, HF_STRATAGEM_EXO45_PATRIOT,
+                      0x22749A294788AF66ull /* packages/generated/loadout/combat_walker */, 65.0f, "sinbreaker_free", "EXO-45V", "free Sinbreaker", &g_sinFreeRes, &g_sinFreeType);
+    else
+        SinbreakerAdd(api, mod, HF_ENTITY_EXO49_EMANCIPATOR_EXOSUIT, HF_STRATAGEM_EXO49_EMANCIPATOR_EXOSUIT,
+                      0xE72D3E9B05C3DB0Bull /* packages/generated/loadout/combat_walker_obsidian */, 65.0f, "sinbreaker_free", "EXO-49V", "free Sinbreaker", &g_sinFreeRes, &g_sinFreeType);
 }
 
 static uint32_t MechNow(void) { return g_mech; }
@@ -2978,13 +2364,27 @@ static int GrantPins(void)
         if (!hf->code_matches(game + k[i].at, k[i].bytes)) { Log("Sinbreaker grant: game.dll+0x%llX is not as researched: no grant", (unsigned long long)k[i].at); ok = 0; break; }
     return ok;
 }
+static int SinOwned(void);
+/* The Sinbreaker her profile may have: the Breakthrough one with the Exo Experts warbond, otherwise the free one (0:
+ * none). Settled once a session (SinOwned). */
+static uint32_t SinGranted(void)
+{
+    static int told;
+    /* sin_fallback 2: the free one even with the warbond (to try it, or by choice) */
+    if (g_sinType && s_sinFallback != 2 && SinOwned()) return g_sinType;
+    if (!s_sinFallback || !g_sinFreeType) { if (!told++) Log("Sinbreaker grant: no free Sinbreaker (sin_fallback 0): no grant"); return 0; }
+    if (!told++) Log("Sinbreaker grant: the free Sinbreaker (no premium content)");
+    return g_sinFreeType;
+}
 static void SinPackage(void)
 {
-    if (g_pkgState == 2 || !g_sinType || !hf->stratagem_row || hf->size < offsetof(HfApi, load_package) + sizeof hf->load_package) return;
+    if (g_pkgState == 2 || !(g_sinType || g_sinFreeType) || !hf->stratagem_row || hf->size < offsetof(HfApi, load_package) + sizeof hf->load_package) return;
     static double next;
     if (g_now < next) return;
     next = g_now + 2;
-    uintptr_t row = hf->stratagem_row(g_sinType);
+    uint32_t type = SinGranted();
+    if (!type) { g_pkgState = 2; return; }
+    uintptr_t row = hf->stratagem_row(type);
     uint64_t pkg = 0;
     if (!row || !ReadAt(row + 0xA8, &pkg, 8) || !pkg || pkg == ~0ull) { if (!g_pkgState) { g_pkgState = 2; Log("Sinbreaker: its stratagem names no package"); } return; }
     int r = hf->load_package(self, pkg);
@@ -3003,27 +2403,28 @@ static int SinOwned(void)
     known = 0;
     const char* folder = hf->size >= offsetof(HfApi, logs_folder) + sizeof hf->logs_folder && hf->logs_folder ? hf->logs_folder(self) : "";
     char path[1024];
-    if (!folder || !folder[0]) { Log("Sinbreaker grant: the session's logs folder is unknown: no grant (premium content)"); return 0; }
+    if (!folder || !folder[0]) { Log("Sinbreaker grant: the session's logs folder is unknown: taken as not owned (premium content)"); return 0; }
     snprintf(path, sizeof path, "%s\\premium-locked.json", folder);
     FILE* f = OpenUtf8(path, L"rb");
-    if (!f) { Log("Sinbreaker grant: %s is unreadable: no grant (premium content)", path); return 0; }
+    if (!f) { Log("Sinbreaker grant: %s is unreadable: taken as not owned (premium content)", path); return 0; }
     char buf[8192];
     size_t n = fread(buf, 1, sizeof buf - 1, f);
     fclose(f);
     buf[n] = 0;
-    if (strstr(buf, "yui.voymastina")) { Log("Sinbreaker grant: this profile does not own the Exo Experts warbond (the EXO-55 Breakthrough): no grant"); return 0; }
+    if (strstr(buf, "yui.voymastina")) { Log("Sinbreaker grant: this profile does not own the Exo Experts warbond (the EXO-55 Breakthrough)"); return 0; }
     known = 1;
     return 1;
 }
 static void GrantFrame(void)
 {
-    if (!g_sinType || !s_sinGrant || g_grantDone || !g_alive) return;
+    if (!(g_sinType || g_sinFreeType) || !s_sinGrant || g_grantDone || !g_alive) return;
     if (g_grantAt <= 0) { g_grantAt = g_now + 3; return; }   /* once she is down on the ground a moment */
     if (g_now < g_grantAt) return;
     g_grantAt = g_now + 1;
     if (++g_grantTries > 20) { g_grantDone = 1; Log("Sinbreaker grant: her stratagem record never became readable"); return; }
     if (!GrantPins()) { g_grantDone = 1; return; }
-    if (!SinOwned()) { g_grantDone = 1; return; }
+    uint32_t want = SinGranted();
+    if (!want) { g_grantDone = 1; return; }
     uintptr_t st = LocalStratagems(), clockObj = Pointer(game + 0x3326348u);
     uint32_t count = 0;
     uint64_t now = 0;
@@ -3033,14 +2434,14 @@ static void GrantFrame(void)
     {
         uint8_t e[0x30];
         if (!ReadAt(st + 0x188 + i * 0x30u, e, sizeof e)) return;
-        if (Word(e) == g_sinType) { g_grantDone = 1; Log("Sinbreaker: already in her stratagems (slot %u)", i); return; }
+        if (Word(e) == want) { g_grantDone = 1; Log("Sinbreaker: already in her stratagems (slot %u)", i); return; }
         if (tmpl < 0 && e[9] == 1 && Quad(e + 0x20) <= now) tmpl = (int)i;
     }
     g_grantDone = 1;
     if (count >= 16) { Log("Sinbreaker grant: her stratagem list is full (16)"); return; }
     uint8_t e[0x30] = {0};
     if (tmpl >= 0) ReadAt(st + 0x188 + (uint32_t)tmpl * 0x30u, e, sizeof e);
-    uint32_t type = g_sinType, uses = s_sinUses < 0 ? 0xFFFFFFFFu : (uint32_t)s_sinUses;
+    uint32_t type = want, uses = s_sinUses < 0 ? 0xFFFFFFFFu : (uint32_t)s_sinUses;
     uint64_t zero = 0;
     memcpy(e, &type, 4);
     memcpy(e + 4, &uses, 4);
@@ -3050,7 +2451,7 @@ static void GrantFrame(void)
     memcpy(e + 0x20, &zero, 8);
     uint32_t next = count + 1;
     if (hf->write(st + 0x188 + count * 0x30u, e, sizeof e) || hf->write(st + 0x788, &next, 4)) { Log("Sinbreaker grant: the write failed"); return; }
-    Log("Sinbreaker: granted outside the loadout (slot %u of %u, template slot %d, uses %s): call it with LRRRR", count, next, tmpl,
+    Log("%s: granted outside the loadout (slot %u of %u, template slot %d, uses %s): call it with LRRRR", want == g_sinType ? "Sinbreaker" : "the free Sinbreaker", count, next, tmpl,
         s_sinUses < 0 ? "unlimited" : "limited");
 }
 static void GrantReset(void) { g_grantDone = 0; g_grantTries = 0; g_grantAt = 0; }
@@ -3058,12 +2459,17 @@ static void GrantReset(void) { g_grantDone = 0; g_grantTries = 0; g_grantAt = 0;
 static void SinHide(void)
 {
     static int done;
-    if (done || s_sinLoadout || !g_sinType || !hf->stratagem_row) return;
-    uintptr_t row = hf->stratagem_row(g_sinType);
-    uint8_t sel;
-    if (!row || !ReadAt(row + 0x80, &sel, 1)) return;
+    if (done || s_sinLoadout || !(g_sinType || g_sinFreeType) || !hf->stratagem_row) return;
+    const uint32_t types[2] = {g_sinType, g_sinFreeType};
+    for (int k = 0; k < 2; k++)
+    {
+        if (!types[k]) continue;
+        uintptr_t row = hf->stratagem_row(types[k]);
+        uint8_t sel;
+        if (!row || !ReadAt(row + 0x80, &sel, 1)) return;
+        if (sel & 2) { sel &= (uint8_t)~2; hf->write(row + 0x80, &sel, 1); Log("%s: kept out of the loadout picker (sin_loadout 0)", k ? "the free Sinbreaker" : "Sinbreaker"); }
+    }
     done = 1;
-    if (sel & 2) { sel &= (uint8_t)~2; hf->write(row + 0x80, &sel, 1); Log("Sinbreaker: kept out of the loadout picker (sin_loadout 0)"); }
 }
 
 /* ---- her guns on foot (AK-15): +ak_ergo ergonomics and x ak_reload reload time on every weapon she holds, as live edits
@@ -3128,11 +2534,11 @@ static void TuneWeapon(uint64_t res)
 }
 static void OnWeaponAk(HfMod* mod, const HfEventInfo* info, void* user)
 {
+    if (!kb_kit_on) return;
     const HfWeaponEvent* w = (const HfWeaponEvent*)info;
     if (!w->avatar || w->avatar != atomic_load(&g_avatar)) return;
     TuneWeapon(w->resource);
 }
-
 
 /* ---- the Sinbreaker's handling and armour: live edits of its own records (own_all) and its arms' --------------------
  * turning (Rotation +0/+4/+8, VehicleMotion steering response) x sin_turn; armour: the main value and every armoured
@@ -3158,10 +2564,8 @@ static int RaiseArmour(uint64_t res, const char* what)
     Log("Sinbreaker: %s %016llx: armour %d on %d of %d armoured values", what, (unsigned long long)res, s_sinArmor, raised, zones);
     return raised;
 }
-static void SinTune(void)
+static void SinTuneOne(uint64_t res, const char* what)
 {
-    if (g_sinTuned || !g_sinRes) return;
-    g_sinTuned = 1;
     static const struct { HfField f; const char* name; } turn[] = {
         {HF_FIELD(Rotation, rotation_turn_speed), "turn speed"}, {HF_FIELD(Rotation, rotation_acceleration), "turn acceleration"},
         {HF_FIELD(Rotation, rotation_deceleration), "turn deceleration"}, {HF_FIELD(VehicleMotion, steering_response_speed), "steering response"}};
@@ -3169,19 +2573,35 @@ static void SinTune(void)
     {
         HfLiveValue v;
         memset(&v, 0, sizeof v);
-        if (!hf->get_live(self, g_sinRes, &turn[i].f, &v) || v.base.number <= 0) { Log("Sinbreaker: no %s to change", turn[i].name); continue; }
+        if (!hf->get_live(self, res, &turn[i].f, &v) || v.base.number <= 0) { Log("%s: no %s to change", what, turn[i].name); continue; }
         HfValue x = HF_F32(v.base.number * s_sinTurn);
-        int r = hf->set_live(self, g_sinRes, &turn[i].f, &x, 0);
-        Log("Sinbreaker: %s %.2f -> %.2f%s", turn[i].name, v.base.number, v.base.number * s_sinTurn, r ? "" : " (refused)");
+        int r = hf->set_live(self, res, &turn[i].f, &x, 0);
+        Log("%s: %s %.2f -> %.2f%s", what, turn[i].name, v.base.number, v.base.number * s_sinTurn, r ? "" : " (refused)");
     }
     if (s_sinArmor <= 0) return;
-    RaiseArmour(g_sinRes, "the suit");
+    RaiseArmour(res, what);
     uint32_t stride = 0;
-    uintptr_t m = hf->component_record("MountComponentData", g_sinRes, &stride);
+    uintptr_t m = hf->component_record("MountComponentData", res, &stride);
     for (int k = 0; m && k < 5; k++)
     {
         uint64_t arm = 0;
         if (ReadAt(m + 24u * (uint32_t)k, &arm, 8) && arm) RaiseArmour(arm, "its mount");
+    }
+}
+/* both Sinbreakers, once, in the first mission frame; and the free base's own turn speed, for the record */
+static void SinTune(void)
+{
+    if (g_sinTuned || !(g_sinRes || g_sinFreeRes)) return;
+    g_sinTuned = 1;
+    if (g_sinRes) SinTuneOne(g_sinRes, "Sinbreaker");
+    if (g_sinFreeRes)
+    {
+        SinTuneOne(g_sinFreeRes, "free Sinbreaker");
+        HfField turn = HF_FIELD(Rotation, rotation_turn_speed);
+        HfLiveValue v;
+        memset(&v, 0, sizeof v);
+        uint64_t base = s_sinFreeBase == 1 ? HF_ENTITY_EXO45_PATRIOT_EXOSUIT : HF_ENTITY_EXO49_EMANCIPATOR_EXOSUIT;
+        if (hf->get_live(self, base, &turn, &v)) Log("free Sinbreaker: its base's own turn speed %.1f (set from 65 x sin_turn)", v.base.number);
     }
 }
 
@@ -3242,7 +2662,7 @@ typedef struct VoymastinaHud
 static VoymastinaHud g_hud = {3};
 HF_MOD_EXPORT VoymastinaHud* voymastina_hud_state(void)
 {
-    g_hud.in_mission = (uint32_t)(g_inMission && g_alive);
+    g_hud.in_mission = (uint32_t)(g_inMission && g_alive && kb_kit_on);
     double r[3] = {g_cd[0], g_cd[1], g_cd[2]};
     float m[3] = {s_sfCd, s_eyeCd, s_pbCd};
     for (int i = 0; i < 3; i++) { g_hud.cd[i] = (float)fmax(0, r[i] - g_now); g_hud.cd_max[i] = m[i]; }
@@ -3281,14 +2701,6 @@ HF_MOD_EXPORT VoymastinaHud* voymastina_hud_state(void)
     g_hud.rage = (float)fmax(0, g_rageUntil - g_now);
     g_hud.howl = g_howlWait ? 99.0f : (float)fmax(0, g_howlUntil - g_now);
     return &g_hud;
-}
-
-static int Focused(void)
-{
-    HWND w = GetForegroundWindow();
-    DWORD pid = 0;
-    if (w) GetWindowThreadProcessId(w, &pid);
-    return pid == GetCurrentProcessId();
 }
 
 /* Her bare hands' speed: jog and sprint x bare_speed while they are on (the Helldiver's own speeds put back after) */
@@ -3464,49 +2876,6 @@ HF_MOD_EXPORT int voymastina_key(unsigned version, int skill, int* vk, int* mods
     *mods = s_keys[skill - 1].mods;
     return 1;
 }
-/* Her own items (primary, secondary, support weapon, backpack: the inventory manager game+53634872, HD2Runtime's
- * research: hash +40, descriptors +64, 48-byte records at +80), read twice a second on the game thread: a hit owned by her
- * and dealt by one of them is hers (a laser's hits name the rifle as their dealer), a sentry's or a dog's is not */
-static atomic_uint g_myItems[4];
-static double g_myItemsAt = -100;
-static void MyItems(void)
-{
-    if (g_now - g_myItemsAt < 0.5) return;
-    g_myItemsAt = g_now;
-    uint32_t me = atomic_load(&g_avatar), i;
-    uintptr_t m = Pointer(game + 53634872u), arr, d, recs;
-    uint8_t desc[24], rec[48];
-    if (!me || !m || !Lookup(m + 40, me, 1048576, &i) || i >= 0x10000 || !(arr = Pointer(m + 64)) || !(d = Pointer(arr + 8u * i)) ||
-        !ReadAt(d, desc, 24) || Word(desc + 8) != me || !(recs = Pointer(m + 80)) || !ReadAt(recs + 48u * i, rec, 48))
-        return;
-    for (int k = 0; k < 4; k++) atomic_store(&g_myItems[k], Word(rec + 4u * k));
-}
-static int MyItem(uint32_t e)
-{
-    for (int k = 0; k < 4; k++) if (e && atomic_load(&g_myItems[k]) == e) return 1;
-    return 0;
-}
-/* Who holds an item: the Wieldable component (game+53634864, HD2Runtime's attribution research: hash +24, u32 wielders at
- * +56). Her rifle is held by her; a sentry or a turret holds itself, so its hits are its own. 1 with *by, 0 unreadable */
-static int WielderOf(uint32_t e, uint32_t* by)
-{
-    uintptr_t m = Pointer(game + 53634864u), arr;
-    uint32_t i;
-    if (!e || !m || !Lookup(m + 24, e, 1048576, &i) || i >= 0x10000 || !(arr = Pointer(m + 56))) return 0;
-    return ReadAt(arr + 4u * i, by, 4) && *by;
-}
-/* A hit owned by her and dealt by `dealer`: hers when the game says she holds the dealer (first), else when it is one of her
- * own items (her inventory: a backpack's or support weapon's gear the wielder record does not name) */
-static int Mine(uint32_t dealer)
-{
-    uint32_t me = atomic_load(&g_avatar), by = 0;
-    int held = WielderOf(dealer, &by), mine = held && by == me ? 1 : held && by != dealer && MyItem(by) ? 1 : !held && MyItem(dealer);
-    static atomic_uint told;
-    if (atomic_fetch_add(&told, 1) < 8)
-        Log("a hit dealt by entity %u: %s%s", dealer, held ? (by == dealer ? "it holds itself" : by == me ? "held by her" : "held by another") : "no holder known",
-            mine ? ": hers" : ": not hers");
-    return mine;
-}
 /* ---- her fist on walls, rocks and the ground ahead: no damage event comes from those, so the swing itself is watched.
  * The ability she runs (HD2Runtime's research: the ability manager game+0x3326640, hash +24, descriptors +48, 224-byte
  * records at +56, id +0, active +16) is learned as a melee one when a melee hit of hers lands while it runs; in bare
@@ -3589,7 +2958,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     g_now += step;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); KitReset(); g_inMission = inMission; }
-    if (!g_inMission) return;
+    if (!g_inMission || !kb_kit_on) return;   /* (standing by: another kit is picked) */
     atomic_store(&g_ppArmorOn, g_ppReady || g_now < g_ppArmorUntil);
     StaminaGuard();
     BareFrame();
@@ -3663,7 +3032,7 @@ static void Tick(HfMod* mod, float dt, void* user)
 }
 
 /* ---- the Mod Options Menu (through the Voymastina HUD addon): read and set a setting by its voymastina.ini name ---- */
-static const struct { const char* name; float* f; int* i; } kOptions[] = {
+static const KbOption kOptions[] = {
     {"sf_cooldown", &s_sfCd, NULL}, {"sa_on", NULL, &s_saOn}, {"sa_every", &s_saEvery, NULL},
     {"eye_cooldown", &s_eyeCd, NULL}, {"eye_seconds", &s_eyeSeconds, NULL}, {"eye_radius", &s_eyeRadius, NULL}, {"eye_max", NULL, &s_eyeMax}, {"eye_move", &s_eyeMove, NULL},
     {"drop_on", NULL, &s_dropOn}, {"drop_targets", NULL, &s_dropTargets},
@@ -3677,34 +3046,127 @@ static const struct { const char* name; float* f; int* i; } kOptions[] = {
     {"sf_range", &s_sfRange, NULL}, {"eye_every", &s_eyeEvery, NULL}, {"drop_radius", &s_dropRadius, NULL}, {"drop_shield", &s_dropShield, NULL},
     {"pbp_step", &s_pbpStep, NULL}, {"stab_min_hit", &s_stabMin, NULL}, {"pp_per", NULL, &s_ppPer}, {"pp_ap", NULL, &s_ppAp},
 };
+/* After Mod Options Menu sets one (changed: its value moved) */
+static void OptionAfter(const char* name, int changed)
+{
+    if (changed && !strcmp(name, "stab_max") && (g_stab > s_stabMax || !g_inMission)) g_stab = s_stabMax;
+    if (g_pp >= s_ppMax) { g_pp = 0; g_ppReady = 1; }   /* a lower most: the charge is full */
+}
 HF_MOD_EXPORT int voymastina_option_get(const char* name, double* out)
 {
-    if (!name || !out) return 0;
-    for (unsigned k = 0; k < sizeof kOptions / sizeof kOptions[0]; k++)
-        if (!strcmp(kOptions[k].name, name)) { *out = kOptions[k].f ? (double)*kOptions[k].f : (double)*kOptions[k].i; return 1; }
-    return 0;
+    return OptionGet(name, out);
 }
 HF_MOD_EXPORT int voymastina_option_set(const char* name, double value)
 {
-    double before;
-    if (!isfinite(value) || !voymastina_option_get(name, &before)) return 0;
-    Setting(name, value);
-    double now;
-    voymastina_option_get(name, &now);
-    if (now != before)
+    return OptionSet(name, value);
+}
+
+/* Her Hellbomb went off: its blast is meant to reach her (OnDamagePre lets it through) */
+static void HellbombFired(const float pos[3])
+{
+    g_boomAt = g_now;
+    atomic_store(&g_boomMs, GetTickCount64());
+    memcpy(g_boomPos, pos, sizeof g_boomPos);
+}
+
+/* Her hits, before the game reads them: her hand's carry bare_ap armour penetration, any other the Shred's (both put
+ * back after) */
+static void HitBefore(KbHitCall* c)
+{
+    if (c->kind == KB_HIT_CALC && BareHit(c->hit))
     {
-        Log("option %s: %g -> %g (Mod Options Menu)", name, before, now);
-        if (g_inMission && (!strcmp(name, "hp_mult") || !strcmp(name, "stamina_mult"))) { Body(0); Body(1); }
-        if (!strcmp(name, "stab_max") && (g_stab > s_stabMax || !g_inMission)) g_stab = s_stabMax;
+        memcpy(c->saved, (const uint8_t*)c->hit + 0x9C, 12);
+        float ap[3] = {s_bareAp, s_bareAp, s_bareAp};
+        memcpy((uint8_t*)c->hit + 0x9C, ap, 12);
+        c->restore = 1;
+        c->flags = 1;
     }
-    if (g_pp >= s_ppMax) { g_pp = 0; g_ppReady = 1; }   /* a lower most: the charge is full */
-    return 1;
+    else c->restore = Shred(c->hit, c->saved) > 0;
+}
+/* Her hits, after: her hand's extra damage, demolition and stagger; its blast's extra demolition */
+static void HitAfter(KbHitCall* c)
+{
+    void* out = c->out;
+    if (c->kind == KB_HIT_CALC && c->flags && out)
+    {
+        float dmg;
+        int32_t demo, stag;
+        memcpy(&dmg, out, 4);
+        memcpy(&demo, (uint8_t*)out + 0x08, 4);
+        memcpy(&stag, (uint8_t*)out + 0x0C, 4);
+        float before = dmg;
+        if (isfinite(dmg)) dmg += s_bareDamage;
+        demo += (int32_t)s_bareDemolition;
+        stag += (int32_t)s_bareStagger;
+        memcpy(out, &dmg, 4);
+        memcpy((uint8_t*)out + 0x08, &demo, 4);
+        memcpy((uint8_t*)out + 0x0C, &stag, 4);
+        unsigned n = atomic_fetch_add(&g_bareHits, 1);
+        if (n < 5) Log("her hand: %.0f -> %.0f damage, demolition %d, stagger %d", (double)before, (double)dmg, demo, stag);
+    }
+    if (c->kind == KB_HIT_BLAST && out && s_bareDemolition > 0 && FistOrigin(c->hit) && Word((const uint8_t*)c->hit + 0x20) != atomic_load(&g_avatar))
+    {
+        int32_t demo;
+        memcpy(&demo, (uint8_t*)out + 0x08, 4);
+        int32_t before = demo;
+        demo += (int32_t)s_bareDemolition;
+        memcpy((uint8_t*)out + 0x08, &demo, 4);
+        static atomic_uint told;
+        if (atomic_fetch_add(&told, 1) < 4) Log("her hand: its blast's demolition %d -> %d", before, demo);
+    }
+}
+/* A hit on her (not one of her own blasts): who dealt it, her Hellbomb let through, the stamina guard's note, and
+ * Predation Protocol's armour. Nonzero: nothing more is done to it. */
+static int HitTaken(const uint8_t* h, void* result, unsigned long long now)
+{
+    uint32_t me = atomic_load(&g_avatar);
+    uint8_t r[RESULT_SIZE];
+    uint32_t dealer = Word(h + 0x80), owner = Word(h + 0x100);
+    if ((dealer && dealer != me) || (owner && owner != me))
+    {
+        unsigned slot = atomic_fetch_add(&g_atkNext, 1) % 8;
+        atomic_store(&g_atkWho[slot][0], dealer);
+        atomic_store(&g_atkWho[slot][1], owner);
+        atomic_store(&g_atkMs[slot], now);
+    }
+    /* her own Hellbomb is meant to reach her as it is */
+    if (now - atomic_load(&g_boomMs) < 2000) return 1;
+    atomic_store(&g_hitMs, now);   /* the stamina guard (Tick): a hit's stamina loss is put back */
+    if (!ReadAt((uintptr_t)result, r, sizeof r)) return 1;
+    /* Predation Protocol: heavy armour (armour value pp_armor) while the buff holds: a hit whose armour penetration is
+     * below it glances off (no damage), one equal to it deals pp_armor_equal of its damage */
+    if (s_ppArmor > 0 && atomic_load(&g_ppArmorOn))
+    {
+        float ap, dmg;
+        memcpy(&ap, h + 0x9C, 4);
+        memcpy(&dmg, r, 4);
+        if (isfinite(ap) && isfinite(dmg) && dmg > 0)
+        {
+            float keep = ap < (float)s_ppArmor - 0.5f ? 0.0f : ap < (float)s_ppArmor + 0.5f ? s_ppArmorEqual : 1.0f;
+            if (keep < 1.0f) { dmg *= keep; memcpy(result, &dmg, 4); atomic_fetch_add(&g_armorHits, 1); }
+        }
+    }
+    return 0;
 }
 
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
+    RosterJoin("voymastina", "Voymastina");
+    kb_ini = "voymastina.ini";
+    kb_key_names[0] = "key_sirius";
+    kb_key_names[1] = "key_eye";
+    kb_key_names[2] = "key_pile";
+    KB_SETTINGS(kSettings);
+    KB_OPTIONS(kOptions);
+    kb_option_after = OptionAfter;
+    kb_damage_taken = DamageTaken;
+    kb_damage_dealt = DamageDealt;
+    kb_hit_before = HitBefore;
+    kb_hit_after = HitAfter;
+    kb_hit_taken = HitTaken;
+    kb_hellbomb_fired = HellbombFired;
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
