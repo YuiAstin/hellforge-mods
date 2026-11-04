@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.equip-probe",
+  "name": "Equip Probe (research)",
+  "version": "0.1.0",
+  "description": "Research for an invisibility ability that only fools enemies without a backpack or support weapon: logs your Helldiver's inventory record each time it changes (each entity in it with its resource), the spawns near you at that moment, and what you hold. Changes nothing. Pick up and drop a support weapon and a backpack; Ctrl+Alt+F11 logs it all now. Host or solo. Turn off when done.",
+  "gameplay": false,
+  "code": {
+    "dll": "equip_probe.dll",
+    "sdk": 15
+  }
+}
