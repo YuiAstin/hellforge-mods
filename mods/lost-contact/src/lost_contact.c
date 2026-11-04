@@ -34,6 +34,7 @@
 #include <math.h>
 #include <stdatomic.h>
 #include <windows.h>
+#include "hd2_mod_options.h"
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
@@ -128,6 +129,7 @@ static int KindOf(uint64_t res)
 #define LC_BREAK_CONTACT 1
 #endif
 static int s_breakMode = LC_BREAK_CONTACT ? 1 : 0, s_patrolMode = 1;   /* 0 off, 1 on, 2 observe */
+static int s_kitRules = 1;   /* 1: a character kit may turn one off while it acts (Lemuen: patrols only) */
 static float s_loseAfter = 3, s_breakRange = 80;
 static float s_seekRadius = 50, s_keepAway = 100, s_patrolRange = 300, s_resend = 3;
 typedef struct { int vk, ctrl, shift, alt; char label[24]; } Key;
@@ -156,12 +158,11 @@ static int ParseKey(const char* v, Key* k)
     *k = n;
     return 1;
 }
-static void LoadSettings(void)
+static int ReadSettings(const char* path)
 {
-    char path[MAX_PATH * 2], line[256];
-    snprintf(path, sizeof path, "%s\\lost-contact.ini", hf->mod_folder(self));
+    char line[256];
     FILE* f = fopen(path, "r");
-    if (!f) { Log("settings: no lost-contact.ini, the defaults"); return; }
+    if (!f) return 0;
     while (fgets(line, sizeof line, f))
     {
         char* c = line;
@@ -182,10 +183,40 @@ static void LoadSettings(void)
         else if (!strcmp(k, "seek_radius")) s_seekRadius = x >= 10 && x <= 300 ? (float)x : s_seekRadius;
         else if (!strcmp(k, "keep_away")) s_keepAway = x >= 20 && x <= 600 ? (float)x : s_keepAway;
         else if (!strcmp(k, "patrol_range")) s_patrolRange = x >= 50 && x <= 1000 ? (float)x : s_patrolRange;
+        else if (!strcmp(k, "kit_rules")) s_kitRules = (int)x ? 1 : 0;
         else if (!strcmp(k, "resend")) s_resend = x >= 0.5 && x <= 30 ? (float)x : s_resend;
         else if (!strcmp(k, "key_break")) { if (!ParseKey(v, &s_keyBreak)) Log("settings: key_break \"%s\" is not a key", v); }
         else if (!strcmp(k, "key_patrol")) { if (!ParseKey(v, &s_keyPatrol)) Log("settings: key_patrol \"%s\" is not a key", v); }
     }
+    fclose(f);
+    return 1;
+}
+/* What the MODS tab changed: HellForge keeps mod folders read-only while the game runs, so the menu's choices live in
+ * %LOCALAPPDATA%\\HellForgeMods\\lost-contact.ini (the game's own local folder), read after the mod's ini */
+static char g_savePath[MAX_PATH * 2];
+static void LoadSettings(void)
+{
+    char path[MAX_PATH * 2], local[MAX_PATH];
+    snprintf(path, sizeof path, "%s\\lost-contact.ini", hf->mod_folder(self));
+    if (!ReadSettings(path)) Log("settings: no lost-contact.ini, the defaults");
+    DWORD n = GetEnvironmentVariableA("LOCALAPPDATA", local, sizeof local);
+    if (n && n < sizeof local)
+    {
+        snprintf(g_savePath, sizeof g_savePath, "%s\\HellForgeMods\\lost-contact.ini", local);
+        if (ReadSettings(g_savePath)) Log("settings: the MODS tab's choices from %s", g_savePath);
+    }
+}
+static void SaveChoices(void)
+{
+    if (!g_savePath[0]) return;
+    char dir[MAX_PATH * 2];
+    snprintf(dir, sizeof dir, "%s", g_savePath);
+    char* cut = strrchr(dir, '\\');
+    if (cut) { *cut = 0; CreateDirectoryA(dir, NULL); }
+    FILE* f = fopen(g_savePath, "w");
+    if (!f) { Log("settings: the MODS tab's choices could not be saved to %s", g_savePath); return; }
+    fprintf(f, "; Lost Contact: the MODS tab's choices (read after the mod's lost-contact.ini). Delete this file to go back to the ini.\n"
+               "break_mode = %d\npatrol_mode = %d\nkit_rules = %d\n", s_breakMode, s_patrolMode, s_kitRules);
     fclose(f);
 }
 /* ---- what the active character kit allows ---------------------------------------------------------------------- */
@@ -193,6 +224,8 @@ typedef int (*RulesFn)(unsigned version);
 static const char* const kKits[] = {"lemuen.dll", "voymastina.dll", "exusiai.dll", "lenna.dll", "leva.dll", "faelynn.dll"};
 static int g_rules = 3;          /* bit 0 break contact, bit 1 patrols */
 static const char* g_rulesBy;
+static int g_kitAsk = 3;
+static const char* g_kitBy;
 static void KitRules(void)
 {
     int rules = 3;
@@ -204,9 +237,11 @@ static void KitRules(void)
         int r = f ? f(1) : -1;
         if (r >= 0) { rules &= r; by = kKits[i]; }
     }
+    g_kitAsk = rules; g_kitBy = by;
+    if (!s_kitRules) { rules = 3; }
     if (rules != g_rules || by != g_rulesBy)
         Log("rules: break contact %s, patrols %s (%s)", rules & 1 ? "allowed" : "OFF", rules & 2 ? "allowed" : "OFF",
-            by ? by : "no kit limits them");
+            !by ? "no kit limits them" : s_kitRules ? by : "a kit asked, kit_rules 0 keeps them");
     g_rules = rules; g_rulesBy = by;
 }
 static const char* ModeName(int m) { return m == 1 ? "on" : m == 2 ? "observe" : "off"; }
@@ -650,10 +685,71 @@ static void MissionStart(void)
     memset(&g_pt, 0, sizeof g_pt); memset(&g_ptSum, 0, sizeof g_ptSum);
     memset(&g_gone, 0, sizeof g_gone);
 }
+
+/* ---- the MODS tab (Vanilla Plus Megapack's native menu, its hd2_mod_options.h): the modes, whether a kit may limit
+ * them, and what runs now and why, so a player knows what is off and where to turn it back on ---------------------- */
+#define OPT_MOD "Lost Contact"
+static const char* const kModes[] = {"Off", "On", "Observe (log only)"};
+static const char* const kStatus[] = {"Running", "Off (your setting)", "Off: the active kit (Character kits can limit)", "Observing"};
+static int g_optsDone;
+static int g_shownStatus[2] = {-1, -1};
+static int ModeIndex(int m) { return m == 1 ? 1 : m == 2 ? 2 : 0; }
+static int StatusOf(int mode, int bit)
+{
+    if (!mode) return 1;
+    if (!(g_rules & bit)) return 2;
+    return mode == 2 ? 3 : 0;
+}
+static void OptChanged(void* user, const char* id, int32_t v)
+{
+    (void)user;
+    const Hd2ModOptionsApi* api = hd2_mod_options();
+    if (!strcmp(id, "break")) { s_breakMode = v == 1 ? 1 : v == 2 ? 2 : 0; Log("MODS tab: break contact %s", ModeName(s_breakMode)); }
+    else if (!strcmp(id, "patrols")) { s_patrolMode = v == 1 ? 1 : v == 2 ? 2 : 0; Log("MODS tab: patrols %s", ModeName(s_patrolMode)); }
+    else if (!strcmp(id, "kits")) { s_kitRules = v ? 1 : 0; Log("MODS tab: character kits %s limit them", s_kitRules ? "may" : "may not"); KitRules(); }
+    else if (api) { if (!strcmp(id, "break_now")) api->set(OPT_MOD, id, g_shownStatus[0]); else if (!strcmp(id, "patrols_now")) api->set(OPT_MOD, id, g_shownStatus[1]); return; }   /* the status rows only show */
+    else return;
+    SaveChoices();
+    g_shownStatus[0] = g_shownStatus[1] = -1;
+}
+static void Options(void)
+{
+    const Hd2ModOptionsApi* api = hd2_mod_options();
+    if (!api) return;
+    static const char* const kText =
+        "Break contact: an enemy that loses sight of you stops tracking you and searches where it last saw you. Patrols: a "
+        "patrol sent at you walks to an outpost away from you instead. A character kit can turn one off while it is your "
+        "active kit (Lemuen: patrols only, so enemies that saw her keep hunting her); turn Character kits can limit off to "
+        "keep both as set here. The two Now rows show what runs. Choices here are saved beside the game's settings.";
+    if (!g_optsDone)
+    {
+        Hd2ModOption rows[5] = {
+            {sizeof(Hd2ModOption), OPT_MOD, "break", "Break contact", kText, HD2_MOD_OPTION_CHOICE, 3, kModes, ModeIndex(s_breakMode), OptChanged, NULL},
+            {sizeof(Hd2ModOption), OPT_MOD, "patrols", "Patrols rerouted", kText, HD2_MOD_OPTION_CHOICE, 3, kModes, ModeIndex(s_patrolMode), OptChanged, NULL},
+            {sizeof(Hd2ModOption), OPT_MOD, "kits", "Character kits can limit", kText, HD2_MOD_OPTION_TOGGLE, 0, NULL, s_kitRules, OptChanged, NULL},
+            {sizeof(Hd2ModOption), OPT_MOD, "break_now", "Break contact now", kText, HD2_MOD_OPTION_CHOICE, 4, kStatus, 0, OptChanged, NULL},
+            {sizeof(Hd2ModOption), OPT_MOD, "patrols_now", "Patrols now", kText, HD2_MOD_OPTION_CHOICE, 4, kStatus, 0, OptChanged, NULL},
+        };
+        int added = 0;
+        for (int k = 0; k < 5; k++) added += api->register_option(&rows[k]) != 0;
+        g_optsDone = 1;
+        Log("MODS tab: %d of 5 rows added", added);
+    }
+    int st[2] = {StatusOf(LC_BREAK_CONTACT ? s_breakMode : 0, 1), StatusOf(s_patrolMode, 2)};
+    if (st[0] != g_shownStatus[0]) { g_shownStatus[0] = st[0]; api->set(OPT_MOD, "break_now", st[0]); if (st[0] == 2) Log("break contact is off while %s is your active kit (MODS tab: Character kits can limit)", g_kitBy ? g_kitBy : "a kit"); }
+    if (st[1] != g_shownStatus[1]) { g_shownStatus[1] = st[1]; api->set(OPT_MOD, "patrols_now", st[1]); if (st[1] == 2) Log("patrols are off while %s is your active kit (MODS tab: Character kits can limit)", g_kitBy ? g_kitBy : "a kit"); }
+}
 static void Tick(HfMod* mod, float dt, void* user)
 {
     (void)mod; (void)user;
     g_now += dt > 0 && dt < 1 ? dt : 0;
+    static double optNext, kitNext;
+    if (g_now >= optNext)
+    {
+        optNext = g_now + 0.5;
+        if (g_now >= kitNext) { kitNext = g_now + 2; KitRules(); }
+        Options();
+    }
     if (g_ready < 0) return;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission)
