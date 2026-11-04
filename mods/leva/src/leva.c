@@ -42,7 +42,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.5.6"
+#define VERSION "0.6.0"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 64

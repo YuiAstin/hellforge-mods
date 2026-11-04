@@ -34,7 +34,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.6f"
+#define VERSION "0.1.6"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"

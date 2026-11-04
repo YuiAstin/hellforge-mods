@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "id": "yui.lost-contact",
+  "name": "Lost Contact",
+  "version": "0.2.0",
+  "icon": "icon.png",
+  "description": "Patrols walk between their own outposts instead of being sent straight at you: a patrol the game aims at you is sent to an outpost away from you, so you meet patrols where they belong, not wherever you go. One that finds you fights as usual. On, observe (counts in the log only) or off: lost-contact.ini, or Ctrl+F10 in a mission. Host or solo.",
+  "gameplay": true,
+  "code": {
+    "dll": "lost_contact.dll",
+    "sdk": 15
+  }
+}

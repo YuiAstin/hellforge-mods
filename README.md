@@ -9,6 +9,7 @@ Code mods for HellForge (offline Helldivers 2). Each folder under `mods/` is one
 | Leva | `mods/leva` | Leva's arc / area-lockdown kit from GFL2: Rational Suppression, Orderly Disruption, Quantum Calculation, Superconduct Blitz. T-Doll body. |
 | Voymastina | `mods/voymastina` | Voymastina's kit from GFL2 in her own exosuit, the Sinbreaker (Sirius Fall, Eye of the White Mastiff, Pile Bunker), and her AK-15 kit on foot. A free Sinbreaker for players without the Exo Experts warbond. |
 | Lemuen | `mods/lemuen` | Lemuen's sniper kit from Arknights: Persecution marks, Salve Etiam, Honesta Missio's scope build-up, Memento Mori's 120mm shells on marked enemies; markers and damage numbers on the HUD. |
+| Lost Contact | `mods/lost-contact` | Patrols walk between their outposts instead of being sent straight at you. On / observe / off. (Break contact, enemies losing track of you, is a research build only: `LC_BREAK_CONTACT=1`.) |
 | Veterancy System | `mods/field-promotions` | Per-mission gear progression: your gear levels up as you use it, for that mission only. |
 | Fire Mission | `mods/fire-mission` | A stratagem that calls mortar sentries onto a spot. |
 | Primed Sure Footed | `mods/primed-sure-footed` | No knockdown or ragdoll on your Helldiver; flinch and push stay. |
