@@ -7,6 +7,8 @@ The zip holds the mod folder as it is here (with its default .ini), minus notes 
 """
 import argparse, json, os, sys, zipfile
 
+import kitbase_sync
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO_ONLY = {'FUTURE.md'}
 SKIP_EXT = ('.dll', '.lib', '.pdb', '.bak')
@@ -34,6 +36,8 @@ def main():
     ap.add_argument('mods', nargs='+')
     ap.add_argument('--out', default=os.path.join(ROOT, '..', 'Releases'))
     a = ap.parse_args()
+    if not kitbase_sync.check([m for m in a.mods if m in kitbase_sync.kits()]):
+        sys.exit('a kit carries a stale kitbase copy: run tools/kitbase_sync.py first')
     os.makedirs(a.out, exist_ok=True)
     for m in a.mods:
         package(m, os.path.abspath(a.out))

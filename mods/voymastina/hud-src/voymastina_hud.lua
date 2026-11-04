@@ -41,6 +41,10 @@ local EMPOWER = {255, 170, 60}
 local NAMES = {'SIRIUS FALL', 'EYE OF THE WHITE MASTIFF', 'PILE BUNKER'}
 local OVERLOAD_RED = {255, 90, 70}
 
+-- the kit, for the shared parts below
+local KIT = {name = 'Voymastina', id = 'voymastina', module = k32.voyhud1_GetModuleHandleA, proc = k32.voyhud1_GetProcAddress}
+-- kitbase:bindings.lua begin. Shared by the GFL2 kits' HUDs: written by tools/kitbase_sync.py from kitbase/hud/bindings.lua, so edit
+-- it there (the kit names itself in KIT, above).
 -------------------------------- GFL2_SHARED: cooldowns while the list is closed, in-game key bindings (same in each kit) --
 -- Cooldowns: with the GFL2 KITS HUD option "<Kit>: Always Show Cooldowns" on (the default), the skills on cooldown stay
 -- on screen while the stratagem list is closed, each on its own (only the ones recharging), where the list shows them.
@@ -49,7 +53,7 @@ local OVERLOAD_RED = {255, 90, 70}
 -- only the menu's fixed slots get keyboard defaults); with every native action taken they fall back to extended bindings
 -- (MORE MODS) with the .ini's keys as defaults. Each press is passed to the DLL (<kit>_input); the .ini's keys keep
 -- working beside them (a press of both within 0.3 s counts once).
-local X = {kit = 'Voymastina', id = 'voymastina', always = true, opt_done = false, opt_wait = 0, bind_done = false, bind_wait = 0,
+local X = {kit = KIT.name, id = KIT.id, always = true, opt_done = false, opt_wait = 0, bind_done = false, bind_wait = 0,
     ids = {}, prev = {}, labels = {}, beat = 0, label_wait = 0, last_box = nil}
 pcall(ffi.cdef, [[
 typedef int (*gfl2bind_input)(unsigned int version, int skill);
@@ -78,9 +82,9 @@ local function default_spec(vk, mods)
     return {{button = button, device = device, modifiers = #m > 0 and m or nil}}
 end
 local function gfl2_dll(name)
-    local module = k32.voyhud1_GetModuleHandleA('voymastina.dll')
+    local module = KIT.module(X.id .. '.dll')
     if module == nil then return nil end
-    local p = k32.voyhud1_GetProcAddress(module, name)
+    local p = KIT.proc(module, name)
     return p ~= nil and p or nil
 end
 -- "<Kit>: Always Show Cooldowns" on the MODS tab (its own GFL2 KITS HUD entry: each kit's own entry is full)
@@ -121,9 +125,9 @@ local function gfl2_bindings(dt)
         X.bind_wait = 2
         if type(mbm) ~= 'table' or type(mbm.register_binding) ~= 'function' or type(mbm.is_down) ~= 'function' then return end
         if (tonumber(mbm.version) or 0) < 4 then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings: Mod Bindings Menu is too old (version ' .. tostring(mbm.version) .. ')') return end
-        local ip, kp = gfl2_dll('voymastina_input'), gfl2_dll('voymastina_key')
+        local ip, kp = gfl2_dll(X.id .. '_input'), gfl2_dll(X.id .. '_key')
         if not ip or not kp then
-            if gfl2_dll('voymastina_hud_state') then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings: this voymastina.dll has none (update it)') end
+            if gfl2_dll(X.id .. '_hud_state') then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings: this ' .. X.id .. '.dll has none (update it)') end
             return
         end
         X.input = ffi.cast('gfl2bind_input', ip)
@@ -147,11 +151,7 @@ local function gfl2_bindings(dt)
     end
     for i = 1, 3 do
         local down = mbm.is_down(X.ids[i]) == true
-        if down and not X.prev[i] then
-            X.input(1, i)
-            X.downs = (X.downs or 0) + 1
-            if X.downs <= 20 then log('[' .. X.kit .. ' HUD] binding ' .. i .. ' pressed (' .. tostring(X.labels[i]) .. '): passed to the DLL') end
-        end
+        if down and not X.prev[i] then X.input(1, i) end
         X.prev[i] = down
     end
     X.beat = X.beat - dt
@@ -162,12 +162,58 @@ local function gfl2_bindings(dt)
         for i = 1, 3 do X.labels[i] = binding_label(mbm, X.ids[i]) end
     end
 end
+-- The roster: with two or more character kits installed, an "Active Character" choice on the MODS tab (GFL2 Kits HUD);
+-- only the picked kit acts, from the next mission start (kitbase/kb_roster.h). Each HUD passes the pick to its own DLL;
+-- every kit reads the same shared answer. One kit alone: no row, it simply acts.
+pcall(ffi.cdef, [[
+typedef int (*gfl2roster_text)(char *out, int size);
+typedef int (*gfl2roster_pick)(const char *id);
+]])
+local R = {done = false, wait = 0, tries = 0}
+local function gfl2_roster(dt)
+    if R.done then return end
+    R.wait = R.wait - dt
+    if R.wait > 0 then return end
+    R.wait = 2
+    local menu = rawget(_G, 'ModOptionsMenu')
+    if not menu or menu.api ~= 1 then return end
+    local tp, pp = gfl2_dll(X.id .. '_roster'), gfl2_dll(X.id .. '_pick')
+    if not tp or not pp then R.done = true return end              -- a DLL from before the roster
+    local buf = ffi.new('char[1024]')
+    local n = ffi.cast('gfl2roster_text', tp)(buf, 1024)
+    R.tries = R.tries + 1
+    if n < 2 then if R.tries >= 5 then R.done = true end return end  -- alone: nothing to pick
+    R.done = true
+    local list, active = ffi.string(buf):match('^(.*)|(.*)$')
+    local ids, names, default = {}, {}, 1
+    for entry in (list or ''):gmatch('[^;]+') do
+        local id, name = entry:match('^([^:]+):(.*)$')
+        if id then ids[#ids + 1] = id; names[#names + 1] = name; if id == active then default = #ids end end
+    end
+    if #ids < 2 or #ids > 16 then return end
+    local key = 0                                                    -- a short id for this roster (a new kit: a new row)
+    for _, id in ipairs(ids) do for c = 1, #id do key = (key * 31 + id:byte(c)) % 2147483647 end end
+    local option = 'yui.gfl2hud.character.' .. key
+    local ok, why = menu.register_option(option, {type = 'choice', label = 'Active Character', mod = 'GFL2 Kits HUD', mod_id = 'yui.gfl2hud',
+        choices = names, default = default,
+        description = 'Several character kits are installed: only the picked one acts (keys, body, skills, HUD). Takes effect at the next mission start.'})
+    if not ok then log('[' .. X.kit .. ' HUD] roster: the picker row was not added here (' .. tostring(why) .. '): another kit\'s HUD may have it') end
+    local pick = ffi.cast('gfl2roster_pick', pp)
+    local saved = menu.get(option)
+    if type(saved) == 'number' and ids[saved] then pick(ids[saved]) end
+    menu.on_change(option, function(value) if ids[value] then pick(ids[value]) end end)
+    log('[' .. X.kit .. ' HUD] roster: ' .. #ids .. ' character kits installed: ' .. table.concat(names, ', ') .. '; picked: ' ..
+        tostring(names[(type(saved) == 'number' and ids[saved]) and saved or default]))
+end
 local function gfl2_step(dt)
+    local okR, errR = pcall(gfl2_roster, dt)
+    if not okR then R.done = true; log('[' .. X.kit .. ' HUD] roster failed: ' .. tostring(errR)) end
     local ok, err = pcall(gfl2_options, dt)
     if not ok then X.opt_done = true; log('[' .. X.kit .. ' HUD] cooldowns option failed: ' .. tostring(err)) end
     ok, err = pcall(gfl2_bindings, dt)
     if not ok then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings failed, the .ini keys stay: ' .. tostring(err)) end
 end
+-- kitbase:bindings.lua end
 local SHORT = {'FALL', 'EYE', 'PILE'}
 
 local state, refresh, find_wait = nil, nil, 0
@@ -212,6 +258,8 @@ end
 for i, id in ipairs({'voymastina_sirius', 'voymastina_eye', 'voymastina_pile'}) do ICONS[i] = load_icon(id) end
 ICON.ak_eye, ICON.howl, ICON.pledge = load_icon('voymastina_ak_eye'), load_icon('voymastina_howl'), load_icon('voymastina_pledge')
 
+-- kitbase:list.lua begin. Shared by the GFL2 kits' HUDs: written by tools/kitbase_sync.py from kitbase/hud/list.lua, so edit
+-- it there (the kit names itself in KIT, above).
 -------------------------------------------------------------------------- the stratagem list, to sit beside --
 -- The list's entries and their icons' rectangles come from HD2Runtime's slot overlay (code / research from
 -- HD2Runtime by SkyeShade, its internal modules); without them the abilities show at a fixed place under the list.
@@ -222,14 +270,14 @@ local okC, SEL = pcall(require, 'hd2runtime/runtime/stratagem_selector')
 if not (okA and okB and okC and type(SO) == 'table' and type(SO.hud_entries) == 'function' and type(SO.rect) == 'function'
         and type(W) == 'table' and type(W.open) == 'function' and type(SEL) == 'table' and type(SEL.prove) == 'function') then
     L.on = false
-    log('[Voymastina HUD] the stratagem list cannot be followed on this HD2Runtime: abilities always shown')
+    log('[' .. X.kit .. ' HUD] the stratagem list cannot be followed on this HD2Runtime: abilities always shown')
 end
 local said = {}
 local function why_not(what, why)
     local key = what .. ': ' .. tostring(why)
     if said[key] then return end
     said[key] = true
-    log('[Voymastina HUD] list: ' .. key)
+    log('[' .. X.kit .. ' HUD] list: ' .. key)
 end
 -- {left, top, right, size, step, alpha} of the open list (top-left origin), false when it is closed, nil when unknown
 local function list_box(d, dt)
@@ -240,7 +288,7 @@ local function list_box(d, dt)
         local proven, why = SEL.prove(world)
         if not proven then why_not('not proven yet', why) return nil end
         L.proven = true
-        log('[Voymastina HUD] the stratagem list can be followed on this build')
+        log('[' .. X.kit .. ' HUD] the stratagem list can be followed on this build')
     end
     L.wait = L.wait - dt
     if not L.entries or L.wait <= 0 then
@@ -274,7 +322,7 @@ local function list_box(d, dt)
     end
     table.sort(seen)
     local view = string.format('%d of %d used entries shown: %s', #tops, total, table.concat(seen, ' '))
-    if view ~= L.last_view and (L.views or 0) < 40 then L.last_view = view; L.views = (L.views or 0) + 1; log('[Voymastina HUD] list: ' .. view) end
+    if view ~= L.last_view and (L.views or 0) < 40 then L.last_view = view; L.views = (L.views or 0) + 1; log('[' .. X.kit .. ' HUD] list: ' .. view) end
     -- open or closed, by how many icons show: the open list shows the whole loadout (7, more with event stratagems;
     -- limited-use ones stay listed), and its most this mission is learned the first time it opens; the closed list
     -- keeps only Reinforce and the few stratagems inbound or recharging. Open: the most, or one fewer (the SOS Beacon
@@ -293,6 +341,7 @@ local function list_box(d, dt)
     return box
 end
 
+-- kitbase:list.lua end
 ---------------------------------------------------------------------------------------------- the abilities --
 local function ability(d, i, x, y, size, alpha)
     local s = d.scale
@@ -370,6 +419,12 @@ local function passive(d, j, x, y, size, a)
     else heavy(d, string.format('%.0fs', math.ceil(left)), tx, y + size * 0.5, ksize, 'title', rgba(TEXT, a * 0.8)) end
 end
 
+-- Pile Bunker's key as the list shows it ('C'): pressed again while it recharges, it sets off the follow-up
+local function pile_key()
+    local bound = X.labels[3]
+    if bound and bound ~= 'UNBOUND' then return bound end
+    return ffi.string(state.key_label[2])   -- the .ini's key, which works either way
+end
 -- the kit's other passives (version 3): {short, name, lit, text}
 local function kit_passives()
     local list = {}
@@ -381,7 +436,7 @@ local function kit_passives()
         list[#list + 1] = {'HWL', 'BLOOD-CURDLING HOWL', howl > 0, icon = ICON.howl, howl >= 98 and 'IMMUNE: GETTING UP' or howl > 0 and string.format('IMMUNE %.1fs', howl) or 'WHEN THE EYE SEES MANY'}
     elseif state.mpb_on ~= 0 then
         local ready = state.mpb_ready ~= 0
-        list[#list + 1] = {'HB', 'PILE BUNKER: HELLBOMB', ready, ready and 'READY: SHIELD BASH' or 'KILL A HEAVY WITH PILE BUNKER'}
+        list[#list + 1] = {'HB', 'PILE BUNKER: HELLBOMB', ready, ready and ('READY: ' .. pile_key() .. ' AGAIN') or 'KILL A HEAVY WITH PILE BUNKER'}
     end
     return list
 end
@@ -501,7 +556,7 @@ local function status_bar(d)
             if state.rage > 0 then bits[#bits + 1] = 'RAGE' end
             if state.howl > 0 then bits[#bits + 1] = 'HOWL: IMMUNE' end
         elseif state.mpb_on ~= 0 and state.mpb_ready ~= 0 then
-            bits[#bits + 1] = 'HELLBOMB READY: SHIELD BASH'
+            bits[#bits + 1] = 'HELLBOMB READY: ' .. pile_key() .. ' AGAIN'
         end
     end
     local effects_y = y - 34 * s

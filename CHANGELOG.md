@@ -1,5 +1,22 @@
 # Changelog
 
+## (release date): Voymastina 0.4.1 · Lemuen 0.1.5
+
+### Voymastina 0.4.1
+- A free Sinbreaker for players without the Exo Experts warbond: the same kit on the EXO-49 Emancipator (or the EXO-45 Patriot, sin_free_base 1). With it, pressing Pile Bunker's key again during its cooldown fires the follow-up in place of the shield bash. sin_fallback 2 gives the free one even with the warbond; 0 gives none.
+- Several character kits can be installed together: with two or more, Mod Options Menu → GFL2 Kits HUD → Active Character picks the one that acts, from the next mission start. Kits that do not know the roster yet (Lenna, Leva and Faelynn as released) still act alongside: run them on their own for now.
+- Built on the shared kit base (no change in how she plays).
+
+### Lemuen 0.1.5
+- First release: Lemuen's sniper kit from Arknights.
+  - Persecution: elite enemies she keeps in her sights for a few seconds are marked (up to 5; a new mark replaces the oldest) and take more damage from her. Marked enemies carry a marker on screen, with their distance.
+  - Modus Extraditio: her shots deal more damage a while after she lands.
+  - Salve Etiam (S1): her sniper or marksman rifle's shots deal x3.10 until she reloads.
+  - Honesta Missio (S2): in first person, the enemy held in her scope takes rising damage from her next shot (x1.8 to x4.25 over 3.5 s), until she reloads; locks out to 600 m.
+  - Memento Mori (S3): an Orbital 120mm shell on each marked enemy.
+  - Damage numbers over her hits, by Arknights' rule: only hits her on-hit multipliers raised by half or more (Honesta Missio, the marks).
+- Built on the shared kit base; joins the character roster.
+
 ## 2026-11-03: Voymastina 0.4.0
 - First release: the Sinbreaker (her own exosuit, a copy of the EXO-55 Breakthrough, granted every mission outside the loadout; needs the Exo Experts warbond) with her GFL2 kit (Sirius Fall, Eye of the White Mastiff, Pile Bunker), the Pile Bunker Hellbomb follow-up on her shield bash, her AK-15 kit on foot (Rage, Eye with overload, Blood-Curdling Howl) with +50 ergonomics, half reload time and 30% less recoil on her guns, Mastiff's Pledge on her and the suit, and a HUD that follows her kit.
 
