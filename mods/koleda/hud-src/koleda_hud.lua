@@ -799,7 +799,9 @@ local function find_unit(s, x, y, z)
     if not oku or type(all) ~= 'table' then return nil end
     for _, u in ipairs(all) do
         local p = upos(s, u)
-        if p and (p[1] - x) ^ 2 + (p[2] - y) ^ 2 + (p[3] - z) ^ 2 < 4 and var(s, u, 'move_angle') and var(s, u, 'move_speed') and anim_count(s, u) == #WALK_STATE then
+        -- 0.1.10: the state machine first: animation_has_variable on a unit without one crashed the game (a read at
+        -- 0x30 in the engine); Exo Autopilot asks has_animation_state_machine first too
+        if p and (p[1] - x) ^ 2 + (p[2] - y) ^ 2 + (p[3] - z) ^ 2 < 4 and anim_count(s, u) == #WALK_STATE and var(s, u, 'move_angle') and var(s, u, 'move_speed') then
             return u
         end
     end
