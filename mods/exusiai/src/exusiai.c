@@ -38,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.3"
+#define VERSION "0.2.4"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -348,11 +348,44 @@ static int Living(uint32_t e, int32_t* hp)
     uint32_t life;
     return HealthOf(e, hp, &life) && *hp > 0;
 }
+/* 0.2.4: the middle of a unit's body: the centre of its scene-graph nodes' box (a Bile Titan's root is on the ground
+ * between its legs, its body 6 m up), kept a second per enemy */
+#define BODIES 64
+static struct { uint32_t unit; double at; float off[3]; } g_body[BODIES];
+static int BodyOffset(uint32_t unit, const float root[3], float off[3])
+{
+    unsigned h = (unit * 2654435761u) % BODIES;
+    if (g_body[h].unit == unit && g_now - g_body[h].at < 1.0) { memcpy(off, g_body[h].off, 12); return 1; }
+    uintptr_t registry = Pointer(exe + 0x1A100F0), objects, object, nodes;
+    uint32_t count = 0, id, slot = unit & 0x3FFFFF;
+    static float m[256 * 16];
+    if (!registry || !(objects = Pointer(registry + 0x88)) || !(object = Pointer(objects + 8u * slot)) || !ReadAt(object + 8, &id, 4) || id != unit ||
+        !ReadAt(object + 0x70, &count, 4) || !count || count > 4096 || !(nodes = Pointer(object + 0x88)))
+        return 0;
+    if (count > 256) count = 256;
+    if (!ReadAt(nodes, m, (size_t)count * 64)) return 0;
+    float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+    int used = 0;
+    for (uint32_t i = 0; i < count; i++)
+    {
+        const float* t = m + 16 * i + 12;
+        if (!isfinite(t[0]) || !isfinite(t[1]) || !isfinite(t[2]) || fabsf(t[0] - root[0]) > 30 || fabsf(t[1] - root[1]) > 30 || fabsf(t[2] - root[2]) > 30) continue;
+        for (int k = 0; k < 3; k++) { if (t[k] < lo[k]) lo[k] = t[k]; if (t[k] > hi[k]) hi[k] = t[k]; }
+        used++;
+    }
+    if (used < 2) return 0;
+    for (int k = 0; k < 3; k++) off[k] = (lo[k] + hi[k]) / 2 - root[k];
+    if (off[2] < 0.5f) off[2] = 0.5f;
+    g_body[h].unit = unit; g_body[h].at = g_now; memcpy(g_body[h].off, off, 12);
+    return 1;
+}
 static int TargetPos(uint32_t e, uint64_t res, float out[3])
 {
     uint8_t d[24];
     if (!Descriptor(e, d) || Quad(d) != res || !UnitNode(Word(d + 12), 0, out)) return 0;
-    out[2] += 1.0f;   /* its body, not its feet */
+    float off[3];
+    if (BodyOffset(Word(d + 12), out, off)) { for (int k = 0; k < 3; k++) out[k] += off[k]; }   /* its body's middle */
+    else out[2] += 1.0f;   /* its body, not its feet */
     return 1;
 }
 /* Overloading Mode's gun i (2-5) picks by its own priority */
