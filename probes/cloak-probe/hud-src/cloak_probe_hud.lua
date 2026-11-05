@@ -41,17 +41,39 @@ local function xyz(v)
     local ok2, a, b, c = pcall(function() return v.x, v.y, v.z end)
     if ok2 then return a, b, c end
 end
+-- the world's units of rare types only (at most 4 of a type), as Exo Autopilot (marti) found: reading the position of
+-- a unit of a mass-instanced type crashed the game (helldivers2.exe+0x9E27E, a read at 0x30)
+local function rare_units(s, w)
+    local oku, all = pcall(s.World.units, w)
+    if not oku or type(all) ~= 'table' then return nil end
+    local res, count = {}, {}
+    for i, u in ipairs(all) do
+        local okr, r = pcall(s.Unit.resource_name, u)
+        r = okr and tostring(r) or '?'
+        res[i] = r
+        count[r] = (count[r] or 0) + 1
+    end
+    local out = {}
+    for i, u in ipairs(all) do if count[res[i]] <= 4 and res[i] ~= '?' then out[#out + 1] = u end end
+    return out, #all
+end
+local function node_index()
+    local s = rawget(_G, 'stingray')
+    local ok, off = pcall(function() return s.Script.index_offset() end)
+    return ok and type(off) == 'number' and off or 1
+end
+local RI = node_index()
 -- the unit nearest a point (World.units, then each unit's root position)
 local function unit_near(px, py, pz, within)
     local App, W, U = lib('Application'), lib('World'), lib('Unit')
     if not (App and W and U) then return nil, 'Application / World / Unit missing' end
     local okw, world = pc(App.main_world)
     if not okw or not world then return nil, 'no main world' end
-    local oku, all = pc(W.units, world)
-    if not oku or type(all) ~= 'table' then return nil, 'World.units unavailable: ' .. tostring(all) end
+    local all, total = rare_units(S, world)
+    if not all then return nil, 'World.units unavailable' end
     local best, bd = nil, within * within
     for _, u in ipairs(all) do
-        local okp, v = pc(U.world_position, u, 1)
+        local okp, v = pc(U.world_position, u, RI)
         local x, y, z
         if okp then x, y, z = xyz(v) end            -- 0.1.1: (okp and xyz(v)) kept only x
         if x then
@@ -59,7 +81,7 @@ local function unit_near(px, py, pz, within)
             if d2 < bd then best, bd = u, d2 end
         end
     end
-    return best, best and math.sqrt(bd) or ('no unit within ' .. within .. ' m of ' .. #all .. ' units')
+    return best, best and math.sqrt(bd) or ('no unit within ' .. within .. ' m of ' .. #all .. ' rare-type units (' .. tostring(total) .. ' in all)')
 end
 local function api_list()
     for _, name in ipairs({'Unit', 'Mesh', 'Material'}) do
