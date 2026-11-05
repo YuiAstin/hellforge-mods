@@ -26,7 +26,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 #include "kitbase/kb_core.h"
 
 static atomic_uint g_avatar;
@@ -94,6 +94,17 @@ static uintptr_t LocoRec(uint32_t e)
     if (!m || !Lookup(m + 0x20, e, 1048576, &i) || i > 65535 || !(recs = Pointer(m + 0x50))) return 0;
     return recs + (uintptr_t)LC_SIZE * i;
 }
+/* the navigation record (AI Probe's layout, docs/research/ai-modding.md): +0x10 active, +0x54 its position, +0x60 the
+ * destination, +0x6C the next waypoint, +0x78 the path's goal on the navmesh. Only agents the navigation drives have one. */
+static uintptr_t NavRec(uint32_t e)
+{
+    uintptr_t m = Pointer(game + 0x3326418), recs;
+    uint32_t i;
+    if (!m || !Lookup(m + 0x30, e, 1048576, &i) || i > 65535 || !(recs = Pointer(m + 0x50))) return 0;
+    return recs + (uintptr_t)0xA8 * i;
+}
+typedef void (*SetDestFn)(void*, uint32_t, const float*);
+static SetDestFn g_setDest;
 static uintptr_t MoverRec(uint32_t e)
 {
     uintptr_t m = Pointer(game + 0x3326668), recs;
@@ -149,6 +160,7 @@ static void RecordStart(void)
     uint32_t e = NearestExo(4, &d);
     if (!e) { Log("F7: no exosuit within 4 m of you (pilot one first)"); return; }
     uintptr_t v = VlocoRec(e), l = LocoRec(e), mv = MoverRec(e);
+    Log("F7: the suit %s a navigation record", NavRec(e) ? "HAS" : "has no");
     Log("F7: recording exosuit %u (%.1f m): vloco record %s, loco record %s, mover record %s; walk forward, stand, strafe, turn",
         e, d, v ? "found" : "NOT found", l ? "found" : "NOT found", mv ? "found" : "NOT found");
     if (!v && !l) return;
@@ -276,6 +288,11 @@ static void DriveStart(void)
     if (mv) ReadAt(mv + 0xD18, &after, 1);
     if (v) ReadAt(v + 0x50, &st, 4);
     Log("F8: mover flag %u -> %u, state %08X -> %08X", g_saveMover, after, g_saveState, st);
+    /* pathing: does the suit have a navigation record, and does set_destination give it a path to you? */
+    uintptr_t nav = NavRec(e);
+    float me[3];
+    if (!nav) Log("F8: the suit has no navigation record (no navmesh path of its own)");
+    else if (g_setDest && Pos(atomic_load(&g_avatar), me)) { g_setDest(NULL, e, me); Log("F8: the suit has a navigation record: set_destination to you sent"); }
     g_drvUntil = g_now + 5;
     g_drvNext = g_now;
 }
@@ -296,6 +313,12 @@ static void DriveFrame(void)
         if (v) ReadAt(v + 0x50, &st, 4);
         if (Pos(g_drvExo, p))
             Log("  t%.2f suit at %.2f %.2f %.2f (%.2f m from the start), state %08X", 5 - (g_drvUntil - g_now), p[0], p[1], p[2], sqrtf(Dist2(p, g_drvStart)), st);
+        uintptr_t nav = NavRec(g_drvExo);
+        float dst[3], wp[3], goal[3];
+        uint32_t act = 0;
+        if (nav && ReadAt(nav + 0x10, &act, 4) && ReadAt(nav + 0x60, dst, 12) && ReadAt(nav + 0x6C, wp, 12) && ReadAt(nav + 0x78, goal, 12))
+            Log("    nav: active %u, destination %.1f %.1f %.1f, next waypoint %.1f %.1f %.1f, goal %.1f %.1f %.1f", act & 0xFF, dst[0], dst[1], dst[2],
+                wp[0], wp[1], wp[2], goal[0], goal[1], goal[2]);
     }
     if (g_now >= g_drvUntil) DriveStop("done");
 }
@@ -332,6 +355,11 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     else Log("the mover setter is not the reviewed code: not called");
     if (hf->code_matches(game + 0x59CA90, "41 56 3b 15 88 71 ee 02 45 8b f0 4c 8b 1d b6 9a d8 02 75 07")) g_state = (StateFn)(game + 0x59CA90);
     else Log("the state setter is not the reviewed code: not called");
+    {
+        uint8_t b[2];
+        if (!hf->read_code(game + 0x5B36C0 - 1, b, 2) && (b[0] == 0xCC || b[0] == 0xC3 || b[0] == 0x90) && b[1] != 0xCC) g_setDest = (SetDestFn)(game + 0x5B36C0);
+        else Log("set_destination is not where Lost Contact found it: no pathing test");
+    }
     Log("ready: F7 records a suit you pilot, F8 drives the nearest empty one, F9 stops");
 }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
