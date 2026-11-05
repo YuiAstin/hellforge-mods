@@ -505,6 +505,100 @@ local function ammo_step()
     if not A.told then A.told = true; log(('[Exusiai HUD] ammo: %s (%s), %d rounds: reported each frame'):format(tostring(a.name), tostring(a.feed), a.rounds)) end
 end
 
+------------------------------------------------------------------------------------- her guns' models --
+-- Each gun the DLL has out (exusiai_guns: where it hovers and where it aims) is shown as the Guard Dog's own gun model
+-- (drone_mg_weapon) riding a Guard Dog body (drone_mg) made invisible: the body holds where it is put, the gun is linked
+-- to it, and only the body is moved (Gun Probe 0.1.9's finding, docs/research/game-notes.md). Both models come with the
+-- Guard Dog's package, which exusiai.dll loads at each mission start. Visual only: the shots are the DLL's.
+pcall(ffi.cdef, [[ typedef int (*exuguns1)(unsigned int version, float *out, int max); ]])
+local GM = {fn = nil, failed = false, buf = ffi.new('float[48]'), dogs = {}, guns = {}, told = {}}
+local S_ = rawget(_G, 'stingray')
+local function eng(lib, name)
+    local t = rawget(_G, lib) or (type(S_) == 'table' and S_[lib]) or nil
+    local f = t and t[name]
+    return type(f) == 'function' and f or nil
+end
+local function once(key, message) if not GM.told[key] then GM.told[key] = true; log('[Exusiai HUD] guns: ' .. message) end end
+local function ecall(lib, name, ...)
+    local f = eng(lib, name)
+    if not f then once(lib .. '.' .. name, lib .. '.' .. name .. ' is not reachable'); return false end
+    local r = {pcall(f, ...)}
+    if not r[1] then once(lib .. '.' .. name .. '!', lib .. '.' .. name .. ' failed: ' .. tostring(r[2])) end
+    return unpack(r)
+end
+local function v3(x, y, z)
+    local V = rawget(_G, 'Vector3') or (type(S_) == 'table' and S_.Vector3)
+    local ok, v = pcall(V, x, y, z)
+    if ok and v ~= nil then return v end
+    if type(V) == 'table' and type(rawget(V, 'new')) == 'function' then local ok2, w = pcall(V.new, x, y, z); if ok2 then return w end end
+    return nil
+end
+local DOG = 'content/fac_helldivers/equipment/backpacks/drone_mg/drone_mg'
+local GUN_MODELS = {
+    'content/fac_helldivers/equipment/backpacks/drone_mg/drone_mg_weapon',
+    'content/fac_helldivers/equipment/backpacks/drone_weapons/drone_assault_rifle/drone_assault_rifle',
+}
+local function can(path) local ok, r = ecall('Application', 'can_get', 'unit', path); return ok and r == true end
+local function gm_world() local ok, w = ecall('Application', 'main_world'); return ok and w or nil end
+local function gm_drop(w, i)
+    if GM.guns[i] then ecall('World', 'unlink_unit', w, GM.guns[i]); ecall('World', 'destroy_unit', w, GM.guns[i]) end
+    if GM.dogs[i] then ecall('World', 'destroy_unit', w, GM.dogs[i]) end
+    GM.guns[i], GM.dogs[i] = nil, nil
+end
+local function gm_alive(u) local ok, a = ecall('Unit', 'alive', u); return ok and a == true end
+local function gm_spawn(w, i, pos, rot)
+    if not can(DOG) then once('dog', 'the Guard Dog body is not loaded yet (its package): no models'); return end
+    local model
+    for _, path in ipairs(GUN_MODELS) do if can(path) then model = path; break end end
+    if not model then once('gun', 'no Guard Dog gun model is loaded yet: no models'); return end
+    local okd, dog = ecall('World', 'spawn_unit', w, DOG, pos, rot)
+    if not (okd and dog) then once('spawn', 'the carrier could not be spawned'); return end
+    if not ecall('Unit', 'set_unit_visibility', dog, false) then once('hide', 'the carrier could not be hidden') end
+    local okg, gun = ecall('World', 'spawn_unit', w, model, pos, rot)
+    if not (okg and gun) then ecall('World', 'destroy_unit', w, dog); once('spawng', 'the gun model could not be spawned'); return end
+    ecall('Unit', 'disable_physics', gun)
+    if ecall('World', 'link_unit', w, gun, 1, dog, 1) then ecall('Unit', 'set_local_position', gun, 1, v3(0, 0, 0))
+    else once('link', 'the gun could not be linked to its carrier') end
+    GM.dogs[i], GM.guns[i] = dog, gun
+    once('first', ('models out (%s on a hidden %s)'):format(model, DOG))
+end
+local function gm_step()
+    if GM.failed then return end
+    if not GM.fn then
+        local module = k32.exuhud1_GetModuleHandleA('exusiai.dll')
+        if module == nil then return end
+        local proc = k32.exuhud1_GetProcAddress(module, 'exusiai_guns')
+        if proc == nil then GM.failed = true; log('[Exusiai HUD] guns: this exusiai.dll has no gun positions (update Exusiai): no models') return end
+        GM.fn = ffi.cast('exuguns1', proc)
+    end
+    local w = gm_world()
+    if not w then GM.dogs, GM.guns = {}, {}; return end
+    local n = GM.fn(1, GM.buf, 6)
+    for i = 1, 6 do
+        local o = (i - 1) * 8
+        local on = n >= 6 and state.in_mission ~= 0 and GM.buf[o] > 0.5
+        if GM.dogs[i] and (not on or not gm_alive(GM.dogs[i])) then gm_drop(w, i) end
+        if on then
+            local x, y, z = GM.buf[o + 1], GM.buf[o + 2], GM.buf[o + 3]
+            local dx, dy, dz = GM.buf[o + 4] - x, GM.buf[o + 5] - y, GM.buf[o + 6] - z
+            local len = math.sqrt(dx * dx + dy * dy + dz * dz)
+            if len < 0.01 then dx, dy, dz, len = 0, 1, 0, 1 end
+            local pos = v3(x, y, z)
+            local okq, rot = ecall('Quaternion', 'look', v3(dx / len, dy / len, dz / len), v3(0, 0, 1))
+            if not okq then rot = nil end
+            if pos then
+                if not GM.dogs[i] then
+                    local okI = rot and true
+                    if okI then gm_spawn(w, i, pos, rot) end
+                else
+                    ecall('Unit', 'set_local_position', GM.dogs[i], 1, pos)
+                    if rot then ecall('Unit', 'set_local_rotation', GM.dogs[i], 1, rot) end
+                end
+            end
+        end
+    end
+end
+
 local overlay = hd2.ui.overlay({id = 'kit', owner = OWNER})
 overlay:draw(function(d, dt)
     dt = tonumber(dt) or 0
@@ -515,9 +609,20 @@ overlay:draw(function(d, dt)
         if not okO then O.failed = true; log('[Exusiai HUD] options failed: ' .. tostring(errO)) end
     end
     if not find(dt) then return end
-    if state.in_mission == 0 then return end
+    if state.in_mission == 0 then
+        if next(GM.dogs) then
+            local w = gm_world()
+            if w then for i = 1, 6 do if GM.dogs[i] and gm_alive(GM.dogs[i]) then pcall(gm_drop, w, i) end end end
+            GM.dogs, GM.guns = {}, {}
+        end
+        return
+    end
     local okA, errA = pcall(ammo_step)
     if not okA then A.failed = true; log('[Exusiai HUD] ammo failed: ' .. tostring(errA)) end
+    if not GM.failed then
+        local okG, errG = pcall(gm_step)
+        if not okG then GM.failed = true; log('[Exusiai HUD] guns: models failed, off for this session: ' .. tostring(errG)) end
+    end
     status_bar(d)
     local okL, box = pcall(list_box, d, dt)
     if not okL then L.on = false; log('[Exusiai HUD] following the list failed, abilities always shown: ' .. tostring(box)); box = nil end

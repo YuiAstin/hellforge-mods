@@ -13,9 +13,13 @@
  *     target within s3_range m by its own priority (the nearest, the most heavily armoured, whoever last hit her, the
  *     weakest) and firing every s3_every s.
  *
- * The guns fire the AX/AR-23 Guard Dog's rounds (projectile gun_round, 7), spawned from where each gun hovers and
- * credited to her. While any gun is out her shots do not hurt her allies (no_friendly_fire). The guns are invisible in
- * this version: the floating models wait on the Gun Probe (probes/gun-probe).
+ * Each gun fires rounds of her own for what it hunts (copies of vanilla rounds, add_projectile, spawned from its muzzle
+ * and credited to her): the pair the R-63CS Diligence Counter Sniper's (medium penetration, for whatever she hits); the
+ * nearest-target gun a shotgun's pellets (the SG-225 Breaker's); the armour hunter heavy penetration (the APW-1
+ * Anti-Materiel Rifle's); her attacker's gun the JAR-5 Dominator's (it staggers); the finisher the AR-23 Liberator's,
+ * quick. A round that cannot be spawned falls back to the Guard Dog's (gun_round, 7). While any gun is out her shots do
+ * not hurt her allies (no_friendly_fire). The HUD shows each gun as the Guard Dog's own gun model riding a hidden Guard
+ * Dog body (Gun Probe 0.1.9's way, docs/research/game-notes.md), turned toward what it aims at (exusiai_guns).
  *
  * Research credit: the entity, scene-graph and hit reads are the kit base's (Helldiver Survival Rework by
  * enochlophobianumerophobia, MIT; HD2Runtime by SkyeShade); the Guard Dog round's type is from HD2Runtime's attack
@@ -34,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.1"
+#define VERSION "0.2.0"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -53,9 +57,15 @@ KB_ROSTER_EXPORTS(exusiai)
 static float s_fireRate = 1.15f, s_blessMult = 1.08f;
 static int s_chEvery = 4, s_chFree = 3;
 static float s_chGap = 0.2f, s_chSpread = 0.6f;
-static float s_s2Cd = 40, s_s2Seconds = 15, s_gunEvery = 0.15f;
+static float s_s2Cd = 40, s_s2Seconds = 15, s_gunEvery = 0.3f;
 static float s_s3Cd = 60, s_s3Seconds = 15, s_s3Every = 0.35f, s_s3Range = 60;
 static int s_gunRound = 7, s_noFriendlyFire = 1;
+/* her guns' own rounds (copies of vanilla ones, add_projectile): the summoned pair, then Overloading Mode's four */
+static int s_rBase[5] = {241, 179, 226,   /* R-63CS Diligence Counter Sniper, SG-225 Breaker, APW-1 Anti-Materiel Rifle */
+                         177, 276};   /* JAR-5 Dominator, AR-23 Liberator */
+static float s_rEvery[4] = {0.8f, 1.6f, 0.6f, 0.15f};   /* Overloading Mode's: the nearest, the armoured, her attacker, the weakest */
+static int s_pellets = 6;
+static float s_pelletSpread = 5;
 
 /* Every setting: its .ini / Mod Options Menu name, variable and range (kitbase/kb_settings.h) */
 static const KbSetting kSettings[] = {
@@ -64,6 +74,10 @@ static const KbSetting kSettings[] = {
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("s2_seconds", s_s2Seconds, 1, 120), KB_F("gun_every", s_gunEvery, 0.05, 5),
     KB_F("s3_cooldown", s_s3Cd, 0, 600), KB_F("s3_seconds", s_s3Seconds, 1, 120), KB_F("s3_every", s_s3Every, 0.05, 5), KB_F("s3_range", s_s3Range, 5, 200),
     KB_I("gun_round", s_gunRound, 1, 100000), KB_I("no_friendly_fire", s_noFriendlyFire, 0, 1),
+    KB_I("round_pair", s_rBase[0], 1, 350), KB_I("round_nearest", s_rBase[1], 1, 350), KB_I("round_armoured", s_rBase[2], 1, 350),
+    KB_I("round_attacker", s_rBase[3], 1, 350), KB_I("round_weakest", s_rBase[4], 1, 350),
+    KB_F("every_nearest", s_rEvery[0], 0.05, 10), KB_F("every_armoured", s_rEvery[1], 0.05, 10), KB_F("every_attacker", s_rEvery[2], 0.05, 10),
+    KB_F("every_weakest", s_rEvery[3], 0.05, 10), KB_I("pellets", s_pellets, 1, 16), KB_F("pellet_spread", s_pelletSpread, 0, 30),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
 };
@@ -84,16 +98,26 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Summoned guns: cooldown; for s2_seconds two guns at her shoulders fire at what she hits (each at most once every\n"
                "; gun_every s).\ns2_cooldown = %g\ns2_seconds = %g\ngun_every = %g\n"
                "; Overloading Mode: cooldown; for s3_seconds four more guns each pick their own target within s3_range m (the\n"
-               "; nearest, the most heavily armoured, whoever last hit her, the weakest) and fire every s3_every s.\n"
+               "; nearest, the most heavily armoured, whoever last hit her, the weakest), each firing every every_<its target> s.\n"
+               "; (s3_every: no longer used.)\n"
                "s3_cooldown = %g\ns3_seconds = %g\ns3_every = %g\ns3_range = %g\n"
-               "; The guns' round (7: the AX/AR-23 Guard Dog's). no_friendly_fire 1: while a gun is out her shots spare her allies.\n"
+               "; Her guns' own rounds: copies of these vanilla projectiles (types 1-350). round_pair: the summoned pair (241: the\n"
+               "; R-63CS Diligence Counter Sniper's, medium armour penetration, for whatever she hits); round_nearest: a shotgun\n"
+               "; (179: the SG-225 Breaker's, pellets of them pellet_spread degrees wide); round_armoured: heavy penetration (226:\n"
+               "; the APW-1 Anti-Materiel Rifle's); round_attacker: one that staggers (177: the JAR-5 Dominator's); round_weakest:\n"
+               "; quick rounds to finish it (276: the AR-23 Liberator's).\n"
+               "round_pair = %d\nround_nearest = %d\nround_armoured = %d\nround_attacker = %d\nround_weakest = %d\n"
+               "every_nearest = %g\nevery_armoured = %g\nevery_attacker = %g\nevery_weakest = %g\npellets = %d\npellet_spread = %g\n"
+               "; gun_round: the round used when one of hers cannot be spawned (7: the AX/AR-23 Guard Dog's). no_friendly_fire 1:\n"
+               "; while a gun is out her shots spare her allies.\n"
                "gun_round = %d\nno_friendly_fire = %d\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint. hellbomb_on_exhaustion 1 sets off a\n"
                "; Hellbomb on her if she runs her stamina dry (a T-Doll's price; off for her).\n"
                "hp_mult = 1.13\nstamina_mult = 1\nhellbomb_on_exhaustion = 0\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_fireRate, (double)s_blessMult, s_chEvery, s_chFree,
             (double)s_chGap, (double)s_chSpread, (double)s_s2Cd, (double)s_s2Seconds, (double)s_gunEvery, (double)s_s3Cd,
-            (double)s_s3Seconds, (double)s_s3Every, (double)s_s3Range, s_gunRound, s_noFriendlyFire);
+            (double)s_s3Seconds, (double)s_s3Every, (double)s_s3Range, s_rBase[0], s_rBase[1], s_rBase[2], s_rBase[3], s_rBase[4],
+            (double)s_rEvery[0], (double)s_rEvery[1], (double)s_rEvery[2], (double)s_rEvery[3], s_pellets, (double)s_pelletSpread, s_gunRound, s_noFriendlyFire);
 }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
@@ -181,6 +205,27 @@ static int GunPos(int i, float out[3])
     out[2] = pos[2] + 1.5f + kGunAt[i][1];
     return 1;
 }
+/* her rounds by role (0: the pair, 1-4: Overloading Mode's guns): her copy, else the vanilla round, else gun_round */
+static const char* const kRole[5] = {"pair", "nearest", "armoured", "attacker", "weakest"};
+static uint32_t g_round[5], g_roundBad[5];
+static void RoundsAdd(void)
+{
+    static char names[5][48];
+    for (int r = 0; r < 5; r++)
+    {
+        HfProjectile p;
+        memset(&p, 0, sizeof p);
+        p.size = sizeof p;
+        p.base = (uint32_t)s_rBase[r];
+        snprintf(names[r], sizeof names[r], "yui/exusiai/round_%s", kRole[r]);
+        p.name = names[r];
+        g_round[r] = hf->add_projectile ? hf->add_projectile(self, &p) : 0;
+        if (!g_round[r]) { g_round[r] = p.base; Log("her %s round: no copy of projectile %u (the vanilla round fires)", kRole[r], p.base); }
+    }
+}
+static uint32_t RoundOf(int i) { int r = i < 2 ? 0 : i - 1; return g_roundBad[r] ? (uint32_t)s_gunRound : g_round[r]; }
+static float g_gunLook[6][3];      /* where each gun aims (its model turns there) */
+static double g_gunShotAt[6];
 static int Fire(int i, const float at[3])
 {
     float from[3], d[3];
@@ -189,9 +234,33 @@ static int Fire(int i, const float at[3])
     float n = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
     if (!(n > 0.5f)) return 0;
     for (int k = 0; k < 3; k++) d[k] /= n;
-    int r = hf->spawn_projectile(self, (uint32_t)s_gunRound, from, d);
-    if (r == HF_ACT_WAITING) return 0;
-    if (!Act("a summoned gun's shot", r)) return 0;
+    memcpy(g_gunLook[i], at, 12);
+    int role = i < 2 ? 0 : i - 1, pellets = role == 1 ? s_pellets : 1;
+    uint32_t round = RoundOf(i);
+    for (int k = 0; k < 3; k++) from[k] += d[k] * 0.4f;   /* from its muzzle */
+    int r = 0;
+    for (int p = 0; p < pellets; p++)
+    {
+        float dir[3];
+        memcpy(dir, d, 12);
+        if (pellets > 1)
+        {
+            float sp = s_pelletSpread * 0.0174533f;
+            for (int k = 0; k < 3; k++) dir[k] += sp * ((float)rand() / RAND_MAX - 0.5f);
+            float m = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+            for (int k = 0; k < 3; k++) dir[k] /= m;
+        }
+        r = hf->spawn_projectile(self, round, from, dir);
+        if (r == HF_ACT_WAITING) return 0;
+        if (!r && round != (uint32_t)s_gunRound)
+        {
+            g_roundBad[role] = 1;
+            Log("her %s round (projectile %u) cannot be spawned here: that gun fires projectile %d (gun_round) instead", kRole[role], round, s_gunRound);
+            return 0;
+        }
+        if (!Act("a summoned gun's shot", r)) return 0;
+    }
+    g_gunShotAt[i] = g_now;
     unsigned slot = g_gunAimNext++ % 16;
     memcpy(g_gunAim[slot], at, sizeof g_gunAim[slot]);
     g_gunAimAt[slot] = g_now;
@@ -254,7 +323,7 @@ static void GunsFrame(void)
     for (int i = 2; i < 6; i++)
     {
         if (g_now < g_gunNext[i]) continue;
-        g_gunNext[i] = g_now + s_s3Every;
+        g_gunNext[i] = g_now + s_rEvery[i - 2];
         float at[3];
         uint32_t t = Pick(i, at);
         if (t != g_gunTarget[i])
@@ -417,6 +486,7 @@ static void OverloadingMode(void)
     g_cd[2] = g_now + s_s3Cd;
     g_s3Until = g_now + s_s3Seconds;
     for (int i = 2; i < 6; i++) { g_gunNext[i] = g_now + 0.1 * (i - 2); g_gunTarget[i] = 0; }
+    memset(g_roundBad, 0, sizeof g_roundBad);
     g_casts[2]++;
     Log("Overloading Mode: four more guns for %.0f s", (double)s_s3Seconds);
 }
@@ -539,7 +609,7 @@ static void Reset(const char* why)
     if (start) KitDecide();   /* with several kits installed: is this one picked? */
     Body(start);
     /* the Guard Dog's package: its rounds fly (and sound) only once that is in */
-    if (start && s_gunRound == 7 && !hf->load_package(self, UINT64_C(0xA14F1A98C80575AF))) Log("the Guard Dog's package could not be loaded ahead: the guns' first shots may wait");
+    if (start && !hf->load_package(self, UINT64_C(0xA14F1A98C80575AF))) Log("the Guard Dog's package could not be loaded ahead: the guns' models and first shots may wait");
     if (start && s_hellbomb && s_hellbombRow == 125 && !hf->load_package(self, UINT64_C(0x346D785D6CA13FF4))) Log("the Hellbomb's package could not be loaded ahead");
     g_boomPending = 0;
     g_boomArmed = 0;
@@ -549,6 +619,8 @@ static void Reset(const char* why)
     memset(g_gunNext, 0, sizeof g_gunNext);
     memset(g_gunTarget, 0, sizeof g_gunTarget);
     memset(g_gunAimAt, 0, sizeof g_gunAimAt);
+    memset(g_gunShotAt, 0, sizeof g_gunShotAt);
+    memset(g_roundBad, 0, sizeof g_roundBad);
     g_spared = 0;
     g_charge = g_groupShots = g_groupFree = 0;
     g_freeLeft = 0;
@@ -598,6 +670,35 @@ HF_MOD_EXPORT ExusiaiHud* exusiai_hud_state(void)
     }
     return &g_hud;
 }
+/* her guns for the HUD's models: 8 floats each (out, x, y, z where it hovers, x, y, z where it aims, seconds since its
+ * last shot), the pair then Overloading Mode's four; written on the game thread (GunsOut) */
+static float g_gunsOut[6][8];
+static atomic_int g_gunsSeq;
+static void GunsOut(void)
+{
+    float pos[3], aim[3];
+    int have = g_inMission && g_alive && kb_kit_on && PlayerPose(pos, aim);
+    for (int i = 0; i < 6; i++)
+    {
+        float* o = g_gunsOut[i];
+        float p[3];
+        int on = have && (i < 2 ? g_now < g_s2Until : g_now < g_s3Until) && GunPos(i, p);
+        o[0] = (float)on;
+        if (!on) continue;
+        memcpy(o + 1, p, 12);
+        int fresh = g_gunShotAt[i] > 0 && g_now - g_gunShotAt[i] < 1.5;
+        if (fresh) memcpy(o + 4, g_gunLook[i], 12);
+        else for (int k = 0; k < 3; k++) o[4 + k] = p[k] + aim[k] * 20;
+        o[7] = (float)(g_gunShotAt[i] > 0 ? g_now - g_gunShotAt[i] : 99);
+    }
+    atomic_fetch_add(&g_gunsSeq, 1);
+}
+HF_MOD_EXPORT int exusiai_guns(unsigned version, float* out, int max)
+{
+    if (version != 1 || !out || max < 6) return 0;
+    memcpy(out, g_gunsOut, sizeof g_gunsOut);
+    return 6;
+}
 /* in-game key bindings: the HUD registers her three skills with Mod Bindings Menu and passes each press here */
 static _Atomic unsigned long long g_bindMs;
 static atomic_int g_bindPress;
@@ -644,6 +745,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         prev[i] = down;
     }
     if (g_alive) { GunsFrame(); BurstFrame(); }
+    GunsOut();
     Exhaustion();
     atomic_exchange(&g_ownStopped, 0);
     atomic_exchange(&g_kdStopped, 0);
@@ -652,7 +754,8 @@ static void Tick(HfMod* mod, float dt, void* user)
 /* ---- Mod Options Menu ------------------------------------------------------------------------------------------- */
 static const KbOption kOptions[] = {
     {"fire_rate", &s_fireRate, NULL}, {"bless_mult", &s_blessMult, NULL}, {"ch_every", NULL, &s_chEvery}, {"ch_free", NULL, &s_chFree}, {"s2_cooldown", &s_s2Cd, NULL}, {"s2_seconds", &s_s2Seconds, NULL}, {"gun_every", &s_gunEvery, NULL},
-    {"s3_cooldown", &s_s3Cd, NULL}, {"s3_seconds", &s_s3Seconds, NULL}, {"s3_every", &s_s3Every, NULL}, {"s3_range", &s_s3Range, NULL},
+    {"s3_cooldown", &s_s3Cd, NULL}, {"s3_seconds", &s_s3Seconds, NULL}, {"s3_range", &s_s3Range, NULL},
+    {"every_nearest", &s_rEvery[0], NULL}, {"every_armoured", &s_rEvery[1], NULL}, {"every_attacker", &s_rEvery[2], NULL}, {"every_weakest", &s_rEvery[3], NULL},
     {"no_friendly_fire", NULL, &s_noFriendlyFire}, {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
     {"hellbomb_on_exhaustion", NULL, &s_hellbomb},
 };
@@ -691,6 +794,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
+    RoundsAdd();
     api->log(mod, "Exusiai %s: keys %s / %s / %s (Charging Mode, the summoned guns, Overloading Mode)", VERSION, s_keys[0].label,
              s_keys[1].label, s_keys[2].label);
     if (s_badKey) api->log(mod, "exusiai.ini: a key could not be read (bits %d: charge, guns, overload); its default stays", s_badKey);
