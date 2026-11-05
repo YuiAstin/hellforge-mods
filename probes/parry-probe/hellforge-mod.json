@@ -2,8 +2,8 @@
   "format": 1,
   "id": "yui.parry-probe",
   "name": "Parry Probe (research)",
-  "version": "0.1.0",
-  "description": "Research for Texas the Omertosa's parry: with a melee weapon in hand, press right-click just before a hit lands. Every hit on you is logged with how long after your last right-click press it came; a press within the window (0.2 s; F10 cycles 0.15 / 0.2 / 0.3 / 0.5) cancels the hit, teleports you behind the attacker and strikes it. Ctrl+F10: any weapon counts, not just melee. Host or solo. Turn off when done.",
+  "version": "0.1.1",
+  "description": "Research for Texas the Omertosa's parry: with a melee weapon in hand, press right-click just before a hit lands. Every hit on you is logged with how long after your last right-click press it came; a press within the window (0.2 s; F10 cycles 0.15 / 0.2 / 0.3 / 0.5) cancels the hit, teleports you behind the attacker and strikes it. Ctrl+F10: any weapon counts, not just melee. Each counter draws a slash of harmless laser bolts (F11 cycles Quasar short, Quasar, Talon; Ctrl+F11 test slash). Host or solo. Turn off when done.",
   "gameplay": false,
   "code": {
     "dll": "parry_probe.dll",

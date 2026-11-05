@@ -7,6 +7,9 @@
  *   - she is teleported behind the attacker (its root node's facing; 2.2 m behind, put on the ground by a raycast down;
  *     not beyond 25 m), with the Warp Pack's position setter and a zeroed velocity (as Faelynn's Loyal Dash);
  *   - the attacker takes a counter: an APW-1 round from behind at its chest and a Stun Medium.
+ * 0.1.1: the slash look (docs/texas-design.md, option A): each counter draws a slash across the target out of laser
+ *   bolts, copies of the LAS-99 Quasar Cannon's (F11 cycles: Quasar short-lived, Quasar as it is, LAS-58 Talon) that deal
+ *   no damage and set off no explosion; Ctrl+F11 draws one in front of her any time.
  * Every hit on her is logged (the first 80) with how long after her last right-click press it came, its kind, the
  * dealer and owner and whether she held a melee weapon, so the window can be set from real presses.
  * Credit: the hit hook, entity, scene-graph and raycast reads are the kit base's (Helldiver Survival Rework, MIT;
@@ -25,7 +28,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 #define BUILD "25480438"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
@@ -147,6 +150,7 @@ static uint32_t Attacker(const Counter* c)
     }
     return best;
 }
+static void Slash(const float at[3], const float from[3]);
 static void CounterFrame(void)
 {
     if (!atomic_load(&g_counterReady)) return;
@@ -185,8 +189,94 @@ static void CounterFrame(void)
         shot = Act("the counter's round", hf->spawn_projectile(self, HF_PROJECTILE_APW1_ANTIMATERIEL_RIFLE, from, aim));
     }
     if (hf->apply_status) stun = Act("the counter's stun", hf->apply_status(self, foe, HF_STATUS_STUN_MEDIUM, 300));
+    Slash(at, dest);
     Log("COUNTER: behind entity %u (%.1f m from her, facing %.2f %.2f), %.0f ms after the hit; round %s, stun %s", foe, dist, fwd[0], fwd[1],
         (double)(GetTickCount64() - (unsigned long long)c.ms), shot ? "fired" : "NOT fired", stun ? "applied" : "not applied");
+}
+
+/* ---- the slash look: a fan of harmless laser bolts across the target ------------------------------------------- */
+static uint32_t g_slashDamage, g_slashType[3];
+static int g_look;
+static const char* const kLook[3] = {"Quasar, short-lived", "Quasar as it is", "Talon"};
+static void SlashAdd(void)
+{
+    HfDamage dmg;
+    memset(&dmg, 0, sizeof dmg);
+    dmg.size = sizeof dmg;
+    dmg.base = HF_DAMAGE_LAS58_TALON;
+    dmg.name = "yui/parry_probe/slash_damage";
+    dmg.scale = 0.001f;
+    g_slashDamage = hf->add_damage ? hf->add_damage(self, &dmg) : 0;
+    static const char* names[3] = {"yui/parry_probe/slash_quasar_short", "yui/parry_probe/slash_quasar", "yui/parry_probe/slash_talon"};
+    const uint32_t base[3] = {HF_PROJECTILE_LAS99_QUASAR_CANNON, HF_PROJECTILE_LAS99_QUASAR_CANNON, HF_PROJECTILE_LAS58_TALON};
+    for (int i = 0; i < 3; i++)
+    {
+        HfProjectile p;
+        memset(&p, 0, sizeof p);
+        p.size = sizeof p;
+        p.base = base[i];
+        p.name = names[i];
+        p.damage = g_slashDamage;
+        g_slashType[i] = hf->add_projectile ? hf->add_projectile(self, &p) : 0;
+    }
+    Log("slash looks: damage %u, projectiles %u / %u / %u", g_slashDamage, g_slashType[0], g_slashType[1], g_slashType[2]);
+}
+static void ProjectilesReady(HfMod* mod, HfEvent event, void* user)
+{
+    for (int i = 0; i < 3; i++)
+    {
+        HfProjectileSettings* r = g_slashType[i] && hf->projectile_row ? (HfProjectileSettings*)hf->projectile_row(g_slashType[i]) : NULL;
+        if (!r) { Log("slash look %d: no row", i); continue; }
+        Log("slash look %s: velocity %.0f, lifetime %.2f, pellets %u, impact explosion %u, expiry explosion %u (cleared)", kLook[i], (double)r->velocity,
+            (double)r->lifetime, r->pellet_count, r->impact_explosion, r->expiry_explosion);
+        r->impact_explosion = 0;
+        r->expiry_explosion = 0;
+        if (i == 0) { r->lifetime = 0.12f; if (r->velocity > 120) r->velocity = 120; }
+    }
+    HfDamageInfo* d = g_slashDamage && hf->damage_row ? (HfDamageInfo*)hf->damage_row(g_slashDamage) : NULL;
+    if (d) Log("slash damage row ready");
+}
+/* the slash: 6 bolts along an arc around `at` (radius 1.3 m, a tilted plane facing `from`), one a frame, each flying
+ * along the arc so their streaks join into one cut */
+static float g_slashAt[3], g_slashFrom[3];
+static int g_slashLeft;
+static void Slash(const float at[3], const float from[3])
+{
+    memcpy(g_slashAt, at, 12);
+    memcpy(g_slashFrom, from, 12);
+    g_slashLeft = 6;
+}
+static void SlashFrame(void)
+{
+    if (g_slashLeft <= 0) return;
+    uint32_t type = g_slashType[g_look];
+    if (!type) { g_slashLeft = 0; return; }
+    float f[3] = {g_slashAt[0] - g_slashFrom[0], g_slashAt[1] - g_slashFrom[1], 0};
+    float h = sqrtf(f[0] * f[0] + f[1] * f[1]);
+    if (h < 0.01f) { f[0] = 1; f[1] = 0; h = 1; }
+    f[0] /= h; f[1] /= h;
+    float r[3] = {f[1], -f[0], 0};
+    /* the arc: from upper left to lower right, tilted 35 degrees */
+    int i = 6 - g_slashLeft;
+    float a0 = -1.1f + 2.2f * i / 5.0f, a1 = a0 + 0.44f;
+    float tilt = 0.61f, cu = cosf(tilt), su = sinf(tilt);
+    float p0[3], p1[3];
+    for (int k = 0; k < 3; k++)
+    {
+        float up = k == 2 ? 1.0f : 0.0f;
+        float axisX = r[k] * cu + up * su, axisY = -r[k] * su + up * cu;   /* the slash plane's two axes */
+        p0[k] = g_slashAt[k] - f[k] * 0.4f + (axisX * sinf(a0) + axisY * cosf(a0) * 0.35f) * 1.3f;
+        p1[k] = g_slashAt[k] - f[k] * 0.4f + (axisX * sinf(a1) + axisY * cosf(a1) * 0.35f) * 1.3f;
+    }
+    p0[2] += 1.0f; p1[2] += 1.0f;
+    float d[3] = {p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]};
+    float n = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (n < 0.01f) { g_slashLeft = 0; return; }
+    for (int k = 0; k < 3; k++) d[k] /= n;
+    int res = hf->spawn_projectile(self, type, p0, d);
+    if (res == HF_ACT_WAITING) return;   /* its package: the next frame */
+    if (!Act("a slash bolt", res)) { g_slashLeft = 0; return; }
+    g_slashLeft--;
 }
 
 /* ---- events and the frame ----------------------------------------------------------------------------------------- */
@@ -231,6 +321,19 @@ static void Tick(HfMod* mod, float dt, void* user)
         else { g_window = (g_window + 1) % 4; Log("F10: the parry window is %.2f s", (double)kWindows[g_window]); }
     }
     prevF10 = f10;
+    static int prevF11;
+    int f11 = focused && (GetAsyncKeyState(VK_F11) & 0x8000);
+    if (f11 && !prevF11)
+    {
+        if (GetAsyncKeyState(VK_CONTROL) & 0x8000)
+        {
+            float pos[3], aim[3];
+            if (PlayerPose(pos, aim)) { float at[3] = {pos[0] + aim[0] * 3, pos[1] + aim[1] * 3, pos[2]}; Slash(at, pos); Log("Ctrl+F11: a test slash (%s)", kLook[g_look]); }
+        }
+        else { g_look = (g_look + 1) % 3; Log("F11: the slash look is %s", kLook[g_look]); }
+    }
+    prevF11 = f11;
+    SlashFrame();
     CounterFrame();
 }
 static void Loaded(HfMod* mod, HfEvent event, void* user)
@@ -253,7 +356,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         Log("teleport ready");
     }
     else Log("teleport off: its functions are not the reviewed code (parries only)");
-    Log("ready: melee in hand, right-click just before a hit (window %.2f s; F10 cycles it, Ctrl+F10 any weapon)", (double)kWindows[g_window]);
+    Log("ready: melee in hand, right-click just before a hit (window %.2f s; F10 cycles it, Ctrl+F10 any weapon); F11 slash look, Ctrl+F11 test slash", (double)kWindows[g_window]);
 }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
@@ -263,7 +366,8 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     kb_damage_taken = DamageTaken;
     if (!api || api->version < 13 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
     Log("Parry Probe " VERSION ": research for Texas's parry");
-    if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
+    SlashAdd();
+    if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL) || api->on(mod, HF_EVENT_PROJECTILES_READY, ProjectilesReady, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) && api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) &&
              api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_PLAYER_DOWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) &&
