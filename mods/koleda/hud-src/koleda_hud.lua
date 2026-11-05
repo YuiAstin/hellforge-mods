@@ -769,9 +769,31 @@ local function wk_log(m) if WK.told < 30 then WK.told = WK.told + 1; log('[Koled
 local function wrap(a) return ((a + 540) % 360) - 180 end
 local function clampv(v, a, b) if v < a then return a elseif v > b then return b end return v end
 local function S_() return rawget(_G, 'stingray') end
-local function upos(s, u) local ok, v = pcall(s.Unit.world_position, u, 1); if not ok or not v then return nil end local x, y, z = s.Vector3.to_elements(v); return {x, y, z} end
+-- the world's units of rare types only (at most 4 of a type), as Exo Autopilot (marti) found: reading the position of
+-- a unit of a mass-instanced type crashed the game (helldivers2.exe+0x9E27E, a read at 0x30)
+local function rare_units(s, w)
+    local oku, all = pcall(s.World.units, w)
+    if not oku or type(all) ~= 'table' then return nil end
+    local res, count = {}, {}
+    for i, u in ipairs(all) do
+        local okr, r = pcall(s.Unit.resource_name, u)
+        r = okr and tostring(r) or '?'
+        res[i] = r
+        count[r] = (count[r] or 0) + 1
+    end
+    local out = {}
+    for i, u in ipairs(all) do if count[res[i]] <= 4 and res[i] ~= '?' then out[#out + 1] = u end end
+    return out, #all
+end
+local function node_index()
+    local s = rawget(_G, 'stingray')
+    local ok, off = pcall(function() return s.Script.index_offset() end)
+    return ok and type(off) == 'number' and off or 1
+end
+local RI = node_index()
+local function upos(s, u) local ok, v = pcall(s.Unit.world_position, u, RI); if not ok or not v then return nil end local x, y, z = s.Vector3.to_elements(v); return {x, y, z} end
 local function uyaw(s, u)
-    local ok, q = pcall(s.Unit.world_rotation, u, 1)
+    local ok, q = pcall(s.Unit.world_rotation, u, RI)
     if not ok or not q then return nil end
     local okf, f = pcall(s.Quaternion.forward, q)
     if not okf or not f then return nil end
@@ -795,8 +817,8 @@ end
 local function find_unit(s, x, y, z)
     local okw, w = pcall(s.Application.main_world)
     if not okw or not w then return nil end
-    local oku, all = pcall(s.World.units, w)
-    if not oku or type(all) ~= 'table' then return nil end
+    local all = rare_units(s, w)
+    if not all then return nil end
     for _, u in ipairs(all) do
         local p = upos(s, u)
         -- 0.1.10: the state machine first: animation_has_variable on a unit without one crashed the game (a read at
