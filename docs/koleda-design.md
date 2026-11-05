@@ -27,6 +27,46 @@ game code and turns itself off with a log line.
 - Dash and movement skills do not follow the camera; aimed skills may.
 - Ship only what is tested.
 
+## Her actual kit, read again (2026-11-06, from her official kit sheet)
+
+The first reading had the Sinner as an exosuit and missed several parts. In GFL2 the Sinner is a vehicle (its skills
+are a ride, a drift, a sprint and a gear shift). What the sheet adds or corrects:
+
+- **Gears, one at a time:** N (her basic attack: the Sinner holds fire, damage taken down, defence up); D (each turn's
+  start: damage and actions up); P (after its last action: parked, damage taken down); S (Tactical Playbook); S+ (Eye of
+  the Snow Wolf).
+- **Kinetic Release:** after the Sinner acts in S, an area hit around it; Kinetic Release+ in S+. Tactical Playbook
+  also releases one after it is used.
+- **Gear Shift (the Sinner's passive):** immune to stun, taunt, silence and displacement; less damage taken; heals a
+  share of its maximum health when hit.
+- **Let's Go for a Ride! (the Sinner's):** an ally rides in it, untargetable; the Sinner gains part of that ally's
+  attack, defence, health and crit damage.
+- **Let's Drift!:** an area hit that pulls enemies to the Sinner. **Full Speed Sprint!:** a move through enemies, each
+  on the path hit (more in S / S+).
+- **Keys:** Creed (Upshift at the start; Kinetic Recovery when the Sinner arrives); No Time to Die (the Sinner never
+  drops below 1 from a fatal hit); Dream of Ruin (the Sinner's skills strip enemy buffs); Extreme Measures; Know My
+  Name (her and its attacks lower the target's defence first); Choosing Life in Death (in S / S+, each enemy death
+  raises the Sinner's attack).
+
+## The FRV Sinner (Yui, 2026-11-06; planned, nothing built)
+
+When she brings the M-102 FRV instead of the Patriot, the Sinner is that car. It never drives itself.
+
+- **The call:** Hallucination grants an FRV call instead of the Patriot's when her loadout has the FRV (the Patriot
+  stays the Sinner otherwise).
+- **Its gun:** while nobody sits in the gunner seat, its mounted gun fires spawned rounds of its own at the targets the
+  gears pick (the Patriot's target rules), from the turret's muzzle, the turret turned toward them (Apache's
+  `set_local_rotation` on the turret node). A player in the gunner seat shoots as normal instead.
+- **Gears, damage share, Upshift, Kinetic Recovery, Winner! (a full repair), No Time to Die:** as the Patriot's.
+  Kinetic Release (S) and Kinetic Release+ (S+): an explosion around the car after a volley, at most every few seconds.
+  P: while the car stands still (parked), it takes less damage.
+- **Let's Go for a Ride! (key, the Sinner's skill):** puts her straight into its driver seat (the gunner seat if the
+  driver's is taken); while she is aboard, the car gets a share of her damage and health. Needs the seat-entry research
+  (scratchpad/frv-seat-research.md).
+- **Let's Drift!:** an effect only: enemies within its radius are pulled to the car and hit (the Patriot's pull).
+- **Full Speed Sprint!:** only while she drives it: a boost (an impulse on the car's physics actor, Apache's way) for
+  about 1.5 s; enemies it passes through take a hit, more in S / S+.
+
 ## In Helldivers terms
 
 ### The Sinner: an empty exosuit that drives itself (untested)
