@@ -642,6 +642,58 @@ local function marks_draw(d, dt, v)
     end
 end
 
+-- 0.1.5: shatter numbers: each shatter hit's damage (alva.dll's alva_shatters) as a cyan "!123!" over where it landed,
+-- rising and fading over a second
+pcall(ffi.cdef, [[ typedef int (*alvshat1)(unsigned int version, unsigned int after, float *out, int max); ]])
+local SH = {fn = nil, buf = ffi.new('float[80]'), look = 0, seq = 0, live = {}, failed = false}
+local SH_LIFE = 1.1
+local function shatter_draw(d, dt, v)
+    if not SH.fn then
+        if mk_t < SH.look then return end
+        SH.look = mk_t + 2
+        local module = k32.alvhud1_GetModuleHandleA('alva.dll')
+        local proc = module ~= nil and k32.alvhud1_GetProcAddress(module, 'alva_shatters') or nil
+        if proc == nil then return end
+        SH.fn = ffi.cast('alvshat1', proc)
+        SH.skip = true                                       -- the hits from before the HUD found it: not shown
+    end
+    local n = SH.fn(1, SH.seq, SH.buf, 16)
+    if SH.skip then
+        SH.skip = false
+        for i = 0, n - 1 do if SH.buf[i * 5 + 4] > SH.seq then SH.seq = SH.buf[i * 5 + 4] end end
+        return
+    end
+    for i = 0, n - 1 do
+        local b = i * 5
+        local q = SH.buf[b + 4]
+        if q > SH.seq then SH.seq = q end
+        if #SH.live < 24 then
+            SH.live[#SH.live + 1] = {x = SH.buf[b], y = SH.buf[b + 1], z = SH.buf[b + 2], amount = SH.buf[b + 3], age = 0,
+                                     dx = (math.random() - 0.5) * 30}
+        end
+    end
+    local sc = d.scale or 1
+    local keep = {}
+    for _, e in ipairs(SH.live) do
+        e.age = e.age + dt
+        if e.age < SH_LIFE then
+            keep[#keep + 1] = e
+            local sx, sy, dist = project(v, e.x, e.y, e.z + 0.6)
+            if sx and dist < 200 then
+                local k = e.age / SH_LIFE
+                local pop = e.age < 0.12 and (1.35 - 2.9 * e.age) or 1      -- a quick pop, then steady
+                local size = 22 * sc * pop
+                local a = k < 0.6 and 255 or math.floor(255 * (1 - (k - 0.6) / 0.4))
+                local x, y = sx + e.dx * sc * k, sy - 46 * sc * k
+                local str = ('!%.0f!'):format(e.amount)
+                d:text(str, x + math.max(1, 2 * sc), y + math.max(1, 2 * sc), {size = size, font = 'title', colour = {10, 30, 45, math.floor(a * 0.8)}, z = 7, align = 'center'})
+                d:text(str, x, y, {size = size, font = 'title', colour = {90, 230, 255, a}, z = 8, align = 'center'})
+            end
+        end
+    end
+    SH.live = keep
+end
+
 local overlay = hd2.ui.overlay({id = 'kit', owner = OWNER})
 overlay:draw(function(d, dt)
     dt = tonumber(dt) or 0
@@ -662,6 +714,10 @@ overlay:draw(function(d, dt)
     if v then
         local okM, errM = pcall(marks_draw, d, dt, v)
         if not okM then MK.failed = true; log('[Alva HUD] markers failed, off for this session: ' .. tostring(errM)) end
+        if not SH.failed then
+            local okS, errS = pcall(shatter_draw, d, dt, v)
+            if not okS then SH.failed = true; log('[Alva HUD] shatter numbers failed, off for this session: ' .. tostring(errS)) end
+        end
     end
     status_bar(d)
     local okL, box = pcall(list_box, d, dt)

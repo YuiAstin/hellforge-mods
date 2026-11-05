@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.4"
+#define VERSION "0.1.5"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her chill bursts come often */
@@ -157,6 +157,10 @@ static double g_s1Until;
 static int g_conf, g_prep;
 static double g_confAt = -100, g_pulseAt;
 static unsigned g_shatters;
+/* 0.1.5: the last shatter hits for the HUD's damage numbers: x, y, z, damage, sequence */
+#define SHATTER_RING 32
+static float g_shRing[SHATTER_RING][5];
+static volatile unsigned g_shSeq;
 static double g_shatterBonus;
 static unsigned g_casts[3], g_grants, g_intercepts, g_bursts, g_rounds, g_freezes, g_refunds;
 
@@ -873,6 +877,12 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
         ScaleDamage(d, s_shatterMult);
         g_shatters++;
         g_shatterBonus += d->amount - before;
+        {
+            unsigned q = g_shSeq + 1;
+            float* r = g_shRing[q % SHATTER_RING];
+            r[0] = d->position[0]; r[1] = d->position[1]; r[2] = d->position[2]; r[3] = (float)d->amount; r[4] = (float)q;
+            g_shSeq = q;
+        }
         static unsigned told;
         if (told++ < 20) Log("shatter: entity %u frozen, her hit (kind %u) %d -> %d", d->target, d->kind, before, d->amount);
     }
@@ -1032,6 +1042,22 @@ HF_MOD_EXPORT int alva_marks(unsigned version, float* out, int max)
     {
         out[i * 5] = g_spots[i].x; out[i * 5 + 1] = g_spots[i].y; out[i * 5 + 2] = g_spots[i].z;
         out[i * 5 + 3] = g_spots[i].pool; out[i * 5 + 4] = g_spots[i].who;
+    }
+    return n;
+}
+/* 0.1.5: the shatter hits since `after` (a sequence number), 5 floats each (x, y, z, damage, sequence); how many */
+HF_MOD_EXPORT int alva_shatters(unsigned version, unsigned after, float* out, int max)
+{
+    if (version != 1 || !out || max <= 0 || !g_inMission) return 0;
+    unsigned last = g_shSeq, first = after + 1;
+    if (last - after > SHATTER_RING) first = last - SHATTER_RING + 1;
+    int n = 0;
+    for (unsigned q = first; q != last + 1 && n < max; q++)
+    {
+        const float* r = g_shRing[q % SHATTER_RING];
+        if ((unsigned)r[4] != q) continue;
+        memcpy(out + 5 * n, r, 20);
+        n++;
     }
     return n;
 }
