@@ -27,6 +27,7 @@
  * +0x10 active, +0x54 its position, +0x60 its destination. set_destination is game+0x5B36C0(NULL, entity, &pos).
  * Credit: the behaviour and perception layouts are HD2Runtime's research (SkyeShade), HellForge's turret code and
  * Smarter Guard Dogs' (chef, ported by giblett); nothing of their code is copied. */
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -701,7 +702,7 @@ static int g_optsDone;       /* 1: every row is on the tab, or the tries ran out
 static const Hd2ModOptionsApi* g_optsApi;   /* the menu the rows went to */
 static uint8_t g_rowOk[OPT_ROWS];
 static int g_optTries;
-static double g_optNextTry;
+static double g_optNextTry, g_optCheck;
 static int g_shownStatus[2] = {-1, -1};
 static int ModeIndex(int m) { return m == 1 ? 1 : m == 2 ? 2 : 0; }
 static int StatusOf(int mode, int bit)
@@ -710,39 +711,54 @@ static int StatusOf(int mode, int bit)
     if (!(g_rules & bit)) return 2;
     return mode == 2 ? 3 : 0;
 }
-/* hd2_mod_options() with its refusals told: a menu of another process, or one whose version or size this build does
- * not know, is logged (once per distinct value) instead of being skipped in silence */
+/* hd2_mod_options() with its refusals told: a menu of another process, or one whose version, size or functions this
+ * build does not accept, is logged (once per distinct value) instead of being skipped in silence. The table is read
+ * through hf->read and its functions checked (each inside a loaded module) only when the published value changes. */
+static int g_menuRefused;    /* a menu was published, and refused: the 30 s line says so instead of "no menu" */
+static char g_menuChecked[64];                /* the published value last accepted */
+static const Hd2ModOptionsApi* g_menuAccepted; /* its table */
+static int InModule(const void* fn)
+{
+    HMODULE m = NULL;
+    return fn && GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)fn, &m) && m;
+}
 static const Hd2ModOptionsApi* MenuApi(void)
 {
-    char text[64];
+    char text[64] = "";
     DWORD n = GetEnvironmentVariableA(HD2_MOD_OPTIONS_ENV, text, sizeof text);
     if (!n) return NULL;
+    if (n >= sizeof text) snprintf(text, sizeof text, "(too long: %lu)", (unsigned long)n);   /* text was left unset */
     static char told[64];
+    if (g_menuAccepted && !strcmp(g_menuChecked, text)) return g_menuAccepted;   /* the same value as last time, already checked */
+    g_menuAccepted = NULL;
+    static double recheck;
+    if (!strcmp(told, text) && g_now < recheck) return NULL;   /* refused before: checked again only every 10 s */
+    recheck = g_now + OPT_RETRY;
     unsigned long pid = 0;
     unsigned long long at = 0;
     const char* why = NULL;
-    const Hd2ModOptionsApi* api = NULL;
+    Hd2ModOptionsApi copy;
+    memset(&copy, 0, sizeof copy);
     if (n >= sizeof text || sscanf(text, "%lu:%llx", &pid, &at) != 2 || !at) why = "not \"<process id>:<address>\"";
     else if (pid != GetCurrentProcessId()) why = "another process's";
-    else
+    else if (!RD((uintptr_t)at, &copy, 8)) why = "its address cannot be read";
+    else if (copy.version < 1) why = "an unknown version";
+    else if (copy.size < sizeof(Hd2ModOptionsApi)) why = "a smaller table than this build's";
+    else if (!RD((uintptr_t)at, &copy, sizeof copy)) why = "its table cannot be read";
+    else if (!InModule((const void*)copy.register_option) || !InModule((const void*)copy.get) || !InModule((const void*)copy.set))
+        why = "a function of its table is not in a loaded module";
+    if (!why)
     {
-        api = (const Hd2ModOptionsApi*)(uintptr_t)at;
-        uint32_t head[2] = {0, 0};   /* version, size */
-        if (!RD((uintptr_t)at, head, sizeof head)) why = "its address cannot be read";
-        else if (head[0] < 1) why = "an unknown version";
-        else if (head[1] < sizeof(Hd2ModOptionsApi)) why = "a smaller table than this build's";
-        if (why && strcmp(told, text))
-        {
-            snprintf(told, sizeof told, "%s", text);
-            Log("MODS tab: a menu publishes %s but is refused: %s (version %u, size %u; this build needs version 1 or later, size %u or more)",
-                HD2_MOD_OPTIONS_ENV, why, head[0], head[1], (unsigned)sizeof(Hd2ModOptionsApi));
-        }
-        return why ? NULL : api;
+        snprintf(g_menuChecked, sizeof g_menuChecked, "%s", text);
+        g_menuAccepted = (const Hd2ModOptionsApi*)(uintptr_t)at;
+        return g_menuAccepted;
     }
+    g_menuRefused = 1;
     if (strcmp(told, text))
     {
         snprintf(told, sizeof told, "%s", text);
-        Log("MODS tab: %s = \"%.40s\" is refused (%s)", HD2_MOD_OPTIONS_ENV, n < sizeof text ? text : "(too long)", why);
+        Log("MODS tab: %s = \"%s\" is refused: %s (version %u, size %u; this build needs version 1 or later, size %u or more)",
+            HD2_MOD_OPTIONS_ENV, text, why, copy.version, copy.size, (unsigned)sizeof(Hd2ModOptionsApi));
     }
     return NULL;
 }
@@ -758,33 +774,85 @@ static void OptChanged(void* user, const char* id, int32_t v)
     SaveChoices();
     g_shownStatus[0] = g_shownStatus[1] = -1;
 }
-/* no menu 30 s after start: one line naming what was looked for and where the settings are without it */
+/* the public Vanilla Plus Megapack, for the 30 s line: in the session's mods (hf->mods, SDK 10) by its id, and its DLL
+ * by its manifest's code.dll name (vanilla_plus_megapack.dll, which HellForge loads it under) */
+#define VPM_ID "cowboybingus.vanilla-plus-megapack"
+#define VPM_DLL "vanilla_plus_megapack.dll"
+static const char* PublicPack(void)
+{
+    int listed = -1;   /* -1: hf->mods is not there */
+    if (hf->size >= offsetof(HfApi, mods) + sizeof hf->mods && hf->mods)
+    {
+        listed = 0;
+        HfModInfo info;
+        for (uint32_t i = 0; i < 512; i++)
+        {
+            memset(&info, 0, sizeof info);
+            info.size = sizeof info;
+            if (!hf->mods(self, i, &info)) break;
+            if (info.id && !strcmp(info.id, VPM_ID)) { listed = info.loaded ? 2 : 1; break; }
+        }
+    }
+    HMODULE vpm = GetModuleHandleA(VPM_DLL);
+    int mom = vpm && GetProcAddress(vpm, "vpm_mom_api");
+    if (listed == 0 && !vpm) return "the Vanilla Plus Megapack (" VPM_ID ") is not installed";
+    if (listed == 1) return "the Vanilla Plus Megapack (" VPM_ID ") is installed but did not load";
+    if (!vpm) return listed == 2 ? "the Vanilla Plus Megapack is loaded, but not as " VPM_DLL ", so its exports were not checked"
+                                 : VPM_DLL " is not loaded";
+    return mom ? "the Vanilla Plus Megapack that is loaded offers only vpm_mom_api, which this release does not use yet"
+               : "the Vanilla Plus Megapack that is loaded publishes neither";
+}
+/* the mission keys, as the log names them (break contact's only when it is built in) */
+static const char* KeysText(void)
+{
+    static char keys[64];
+    if (LC_BREAK_CONTACT) snprintf(keys, sizeof keys, "%s / %s", s_keyBreak.label, s_keyPatrol.label);
+    else snprintf(keys, sizeof keys, "%s", s_keyPatrol.label);
+    return keys;
+}
+/* no usable menu 30 s after start: one line naming what was looked for and where the settings are without it */
 static void NoMenuYet(void)
 {
     static int told;
     if (told || g_optsApi || g_now < 30) return;
     told = 1;
-    HMODULE vpm = GetModuleHandleA("vanilla_plus_megapack.dll");
-    int mom = vpm && GetProcAddress(vpm, "vpm_mom_api");
-    Log("MODS tab: no menu after 30 s: looked for %s (published by giblett's Vanilla Plus Megapack build); %s. Without it: "
-        "lost-contact.ini, or %s / %s in a mission",
-        HD2_MOD_OPTIONS_ENV, !vpm ? "vanilla_plus_megapack.dll is not loaded"
-                              : mom ? "the Vanilla Plus Megapack that is loaded offers only vpm_mom_api, which this release does not use yet"
-                                    : "the Vanilla Plus Megapack that is loaded publishes neither",
-        s_keyBreak.label, s_keyPatrol.label);
+    Log("MODS tab: %s after 30 s: looked for %s (published by giblett's Vanilla Plus Megapack build); %s. Without it: "
+        "lost-contact.ini, or %s in a mission",
+        g_menuRefused ? "no usable menu (one was refused, see above)" : "no menu", HD2_MOD_OPTIONS_ENV, PublicPack(), KeysText());
 }
 static void Options(void)
 {
     const Hd2ModOptionsApi* api = MenuApi();
-    if (!api) { NoMenuYet(); return; }
+    if (!api) { g_optsApi = NULL; NoMenuYet(); return; }   /* gone: a menu published again, even at the same address, gets the rows */
     if (api != g_optsApi)
     {
         /* a menu for the first time, or one set up again (a reload): every row is asked for */
-        if (g_optsApi) Log("MODS tab: the menu moved (set up again); adding the rows again");
         g_optsApi = api;
         g_optsDone = 0; g_optTries = 0; g_optNextTry = 0;
         memset(g_rowOk, 0, sizeof g_rowOk);
         g_shownStatus[0] = g_shownStatus[1] = -1;
+    }
+    else if (g_optsDone && g_rowOk[0] && g_now >= g_optCheck)
+    {
+        /* every 10 s once registered: a menu reloaded in place (HellForge's live mods) has lost the rows. Its table is
+         * checked again first: a menu taken out without clearing HD2_MOD_OPTIONS_v1 leaves functions in no module */
+        Hd2ModOptionsApi copy;
+        int32_t v;
+        g_optCheck = g_now + OPT_RETRY;
+        if (!RD((uintptr_t)api, &copy, sizeof copy) || !InModule((const void*)copy.get) || !InModule((const void*)copy.register_option) ||
+            !InModule((const void*)copy.set))
+        {
+            Log("MODS tab: the menu's table is gone (taken out?); looking for a menu again");
+            g_menuAccepted = NULL; g_menuChecked[0] = 0; g_optsApi = NULL;
+            return;
+        }
+        if (!api->get(OPT_MOD, "break", &v))
+        {
+            Log("MODS tab: the menu no longer has Lost Contact's rows (set up again?); adding them again");
+            g_optsDone = 0; g_optTries = 0; g_optNextTry = 0;
+            memset(g_rowOk, 0, sizeof g_rowOk);
+            g_shownStatus[0] = g_shownStatus[1] = -1;
+        }
     }
     /* (at most 400 characters: the menu refuses longer descriptions) */
     static const char* const kText =
@@ -811,16 +879,17 @@ static void Options(void)
         g_optTries++;
         g_optNextTry = g_now + OPT_RETRY;
         if (fresh) g_shownStatus[0] = g_shownStatus[1] = -1;   /* a Now row added now shows its status */
-        if (added == OPT_ROWS) { g_optsDone = 1; Log("MODS tab: %d of %d rows added (menu: %s, version %u)", added, OPT_ROWS, HD2_MOD_OPTIONS_ENV, api->version); }
+        if (added == OPT_ROWS) { g_optsDone = 1; g_optCheck = g_now + OPT_RETRY; Log("MODS tab: %d of %d rows added (menu: %s, version %u)", added, OPT_ROWS, HD2_MOD_OPTIONS_ENV, api->version); }
         else if (g_optTries < OPT_TRIES)
             Log("MODS tab: %d of %d rows added (menu: %s, version %u); refused: %s; asking again in %.0f s (try %d of %d)", added, OPT_ROWS,
                 HD2_MOD_OPTIONS_ENV, api->version, refused, OPT_RETRY, g_optTries, OPT_TRIES);
         else
         {
             g_optsDone = 1;
+            g_optCheck = g_now + OPT_RETRY;
             Log("MODS tab: %d of %d rows added after %d tries (menu: %s, version %u); refused: %s (the menu may be full: 8 mods, 31 rows each). "
-                "Those settings stay in lost-contact.ini and on %s / %s", added, OPT_ROWS, g_optTries, HD2_MOD_OPTIONS_ENV, api->version, refused,
-                s_keyBreak.label, s_keyPatrol.label);
+                "Those settings stay in lost-contact.ini and on %s", added, OPT_ROWS, g_optTries, HD2_MOD_OPTIONS_ENV, api->version, refused,
+                KeysText());
         }
     }
     int st[2] = {StatusOf(LC_BREAK_CONTACT ? s_breakMode : 0, 1), StatusOf(s_patrolMode, 2)};

@@ -1,11 +1,9 @@
 # Changelog
 
 ## 2026-11-05: Lost Contact 0.2.1
-
-### Lost Contact 0.2.1
-- The MODS tab needs a menu that publishes HD2_MOD_OPTIONS_v1 (giblett's Vanilla Plus Megapack build). The public Vanilla Plus Megapack (0.2.0) does not offer it yet, so with it there is no Lost Contact tab: use lost-contact.ini, or Ctrl+F9 / Ctrl+F10 in a mission. The log now says so once, about 30 s after start, naming what it looked for and whether the public pack is loaded.
-- A menu that is found but refused (another version or table size) is named in the log instead of being skipped in silence, and the line for added rows names the menu used.
-- Rows the menu refuses are named in the log and asked for again, up to 4 tries 10 s apart, instead of never; the tab no longer stays short of rows for good after one refusal.
+- The MODS tab needs a menu that publishes HD2_MOD_OPTIONS_v1 (giblett's Vanilla Plus Megapack build). The public Vanilla Plus Megapack (0.2.0) does not offer it yet, so with it there is no Lost Contact tab: use lost-contact.ini, or Ctrl+F9 / Ctrl+F10 in a mission. The log now says so once, about 30 s after start, naming what it looked for and whether the public pack is installed and loaded.
+- A menu that is found but refused (another version, table size, or functions outside any loaded module) is named in the log instead of being skipped in silence, and the line for added rows names the menu used.
+- Rows the menu refuses are named in the log and asked for again up to 4 times, 10 s apart (0.2.0 asked once). A menu set up again while the game runs gets the rows again.
 
 ## 2026-11-05: Voymastina 0.4.1 · Lemuen 0.1.6 · Lenna 0.3.0 · Leva 0.6.0 · Faelynn 0.4.0 · Lost Contact 0.2.0
 
