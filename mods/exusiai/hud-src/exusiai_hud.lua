@@ -669,7 +669,7 @@ local function sound_step(dt)
                 if L and L.h and (SND.t - L.started > 2 or (L.x - x) ^ 2 + (L.y - y) ^ 2 > 36) then pcall(function() L.h:stop() end); L.h = nil end
                 if not (L and L.h) and SND.tokens >= 1 then
                     SND.tokens = SND.tokens - 1
-                    local okP, h, why = pcall(hd2.sounds.play, use, {position = {x, y, z}})
+                    local okP, h, why = pcall(hd2.sounds.play, use, {})   -- (0.2.9: 2D: a post at a position played nothing audible; her guns are at her shoulders)
                     if okP and h then SND.loops[use] = {h = h, started = SND.t, last = SND.t, x = x, y = y}
                     else
                         snd_log(use .. ' did not play: ' .. tostring(okP and why or h))
@@ -680,7 +680,7 @@ local function sound_step(dt)
                 elseif L then L.last = SND.t end
             elseif use and SND.tokens >= 1 then
                 SND.tokens = SND.tokens - 1
-                local okP, h, why = pcall(hd2.sounds.play, use, {position = {x, y, z}})
+                local okP, h, why = pcall(hd2.sounds.play, use, {})   -- (0.2.9: 2D: a post at a position played nothing audible; her guns are at her shoulders)
                 if not okP or not h then
                     snd_log(use .. ' did not play: ' .. tostring(okP and why or h))
                     SND.miss = SND.miss or {}
