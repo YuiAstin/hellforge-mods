@@ -38,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.5"
+#define VERSION "0.2.6"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -355,6 +355,7 @@ static int Living(uint32_t e, int32_t* hp)
  * between its legs, its body 6 m up), kept a second per enemy */
 #define BODIES 64
 static struct { uint32_t unit; double at; float off[3]; } g_body[BODIES];
+static int CmpF(const void* x, const void* y) { float a = *(const float*)x, b = *(const float*)y; return a < b ? -1 : a > b; }
 static int BodyOffset(uint32_t unit, const float root[3], float off[3])
 {
     unsigned h = (unit * 2654435761u) % BODIES;
@@ -367,18 +368,19 @@ static int BodyOffset(uint32_t unit, const float root[3], float off[3])
         return 0;
     if (count > 256) count = 256;
     if (!ReadAt(nodes, m, (size_t)count * 64)) return 0;
-    float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+    /* the median of its nodes (the box's centre overshot small enemies: a few nodes far up, a weapon, an effect) */
+    static float v[3][256];
     int used = 0;
     for (uint32_t i = 0; i < count; i++)
     {
         const float* t = m + 16 * i + 12;
-        if (!isfinite(t[0]) || !isfinite(t[1]) || !isfinite(t[2]) || fabsf(t[0] - root[0]) > 30 || fabsf(t[1] - root[1]) > 30 || fabsf(t[2] - root[2]) > 30) continue;
-        for (int k = 0; k < 3; k++) { if (t[k] < lo[k]) lo[k] = t[k]; if (t[k] > hi[k]) hi[k] = t[k]; }
+        if (!isfinite(t[0]) || !isfinite(t[1]) || !isfinite(t[2]) || fabsf(t[0] - root[0]) > 20 || fabsf(t[1] - root[1]) > 20 || t[2] < root[2] - 2 || t[2] > root[2] + 20) continue;
+        for (int k = 0; k < 3; k++) v[k][used] = t[k] - root[k];
         used++;
     }
     if (used < 2) return 0;
-    for (int k = 0; k < 3; k++) off[k] = (lo[k] + hi[k]) / 2 - root[k];
-    if (off[2] < 0.5f) off[2] = 0.5f;
+    for (int k = 0; k < 3; k++) { qsort(v[k], used, sizeof(float), CmpF); off[k] = v[k][used / 2]; }
+    if (off[2] < 0.3f) off[2] = 0.3f;
     g_body[h].unit = unit; g_body[h].at = g_now; memcpy(g_body[h].off, off, 12);
     return 1;
 }
@@ -392,15 +394,102 @@ static int TargetPos(uint32_t e, uint64_t res, float out[3])
     return 1;
 }
 /* Overloading Mode's gun i (2-5) picks by its own priority */
+static uint32_t UnitOf(uint32_t e) { uint8_t d[24]; return Descriptor(e, d) ? Word(d + 12) : 0; }
+/* ---- line of sight (0.2.6; Koleda's, after Lemuen 0.1.6's and Alva's: the game's raycast, skipping her, leaves, bodies and the target) ---- */
+typedef uint32_t (*WorldFn)(const void*);
+typedef uint32_t (*RayFn)(uint32_t, const void*, const void*, float, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, void*, uint32_t);
+static WorldFn g_worldId;
+static RayFn g_raycast;
+static uint32_t ActorFilter(uint32_t id, uint32_t unit)
+{
+    uint32_t world = id >> 30, layout, stride, key_offset, data_offset, key, index, name = 0;
+    uintptr_t pool = exe + 0x2369B00 + 64u * ((id >> 28 & 3) + 10 * world);
+    uint8_t header[56], record[40], body[160];
+    if (!ReadAt(pool, header, 56)) return 0;
+    layout = Word(header + 28); stride = layout & 65535; key_offset = layout >> 16 & 255; data_offset = layout >> 24;
+    index = id & Word(header + 40);
+    if (index >= Word(header + 36) || !(id & Word(header + 52)) || stride < 40 || stride > 512 || key_offset + 4 > stride || data_offset + 40 > stride) return 0;
+    uintptr_t entry = (uintptr_t)Quad(header) + (uintptr_t)index * stride;
+    if (!ReadAt(entry + key_offset, &key, 4) || key != id || !ReadAt(entry + data_offset, record, 40) || Word(record + 12) != unit || !(Word(record + 16) & 1)) return 0;
+    uintptr_t physics = Pointer(exe + 0x27BA8A8 + 176u * world), bodies = physics ? Pointer(physics + 24) : 0;
+    uint32_t body_index = Word(record + 20) & 0xFFFFFF;
+    if (!bodies || body_index >= 262144 || !ReadAt(bodies + 160u * body_index, body, 160) || Word(body + 144) != id || Word(body + 148) != unit) return 0;
+    uintptr_t filters = Pointer(exe + 0x27C5E48), names;
+    uint32_t count, filter = Word(body + 108) & 127;
+    if (!filters || !ReadAt(filters + 248, &count, 4) || count > 128 || filter >= count || !(names = Pointer(filters + 256)) || !ReadAt(names + 4u * filter, &name, 4)) return 0;
+    return name;
+}
+#define FILTER_FOLIAGE 0x04A8FBF9u
+static uint32_t g_foeUnit[FOES];
+static int g_nfoeUnit;
+static double g_foeUnitAt = -1;
+static int FoeUnit(uint32_t u)
+{
+    if (g_now - g_foeUnitAt > 0.25 || g_foeUnitAt < 0)
+    {
+        g_foeUnitAt = g_now;
+        g_nfoeUnit = 0;
+        for (int k = 0; k < FOES; k++) if (g_foe[k]) { uint32_t fu = UnitOf(g_foe[k]); if (fu) g_foeUnit[g_nfoeUnit++] = fu; }
+    }
+    for (int i = 0; i < g_nfoeUnit; i++) if (g_foeUnit[i] == u) return 1;
+    return 0;
+}
+static int WorldId(uint32_t* id)
+{
+    if (!g_raycast || !g_worldId) return 0;
+    uintptr_t world = Pointer(game + 0x346BFA0);
+    if (!world) return 0;
+    *id = g_worldId((const void*)world);
+    return *id < 4;
+}
+/* the first wall along a ray (len + 1: clear); *hitTarget when the target's unit is met first; skip: a second unit to
+ * see through (the Sinner) */
+static float FirstWall(uint32_t id, const float from[3], const float dir[3], float len, uint32_t me, uint32_t tu, uint32_t skip, int* hitTarget)
+{
+    uint8_t hits[16 * 44];
+    memset(hits, 0, sizeof hits);
+    uint32_t n = g_raycast(id, from, dir, len, 2, 1, 0, 0x80000009u, me, hits, 16);
+    if (n > 16) n = 16;
+    float best = len + 1;
+    int target = 0;
+    for (uint32_t i = 0; i < n; i++)
+    {
+        float d;
+        memcpy(&d, hits + 44u * i + 24, 4);
+        uint32_t hu = Word(hits + 44u * i + 28);
+        if (!isfinite(d) || d < 1.2f || d >= best || (hu && (hu == me || hu == skip))) continue;
+        if (hu && tu && hu == tu) { best = d; target = 1; continue; }
+        uint32_t filt = ActorFilter(Word(hits + 44u * i + 32), hu);
+        if (filt == FILTER_FOLIAGE || (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u || FoeUnit(hu)))) continue;
+        best = d; target = 0;
+    }
+    if (hitTarget) *hitTarget = target;
+    return best;
+}
+/* a clear shot from a gun to a target (no wall between; its own body or another enemy's does not count) */
+static int ClearShot(const float from[3], const float q[3], uint32_t target)
+{
+    uint32_t id;
+    if (!WorldId(&id) || !QueryIdle()) return 1;
+    float d[3] = {q[0] - from[0], q[1] - from[1], q[2] - from[2]};
+    float n = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (!(n > 1.5f)) return 1;
+    for (int k = 0; k < 3; k++) d[k] /= n;
+    int hit = 0;
+    float w = FirstWall(id, from, d, n, UnitOf(atomic_load(&g_avatar)), UnitOf(target), 0, &hit);
+    return hit || w > n - 1.0f;
+}
 static uint32_t Pick(int i, float at[3])
 {
-    float me[3], q[3];
+    float me[3], q[3], from[3];
     if (!PlayerPose(me, NULL)) return 0;
+    if (!GunPos(i, from)) memcpy(from, me, 12);
     int prio = i - 2;
     uint32_t threat = atomic_load(&g_threat);
     int threatFresh = threat && GetTickCount64() - atomic_load(&g_threatMs) < 10000;
-    uint32_t best = 0;
-    double score = -1e30;
+    /* 0.2.6: the candidates by score, then the best one with a clear shot from the gun (the first 5 tried) */
+    struct { uint32_t e; double s; float q[3]; } c[48];
+    int nc = 0;
     for (int k = 0; k < FOES; k++)
     {
         uint32_t e = g_foe[k];
@@ -408,13 +497,19 @@ static uint32_t Pick(int i, float at[3])
         if (!e || !TargetPos(e, g_foeRes[k], q) || !Living(e, &hp)) continue;
         float d2 = Dist2(me, q);
         if (d2 > s_s3Range * s_s3Range) continue;
-        double s = -d2;                                                   /* 0: the nearest */
-        if (prio == 1) s = ArmourOf(g_foeRes[k]) * 1e6 - d2;              /* 1: the most armour, then the nearest */
-        else if (prio == 2) s = (threatFresh && e == threat ? 1e9 : 0) - d2;   /* 2: her attacker, else the nearest */
-        else if (prio == 3) s = -(double)hp * 1e4 - d2;                   /* 3: the least health */
-        if (s > score) { score = s; best = e; memcpy(at, q, 12); }
+        double sc = -d2;                                                   /* 0: the nearest */
+        if (prio == 1) sc = ArmourOf(g_foeRes[k]) * 1e6 - d2;              /* 1: the most armour, then the nearest */
+        else if (prio == 2) sc = (threatFresh && e == threat ? 1e9 : 0) - d2;   /* 2: her attacker, else the nearest */
+        else if (prio == 3) sc = -(double)hp * 1e4 - d2;                   /* 3: the least health */
+        int j;
+        if (nc == 48) { if (sc <= c[47].s) continue; j = 47; }
+        else j = nc++;
+        while (j > 0 && c[j - 1].s < sc) { c[j] = c[j - 1]; j--; }
+        c[j].e = e; c[j].s = sc; memcpy(c[j].q, q, 12);
     }
-    return best;
+    for (int j = 0; j < nc && j < 5; j++)
+        if (ClearShot(from, c[j].q, c[j].e)) { memcpy(at, c[j].q, 12); return c[j].e; }
+    return 0;
 }
 static int FoePos(uint32_t e, float out[3])
 {
@@ -778,6 +873,14 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     if (!g || !x || gameSize != 74727424u || exeSize != 60719104u) { Log("REFUSED: the game's modules are not build " BUILD "'s: her kit stays off"); return; }
     game = g;
     exe = x;
+    if (hf->code_matches(exe + 0x79F860, "33 c0 4c 8d 05 c7 b2 01 02 0f 1f 80 00 00 00 00 49 39 0c c0 74 0c ff c0 83 f8 04 75 f3") &&
+        hf->code_matches(exe + 0x7F4590, "48 8b c4 f3 0f 11 58 20 89 48 08 55 53 56 57 41 54 41 55 41 56 41 57 48"))
+    {
+        g_worldId = (WorldFn)(exe + 0x79F860);
+        g_raycast = (RayFn)(exe + 0x7F4590);
+        Log("line of sight ready (the game's raycast): her guns pick only what they can hit");
+    }
+    else Log("line of sight off: the raycast is not the reviewed code");
     HitsInstall("own-blast guard");
     g_staminaOk = hf->code_matches(game + 0xA50E2D, "f3 42 0f 11 8c 11 54 78 54 00");
 }
