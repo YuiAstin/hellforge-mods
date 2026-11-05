@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.14"
+#define VERSION "0.1.15"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -1276,6 +1276,19 @@ static const GunProfile* Profile(int gear)
     memset(&v, 0, sizeof v);
     if (hf->get_live && hf->get_live(self, (HfRef)g->round, &pel, &v) && v.base.number >= 1 && v.base.number <= 32) g->pellets = (uint32_t)v.base.number;
     if (g->every < 0.05f) g->every = 0.05f;
+    if (gear == 3)
+    {
+        /* 0.1.15: what the rocket arm really fires: a projectile entity per shot (a missile), or the row itself */
+        HfField pe = HF_FIELD(ProjectileWeapon, projectile_entity), pr = HF_FIELD(ProjectileWeapon, projectile);
+        HfField vel = HF_FIELD(ProjectileSettings, velocity);
+        HfLiveValue a, b2, c;
+        memset(&a, 0, sizeof a); memset(&b2, 0, sizeof b2); memset(&c, 0, sizeof c);
+        int okA = hf->get_live && hf->get_live(self, UINT64_C(0x824B7E0C4C879EB5), &pe, &a);
+        int okB = hf->get_live && hf->get_live(self, UINT64_C(0x824B7E0C4C879EB5), &pr, &b2);
+        int okC = hf->get_live && hf->get_live(self, (HfRef)g->round, &vel, &c);
+        Log("the rocket arm: its projectile %s %.0f, its projectile entity %s %.0f (non-zero: each shot is a missile entity, not the row); "
+            "row %u velocity %s %.0f m/s", okB ? "=" : "unread", b2.base.number, okA ? "=" : "unread", a.base.number, g->round, okC ? "=" : "unread", c.base.number);
+    }
     Log("the Sinner's %s: round %u, one every %.3f s, %u pellet(s) a shot", gear == 3 ? "rockets" : kGear[gear], g->round, (double)g->every, g->pellets);
     return g;
 }
@@ -1340,6 +1353,18 @@ static int ProjBudget(void)
 static int g_shootRocket;   /* 0.1.3: this shot is the left arm's rocket */
 static double g_rocketNext;
 static unsigned g_rocketsFired;
+static double g_rocketAt = -100;
+static float g_rocketFrom[3];
+static void OnBoom(HfMod* mod, const HfEventInfo* info, void* user)
+{
+    const HfExplosionEvent* x = (const HfExplosionEvent*)info;
+    static unsigned told;
+    if (g_now - g_rocketAt > 3 || told >= 20) return;
+    float d = sqrtf(Dist2(x->position, g_rocketFrom));
+    if (d > 80) return;
+    told++;
+    Log("explosion row %u %.1f m from the last rocket's start, %.2f s after it (from entity %u, owner %u)", x->type, d, g_now - g_rocketAt, x->source, x->owner);
+}
 static int SinnerShoot(int arm, uint32_t target, const float at[3])
 {
     float p[3], m[16], from[3], d[3];
@@ -1434,7 +1459,7 @@ static void FireFrame(void)
     if (g_gear == GEAR_PLUS && g_round[4] && g_now >= g_rocketNext)
     {
         g_shootRocket = 1;
-        if (SinnerShoot(0, t, at)) { g_rocketNext = g_now + (s_gunEvery > 0 ? s_gunEvery * 2 : Profile(3)->every); if (g_rocketsFired++ < 3) Log("the Sinner fires a rocket (projectile %u) at entity %u", g_round[4], t); }
+        if (SinnerShoot(0, t, at)) { g_rocketNext = g_now + (s_gunEvery > 0 ? s_gunEvery * 2 : Profile(3)->every); g_rocketAt = g_now; SinPos(g_rocketFrom); if (g_rocketsFired++ < 3) Log("the Sinner fires a rocket (projectile %u) at entity %u", g_round[4], t); }
         g_shootRocket = 0;
     }
     g_arm = 1;
@@ -2037,7 +2062,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
              VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_sharePct);
     if (s_badKey) api->log(mod, "koleda.ini: a key could not be read (bits %d: s1, s2, s3); its default stays", s_badKey);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
-    int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
+    int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) && api->subscribe(mod, HF_ON_EXPLOSION, OnBoom, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
              api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_PLAYER_DOWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) &&
              api->on_game_thread(mod, Tick, NULL);
