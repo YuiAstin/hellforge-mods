@@ -7,8 +7,10 @@
  *     copies of them) a shield of shield_amount; shields stack with no cap and soak hits before their health
  *     (kitbase/kb_allies.h).
  *   Freezing Touch (passive): her hits and interceptions build Confectance (at most conf_max); her hits chill enemies
- *     (the flamer slow); a fully chilled enemy freezes (a stun) for frozen_seconds and takes shatter_mult times her
- *     damage while frozen. Each skill she uses adds Battle Prep: at prep_max, the skill with the longest cooldown left
+ *     (the flamer slow); a fully chilled enemy freezes (a stun) for frozen_seconds. A frozen enemy takes no damage
+ *     except from an explosion (not her own EMS bursts): that one hit deals shatter_mult times and ends the freeze
+ *     (0.2.0). Her snow fields (Frosted Echo's nitrogen field, and a small one where each of its bursts lands) freeze
+ *     whoever stands in them after field_freeze_seconds, divided by how many fields overlap there. Each skill she uses adds Battle Prep: at prep_max, the skill with the longest cooldown left
  *     is ready again.
  *   Snow Wolf's Heart (key_s1, default Z): Covering Mode for s1_seconds: an enemy that hits an ally within s1_range m of
  *     her gets an interception shot (projectile s1_round) from her, at most one every s1_every s; each one +1
@@ -35,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.5"
+#define VERSION "0.2.0"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her chill bursts come often */
@@ -56,8 +58,9 @@ static float s_shieldAmount = 500, s_shieldRange = 30, s_shieldEvery = 20;
 static int s_shieldOnCast = 1;
 static int s_confMax = 10, s_prepMax = 3;
 static float s_confEvery = 0.3f;
-static float s_chillHit = 10, s_chillBurst = 25, s_chillS3 = 20, s_chillField = 6, s_chillShot = 15;
-static float s_frozenSeconds = 4, s_shatterMult = 1.5f, s_stunBuildup = 200, s_slowBuildup = 60;
+static float s_chillHit = 10, s_chillBurst = 25, s_chillS3 = 20, s_chillShot = 15;
+static float s_fieldFreeze = 3, s_burstFieldRadius = 4, s_burstFieldSeconds = 6;
+static float s_frozenSeconds = 4, s_shatterMult = 8, s_stunBuildup = 200, s_slowBuildup = 60;
 static float s_s1Cd = 25, s_s1Seconds = 12, s_s1Range = 30, s_s1Reach = 150, s_s1Every = 0.4f;
 static int s_s1Round = 305;
 static float s_s2Cd = 18, s_s2Every = 0.25f, s_s2Spread = 3, s_s2FieldSeconds = 12, s_s2FieldRadius = 8, s_s2Cone = 10, s_s2Range = 150;
@@ -77,8 +80,9 @@ static const KbSetting kSettings[] = {
     KB_I("shield_on_cast", s_shieldOnCast, 0, 1),
     KB_I("conf_max", s_confMax, 1, 50), KB_F("conf_every", s_confEvery, 0, 10), KB_I("prep_max", s_prepMax, 0, 20),
     KB_F("chill_hit", s_chillHit, 0, 100), KB_F("chill_shot", s_chillShot, 0, 100), KB_F("chill_burst", s_chillBurst, 0, 100),
-    KB_F("chill_s3", s_chillS3, 0, 100), KB_F("chill_field", s_chillField, 0, 100),
-    KB_F("frozen_seconds", s_frozenSeconds, 0, 60), KB_F("shatter_mult", s_shatterMult, 1, 10), KB_F("stun_buildup", s_stunBuildup, 0, 1000),
+    KB_F("chill_s3", s_chillS3, 0, 100), KB_F("field_freeze_seconds", s_fieldFreeze, 0.1, 60), KB_F("burst_field_radius", s_burstFieldRadius, 0, 30),
+    KB_F("burst_field_seconds", s_burstFieldSeconds, 0, 60),
+    KB_F("frozen_seconds", s_frozenSeconds, 0, 60), KB_F("shatter_mult", s_shatterMult, 1, 50), KB_F("stun_buildup", s_stunBuildup, 0, 1000),
     KB_F("slow_buildup", s_slowBuildup, 0, 1000),
     KB_F("s1_cooldown", s_s1Cd, 0, 600), KB_F("s1_seconds", s_s1Seconds, 1, 120), KB_F("s1_range", s_s1Range, 1, 500),
     KB_F("s1_reach", s_s1Reach, 10, 1000), KB_F("s1_every", s_s1Every, 0.05, 10), KB_I("s1_round", s_s1Round, 1, 100000),
@@ -110,9 +114,12 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; gives Battle Prep: at prep_max the skill with the longest cooldown left is ready again (0: off).\n"
                "conf_max = %d\nconf_every = %g\nprep_max = %d\n"
                "; Chill (out of 100) from her shots, interception shots, EMS bursts, Nix Requiem rounds and the nitrogen field (each\n"
-               "; half second); every chill slows (slow_buildup). At 100 an enemy freezes (a stun, stun_buildup) for frozen_seconds\n"
-               "; and takes shatter_mult times her damage while frozen.\n"
-               "chill_hit = %g\nchill_shot = %g\nchill_burst = %g\nchill_s3 = %g\nchill_field = %g\n"
+               "; half second); every chill slows (slow_buildup). At 100 an enemy freezes (a stun, stun_buildup) for frozen_seconds.\n"
+               "; A frozen enemy takes no damage except from an explosion (not her EMS bursts): that hit deals shatter_mult times\n"
+               "; its damage, once, and the enemy thaws. Snow fields (Frosted Echo's nitrogen field, and one of burst_field_radius m\n"
+               "; for burst_field_seconds where each of its bursts lands) freeze an enemy standing in them in field_freeze_seconds,\n"
+               "; divided by how many fields overlap there.\n"
+               "chill_hit = %g\nchill_shot = %g\nchill_burst = %g\nchill_s3 = %g\nfield_freeze_seconds = %g\nburst_field_radius = %g\nburst_field_seconds = %g\n"
                "frozen_seconds = %g\nshatter_mult = %g\nstun_buildup = %g\nslow_buildup = %g\n"
                "; chill_fx 1: every chill on an enemy sets off a burst on it (chill_fx_explosion, 150: the EMS mortar's; it stuns too),\n"
                "; at most one per enemy each chill_fx_every s and chill_fx_rate a second in all. Her bursts spare her allies.\n"
@@ -143,7 +150,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "hp_mult = 1.5\nstamina_mult = 2\nhellbomb_on_exhaustion = 1\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_shieldAmount, (double)s_shieldRange, (double)s_shieldEvery,
             s_shieldOnCast, s_confMax, (double)s_confEvery, s_prepMax, (double)s_chillHit, (double)s_chillShot, (double)s_chillBurst,
-            (double)s_chillS3, (double)s_chillField, (double)s_frozenSeconds, (double)s_shatterMult, (double)s_stunBuildup, (double)s_slowBuildup, s_chillFx, s_fxExplosion, (double)s_fxEvery, (double)s_fxRate, s_emsShell, (double)s_emsShellHeight,
+            (double)s_chillS3, (double)s_fieldFreeze, (double)s_burstFieldRadius, (double)s_burstFieldSeconds, (double)s_frozenSeconds, (double)s_shatterMult, (double)s_stunBuildup, (double)s_slowBuildup, s_chillFx, s_fxExplosion, (double)s_fxEvery, (double)s_fxRate, s_emsShell, (double)s_emsShellHeight,
             s_allyGuard, s_emsImmune, s_emsSt[0], s_emsSt[1], s_emsSt[2], s_emsSt[3], s_emsBoom[0], s_emsBoom[1],
             (double)s_s1Cd, (double)s_s1Seconds, (double)s_s1Range, (double)s_s1Reach, (double)s_s1Every, s_s1Round, (double)s_s2Cd,
             (double)s_s2Every, (double)s_s2Spread, (double)s_s2FieldSeconds, (double)s_s2FieldRadius, (double)s_s2Cone, (double)s_s2Range,
@@ -471,7 +478,7 @@ static void Chill(uint32_t e, float amount, const char* why)
     Cold* c = ColdOf(e, 1);
     c->at = g_now;
     Status(e, HF_STATUS_FLAMER_SLOWED, s_slowBuildup, "chill (slow)");
-    if (c->frozenUntil > g_now) { ChillFx(c, e); return; }
+    if (c->frozenUntil > g_now) return;   /* (0.2.0: frozen is still: no bursts on it) */
     c->chill += amount;
     if (c->chill >= 100) Freeze(e, why);
     ChillFx(c, e);
@@ -657,7 +664,20 @@ static float g_echoAt[3];
 static uint32_t g_echoTarget;
 static int g_echoLeft;
 static double g_echoNext, g_fieldUntil, g_fieldTick;
-static float g_field[3];
+/* 0.2.0: snow fields: Frosted Echo's nitrogen field and one where each of its bursts lands */
+#define FIELDS 24
+typedef struct Field { float p[3], r; double until; } Field;
+static Field g_fields[FIELDS];
+static void AddField(const float p[3], float r, float seconds)
+{
+    if (r <= 0 || seconds <= 0) return;
+    Field* f = &g_fields[0];
+    for (int i = 0; i < FIELDS; i++) { if (g_fields[i].until < f->until) f = &g_fields[i]; }
+    memcpy(f->p, p, 12);
+    f->r = r;
+    f->until = g_now + seconds;
+    if (f->until > g_fieldUntil) g_fieldUntil = f->until;
+}
 static void FrostedEcho(void)
 {
     if (g_now < g_cd[1]) return;
@@ -671,8 +691,7 @@ static void FrostedEcho(void)
     g_echoTarget = target;
     g_echoLeft = n;
     g_echoNext = g_now;
-    memcpy(g_field, at, 12);
-    g_fieldUntil = g_now + s_s2FieldSeconds;
+    AddField(at, s_s2FieldRadius, s_s2FieldSeconds);
     g_fieldTick = g_now;
     Log("Frosted Echo: %d EMS bursts on %s, and a nitrogen field for %.0f s", n, target ? "her target" : "where she aims", (double)s_s2FieldSeconds);
     Cast(1);
@@ -691,6 +710,7 @@ static void EchoFrame(void)
         int res = EmsBurst(EmsRow(), p);
         if (res == HF_ACT_WAITING) { g_echoNext = g_now + 0.1; return; }
         Act("an EMS burst", res);
+        AddField(p, s_burstFieldRadius, s_burstFieldSeconds);
         g_bursts++;
         g_echoLeft--;
         g_echoNext = g_now + s_s2Every;
@@ -701,24 +721,33 @@ static void EchoFrame(void)
         }
     }
 }
+static unsigned g_fieldFreezes;
 static void FieldFrame(void)
 {
     if (g_now >= g_fieldUntil || g_now < g_fieldTick) return;
-    g_fieldTick = g_now + 0.5;
-    float r2 = s_s2FieldRadius * s_s2FieldRadius;
+    const double tick = 0.25;
+    g_fieldTick = g_now + tick;
     for (int j = 0; j < FOES; j++)
     {
         float q[3];
         if (!g_foe[j] || !TargetPos(g_foe[j], g_foeRes[j], q)) continue;
-        float dx = q[0] - g_field[0], dy = q[1] - g_field[1];
-        if (dx * dx + dy * dy <= r2 && fabsf(q[2] - g_field[2]) <= 4) Chill(g_foe[j], s_chillField, "the nitrogen field");
+        int n = 0;
+        for (int i = 0; i < FIELDS; i++)
+        {
+            const Field* f = &g_fields[i];
+            if (f->until <= g_now) continue;
+            float dx = q[0] - f->p[0], dy = q[1] - f->p[1];
+            if (dx * dx + dy * dy <= f->r * f->r && fabsf(q[2] - f->p[2]) <= 4) n++;
+        }
+        /* 100 chill in field_freeze_seconds / n */
+        if (n) Chill(g_foe[j], (float)(100.0 * tick * n / s_fieldFreeze) + 0.01f, n > 1 ? "overlapping snow fields" : "a snow field");
     }
 }
 
 /* ---- Nix Requiem ---------------------------------------------------------------------------------------------------- */
 static uint32_t g_nixTarget;
-static int g_nixLeft;
-static double g_nixNext;
+static int g_nixLeft, g_nixFreeze;
+static double g_nixNext, g_nixFreezeAt;
 static void NixRequiem(void)
 {
     if (g_now < g_cd[2]) return;
@@ -737,8 +766,8 @@ static void NixRequiem(void)
     g_nixTarget = target;
     g_nixLeft = points > 0 ? points : 1;
     g_nixNext = g_now;
-    Log("Nix Requiem: %d heavy rounds on entity %u (%d Confectance)%s", g_nixLeft, target, points, points >= s_s3FreezeAt ? ": frozen at once" : "");
-    if (points >= s_s3FreezeAt) Freeze(target, "Nix Requiem");
+    Log("Nix Requiem: %d heavy rounds on entity %u (%d Confectance)%s", g_nixLeft, target, points, points >= s_s3FreezeAt ? ": frozen after the last round" : "");
+    g_nixFreeze = points >= s_s3FreezeAt;   /* 0.2.0: after its rounds (a frozen enemy would shrug them off) */
     Cast(2);
 }
 static void NixFrame(void)
@@ -752,7 +781,13 @@ static void NixFrame(void)
         if (r < 0) { g_nixNext = g_now + 0.1; return; }
         g_nixLeft--;
         g_nixNext = g_now + s_s3Every;
-        if (r > 0) { g_rounds++; Chill(g_nixTarget, s_chillS3, "Nix Requiem"); }
+        if (r > 0) { g_rounds++; if (g_nixLeft > 0 || !g_nixFreeze) Chill(g_nixTarget, s_chillS3, "Nix Requiem"); }
+        if (g_nixLeft == 0 && g_nixFreeze) { g_nixFreeze = 0; g_nixFreezeAt = g_now + 0.35; }
+    }
+    if (g_nixFreezeAt > 0 && g_now >= g_nixFreezeAt)
+    {
+        g_nixFreezeAt = 0;
+        if (FoeIndex(g_nixTarget) >= 0 && Alive(g_nixTarget)) Freeze(g_nixTarget, "Nix Requiem");
     }
 }
 
@@ -854,7 +889,33 @@ static void StatusInstall(void)
 }
 
 /* ---- the damage event ------------------------------------------------------------------------------------------- */
-static unsigned g_spared;
+static unsigned g_spared, g_shrugged;
+/* one of her EMS bursts here just now (3 m, 1 s): its blast neither hurts a frozen enemy nor shatters it */
+static int OwnBurstAt(const float p[3])
+{
+    unsigned long long now = GetTickCount64();
+    for (int i = 0; i < KB_OWN_SLOTS; i++)
+    {
+        unsigned long long at = atomic_load(&g_ownMs[i]);
+        if (at && now - at <= 1000 && Dist2(p, g_ownPos[i]) <= 3.0f * 3.0f) return 1;
+    }
+    return 0;
+}
+static void Shatter(HfDamageEvent* d)
+{
+    int before = d->amount;
+    ScaleDamage(d, s_shatterMult);
+    Cold* c = ColdOf(d->target, 0);
+    if (c) { c->frozenUntil = 0; c->chill = 0; }
+    g_shatters++;
+    g_shatterBonus += d->amount - before;
+    unsigned q = g_shSeq + 1;
+    float* r = g_shRing[q % SHATTER_RING];
+    r[0] = d->position[0]; r[1] = d->position[1]; r[2] = d->position[2]; r[3] = (float)d->amount; r[4] = (float)q;
+    g_shSeq = q;
+    static unsigned told;
+    if (told++ < 20) Log("SHATTER: entity %u, an explosion's hit (owner %u) %d -> %d; thawed", d->target, d->owner, before, d->amount);
+}
 static void DamageSeen(HfDamagePreEvent* e, HfDamageEvent* d)
 {
     /* her EMS bursts spare her allies */
@@ -864,6 +925,12 @@ static void DamageSeen(HfDamagePreEvent* e, HfDamageEvent* d)
         if (g_spared++ < 10) Log("her burst spared an ally (entity %u, %d damage)", d->target, d->amount);
         return;
     }
+    /* 0.2.0: frozen: no damage but an explosion's (not her EMS bursts'), which shatters it once and thaws it */
+    if (d->amount > 0 && FoeIndex(d->target) >= 0 && Frozen(d->target))
+    {
+        if (d->kind == 4 && !OwnBurstAt(d->position)) Shatter(d);
+        else { e->cancel = 1; g_shrugged++; return; }
+    }
     Threat(d);
     AllyAbsorb(e, d);
 }
@@ -871,21 +938,6 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     (void)e; (void)me;
     if (d->amount <= 0 || !MineHit(d) || FoeIndex(d->target) < 0) return;
-    if (Frozen(d->target))   /* shatter */
-    {
-        int before = d->amount;
-        ScaleDamage(d, s_shatterMult);
-        g_shatters++;
-        g_shatterBonus += d->amount - before;
-        {
-            unsigned q = g_shSeq + 1;
-            float* r = g_shRing[q % SHATTER_RING];
-            r[0] = d->position[0]; r[1] = d->position[1]; r[2] = d->position[2]; r[3] = (float)d->amount; r[4] = (float)q;
-            g_shSeq = q;
-        }
-        static unsigned told;
-        if (told++ < 20) Log("shatter: entity %u frozen, her hit (kind %u) %d -> %d", d->target, d->kind, before, d->amount);
-    }
     if (IsShot(d))
     {
         NoteTarget(d);
@@ -942,8 +994,13 @@ static void Reset(const char* why)
             "%u bursts, %u heavy rounds, %u freezes, %u Battle Prep refunds, %u chill bursts (%u held back), attackers %u named / %u nearest, "
             "statuses refused %u on allies / %u on her (%u learned)",
             why, g_casts[0], g_casts[1], g_casts[2], g_grants, g_allyHits, g_allyAbsorbed, g_allyBroke, g_intercepts, g_bursts, g_rounds, g_freezes, g_refunds, g_fx, g_fxSkipped, g_threatNamed, g_threatNear, g_refusedAlly, g_refusedHer, g_learned);
-    if (g_shatters) Log("%s: %u shatter hits (+%.0f damage in all, x%.2f)", why, g_shatters, g_shatterBonus, (double)s_shatterMult);
+    if (g_shatters || g_shrugged || g_fieldFreezes)
+        Log("%s: %u shatters (+%.0f damage in all, x%.1f), %u hits on frozen enemies shrugged off", why, g_shatters, g_shatterBonus, (double)s_shatterMult, g_shrugged);
     g_shatters = 0;
+    g_shrugged = 0;
+    memset(g_fields, 0, sizeof g_fields);
+    g_nixFreeze = 0;
+    g_nixFreezeAt = 0;
     g_shatterBonus = 0;
     Body(start);
     if (start && s_hellbomb && s_hellbombRow == 125 && !hf->load_package(self, UINT64_C(0x346D785D6CA13FF4))) Log("the Hellbomb's package could not be loaded ahead");
