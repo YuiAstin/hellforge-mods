@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.1"
+#define VERSION "0.1.2"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her chill bursts come often */
@@ -66,6 +66,7 @@ static float s_s3Cd = 40, s_s3Every = 0.2f, s_s3Cone = 10, s_s3Range = 200;
 static int s_s3Round = 226, s_s3FreezeAt = 5;
 static int s_sight = 1;
 static int s_chillFx = 1, s_fxExplosion = 150;
+static int s_emsImmune = 1, s_allyGuard = 1, s_emsSt[4] = {37, 38, 39, 0}, s_emsBoom[2] = {0, 0};
 static float s_fxEvery = 0.4f, s_fxRate = 8;
 static float s_fpDistance = 0.45f;
 
@@ -86,6 +87,9 @@ static const KbSetting kSettings[] = {
     KB_I("s3_round", s_s3Round, 1, 100000), KB_I("s3_freeze_at", s_s3FreezeAt, 1, 50),
     KB_I("chill_fx", s_chillFx, 0, 1), KB_I("chill_fx_explosion", s_fxExplosion, 1, 100000), KB_F("chill_fx_every", s_fxEvery, 0, 10),
     KB_F("chill_fx_rate", s_fxRate, 0.5, 60),
+    KB_I("ems_immune", s_emsImmune, 0, 1), KB_I("ally_guard", s_allyGuard, 0, 1),
+    KB_I("ems_status_1", s_emsSt[0], 0, 255), KB_I("ems_status_2", s_emsSt[1], 0, 255), KB_I("ems_status_3", s_emsSt[2], 0, 255),
+    KB_I("ems_status_4", s_emsSt[3], 0, 255), KB_I("ems_explosion_1", s_emsBoom[0], 0, 100000), KB_I("ems_explosion_2", s_emsBoom[1], 0, 100000),
     KB_I("line_of_sight", s_sight, 0, 1), KB_F("first_person", s_fpDistance, 0.1, 2),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
@@ -111,6 +115,11 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; chill_fx 1: every chill on an enemy sets off a burst on it (chill_fx_explosion, 150: the EMS mortar's; it stuns too),\n"
                "; at most one per enemy each chill_fx_every s and chill_fx_rate a second in all. Her bursts spare her allies.\n"
                "chill_fx = %d\nchill_fx_explosion = %d\nchill_fx_every = %g\nchill_fx_rate = %g\n"
+               "; ally_guard 1: a status from her own blasts never lands on an ally (gas and fire from anyone still do).\n"
+               "; ems_immune 1: no EMS stun on her, from anyone: the statuses ems_status_1..4 (37-39: the stuns), and any other\n"
+               "; status that lands on her right after an EMS blast near her (EMS mortar, her bursts, ems_explosion_1..2).\n"
+               "ally_guard = %d\nems_immune = %d\nems_status_1 = %d\nems_status_2 = %d\nems_status_3 = %d\nems_status_4 = %d\n"
+               "ems_explosion_1 = %d\nems_explosion_2 = %d\n"
                "; Snow Wolf's Heart: cooldown; Covering Mode for s1_seconds: an enemy (within s1_reach m) that hits an ally within\n"
                "; s1_range m of her gets an interception shot (projectile s1_round, 305: the R-63 Diligence's), one per s1_every s.\n"
                "s1_cooldown = %g\ns1_seconds = %g\ns1_range = %g\ns1_reach = %g\ns1_every = %g\ns1_round = %d\n"
@@ -130,6 +139,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_shieldAmount, (double)s_shieldRange, (double)s_shieldEvery,
             s_shieldOnCast, s_confMax, (double)s_confEvery, s_prepMax, (double)s_chillHit, (double)s_chillShot, (double)s_chillBurst,
             (double)s_chillS3, (double)s_chillField, (double)s_frozenSeconds, (double)s_shatterMult, (double)s_stunBuildup, (double)s_slowBuildup, s_chillFx, s_fxExplosion, (double)s_fxEvery, (double)s_fxRate,
+            s_allyGuard, s_emsImmune, s_emsSt[0], s_emsSt[1], s_emsSt[2], s_emsSt[3], s_emsBoom[0], s_emsBoom[1],
             (double)s_s1Cd, (double)s_s1Seconds, (double)s_s1Range, (double)s_s1Reach, (double)s_s1Every, s_s1Round, (double)s_s2Cd,
             (double)s_s2Every, (double)s_s2Spread, (double)s_s2FieldSeconds, (double)s_s2FieldRadius, (double)s_s2Cone, (double)s_s2Range,
             s_s2Explosion, (double)s_s3Cd, (double)s_s3Every, (double)s_s3Cone, (double)s_s3Range, s_s3Round, s_s3FreezeAt, s_sight,
@@ -724,6 +734,103 @@ static void NixFrame(void)
     }
 }
 
+/* ---- status guard: the game's status build-up (game.dll+0x699E40, every status on every entity; docs/research/
+ * game-notes.md) refuses her own blasts' statuses on her allies, and EMS on her ------------------------------------- */
+typedef void (*AddStatusFn)(void*, uint32_t, uint32_t, uint32_t, float, uint32_t, uint64_t);
+static AddStatusFn original_add;
+static atomic_int g_statusHooked;
+static unsigned g_refusedAlly, g_refusedHer, g_learned;
+static uint8_t g_emsLearned[256];
+/* explosions lately (any): where, when, what row */
+#define BOOMS 32
+typedef struct Boom { float p[3]; uint32_t type; unsigned long long ms; } Boom;
+static Boom g_boom[BOOMS];
+static atomic_uint g_boomNext;
+static int EmsBlast(uint32_t t)
+{
+    return t && (t == 150u || t == (uint32_t)s_fxExplosion || t == (uint32_t)s_s2Explosion || t == (uint32_t)s_emsBoom[0] || t == (uint32_t)s_emsBoom[1]);
+}
+static void OnExplosion(HfMod* mod, const HfEventInfo* info, void* user)
+{
+    const HfExplosionEvent* x = (const HfExplosionEvent*)info;
+    unsigned i = atomic_fetch_add(&g_boomNext, 1) % BOOMS;
+    g_boom[i].ms = 0;
+    memcpy(g_boom[i].p, x->position, 12);
+    g_boom[i].type = x->type;
+    g_boom[i].ms = GetTickCount64();
+}
+/* the latest explosion within r m of p in the last ms (ems: EMS ones only): its row, 0 none */
+static uint32_t BoomNear(const float p[3], float r, unsigned long long ms, int ems)
+{
+    unsigned long long now = GetTickCount64(), best = 0;
+    uint32_t type = 0;
+    for (int i = 0; i < BOOMS; i++)
+    {
+        unsigned long long at = g_boom[i].ms;
+        if (!at || now - at > ms || at < best || Dist2(p, g_boom[i].p) > r * r || (ems && !EmsBlast(g_boom[i].type))) continue;
+        best = at; type = g_boom[i].type;
+    }
+    return type;
+}
+static int OwnWithin(const float p[3], unsigned long long ms, float r)
+{
+    unsigned long long now = GetTickCount64();
+    for (int i = 0; i < KB_OWN_SLOTS; i++)
+    {
+        unsigned long long at = atomic_load(&g_ownMs[i]);
+        if (at && now - at <= ms && Dist2(p, g_ownPos[i]) <= r * r) return 1;
+    }
+    return 0;
+}
+/* gas and fire: friendly fire that still lands on allies */
+static int PassStatus(uint32_t st) { return st == 5 || st == 6 || st == 32 || (st >= 42 && st <= 45); }
+static int EmsStatus(uint32_t st)
+{
+    for (int i = 0; i < 4; i++) if (s_emsSt[i] && st == (uint32_t)s_emsSt[i]) return 1;
+    return st < 256 && g_emsLearned[st];
+}
+static int Refuse(uint32_t e, uint32_t st, float buildup, uint32_t from)
+{
+    uint32_t me = atomic_load(&g_avatar);
+    if (!g_inMission || !kb_kit_on || !e) return 0;
+    if (e == me)
+    {
+        float p[3];
+        int have = PlayerPose(p, NULL);
+        uint32_t nearBoom = have ? BoomNear(p, 20, 700, 0) : 0;
+        static unsigned told;
+        if (told++ < 40) Log("status %u on her (build-up %.1f, from %u; the latest explosion near her: %u)", st, (double)buildup, from, nearBoom);
+        if (!s_emsImmune) return 0;
+        if (EmsStatus(st)) { g_refusedHer++; return 1; }
+        if (have && !PassStatus(st) && BoomNear(p, 20, 700, 1))
+        {
+            if (st < 256 && !g_emsLearned[st]) { g_emsLearned[st] = 1; g_learned++; Log("EMS immunity: status %u came with an EMS blast: refused on her from now on", st); }
+            g_refusedHer++;
+            return 1;
+        }
+        return 0;
+    }
+    if (!s_allyGuard || PassStatus(st)) return 0;
+    KbAlly* a = AllyOf(e);
+    float p[3];
+    if (!a || !AllyPos(a, p) || !OwnWithin(p, 1200, 16)) return 0;
+    if (g_refusedAlly++ < 15) Log("her blast's status %u refused on an ally (entity %u, build-up %.1f)", st, e, (double)buildup);
+    return 1;
+}
+static void AddStatus(void* m, uint32_t e, uint32_t st, uint32_t r9, float buildup, uint32_t from, uint64_t z)
+{
+    if (Refuse(e, st, buildup, from)) return;
+    original_add(m, e, st, r9, buildup, from, z);
+}
+static void StatusInstall(void)
+{
+    if (!hf->code_matches(game + 0x699E40, "40 55 53 57 41 55 41 57 48 8d 6c 24 d0 48 81 ec 30 01 00 00"))
+    { Log("status guard off: game.dll+0x699E40 is not the reviewed code (allies feel her EMS; no EMS immunity)"); return; }
+    if (hf->hook(self, game + 0x699E40, (void*)AddStatus, (void**)&original_add)) { Log("status guard off: the hook could not be placed"); return; }
+    atomic_store(&g_statusHooked, 1);
+    Log("status guard ready: her blasts' statuses spare allies; EMS immunity on her (statuses %d %d %d %d)", s_emsSt[0], s_emsSt[1], s_emsSt[2], s_emsSt[3]);
+}
+
 /* ---- the damage event ------------------------------------------------------------------------------------------- */
 static unsigned g_spared;
 static void DamageSeen(HfDamagePreEvent* e, HfDamageEvent* d)
@@ -796,8 +903,9 @@ static void Reset(const char* why)
     if (start) KitDecide();
     if (g_casts[0] || g_casts[1] || g_casts[2])
         Log("%s: casts %u / %u / %u, %u barriers, %u hits on allies shielded (%.0f damage kept off, %u shields broke), %u interceptions, "
-            "%u bursts, %u heavy rounds, %u freezes, %u Battle Prep refunds, %u chill bursts (%u held back), attackers %u named / %u nearest",
-            why, g_casts[0], g_casts[1], g_casts[2], g_grants, g_allyHits, g_allyAbsorbed, g_allyBroke, g_intercepts, g_bursts, g_rounds, g_freezes, g_refunds, g_fx, g_fxSkipped, g_threatNamed, g_threatNear);
+            "%u bursts, %u heavy rounds, %u freezes, %u Battle Prep refunds, %u chill bursts (%u held back), attackers %u named / %u nearest, "
+            "statuses refused %u on allies / %u on her (%u learned)",
+            why, g_casts[0], g_casts[1], g_casts[2], g_grants, g_allyHits, g_allyAbsorbed, g_allyBroke, g_intercepts, g_bursts, g_rounds, g_freezes, g_refunds, g_fx, g_fxSkipped, g_threatNamed, g_threatNear, g_refusedAlly, g_refusedHer, g_learned);
     Body(start);
     if (start && s_hellbomb && s_hellbombRow == 125 && !hf->load_package(self, UINT64_C(0x346D785D6CA13FF4))) Log("the Hellbomb's package could not be loaded ahead");
     if (!start) AllyClear();   /* (allies spawn before the mission's first frame: kept at its start) */
@@ -808,6 +916,7 @@ static void Reset(const char* why)
     memset(g_cold, 0, sizeof g_cold);
     g_grants = g_intercepts = g_bursts = g_rounds = g_freezes = g_refunds = g_spared = 0;
     g_fx = g_fxSkipped = g_threatNamed = g_threatNear = g_threatSeen = 0;
+    g_refusedAlly = g_refusedHer = 0;
     g_s1Until = 0;
     g_conf = g_prep = 0;
     g_echoLeft = g_nixLeft = 0;
@@ -825,6 +934,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     game = g;
     exe = x;
     HitsInstall("own-blast guard");
+    StatusInstall();
     if (hf->code_matches(exe + 0x79F860, "33 c0 4c 8d 05 c7 b2 01 02 0f 1f 80 00 00 00 00 49 39 0c c0 74 0c ff c0 83 f8 04 75 f3") &&
         hf->code_matches(exe + 0x7F4590, "48 8b c4 f3 0f 11 58 20 89 48 08 55 53 56 57 41 54 41 55 41 56 41 57 48"))
     {
@@ -1019,7 +1129,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (s_badKey) api->log(mod, "alva.ini: a key could not be read (bits %d: s1, s2, s3); its default stays", s_badKey);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
-             api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
+             api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_EXPLOSION, OnExplosion, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_PLAYER_DOWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) &&
              api->on_game_thread(mod, Tick, NULL);
     if (!ok) api->log(mod, "events or the game thread are unavailable: Alva stays off");
