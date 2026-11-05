@@ -38,7 +38,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -686,12 +686,22 @@ static void MissionStart(void)
     memset(&g_gone, 0, sizeof g_gone);
 }
 
-/* ---- the MODS tab (Vanilla Plus Megapack's native menu, its hd2_mod_options.h): the modes, whether a kit may limit
- * them, and what runs now and why, so a player knows what is off and where to turn it back on ---------------------- */
+/* ---- the MODS tab (a menu that publishes hd2_mod_options.h, HD2_MOD_OPTIONS_v1: giblett's Vanilla Plus Megapack
+ * build): the modes, whether a kit may limit them, and what runs now and why, so a player knows what is off and where
+ * to turn it back on. 0.2.1: the public Vanilla Plus Megapack (0.2.0) does not publish it; its own menu API
+ * (vpm_mom_api, include/vpm_mom.h) has no public header yet, so it is only named in the log, never called. Without a
+ * menu the log says so once, after 30 s; rows the menu refuses are named and asked for again a few times. ---------- */
 #define OPT_MOD "Lost Contact"
+#define OPT_ROWS 5
+#define OPT_TRIES 4          /* registrations of refused rows, the first included */
+#define OPT_RETRY 10.0       /* seconds between them */
 static const char* const kModes[] = {"Off", "On", "Observe (log only)"};
 static const char* const kStatus[] = {"Running", "Off (your setting)", "Off: the active kit (Character kits can limit)", "Observing"};
-static int g_optsDone;
+static int g_optsDone;       /* 1: every row is on the tab, or the tries ran out */
+static const Hd2ModOptionsApi* g_optsApi;   /* the menu the rows went to */
+static uint8_t g_rowOk[OPT_ROWS];
+static int g_optTries;
+static double g_optNextTry;
 static int g_shownStatus[2] = {-1, -1};
 static int ModeIndex(int m) { return m == 1 ? 1 : m == 2 ? 2 : 0; }
 static int StatusOf(int mode, int bit)
@@ -700,10 +710,46 @@ static int StatusOf(int mode, int bit)
     if (!(g_rules & bit)) return 2;
     return mode == 2 ? 3 : 0;
 }
+/* hd2_mod_options() with its refusals told: a menu of another process, or one whose version or size this build does
+ * not know, is logged (once per distinct value) instead of being skipped in silence */
+static const Hd2ModOptionsApi* MenuApi(void)
+{
+    char text[64];
+    DWORD n = GetEnvironmentVariableA(HD2_MOD_OPTIONS_ENV, text, sizeof text);
+    if (!n) return NULL;
+    static char told[64];
+    unsigned long pid = 0;
+    unsigned long long at = 0;
+    const char* why = NULL;
+    const Hd2ModOptionsApi* api = NULL;
+    if (n >= sizeof text || sscanf(text, "%lu:%llx", &pid, &at) != 2 || !at) why = "not \"<process id>:<address>\"";
+    else if (pid != GetCurrentProcessId()) why = "another process's";
+    else
+    {
+        api = (const Hd2ModOptionsApi*)(uintptr_t)at;
+        uint32_t head[2] = {0, 0};   /* version, size */
+        if (!RD((uintptr_t)at, head, sizeof head)) why = "its address cannot be read";
+        else if (head[0] < 1) why = "an unknown version";
+        else if (head[1] < sizeof(Hd2ModOptionsApi)) why = "a smaller table than this build's";
+        if (why && strcmp(told, text))
+        {
+            snprintf(told, sizeof told, "%s", text);
+            Log("MODS tab: a menu publishes %s but is refused: %s (version %u, size %u; this build needs version 1 or later, size %u or more)",
+                HD2_MOD_OPTIONS_ENV, why, head[0], head[1], (unsigned)sizeof(Hd2ModOptionsApi));
+        }
+        return why ? NULL : api;
+    }
+    if (strcmp(told, text))
+    {
+        snprintf(told, sizeof told, "%s", text);
+        Log("MODS tab: %s = \"%.40s\" is refused (%s)", HD2_MOD_OPTIONS_ENV, n < sizeof text ? text : "(too long)", why);
+    }
+    return NULL;
+}
 static void OptChanged(void* user, const char* id, int32_t v)
 {
     (void)user;
-    const Hd2ModOptionsApi* api = hd2_mod_options();
+    const Hd2ModOptionsApi* api = g_optsApi;
     if (!strcmp(id, "break")) { s_breakMode = v == 1 ? 1 : v == 2 ? 2 : 0; Log("MODS tab: break contact %s", ModeName(s_breakMode)); }
     else if (!strcmp(id, "patrols")) { s_patrolMode = v == 1 ? 1 : v == 2 ? 2 : 0; Log("MODS tab: patrols %s", ModeName(s_patrolMode)); }
     else if (!strcmp(id, "kits")) { s_kitRules = v ? 1 : 0; Log("MODS tab: character kits %s limit them", s_kitRules ? "may" : "may not"); KitRules(); }
@@ -712,28 +758,70 @@ static void OptChanged(void* user, const char* id, int32_t v)
     SaveChoices();
     g_shownStatus[0] = g_shownStatus[1] = -1;
 }
+/* no menu 30 s after start: one line naming what was looked for and where the settings are without it */
+static void NoMenuYet(void)
+{
+    static int told;
+    if (told || g_optsApi || g_now < 30) return;
+    told = 1;
+    HMODULE vpm = GetModuleHandleA("vanilla_plus_megapack.dll");
+    int mom = vpm && GetProcAddress(vpm, "vpm_mom_api");
+    Log("MODS tab: no menu after 30 s: looked for %s (published by giblett's Vanilla Plus Megapack build); %s. Without it: "
+        "lost-contact.ini, or %s / %s in a mission",
+        HD2_MOD_OPTIONS_ENV, !vpm ? "vanilla_plus_megapack.dll is not loaded"
+                              : mom ? "the Vanilla Plus Megapack that is loaded offers only vpm_mom_api, which this release does not use yet"
+                                    : "the Vanilla Plus Megapack that is loaded publishes neither",
+        s_keyBreak.label, s_keyPatrol.label);
+}
 static void Options(void)
 {
-    const Hd2ModOptionsApi* api = hd2_mod_options();
-    if (!api) return;
+    const Hd2ModOptionsApi* api = MenuApi();
+    if (!api) { NoMenuYet(); return; }
+    if (api != g_optsApi)
+    {
+        /* a menu for the first time, or one set up again (a reload): every row is asked for */
+        if (g_optsApi) Log("MODS tab: the menu moved (set up again); adding the rows again");
+        g_optsApi = api;
+        g_optsDone = 0; g_optTries = 0; g_optNextTry = 0;
+        memset(g_rowOk, 0, sizeof g_rowOk);
+        g_shownStatus[0] = g_shownStatus[1] = -1;
+    }
     /* (at most 400 characters: the menu refuses longer descriptions) */
     static const char* const kText =
         "Break contact: an enemy that loses sight of you stops tracking you. Patrols rerouted: a patrol sent at you walks "
         "to an outpost away from you. A character kit can turn one off while it is your active kit (Lemuen: patrols only). "
         "Turn Character kits can limit off to keep both as set here. The Now rows show what runs.";
-    if (!g_optsDone)
+    if (!g_optsDone && g_now >= g_optNextTry)
     {
-        Hd2ModOption rows[5] = {
+        Hd2ModOption rows[OPT_ROWS] = {
             {sizeof(Hd2ModOption), OPT_MOD, "break", "Break contact", kText, HD2_MOD_OPTION_CHOICE, 3, kModes, ModeIndex(s_breakMode), OptChanged, NULL},
             {sizeof(Hd2ModOption), OPT_MOD, "patrols", "Patrols rerouted", kText, HD2_MOD_OPTION_CHOICE, 3, kModes, ModeIndex(s_patrolMode), OptChanged, NULL},
             {sizeof(Hd2ModOption), OPT_MOD, "kits", "Character kits can limit", kText, HD2_MOD_OPTION_TOGGLE, 0, NULL, s_kitRules, OptChanged, NULL},
             {sizeof(Hd2ModOption), OPT_MOD, "break_now", "Break contact now", kText, HD2_MOD_OPTION_CHOICE, 4, kStatus, 0, OptChanged, NULL},
             {sizeof(Hd2ModOption), OPT_MOD, "patrols_now", "Patrols now", kText, HD2_MOD_OPTION_CHOICE, 4, kStatus, 0, OptChanged, NULL},
         };
-        int added = 0;
-        for (int k = 0; k < 5; k++) added += api->register_option(&rows[k]) != 0;
-        g_optsDone = 1;
-        Log("MODS tab: %d of 5 rows added", added);
+        int added = 0, fresh = 0;
+        char refused[96] = "";
+        for (int k = 0; k < OPT_ROWS; k++)
+        {
+            if (!g_rowOk[k] && (g_rowOk[k] = api->register_option(&rows[k]) != 0)) fresh++;
+            if (g_rowOk[k]) added++;
+            else snprintf(refused + strlen(refused), sizeof refused - strlen(refused), "%s%s", refused[0] ? ", " : "", rows[k].id);
+        }
+        g_optTries++;
+        g_optNextTry = g_now + OPT_RETRY;
+        if (fresh) g_shownStatus[0] = g_shownStatus[1] = -1;   /* a Now row added now shows its status */
+        if (added == OPT_ROWS) { g_optsDone = 1; Log("MODS tab: %d of %d rows added (menu: %s, version %u)", added, OPT_ROWS, HD2_MOD_OPTIONS_ENV, api->version); }
+        else if (g_optTries < OPT_TRIES)
+            Log("MODS tab: %d of %d rows added (menu: %s, version %u); refused: %s; asking again in %.0f s (try %d of %d)", added, OPT_ROWS,
+                HD2_MOD_OPTIONS_ENV, api->version, refused, OPT_RETRY, g_optTries, OPT_TRIES);
+        else
+        {
+            g_optsDone = 1;
+            Log("MODS tab: %d of %d rows added after %d tries (menu: %s, version %u); refused: %s (the menu may be full: 8 mods, 31 rows each). "
+                "Those settings stay in lost-contact.ini and on %s / %s", added, OPT_ROWS, g_optTries, HD2_MOD_OPTIONS_ENV, api->version, refused,
+                s_keyBreak.label, s_keyPatrol.label);
+        }
     }
     int st[2] = {StatusOf(LC_BREAK_CONTACT ? s_breakMode : 0, 1), StatusOf(s_patrolMode, 2)};
     if (st[0] != g_shownStatus[0]) { g_shownStatus[0] = st[0]; api->set(OPT_MOD, "break_now", st[0]); if (st[0] == 2) Log("break contact is off while %s is your active kit (MODS tab: Character kits can limit)", g_kitBy ? g_kitBy : "a kit"); }
