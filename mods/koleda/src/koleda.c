@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.10"
+#define VERSION "0.1.11"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -1155,6 +1155,12 @@ static void MoveFrame(double dt)
 /* ---- its fire: rounds of hers from its shoulders (Exusiai's summoned guns' way), by gear ------------------------- */
 static float g_shotAim[16][3];
 static double g_shotAimAt[16];
+/* 0.1.11: where its rounds start and where they hit, to measure the gap (the first metres where a spawned round neither
+ * shows nor hits: the Gatling Sentry's own rounds of this type show from the muzzle) */
+static float g_shotFrom[32][3];
+static double g_shotFromAt[32];
+static unsigned g_shotFromNext, g_gapHits, g_gapBins[5];
+static float g_gapMin = 1e9f;
 static unsigned g_shotAimNext;
 static double g_fireNext;
 static int g_arm;
@@ -1389,6 +1395,11 @@ static int SinnerShoot(int arm, uint32_t target, const float at[3])
     }
     unsigned slot = g_shotAimNext++ % 16;
     memcpy(g_shotAim[slot], at, 12);
+    {
+        unsigned fs = g_shotFromNext++ % 32;
+        memcpy(g_shotFrom[fs], from, 12);
+        g_shotFromAt[fs] = g_now;
+    }
     g_shotAimAt[slot] = g_now;
     return 1;
 }
@@ -1654,6 +1665,26 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     if (g_now < g_krUntil) mult *= s_krMult;
     if (mult != 1) ScaleDamage(d, mult);
     if (IsShot(d) && !SinnerShotNear(d->position)) NoteTarget(d);
+    if (SinnerShotNear(d->position) && (d->kind == 0 || d->kind == 1))
+    {
+        /* the gap: the nearest start among its rounds of the last second */
+        float best = 1e9f;
+        double age = 0;
+        for (int k = 0; k < 32; k++)
+        {
+            if (g_shotFromAt[k] <= 0 || g_now - g_shotFromAt[k] > 1.0) continue;
+            float dd = sqrtf(Dist2(d->position, g_shotFrom[k]));
+            if (dd < best) { best = dd; age = g_now - g_shotFromAt[k]; }
+        }
+        if (best < 1e8f)
+        {
+            g_gapHits++;
+            if (best < g_gapMin) g_gapMin = best;
+            g_gapBins[best < 5 ? 0 : best < 10 ? 1 : best < 20 ? 2 : best < 40 ? 3 : 4]++;
+            static unsigned told;
+            if (told++ < 10) Log("a Sinner round hit %.1f m from where it started, %.3f s after (%.0f m/s)", best, age, age > 0 ? best / age : 0.0);
+        }
+    }
 }
 /* a hit on her (the hit hook): who dealt it, for the N gear */
 static int HitTaken(const uint8_t* h, void* result, unsigned long long now)
@@ -1713,6 +1744,10 @@ static void Reset(const char* why)
             "%u health writes, %u slides, %u warps, %u push steps, %u pulls, %u hits of hers cancelled, %u path sends",
             why, g_casts[0], g_casts[1], g_casts[2], g_eyeRounds, g_volleys, g_winners, g_upGained, g_shareHits, g_shared, g_healthWrites,
             g_slides, g_warps, g_pushes, g_pulls, g_spared, g_navSends);
+    if (g_gapHits)
+        Log("%s: its rounds' hits by distance from where they started: %u under 5 m, %u 5-10, %u 10-20, %u 20-40, %u beyond (nearest %.1f m)",
+            why, g_gapBins[0], g_gapBins[1], g_gapBins[2], g_gapBins[3], g_gapBins[4], (double)g_gapMin);
+    g_gapHits = 0; memset(g_gapBins, 0, sizeof g_gapBins); g_gapMin = 1e9f;
     Body(start);
     if (start && s_hellbomb && s_hellbombRow == 125 && !hf->load_package(self, UINT64_C(0x346D785D6CA13FF4))) Log("the Hellbomb's package could not be loaded ahead");
     g_boomPending = 0;
