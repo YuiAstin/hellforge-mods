@@ -10,7 +10,9 @@
  *           the seat node, the peers told, one seater update
  *   Insert  the FRV gun: its muzzle node hash (ProjectileWeapon +0x21C), its nodes' positions from its root, the one
  *           furthest along its barrel. Shift+Insert turns one of its nodes 45 degrees (the next node each press) and logs
- *           whether it held half a second later (can the mod aim the gun with nobody in it?)
+ *           whether it held half a second later (can the mod aim the gun with nobody in it?). 0.1.2: Shift+Insert swings
+ *           the next node about its Z for 3 s (from node 18), Ctrl+Insert about its X (from node 19), listing the nodes
+ *           that move with it; the nodes are logged by themselves 4 s after an FRV lands
  *
  * Credit: the seat tables as Khi and RSNLRiggs (Apache - Rise Above) read them; Unit.set_local_rotation and
  * unit_resolve as Apache pins them; the entity and scene-graph reads are the kit base's (Helldiver Survival Rework,
@@ -27,7 +29,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.1"
+#define VERSION "0.1.2"
 #include "kitbase/kb_core.h"
 
 static atomic_uint g_avatar;
@@ -49,7 +51,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     g_newRes[h % 128] = s->resource;
     atomic_store(&g_newHead, h + 1);
 }
-typedef struct { uint32_t frv, gun; uint64_t frvRes, gunRes; int after; } Car;
+typedef struct { uint32_t frv, gun; uint64_t frvRes, gunRes; int after; double seen; int logged; } Car;
 static Car g_car[16];
 static int g_cars;
 static const char* Kinds(uint64_t r, char* out)
@@ -85,7 +87,7 @@ static void SortSpawns(void)
         {
             Car* c = &g_car[g_cars < 16 ? g_cars++ : 15];
             memset(c, 0, sizeof *c);
-            c->frv = e; c->frvRes = r; c->after = 8;
+            c->frv = e; c->frvRes = r; c->after = 8; c->seen = g_now;
             Log("FRV spawned: entity %u (resource %016llx):%s; the spawns just before it:", e, (unsigned long long)r, Kinds(r, kinds));
             for (unsigned b = 1; b <= 6 && b <= g_newTail; b++)
             {
@@ -348,41 +350,61 @@ static void GunNodes(void)
     }
     Log("Insert: %u nodes; the furthest along the root's forward: node %d (%.2f m)", count, tip, best);
 }
-static uint32_t g_turnNode;
-static uint32_t g_turnUnit;
-static float g_turnBefore[16];
-static double g_turnCheckAt;
-static void TurnNode(void)
+/* 0.1.2: a sweep instead of one turn: the node swings back and forth for 3 s (about its Z: +-60 degrees; about its X:
+ * +-30), and at the first peak every node of the gun that moved is listed (the swept node's children: the barrel's tip
+ * is among them). 0.1.1's single turns: nodes 2, 10, 11, 13, 14 turned the railing; 18 turned the gun itself */
+static uint32_t g_zNode = 17, g_xNode = 18;
+static uint32_t g_swNode, g_swUnit, g_swCount;
+static int g_swAxis;   /* 2 Z, 0 X */
+static double g_swStart, g_swEnd;
+static int g_swPeak;
+static float g_swBase[96][3];
+static void SweepStart(int axis)
 {
     float d;
     Car* c = Nearest(&d);
     uint32_t count = 0;
     uintptr_t nodes = 0;
-    if (!c || !c->gun) { Log("Shift+Insert: no gun known"); return; }
-    if (!g_setRot || !g_resolve) { Log("Shift+Insert: Unit.set_local_rotation is not the reviewed code: not called"); return; }
+    const char* key = axis == 2 ? "Shift+Insert" : "Ctrl+Insert";
+    if (!c || !c->gun) { Log("%s: no gun known", key); return; }
+    if (!g_setRot || !g_resolve) { Log("%s: Unit.set_local_rotation is not the reviewed code: not called", key); return; }
     uint32_t unit = UnitOf(c->gun);
-    if (!unit || !g_resolve(unit) || !UnitNodes(unit, &count, &nodes)) { Log("Shift+Insert: the gun's unit does not resolve"); return; }
-    g_turnNode = g_turnNode + 1 < count ? g_turnNode + 1 : 1;
-    ReadAt(nodes + 64ull * g_turnNode, g_turnBefore, 64);
-    const float q[4] = {0, 0, 0.3826834f, 0.9238795f};   /* 45 degrees about its local Z */
-    g_setRot(unit, g_turnNode, q);
-    g_turnUnit = unit;
-    g_turnCheckAt = g_now + 0.5;
-    Log("Shift+Insert: gun node %u of %u turned 45 degrees about its Z (watch the gun)", g_turnNode, count);
+    if (!unit || !g_resolve(unit) || !UnitNodes(unit, &count, &nodes)) { Log("%s: the gun's unit does not resolve", key); return; }
+    uint32_t* at = axis == 2 ? &g_zNode : &g_xNode;
+    *at = *at + 1 < count ? *at + 1 : 1;
+    g_swNode = *at; g_swUnit = unit; g_swAxis = axis; g_swCount = count < 96 ? count : 96;
+    for (uint32_t i = 0; i < g_swCount; i++) { float m[16]; if (ReadAt(nodes + 64ull * i, m, 64)) memcpy(g_swBase[i], m + 12, 12); }
+    g_swStart = g_now; g_swEnd = g_now + 3; g_swPeak = 0;
+    Log("%s: gun node %u of %u swings about its %s for 3 s (watch the gun)", key, g_swNode, count, axis == 2 ? "Z (+-60 degrees)" : "X (+-30 degrees)");
 }
-static void TurnCheck(void)
+static void SweepFrame(void)
 {
-    if (!g_turnCheckAt || g_now < g_turnCheckAt) return;
-    g_turnCheckAt = 0;
-    uint32_t count = 0;
-    uintptr_t nodes = 0;
-    float m[16];
-    if (!UnitNodes(g_turnUnit, &count, &nodes) || g_turnNode >= count || !ReadAt(nodes + 64ull * g_turnNode, m, 64)) { Log("  (the node no longer reads)"); return; }
-    float dot = m[4] * g_turnBefore[4] + m[5] * g_turnBefore[5] + m[6] * g_turnBefore[6];
-    Log("  0.5 s later node %u forward %+.2f %+.2f %+.2f (was %+.2f %+.2f %+.2f): %s", g_turnNode, m[4], m[5], m[6], g_turnBefore[4], g_turnBefore[5], g_turnBefore[6],
-        dot < 0.99f ? "turned and held" : "unchanged (overwritten, or this node's turn does not show here)");
+    if (!g_swEnd) return;
+    if (!g_resolve(g_swUnit)) { g_swEnd = 0; Log("  (the gun is gone)"); return; }
+    double t = g_now - g_swStart;
+    float amp = g_swAxis == 2 ? 1.0472f : 0.5236f, ang = g_now >= g_swEnd ? 0 : amp * (float)sin(t * 6.2831853 / 3.0);
+    float q[4] = {0, 0, 0, cosf(ang / 2)};
+    q[g_swAxis] = sinf(ang / 2);
+    g_setRot(g_swUnit, g_swNode, q);
+    if (!g_swPeak && t >= 0.75)
+    {
+        g_swPeak = 1;
+        uint32_t count = 0;
+        uintptr_t nodes = 0;
+        char list[512] = "";
+        int n = 0;
+        if (UnitNodes(g_swUnit, &count, &nodes))
+            for (uint32_t i = 0; i < g_swCount; i++)
+            {
+                float m[16];
+                if (!ReadAt(nodes + 64ull * i, m, 64)) break;
+                float moved = sqrtf(Dist2(m + 12, g_swBase[i]));
+                if (moved > 0.02f && strlen(list) < 480) { char one[24]; snprintf(one, sizeof one, " %u (%.2f m)", i, moved); strcat(list, one); n++; }
+            }
+        Log("  at its peak, %d node(s) moved:%s", n, n ? list : " none");
+    }
+    if (g_now >= g_swEnd) { g_swEnd = 0; Log("  node %u back to its unturned rotation", g_swNode); }
 }
-
 /* ---- the frame -------------------------------------------------------------------------------------------------- */
 static void Tick(HfMod* mod, float dt, void* user)
 {
@@ -393,7 +415,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         g_inMission = in;
         g_cars = 0;
         g_haveEntry = -1;
-        g_turnCheckAt = 0;
+        g_swEnd = 0;
         g_newTail = atomic_load(&g_newHead);
         if (in)
         {
@@ -406,7 +428,9 @@ static void Tick(HfMod* mod, float dt, void* user)
     SortSpawns();
     { float me[3]; if (Pos(atomic_load(&g_avatar), me)) memcpy(g_lastMe, me, 12); }
     WatchSeat();
-    TurnCheck();
+    SweepFrame();
+    for (int i = 0; i < g_cars; i++)
+        if (!g_car[i].logged && g_car[i].gun && g_now - g_car[i].seen > 4 && Alive(&g_car[i])) { g_car[i].logged = 1; Log("(the gun's nodes, once per FRV:)"); GunNodes(); }
     static int prev[2];
     int focused = Focused(), shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0, ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0,
         alt = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
@@ -418,7 +442,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         else if (shift) EnterGameWay();
         else SurveyNearest();
     }
-    if (k[1] && !prev[1]) { if (shift) TurnNode(); else GunNodes(); }
+    if (k[1] && !prev[1]) { if (shift) SweepStart(2); else if (ctrl) SweepStart(0); else GunNodes(); }
     memcpy(prev, k, sizeof prev);
 }
 static void Pin(void** slot, uintptr_t at, const char* pattern, const char* what)
