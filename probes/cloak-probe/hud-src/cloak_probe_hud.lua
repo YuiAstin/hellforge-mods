@@ -52,7 +52,8 @@ local function unit_near(px, py, pz, within)
     local best, bd = nil, within * within
     for _, u in ipairs(all) do
         local okp, v = pc(U.world_position, u, 1)
-        local x, y, z = okp and xyz(v)
+        local x, y, z
+        if okp then x, y, z = xyz(v) end            -- 0.1.1: (okp and xyz(v)) kept only x
         if x then
             local d2 = (x - px) ^ 2 + (y - py) ^ 2 + (z - pz) ^ 2
             if d2 < bd then best, bd = u, d2 end
@@ -91,10 +92,12 @@ end
 local function copy_materials(me, stalker)
     local U, M = lib('Unit'), lib('Mesh')
     local okn, n = pc(U.num_meshes, me)
-    local oks, ns = pc(U.num_meshes, stalker)
+    local oks, ns = true, 0
+    if stalker then oks, ns = pc(U.num_meshes, stalker) end
     if not (okn and oks) then log('[Cloak Probe] cloak: mesh counts unreadable'); return end
-    -- the Stalker's body materials (its first mesh with materials)
+    -- the Stalker's body materials (its first mesh with materials; 0.1.1: else the ones kept)
     local src = {}
+    if not stalker then src = st.cached or {} end
     for i = 1, ns do
         local okm, mesh = pc(U.mesh, stalker, i)
         local okc, c = okm and pc(M.num_materials, mesh)
@@ -104,6 +107,7 @@ local function copy_materials(me, stalker)
         if #src > 0 then break end
     end
     if #src == 0 then log('[Cloak Probe] cloak: no material on the Stalker'); return end
+    st.cached = src
     st.saved = st.saved or {}
     local done, failed, how = 0, 0, nil
     for i = 1, n do
@@ -161,10 +165,26 @@ overlay:draw(function(d, dt)
                 local me = unit_near(b[0], b[1], b[2], 1.5)
                 if not me then log('[Cloak Probe] your Helldiver\'s unit was not found near you') return end
                 if k == 3 then restore() return end
-                if b[6] < 0.5 then log('[Cloak Probe] no Stalker known (a Terminid mission with Stalkers)') return end
+                if b[6] < 0.5 then
+                    if k == 2 and st.cached then log('[Cloak Probe] no Stalker near: the materials kept from the last one'); copy_materials(me, nil) return end
+                    log('[Cloak Probe] no Stalker known (a Terminid mission with Stalkers)') return
+                end
                 local stalker, how = unit_near(b[3], b[4], b[5], 1.5)
                 if not stalker then log('[Cloak Probe] the Stalker\'s unit was not found: ' .. tostring(how)) return end
-                if k == 1 then describe(stalker, ('the Stalker (entity %d, %.0f m)'):format(b[11], b[10])); describe(me, 'your Helldiver')
+                if k == 1 then
+                    describe(stalker, ('the Stalker (entity %d, %.0f m)'):format(b[11], b[10])); describe(me, 'your Helldiver')
+                    local U2, M2 = lib('Unit'), lib('Mesh')
+                    local okc, nc = pc(U2.num_meshes, stalker)
+                    local kept = {}
+                    for i = 1, (okc and nc or 0) do
+                        local okm, mesh = pc(U2.mesh, stalker, i)
+                        local okq, c = okm and pc(M2.num_materials, mesh)
+                        if okq and type(c) == 'number' and c > 0 then
+                            for j = 1, c do local okt, mat = pc(M2.material, mesh, j); if okt and mat then kept[#kept + 1] = mat end end
+                            break
+                        end
+                    end
+                    if #kept > 0 then st.cached = kept; log(('[Cloak Probe] kept %d of its materials for Ctrl+F12 later'):format(#kept)) end
                 else copy_materials(me, stalker) end
             end)
             if not okr then log('[Cloak Probe] failed: ' .. tostring(err)) end

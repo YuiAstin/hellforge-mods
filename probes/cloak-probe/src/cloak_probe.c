@@ -19,7 +19,7 @@
 #include "hellforge_mod.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 #define BUILD "25480438"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
@@ -28,6 +28,7 @@
 static const uint32_t kSmoke = 16;            /* Eagle Smoke Strike's round (HD2Runtime attack outputs) */
 static uint32_t g_stalker[64];
 static unsigned g_keys[3];
+static int dumped;
 static float g_out[12];
 
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
@@ -79,7 +80,7 @@ static void Tick(HfMod* mod, float dt, void* user)
 {
     g_now += dt > 0 && dt < 1 ? dt : 0;
     int in = hf->game_state(self) == HF_STATE_MISSION;
-    if (in != g_inMission) { g_inMission = in; if (!in) { memset(g_stalker, 0, sizeof g_stalker); g_booms = 0; } }
+    if (in != g_inMission) { g_inMission = in; if (!in) { memset(g_stalker, 0, sizeof g_stalker); g_booms = 0; dumped = 0; } }
     memset(g_out, 0, sizeof g_out);
     if (!in || !game) return;
     float me[3], p[3];
@@ -96,6 +97,8 @@ static void Tick(HfMod* mod, float dt, void* user)
         if (d2 < bd) { bd = d2; best = g_stalker[i]; memcpy(g_out + 3, p, 12); }
     }
     g_out[6] = best ? 1.0f : 0.0f;
+    /* 0.1.1: the first Stalker within 40 m each mission is dumped by itself (they died before F12 last time) */
+    if (best && !dumped && bd < 40 * 40) { dumped = 1; g_keys[0]++; Log("a Stalker %.0f m away: dumped by itself (its materials kept for Ctrl+F12)", sqrtf(bd)); }
     g_out[10] = best ? sqrtf(bd) : 0;
     g_out[11] = (float)best;
     static int prev;
