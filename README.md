@@ -13,6 +13,7 @@ Code mods for HellForge (offline Helldivers 2). Each folder under `mods/` is one
 | Veterancy System | `mods/field-promotions` | Per-mission gear progression: your gear levels up as you use it, for that mission only. |
 | Fire Mission | `mods/fire-mission` | A stratagem that calls mortar sentries onto a spot. |
 | Primed Sure Footed | `mods/primed-sure-footed` | No knockdown or ragdoll on your Helldiver; flinch and push stay. |
+| Extra Boosters | `mods/extra-boosters` | Adds a 22nd booster (a copy of a vanilla one under its own item id) by moving the game's booster table. Test build; GPL-3.0. |
 | Stat Tuner | `mods/stat-tuner` | Per-item stat sliders on the in-game MODS tab, with presets. |
 
 The character kits and Veterancy System have HUDs drawn with HD2Runtime (Bingus Shared Loader + HD2Runtime). Their Lua sources sit in each mod's `hud-src/` (Veterancy System's in `huds/field-promotions-hud/`); the built HUD ships in the mod's `data/`.

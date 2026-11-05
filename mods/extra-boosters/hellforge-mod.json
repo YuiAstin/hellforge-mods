@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.extra-boosters",
+  "name": "Extra Boosters",
+  "version": "0.1.0",
+  "description": "Adds a 22nd booster: a copy of a vanilla booster (Muscle Enhancement by default) under its own item id, owned and in the booster picker. Moves the game's booster table to make room. Every player in a co-op session needs it. Settings in extra-boosters.ini. GPL-3.0 (ownership code from HellForge).",
+  "gameplay": true,
+  "code": {
+    "dll": "extra_boosters.dll",
+    "sdk": 13
+  }
+}

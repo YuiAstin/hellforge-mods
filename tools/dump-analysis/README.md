@@ -32,3 +32,12 @@ python chain_sweep.py --dump game.dll.25480438.dump --table 0x32FDA90 --row 56 -
 Both count on `.pdata` (the exception directory), which the protector leaves intact in memory. Code that handles a
 row index without ever addressing the table (a validator, network serialisation) is not found by either: trace it at run
 time (Cheat Engine "find out what accesses this address" on a row, then follow the index back).
+
+## Extra Boosters
+
+- `gen_booster_tables.py <dump> docs/research/booster-table.md <sweep.json> <out>`: writes
+  `mods/extra-boosters/src/booster_sites.h` and `booster_bounds.h` from the dump and the note's reviewed
+  classification, asserting every displacement and count against the dump.
+- `simulate_extra_boosters.py`: applies the mod's patches to a copy of the dump, re-disassembles every patched
+  instruction, and emulates the game's booster accessors (unicorn) to check booster 21 is found by id and index and
+  that "not found" becomes 22. Needs `pip install unicorn`. Paths at the top of the script.
