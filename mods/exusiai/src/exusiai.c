@@ -15,7 +15,7 @@
  *
  * Each gun fires rounds of her own for what it hunts (copies of vanilla rounds, add_projectile, spawned from its muzzle
  * and credited to her): the pair the R-63CS Diligence Counter Sniper's (medium penetration, for whatever she hits); the
- * nearest-target gun a shotgun's pellets (the SG-225 Breaker's); the armour hunter heavy penetration (the APW-1
+ * (pair_primary 1: her primary's own round instead, while it fires one that can be spawned); the nearest-target gun a shotgun's pellets (the SG-225 Breaker's); the armour hunter heavy penetration (the APW-1
  * Anti-Materiel Rifle's); her attacker's gun the JAR-5 Dominator's (it staggers); the finisher the AR-23 Liberator's,
  * quick. A round that cannot be spawned falls back to the Guard Dog's (gun_round, 7). While any gun is out her shots do
  * not hurt her allies (no_friendly_fire). The HUD shows each gun as the Guard Dog's own gun model riding a hidden Guard
@@ -38,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -64,7 +64,7 @@ static int s_gunRound = 7, s_noFriendlyFire = 1;
 static int s_rBase[5] = {241, 179, 226,   /* R-63CS Diligence Counter Sniper, SG-225 Breaker, APW-1 Anti-Materiel Rifle */
                          177, 276};   /* JAR-5 Dominator, AR-23 Liberator */
 static float s_rEvery[4] = {0.8f, 1.6f, 0.6f, 0.15f};   /* Overloading Mode's: the nearest, the armoured, her attacker, the weakest */
-static int s_pellets = 6;
+static int s_pellets = 6, s_pairPrimary = 1;
 static float s_pelletSpread = 5;
 
 /* Every setting: its .ini / Mod Options Menu name, variable and range (kitbase/kb_settings.h) */
@@ -77,7 +77,7 @@ static const KbSetting kSettings[] = {
     KB_I("round_pair", s_rBase[0], 1, 350), KB_I("round_nearest", s_rBase[1], 1, 350), KB_I("round_armoured", s_rBase[2], 1, 350),
     KB_I("round_attacker", s_rBase[3], 1, 350), KB_I("round_weakest", s_rBase[4], 1, 350),
     KB_F("every_nearest", s_rEvery[0], 0.05, 10), KB_F("every_armoured", s_rEvery[1], 0.05, 10), KB_F("every_attacker", s_rEvery[2], 0.05, 10),
-    KB_F("every_weakest", s_rEvery[3], 0.05, 10), KB_I("pellets", s_pellets, 1, 16), KB_F("pellet_spread", s_pelletSpread, 0, 30),
+    KB_F("every_weakest", s_rEvery[3], 0.05, 10), KB_I("pellets", s_pellets, 1, 16), KB_I("pair_primary", s_pairPrimary, 0, 1), KB_F("pellet_spread", s_pelletSpread, 0, 30),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
 };
@@ -108,6 +108,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; quick rounds to finish it (276: the AR-23 Liberator's).\n"
                "round_pair = %d\nround_nearest = %d\nround_armoured = %d\nround_attacker = %d\nround_weakest = %d\n"
                "every_nearest = %g\nevery_armoured = %g\nevery_attacker = %g\nevery_weakest = %g\npellets = %d\npellet_spread = %g\n"
+               "; pair_primary 1: the summoned pair fire her primary's own round (round_pair when it fires none or it cannot be\n"
+               "; spawned).\npair_primary = %d\n"
                "; gun_round: the round used when one of hers cannot be spawned (7: the AX/AR-23 Guard Dog's). no_friendly_fire 1:\n"
                "; while a gun is out her shots spare her allies.\n"
                "gun_round = %d\nno_friendly_fire = %d\n"
@@ -117,7 +119,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_fireRate, (double)s_blessMult, s_chEvery, s_chFree,
             (double)s_chGap, (double)s_chSpread, (double)s_s2Cd, (double)s_s2Seconds, (double)s_gunEvery, (double)s_s3Cd,
             (double)s_s3Seconds, (double)s_s3Every, (double)s_s3Range, s_rBase[0], s_rBase[1], s_rBase[2], s_rBase[3], s_rBase[4],
-            (double)s_rEvery[0], (double)s_rEvery[1], (double)s_rEvery[2], (double)s_rEvery[3], s_pellets, (double)s_pelletSpread, s_gunRound, s_noFriendlyFire);
+            (double)s_rEvery[0], (double)s_rEvery[1], (double)s_rEvery[2], (double)s_rEvery[3], s_pellets, (double)s_pelletSpread, s_pairPrimary, s_gunRound, s_noFriendlyFire);
 }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
@@ -223,7 +225,25 @@ static void RoundsAdd(void)
         if (!g_round[r]) { g_round[r] = p.base; Log("her %s round: no copy of projectile %u (the vanilla round fires)", kRole[r], p.base); }
     }
 }
-static uint32_t RoundOf(int i) { int r = i < 2 ? 0 : i - 1; return g_roundBad[r] ? (uint32_t)s_gunRound : g_round[r]; }
+typedef struct GunInfo GunInfo;
+static const GunInfo* InfoOf(uint64_t res);
+static uint32_t InfoProjectile(const GunInfo* g);
+static int NoSpawn(uint32_t type);
+static void NoSpawnAdd(uint32_t type);
+static uint64_t g_primaryRes;      /* her primary (the weapon event, selection 1) */
+static uint32_t PrimaryRound(void)
+{
+    if (!s_pairPrimary || !g_primaryRes) return 0;
+    uint32_t t = InfoProjectile(InfoOf(g_primaryRes));
+    return t && !NoSpawn(t) ? t : 0;
+}
+static uint32_t RoundOf(int i)
+{
+    int r = i < 2 ? 0 : i - 1;
+    uint32_t prim = r == 0 ? PrimaryRound() : 0;
+    if (prim) return prim;
+    return g_roundBad[r] ? (uint32_t)s_gunRound : g_round[r];
+}
 static float g_gunLook[6][3];      /* where each gun aims (its model turns there) */
 static double g_gunShotAt[6];
 static int Fire(int i, const float at[3])
@@ -252,6 +272,12 @@ static int Fire(int i, const float at[3])
         }
         r = hf->spawn_projectile(self, round, from, dir);
         if (r == HF_ACT_WAITING) return 0;
+        if (!r && role == 0 && round == PrimaryRound())
+        {
+            NoSpawnAdd(round);
+            Log("her primary's round (projectile %u) cannot be spawned here: the pair fire projectile %u (round_pair) instead", round, g_round[0]);
+            return 0;
+        }
         if (!r && round != (uint32_t)s_gunRound)
         {
             g_roundBad[role] = 1;
@@ -341,7 +367,7 @@ static void GunsFrame(void)
 /* her gun in hand (the weapon event) and what its rounds are: its projectile type, burst size and fire rate */
 static uint32_t g_heldEntity;
 static uint64_t g_heldRes;
-typedef struct GunInfo { uint64_t res; uint32_t projectile, burst; float rpm; } GunInfo;
+struct GunInfo { uint64_t res; uint32_t projectile, burst; float rpm; };
 static GunInfo g_gunInfo[24];
 static int g_ngunInfo;
 static const GunInfo* InfoOf(uint64_t res)
@@ -408,6 +434,12 @@ static int NoSpawn(uint32_t type)
     for (int k = 0; k < 8; k++) if (g_noSpawn[k] == type) return 1;
     return 0;
 }
+static void NoSpawnAdd(uint32_t type)
+{
+    if (NoSpawn(type)) return;
+    for (int k = 0; k < 8; k++) if (!g_noSpawn[k]) { g_noSpawn[k] = type; return; }
+}
+static uint32_t InfoProjectile(const GunInfo* g) { return g ? g->projectile : 0; }
 static void StartFree(const GunInfo* gi)
 {
     if (!gi || !gi->projectile || s_chFree <= 0) { Log("Charging Mode: charged, but the gun in hand has no rounds to copy"); return; }
@@ -459,8 +491,7 @@ static void BurstFrame(void)
         if (r == HF_ACT_WAITING) { g_freeNext = g_now + 0.05; break; }
         if (!r && g_freeProjectile != (uint32_t)s_gunRound)
         {
-            static int n;
-            if (n < 8) g_noSpawn[n++] = g_freeProjectile;
+            NoSpawnAdd(g_freeProjectile);
             Log("Charging Mode: projectile %u cannot be spawned here; free rounds use projectile %d (gun_round) instead", g_freeProjectile, s_gunRound);
             g_freeProjectile = (uint32_t)s_gunRound;
             continue;
@@ -524,6 +555,12 @@ static void OnWeaponExu(HfMod* mod, const HfEventInfo* info, void* user)
     if (!w->avatar || w->avatar != atomic_load(&g_avatar) || !kb_kit_on) return;
     g_heldEntity = w->entity;
     g_heldRes = w->resource;
+    if (w->selection == 1 && w->resource && w->resource != g_primaryRes)
+    {
+        g_primaryRes = w->resource;
+        static unsigned told;
+        if (told++ < 6) Log("her primary: weapon %016llx (the summoned pair fire its round)", (unsigned long long)w->resource);
+    }
     FastCartridge(w->resource);
 }
 
