@@ -38,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.1"
+#define VERSION "0.2.2"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -237,6 +237,25 @@ static uint32_t PrimaryRound(void)
     uint32_t t = InfoProjectile(InfoOf(g_primaryRes));
     return t && !NoSpawn(t) ? t : 0;
 }
+/* a projectile's pellets per shot (its settings row +0x1C): rows sit in one list by type, so a vanilla row is found from
+ * one of hers (projectile_row) and checked by its +0 type; 0: unknown */
+static uintptr_t g_rowAnchor;
+static uint32_t g_rowAnchorType;
+static uint32_t PelletsOf(uint32_t type)
+{
+    if (!g_rowAnchor || !type || type > 1000) return 0;
+    uintptr_t row = g_rowAnchor + ((intptr_t)type - (intptr_t)g_rowAnchorType) * 272;
+    uint32_t t = 0, n = 0;
+    if (!ReadAt(row, &t, 4) || t != type || !ReadAt(row + 0x1C, &n, 4)) return 0;
+    return n >= 1 && n <= 32 ? n : 0;
+}
+static void ProjectilesReady(HfMod* mod, HfEvent event, void* user)
+{
+    for (int r = 0; r < 5 && !g_rowAnchor; r++)
+        if (g_round[r] != (uint32_t)s_rBase[r] && hf->projectile_row && (g_rowAnchor = hf->projectile_row(g_round[r]))) g_rowAnchorType = g_round[r];
+    if (!g_rowAnchor) { Log("pellets: no row of hers to read the list by (a shotgun primary's pair fire one pellet a shot)"); return; }
+    Log("pellets: the SG-225 Breaker's round %u: %u a shot (her copy %u: %u)", (unsigned)s_rBase[1], PelletsOf((uint32_t)s_rBase[1]), g_round[1], PelletsOf(g_round[1]));
+}
 static uint32_t RoundOf(int i)
 {
     int r = i < 2 ? 0 : i - 1;
@@ -257,6 +276,13 @@ static int Fire(int i, const float at[3])
     memcpy(g_gunLook[i], at, 12);
     int role = i < 2 ? 0 : i - 1, pellets = role == 1 ? s_pellets : 1;
     uint32_t round = RoundOf(i);
+    if (role == 0 && round == PrimaryRound())
+    {
+        uint32_t n = PelletsOf(round);   /* a shotgun primary: its whole shot, each pellet its own round */
+        if (n > 1) pellets = (int)n;
+        static uint32_t toldFor;
+        if (toldFor != round) { toldFor = round; Log("the pair fire her primary's round %u, %d a shot", round, pellets); }
+    }
     for (int k = 0; k < 3; k++) from[k] += d[k] * 0.4f;   /* from its muzzle */
     int r = 0;
     for (int p = 0; p < pellets; p++)
@@ -835,7 +861,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     api->log(mod, "Exusiai %s: keys %s / %s / %s (Charging Mode, the summoned guns, Overloading Mode)", VERSION, s_keys[0].label,
              s_keys[1].label, s_keys[2].label);
     if (s_badKey) api->log(mod, "exusiai.ini: a key could not be read (bits %d: charge, guns, overload); its default stays", s_badKey);
-    if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
+    if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL) || api->on(mod, HF_EVENT_PROJECTILES_READY, ProjectilesReady, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
              api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_PLAYER_DOWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) &&
