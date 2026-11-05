@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -434,6 +434,7 @@ static int Walks(uint32_t e)
 }
 /* whether the warp setter may move this entity: this machine's, numbered under 0x400000, alive, and (warp_needs_walks)
  * with a navigation record. why: the reason when not */
+static uint32_t g_sinner;   /* (defined below) */
 static int Movable(uint32_t e, const char** why)
 {
     uint8_t d[24];
@@ -442,7 +443,9 @@ static int Movable(uint32_t e, const char** why)
     if (!Descriptor(e, d)) { *why = "it is gone"; return 0; }
     if (!(Word(d + 20) & 1) || e >= 0x400000u) { *why = "it is not simulated here"; return 0; }
     if (!Alive(e)) { *why = "it is down"; return 0; }
-    if (s_warpWalks && !Walks(e)) { *why = "it has no navigation record (warp_needs_walks 1)"; return 0; }
+    /* 0.1.1: the Sinner is exempt (our own spawn, simulated here; the Drive Probe found it has no navigation record,
+     * so 0.1.0 never moved it): warp_needs_walks guards the others (a strider's pilot crashed the setter) */
+    if (s_warpWalks && e != g_sinner && !Walks(e)) { *why = "it has no navigation record (warp_needs_walks 1)"; return 0; }
     return 1;
 }
 
