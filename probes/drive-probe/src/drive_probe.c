@@ -26,7 +26,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.2"
+#define VERSION "0.1.3"
 #include "kitbase/kb_core.h"
 
 static atomic_uint g_avatar;
@@ -58,9 +58,11 @@ static void AddExo(uint32_t e, uint64_t res, const char* what)
 }
 static uint64_t g_vehRes[64];
 static uint8_t g_vehIs[64];
+#define SINNER UINT64_C(0xB15CF5BCDC051115)   /* Koleda's Sinner (a Patriot copy) */
 static int IsSuit(uint64_t res)
 {
     for (int k = 0; k < 4; k++) if (res == kExo[k]) return 1;
+    if (res == SINNER) return 1;
     for (int i = 0; i < 64; i++)
     {
         if (g_vehRes[i] == res) return g_vehIs[i];
@@ -72,6 +74,7 @@ static int IsSuit(uint64_t res)
             g_vehIs[i] = hf->component_record("SeatCollectionComponentData", res, &st) && !hf->component_record("AvatarComponentData", res, &st) &&
                          !hf->component_record("BehaviorComponentData", res, &st);
             if (g_vehIs[i]) Log("a vehicle type %016llx (seats, no behaviour): counted as a suit", (unsigned long long)res);
+            else if (hf->component_record("SeatCollectionComponentData", res, &st)) Log("type %016llx has seats but is not counted (a behaviour or a Helldiver)", (unsigned long long)res);
             return g_vehIs[i];
         }
     }
@@ -84,6 +87,11 @@ static void SortSpawns(void)
         unsigned i = g_newTail % 128;
         if (IsSuit(g_newRes[i])) AddExo(g_newEnt[i], g_newRes[i], "a vehicle");
     }
+}
+static void OnWeaponAv(HfMod* mod, const HfEventInfo* info, void* user)
+{
+    const HfWeaponEvent* w = (const HfWeaponEvent*)info;
+    if (w->avatar && w->avatar != atomic_load(&g_avatar)) { atomic_store(&g_avatar, w->avatar); Log("her Helldiver: entity %u (weapon event)", w->avatar); }
 }
 static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 {
@@ -376,8 +384,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (in != g_inMission)
     {
         g_inMission = in;
-        if (!in) { DriveStop("mission end"); g_recExo = 0; memset(g_exo, 0, sizeof g_exo); }
-        g_newTail = atomic_load(&g_newHead);
+        if (!in) { DriveStop("mission end"); g_recExo = 0; memset(g_exo, 0, sizeof g_exo); g_newTail = atomic_load(&g_newHead); }
     }
     if (!in || !game) return;
     SortSpawns();
@@ -420,7 +427,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 15 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
     Log("Drive Probe " VERSION ": research for Koleda's Sinner (an exosuit that walks with nobody in it)");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
-    int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
+    int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeaponAv, NULL, 0) &&
              api->on_game_thread(mod, Tick, NULL);
     if (!ok) Log("events or the game thread are unavailable");
     return 0;
