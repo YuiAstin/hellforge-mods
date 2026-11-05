@@ -456,7 +456,7 @@ static void ChillFx(Cold* c, uint32_t e)
     g_fxTokens -= 1;
     g_fx++;
 }
-static int Frozen(uint32_t e) { Cold* c = ColdOf(e, 0); return c && c->frozenUntil > g_now; }
+static __attribute__((unused)) int Frozen(uint32_t e) { Cold* c = ColdOf(e, 0); return c && c->frozenUntil > g_now; }
 static void Status(uint32_t e, uint32_t status, float buildup, const char* what)
 {
     if (buildup <= 0 || !hf->apply_status) return;
