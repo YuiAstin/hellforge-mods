@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.1"
+#define VERSION "0.1.2"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -67,7 +67,7 @@ static int s_warpWalks = 1, s_navPath = 1;
  * her, S a quick light round, S+ a heavy one, faster */
 static int s_sinFire = 1, s_sinSight = 1;
 static int s_roundN = 241, s_roundS = 276, s_roundPlus = 177, s_roundFallback = 7;
-static float s_gunEvery = 0.5f, s_plusRate = 0.6f, s_guardRange = 20, s_fireRange = 40;
+static float s_gunEvery = 0, s_plusRate = 0.6f, s_guardRange = 20, s_fireRange = 40;
 /* KANSEI DORIFTO (the pull), off by default */
 static int s_pullOn = 0, s_pullExplosion = 0;
 static float s_pullEvery = 12, s_pullRadius = 8;
@@ -95,7 +95,7 @@ static const KbSetting kSettings[] = {
     KB_F("plus_distance", s_plusDistance, 1, 100), KB_F("plus_leash", s_plusLeash, 5, 200), KB_I("warp_needs_walks", s_warpWalks, 0, 1), KB_I("nav_path", s_navPath, 0, 1),
     KB_I("sinner_fire", s_sinFire, 0, 1), KB_I("sinner_sight", s_sinSight, 0, 1),
     KB_I("round_n", s_roundN, 1, 350), KB_I("round_s", s_roundS, 1, 350), KB_I("round_plus", s_roundPlus, 1, 350), KB_I("round_fallback", s_roundFallback, 1, 100000),
-    KB_F("gun_every", s_gunEvery, 0.05, 10), KB_F("plus_rate", s_plusRate, 0.1, 1), KB_F("guard_range", s_guardRange, 5, 200), KB_F("fire_range", s_fireRange, 5, 300),
+    KB_F("gun_every", s_gunEvery, 0, 10), KB_F("plus_rate", s_plusRate, 0.1, 1), KB_F("guard_range", s_guardRange, 5, 200), KB_F("fire_range", s_fireRange, 5, 300),
     KB_I("pull_on", s_pullOn, 0, 1), KB_I("pull_explosion", s_pullExplosion, 0, 100000), KB_F("pull_every", s_pullEvery, 1, 600), KB_F("pull_radius", s_pullRadius, 1, 30),
     KB_F("s1_cooldown", s_s1Cd, 0, 600), KB_F("s1_every", s_s1Every, 0.05, 5), KB_F("s1_cone", s_s1Cone, 0.5, 45), KB_F("s1_range", s_s1Range, 10, 1000),
     KB_I("s1_rounds", s_s1Rounds, 1, 20), KB_I("s1_round", s_s1Round, 1, 350),
@@ -136,7 +136,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; nav_path 1: with a navigation record of its own, it is sent to its follow point on the navmesh (the game's\n"
                "; set_destination, as Lost Contact's patrols) and heads for the path's next waypoint instead of straight at it.\n"
                "plus_distance = %g\nplus_leash = %g\nwarp_needs_walks = %d\nnav_path = %d\n"
-               "; Its fire (sinner_fire 0: none): rounds of hers from its shoulders, one every gun_every s (S+: times plus_rate).\n"
+               "; Its fire (sinner_fire 0: none): rounds of hers from its shoulders, one every gun_every s (S+: times plus_rate);\n"
+               "; gun_every 0: at the fire rate of the gun each gear's round comes from, with its pellets (0.1.2).\n"
                "; N: whoever last hit her, else the nearest enemy within guard_range m of her; S: the nearest within fire_range m\n"
                "; of it; S+: her target. Rounds by gear (projectile types, copied): round_n (241: the R-63CS Diligence Counter\n"
                "; Sniper's), round_s (276: the AR-23 Liberator's), round_plus (177: the JAR-5 Dominator's); one that cannot be\n"
@@ -1139,6 +1140,36 @@ static uint32_t FireTarget(const float p[3], float at[3])
     }
     return Nearest(p, s_fireRange, at);
 }
+/* 0.1.2: a gear's gun profile: the vanilla gun its round comes from (fire rate, pellets) */
+typedef struct GunProfile { uint32_t round; float every; uint32_t pellets; } GunProfile;
+static GunProfile g_prof[3];
+static const struct { uint32_t round; uint64_t gun; } kRoundGun[] = {
+    {241, HF_ENTITY_R63CS_DILIGENCE_COUNTER_SNIPER}, {276, HF_ENTITY_AR23_LIBERATOR}, {177, HF_ENTITY_JAR5_DOMINATOR},
+    {226, HF_ENTITY_APW1_ANTIMATERIEL_RIFLE}, {179, HF_ENTITY_SG225_BREAKER}};
+static const GunProfile* Profile(int gear)
+{
+    int base[3] = {s_roundN, s_roundS, s_roundPlus};
+    GunProfile* g = &g_prof[gear];
+    if (g->round == (uint32_t)base[gear] && g->every > 0) return g;
+    g->round = (uint32_t)base[gear];
+    g->every = 0.5f;
+    g->pellets = 1;
+    for (unsigned i = 0; i < sizeof kRoundGun / sizeof kRoundGun[0]; i++)
+    {
+        if (kRoundGun[i].round != g->round) continue;
+        HfField rate = {HfProjectileWeapon_INFO, 0x08, 4, HF_TYPE_F32, __LINE__};
+        HfLiveValue v;
+        memset(&v, 0, sizeof v);
+        if (hf->get_live && hf->get_live(self, kRoundGun[i].gun, &rate, &v) && v.base.number > 0) g->every = (float)(60.0 / v.base.number);
+    }
+    HfField pel = HF_FIELD(ProjectileSettings, pellet_count);
+    HfLiveValue v;
+    memset(&v, 0, sizeof v);
+    if (hf->get_live && hf->get_live(self, (HfRef)g->round, &pel, &v) && v.base.number >= 1 && v.base.number <= 32) g->pellets = (uint32_t)v.base.number;
+    if (g->every < 0.05f) g->every = 0.05f;
+    Log("the Sinner's %s gun: round %u, one every %.3f s, %u pellet(s) a shot", kGear[gear], g->round, (double)g->every, g->pellets);
+    return g;
+}
 static int SinnerShoot(int arm, uint32_t target, const float at[3])
 {
     float p[3], m[16], from[3], d[3];
@@ -1174,6 +1205,15 @@ static int SinnerShoot(int arm, uint32_t target, const float at[3])
     uint32_t round = g_roundBad[r] ? (uint32_t)s_roundFallback : g_round[r];
     int res = hf->spawn_projectile(self, round, from, d);
     if (res == HF_ACT_WAITING) return 0;
+    /* 0.1.2: a shotgun's other pellets, 5 degrees wide */
+    for (uint32_t k = 1; res && s_gunEvery <= 0 && k < Profile(r)->pellets; k++)
+    {
+        float dir[3];
+        for (int j = 0; j < 3; j++) dir[j] = d[j] + 0.0873f * ((float)rand() / RAND_MAX - 0.5f);
+        float m = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+        for (int j = 0; j < 3; j++) dir[j] /= m;
+        hf->spawn_projectile(self, round, from, dir);
+    }
     if (!res && round != (uint32_t)s_roundFallback)
     {
         g_roundBad[r] = 1;
@@ -1193,7 +1233,7 @@ static void FireFrame(void)
     if (!SinPos(p)) return;
     uint32_t t = FireTarget(p, at);
     if (!t) { g_fireNext = g_now + 0.25; return; }
-    double every = s_gunEvery * (g_gear == GEAR_PLUS ? s_plusRate : 1);
+    double every = (s_gunEvery > 0 ? s_gunEvery : Profile(g_gear)->every) * (g_gear == GEAR_PLUS ? s_plusRate : 1);
     if (g_now < g_krUntil && s_krMult > 0) every /= s_krMult;
     g_fireNext = g_now + every;
     g_arm ^= 1;
