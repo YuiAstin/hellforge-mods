@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.2"
+#define VERSION "0.1.3"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -66,7 +66,7 @@ static int s_warpWalks = 1, s_navPath = 1;
 /* its fire: rounds by gear (copies of vanilla rounds, add_projectile): N a medium-penetration round at whatever attacks
  * her, S a quick light round, S+ a heavy one, faster */
 static int s_sinFire = 1, s_sinSight = 1;
-static int s_roundN = 241, s_roundS = 276, s_roundPlus = 177, s_roundFallback = 7;
+static int s_roundN = 148, s_roundS = 148, s_roundPlus = 148, s_roundRocket = 128, s_roundFallback = 7;   /* 0.1.3: its own arms: the Patriot's minigun (148) and rockets (128) */
 static float s_gunEvery = 0, s_plusRate = 0.6f, s_guardRange = 20, s_fireRange = 40;
 /* KANSEI DORIFTO (the pull), off by default */
 static int s_pullOn = 0, s_pullExplosion = 0;
@@ -94,7 +94,7 @@ static const KbSetting kSettings[] = {
     KB_F("leash_warp", s_leashWarp, 10, 500), KB_F("stuck_seconds", s_stuckSeconds, 0.5, 60), KB_F("push_step", s_pushStep, 0.5, 5), KB_I("push_steps", s_pushSteps, 0, 50), KB_F("slide_speed", s_slideSpeed, 0.5, 20),
     KB_F("plus_distance", s_plusDistance, 1, 100), KB_F("plus_leash", s_plusLeash, 5, 200), KB_I("warp_needs_walks", s_warpWalks, 0, 1), KB_I("nav_path", s_navPath, 0, 1),
     KB_I("sinner_fire", s_sinFire, 0, 1), KB_I("sinner_sight", s_sinSight, 0, 1),
-    KB_I("round_n", s_roundN, 1, 350), KB_I("round_s", s_roundS, 1, 350), KB_I("round_plus", s_roundPlus, 1, 350), KB_I("round_fallback", s_roundFallback, 1, 100000),
+    KB_I("round_n", s_roundN, 1, 350), KB_I("round_s", s_roundS, 1, 350), KB_I("round_plus", s_roundPlus, 1, 350), KB_I("round_rocket", s_roundRocket, 0, 350), KB_I("round_fallback", s_roundFallback, 1, 100000),
     KB_F("gun_every", s_gunEvery, 0, 10), KB_F("plus_rate", s_plusRate, 0.1, 1), KB_F("guard_range", s_guardRange, 5, 200), KB_F("fire_range", s_fireRange, 5, 300),
     KB_I("pull_on", s_pullOn, 0, 1), KB_I("pull_explosion", s_pullExplosion, 0, 100000), KB_F("pull_every", s_pullEvery, 1, 600), KB_F("pull_radius", s_pullRadius, 1, 30),
     KB_F("s1_cooldown", s_s1Cd, 0, 600), KB_F("s1_every", s_s1Every, 0.05, 5), KB_F("s1_cone", s_s1Cone, 0.5, 45), KB_F("s1_range", s_s1Range, 10, 1000),
@@ -139,10 +139,11 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Its fire (sinner_fire 0: none): rounds of hers from its shoulders, one every gun_every s (S+: times plus_rate);\n"
                "; gun_every 0: at the fire rate of the gun each gear's round comes from, with its pellets (0.1.2).\n"
                "; N: whoever last hit her, else the nearest enemy within guard_range m of her; S: the nearest within fire_range m\n"
-               "; of it; S+: her target. Rounds by gear (projectile types, copied): round_n (241: the R-63CS Diligence Counter\n"
-               "; Sniper's), round_s (276: the AR-23 Liberator's), round_plus (177: the JAR-5 Dominator's); one that cannot be\n"
-               "; spawned falls back to round_fallback (7: the Guard Dog's). sinner_sight 1: only at what it can see.\n"
-               "sinner_fire = %d\nsinner_sight = %d\nround_n = %d\nround_s = %d\nround_plus = %d\nround_fallback = %d\n"
+               "; of it; S+: her target. Its own arms' rounds (projectile types, copied), at the Patriot's arms' fire rates: the\n"
+               "; right arm's minigun by gear, round_n / round_s / round_plus (148: the Patriot's minigun), and in S+ the left arm's\n"
+               "; rockets too, round_rocket (128: the Patriot's rockets; 0: none). One that cannot be spawned falls back to\n"
+               "; round_fallback (7: the Guard Dog's). sinner_sight 1: only at what it can see.\n"
+               "sinner_fire = %d\nsinner_sight = %d\nround_n = %d\nround_s = %d\nround_plus = %d\nround_rocket = %d\nround_fallback = %d\n"
                "gun_every = %g\nplus_rate = %g\nguard_range = %g\nfire_range = %g\n"
                "; KANSEI DORIFTO (pull_on 1; untested, so off): in S+, every pull_every s, enemies within pull_radius m of the\n"
                "; Sinner are dragged to it, and pull_explosion (0: none) goes off on it.\n"
@@ -169,7 +170,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             s_sinOn, s_callMode, (double)s_sharePct, (double)s_shareRange,
             (double)s_leashStart, (double)s_leashStop, (double)s_guardStart, (double)s_leashWarp, (double)s_stuckSeconds, (double)s_pushStep, s_pushSteps, (double)s_slideSpeed,
             (double)s_plusDistance, (double)s_plusLeash, s_warpWalks, s_navPath,
-            s_sinFire, s_sinSight, s_roundN, s_roundS, s_roundPlus, s_roundFallback, (double)s_gunEvery, (double)s_plusRate, (double)s_guardRange,
+            s_sinFire, s_sinSight, s_roundN, s_roundS, s_roundPlus, s_roundRocket, s_roundFallback, (double)s_gunEvery, (double)s_plusRate, (double)s_guardRange,
             (double)s_fireRange, s_pullOn, (double)s_pullEvery, (double)s_pullRadius, s_pullExplosion,
             (double)s_s1Cd, s_s1Rounds, (double)s_s1Every, (double)s_s1Cone, (double)s_s1Range, s_s1Round,
             (double)s_s2Cd, (double)s_krSeconds, (double)s_krMult, (double)s_krHeal, (double)s_krSinnerHeal, (double)s_s3Cd, s_cleanse,
@@ -579,16 +580,17 @@ static void SinnerAdd(const HfApi* api, HfMod* mod)
 }
 
 /* her rounds: the Sinner's by gear and Eye of the Snow Wolf's (copies, add_projectile; the vanilla round without one) */
-static uint32_t g_round[4];
-static int g_roundBad[4];
-static const char* const kRoundName[4] = {"N", "S", "S+", "Eye of the Snow Wolf"};
+static uint32_t g_round[5];
+static int g_roundBad[5];
+static const char* const kRoundName[5] = {"N", "S", "S+", "Eye of the Snow Wolf", "rocket"};
 static void RoundsAdd(void)
 {
-    static char names[4][48];
-    int base[4] = {s_roundN, s_roundS, s_roundPlus, s_s1Round};
-    static const char* const tag[4] = {"sinner_n", "sinner_s", "sinner_plus", "snow_wolf"};
-    for (int r = 0; r < 4; r++)
+    static char names[5][48];
+    int base[5] = {s_roundN, s_roundS, s_roundPlus, s_s1Round, s_roundRocket};
+    static const char* const tag[5] = {"sinner_n", "sinner_s", "sinner_plus", "snow_wolf", "sinner_rocket"};
+    for (int r = 0; r < 5; r++)
     {
+        if (!base[r]) { g_round[r] = 0; continue; }
         HfProjectile p;
         memset(&p, 0, sizeof p);
         p.size = sizeof p;
@@ -1142,13 +1144,14 @@ static uint32_t FireTarget(const float p[3], float at[3])
 }
 /* 0.1.2: a gear's gun profile: the vanilla gun its round comes from (fire rate, pellets) */
 typedef struct GunProfile { uint32_t round; float every; uint32_t pellets; } GunProfile;
-static GunProfile g_prof[3];
+static GunProfile g_prof[4];
 static const struct { uint32_t round; uint64_t gun; } kRoundGun[] = {
+    {148, UINT64_C(0x08F6089289C83D22)}, {128, UINT64_C(0x824B7E0C4C879EB5)},   /* the Patriot's right arm (minigun), left (rockets) */
     {241, HF_ENTITY_R63CS_DILIGENCE_COUNTER_SNIPER}, {276, HF_ENTITY_AR23_LIBERATOR}, {177, HF_ENTITY_JAR5_DOMINATOR},
     {226, HF_ENTITY_APW1_ANTIMATERIEL_RIFLE}, {179, HF_ENTITY_SG225_BREAKER}};
 static const GunProfile* Profile(int gear)
 {
-    int base[3] = {s_roundN, s_roundS, s_roundPlus};
+    int base[4] = {s_roundN, s_roundS, s_roundPlus, s_roundRocket};   /* 3: the rockets */
     GunProfile* g = &g_prof[gear];
     if (g->round == (uint32_t)base[gear] && g->every > 0) return g;
     g->round = (uint32_t)base[gear];
@@ -1167,9 +1170,11 @@ static const GunProfile* Profile(int gear)
     memset(&v, 0, sizeof v);
     if (hf->get_live && hf->get_live(self, (HfRef)g->round, &pel, &v) && v.base.number >= 1 && v.base.number <= 32) g->pellets = (uint32_t)v.base.number;
     if (g->every < 0.05f) g->every = 0.05f;
-    Log("the Sinner's %s gun: round %u, one every %.3f s, %u pellet(s) a shot", kGear[gear], g->round, (double)g->every, g->pellets);
+    Log("the Sinner's %s: round %u, one every %.3f s, %u pellet(s) a shot", gear == 3 ? "rockets" : kGear[gear], g->round, (double)g->every, g->pellets);
     return g;
 }
+static int g_shootRocket;   /* 0.1.3: this shot is the left arm's rocket */
+static double g_rocketNext;
 static int SinnerShoot(int arm, uint32_t target, const float at[3])
 {
     float p[3], m[16], from[3], d[3];
@@ -1201,12 +1206,12 @@ static int SinnerShoot(int arm, uint32_t target, const float at[3])
         float w = FirstWall(id, from, d, n - 1.8f, UnitOf(atomic_load(&g_avatar)), UnitOf(target), g_sinUnit, &hit);
         if (!hit && w <= n - 1.8f - 1.5f) return 0;   /* a wall between */
     }
-    int r = g_gear;
+    int r = g_shootRocket ? 4 : g_gear;
     uint32_t round = g_roundBad[r] ? (uint32_t)s_roundFallback : g_round[r];
     int res = hf->spawn_projectile(self, round, from, d);
     if (res == HF_ACT_WAITING) return 0;
     /* 0.1.2: a shotgun's other pellets, 5 degrees wide */
-    for (uint32_t k = 1; res && s_gunEvery <= 0 && k < Profile(r)->pellets; k++)
+    for (uint32_t k = 1; res && s_gunEvery <= 0 && k < Profile(r == 4 ? 3 : r)->pellets; k++)
     {
         float dir[3];
         for (int j = 0; j < 3; j++) dir[j] = d[j] + 0.0873f * ((float)rand() / RAND_MAX - 0.5f);
@@ -1236,7 +1241,14 @@ static void FireFrame(void)
     double every = (s_gunEvery > 0 ? s_gunEvery : Profile(g_gear)->every) * (g_gear == GEAR_PLUS ? s_plusRate : 1);
     if (g_now < g_krUntil && s_krMult > 0) every /= s_krMult;
     g_fireNext = g_now + every;
-    g_arm ^= 1;
+    /* 0.1.3: the right arm's minigun; in S+ the left arm's rockets on their own rate */
+    if (g_gear == GEAR_PLUS && g_round[4] && g_now >= g_rocketNext)
+    {
+        g_shootRocket = 1;
+        if (SinnerShoot(0, t, at)) g_rocketNext = g_now + (s_gunEvery > 0 ? s_gunEvery * 2 : Profile(3)->every);
+        g_shootRocket = 0;
+    }
+    g_arm = 1;
     if (!SinnerShoot(g_arm, t, at)) return;
     g_volleys++;
     static unsigned told;
