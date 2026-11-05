@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.8"
+#define VERSION "0.1.9"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -1355,6 +1355,16 @@ static int SinnerShoot(int arm, uint32_t target, const float at[3])
         return 0;
     }
     if (!Act("a Sinner shot", res)) return 0;
+    {
+        /* 0.1.9: where its shots start (they looked spawned far out from it): the first 12 */
+        static unsigned told;
+        float me[3], up[3];
+        int ok = PlayerPose(me, NULL), upok = UnitNode(g_sinUnit, 0, up);
+        if (told++ < 12)
+            Log("shot %u: from %.1f %.1f %.1f = %.1f m from its root (its unit's node 0 %s %.1f m from the root), %.1f m from her, %.1f m to the target",
+                told, from[0], from[1], from[2], sqrtf(Dist2(from, p)), upok ? "is" : "unread,", upok ? sqrtf(Dist2(up, p)) : -1.0,
+                ok ? sqrtf(Dist2(from, me)) : -1.0, sqrtf(Dist2(from, at)));
+    }
     /* 0.1.5: its gun's firing sound (the HUD side plays it: koleda_sounds) */
     {
         uint32_t base = r == 4 ? (uint32_t)s_roundRocket : (uint32_t)(r == 0 ? s_roundN : r == 1 ? s_roundS : s_roundPlus);
