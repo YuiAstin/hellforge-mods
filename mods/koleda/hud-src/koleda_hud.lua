@@ -676,7 +676,13 @@ local function sound_step(dt)
         if type(hd2.sounds) ~= 'table' or type(hd2.sounds.play) ~= 'function' then SND.failed = true; log('[Koleda HUD] sounds: hd2.sounds is not in this HD2Runtime'); return end
         SND.fn, SND.name_fn = ffi.cast('kolsnd1', p1), ffi.cast('kolsndname1', p2)
     end
-    SND.tokens = math.min(24, SND.tokens + dt * 24)          -- HD2Runtime allows a mod 32 posts a second
+    -- v2: most guns' firing sounds are MIDI (the weapon plays them as notes: posted as one event they are silent) or
+    -- their banks load only with the weapon (resident-only). Such a gun uses sentry/gatling, a sentry's own sound that
+    -- plays by itself; a loop sound runs while the gun keeps firing (stopped 0.25 s after its last shot)
+    SND.tokens = math.min(10, SND.tokens + dt * 10)
+    SND.t = (SND.t or 0) + dt
+    SND.use = SND.use or {}
+    SND.loops = SND.loops or {}
     local n = SND.fn(1, SND.seq, SND.buf, 16)
     for i = 0, n - 1 do
         local b = i * 5
@@ -689,17 +695,40 @@ local function sound_step(dt)
                 name = c ~= nil and ffi.string(c) or false
                 SND.names[idx] = name
             end
-            if name and not SND.asked[name] then
-                SND.asked[name] = true
-                local okA, errA = pcall(hd2.require_assets, {id = 'kol-snd-' .. (name:gsub('[^%w]', '-')), targets = {hd2.sounds.asset(name)}})
-                snd_log(name .. ': its bank ' .. (okA and 'asked for' or ('not loaded: ' .. tostring(errA))))
+            local use = name and SND.use[name]
+            if name and use == nil then
+                local okD, desc = pcall(hd2.sounds.describe, name)
+                if okD and type(desc) == 'table' and not desc.midi and not desc.resident_only then use = name else use = 'sentry/gatling' end
+                local okF, fd = pcall(hd2.sounds.describe, use)
+                SND.use[name] = use
+                SND.kind = SND.kind or {}
+                SND.kind[use] = okF and type(fd) == 'table' and fd.kind or 'shot'
+                snd_log(name .. ' plays as ' .. use .. ' (' .. SND.kind[use] .. ')')
             end
-            if name and SND.tokens >= 1 then
+            if use and not SND.asked[use] then
+                SND.asked[use] = true
+                local okA, errA = pcall(hd2.require_assets, {id = 'kol-snd-' .. (use:gsub('[^%w]', '-')), targets = {hd2.sounds.asset(use)}})
+                snd_log(use .. ': its bank ' .. (okA and 'asked for' or ('not loaded: ' .. tostring(errA))))
+            end
+            local x, y, z = SND.buf[b], SND.buf[b + 1], SND.buf[b + 2]
+            if use and SND.kind[use] == 'loop' then
+                local L = SND.loops[use]
+                if L and L.h and (SND.t - L.started > 2 or (L.x - x) ^ 2 + (L.y - y) ^ 2 > 36) then pcall(function() L.h:stop() end); L.h = nil end
+                if not (L and L.h) and SND.tokens >= 1 then
+                    SND.tokens = SND.tokens - 1
+                    local okP, h, why = pcall(hd2.sounds.play, use, {position = {x, y, z}})
+                    if okP and h then SND.loops[use] = {h = h, started = SND.t, last = SND.t, x = x, y = y}
+                    else snd_log(use .. ' did not play: ' .. tostring(okP and why or h)) end
+                elseif L then L.last = SND.t end
+            elseif use and SND.tokens >= 1 then
                 SND.tokens = SND.tokens - 1
-                local okP, h, why = pcall(hd2.sounds.play, name, {position = {SND.buf[b], SND.buf[b + 1], SND.buf[b + 2]}})
-                if not okP or not h then snd_log(name .. ' did not play: ' .. tostring(okP and why or h)) end
+                local okP, h, why = pcall(hd2.sounds.play, use, {position = {x, y, z}})
+                if not okP or not h then snd_log(use .. ' did not play: ' .. tostring(okP and why or h)) end
             end
         end
+    end
+    for _, L in pairs(SND.loops) do
+        if L.h and SND.t - L.last > 0.25 then pcall(function() L.h:stop() end); L.h = nil end
     end
     SND.skip = false
 end

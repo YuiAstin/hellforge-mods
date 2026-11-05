@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.5"
+#define VERSION "0.1.6"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -234,6 +234,7 @@ static int Alive(uint32_t e) { int32_t hp; uint32_t life; return HealthOf(e, &hp
 /* 0.1.4: the middle of a unit's body: the centre of its scene-graph nodes' box (a Bile Titan's root is on the ground) */
 #define BODIES 64
 static struct { uint32_t unit; double at; float off[3]; } g_body[BODIES];
+static int CmpF(const void* x, const void* y) { float a = *(const float*)x, b = *(const float*)y; return a < b ? -1 : a > b; }
 static int BodyOffset(uint32_t unit, const float root[3], float off[3])
 {
     unsigned h = (unit * 2654435761u) % BODIES;
@@ -246,18 +247,19 @@ static int BodyOffset(uint32_t unit, const float root[3], float off[3])
         return 0;
     if (count > 256) count = 256;
     if (!ReadAt(nodes, m, (size_t)count * 64)) return 0;
-    float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+    /* the median of its nodes (the box's centre overshot small enemies: a few nodes far up, a weapon, an effect) */
+    static float v[3][256];
     int used = 0;
     for (uint32_t i = 0; i < count; i++)
     {
         const float* t = m + 16 * i + 12;
-        if (!isfinite(t[0]) || !isfinite(t[1]) || !isfinite(t[2]) || fabsf(t[0] - root[0]) > 30 || fabsf(t[1] - root[1]) > 30 || fabsf(t[2] - root[2]) > 30) continue;
-        for (int k = 0; k < 3; k++) { if (t[k] < lo[k]) lo[k] = t[k]; if (t[k] > hi[k]) hi[k] = t[k]; }
+        if (!isfinite(t[0]) || !isfinite(t[1]) || !isfinite(t[2]) || fabsf(t[0] - root[0]) > 20 || fabsf(t[1] - root[1]) > 20 || t[2] < root[2] - 2 || t[2] > root[2] + 20) continue;
+        for (int k = 0; k < 3; k++) v[k][used] = t[k] - root[k];
         used++;
     }
     if (used < 2) return 0;
-    for (int k = 0; k < 3; k++) off[k] = (lo[k] + hi[k]) / 2 - root[k];
-    if (off[2] < 0.5f) off[2] = 0.5f;
+    for (int k = 0; k < 3; k++) { qsort(v[k], used, sizeof(float), CmpF); off[k] = v[k][used / 2]; }
+    if (off[2] < 0.3f) off[2] = 0.3f;
     g_body[h].unit = unit; g_body[h].at = g_now; memcpy(g_body[h].off, off, 12);
     return 1;
 }
@@ -1149,7 +1151,7 @@ static int SinnerShotNear(const float p[3])
     for (int k = 0; k < 16; k++) if (g_shotAimAt[k] > 0 && g_now - g_shotAimAt[k] < 2.0 && Dist2(p, g_shotAim[k]) < 3.0f * 3.0f) return 1;
     return 0;
 }
-static uint32_t Nearest(const float c[3], float range, float at[3])
+static __attribute__((unused)) uint32_t Nearest(const float c[3], float range, float at[3])
 {
     uint32_t best = 0;
     float bd = range * range, q[3];
@@ -1161,6 +1163,38 @@ static uint32_t Nearest(const float c[3], float range, float at[3])
     }
     return best;
 }
+/* 0.1.6: a clear shot from its shoulders to a point (no wall between; bodies do not count) */
+static int SinClear(const float p[3], const float q[3], uint32_t target)
+{
+    uint32_t id;
+    if (!s_sinSight || !WorldId(&id) || !QueryIdle()) return 1;
+    float from[3] = {p[0], p[1], p[2] + 2.4f}, d[3] = {q[0] - from[0], q[1] - from[1], q[2] - from[2]};
+    float n = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (!(n > 3.0f)) return 1;
+    for (int k = 0; k < 3; k++) d[k] /= n;
+    int hit = 0;
+    float w = FirstWall(id, from, d, n, UnitOf(atomic_load(&g_avatar)), UnitOf(target), g_sinUnit, &hit);
+    return hit || w > n - 1.5f;
+}
+/* the nearest enemies to c within range, nearest first, the first (of 5 tried) it has a clear shot at */
+static uint32_t NearestClear(const float c[3], float range, const float p[3], float at[3])
+{
+    struct { uint32_t e; float d2, q[3]; } b[5];
+    int nb = 0;
+    float q[3];
+    for (int k = 0; k < FOES; k++)
+    {
+        float d2;
+        if (!g_foe[k] || !TargetPos(g_foe[k], g_foeRes[k], q) || (d2 = Dist2(q, c)) >= range * range || !Alive(g_foe[k])) continue;
+        int j;
+        if (nb == 5) { if (d2 >= b[4].d2) continue; j = 4; }
+        else j = nb++;
+        while (j > 0 && b[j - 1].d2 > d2) { b[j] = b[j - 1]; j--; }
+        b[j].e = g_foe[k]; b[j].d2 = d2; memcpy(b[j].q, q, 12);
+    }
+    for (int j = 0; j < nb; j++) if (SinClear(p, b[j].q, b[j].e)) { memcpy(at, b[j].q, 12); return b[j].e; }
+    return 0;
+}
 static uint32_t FireTarget(const float p[3], float at[3])
 {
     float me[3];
@@ -1169,15 +1203,16 @@ static uint32_t FireTarget(const float p[3], float at[3])
     {
         uint32_t t = atomic_load(&g_threat);
         int k = FoeIndex(t);
-        if (t && GetTickCount64() - atomic_load(&g_threatMs) < 5000 && k >= 0 && Alive(t) && TargetPos(t, g_foeRes[k], at) && Dist2(at, p) < s_fireRange * s_fireRange) return t;
-        return Nearest(me, s_guardRange, at);
+        if (t && GetTickCount64() - atomic_load(&g_threatMs) < 5000 && k >= 0 && Alive(t) && TargetPos(t, g_foeRes[k], at) && Dist2(at, p) < s_fireRange * s_fireRange &&
+            SinClear(p, at, t)) return t;
+        return NearestClear(me, s_guardRange, p, at);
     }
     if (g_gear == GEAR_PLUS)
     {
         uint32_t t = PlusTarget(at);
-        if (t && Dist2(at, p) < (s_fireRange * 1.5f) * (s_fireRange * 1.5f)) return t;
+        if (t && Dist2(at, p) < (s_fireRange * 1.5f) * (s_fireRange * 1.5f) && SinClear(p, at, t)) return t;
     }
-    return Nearest(p, s_fireRange, at);
+    return NearestClear(p, s_fireRange, p, at);   /* (0.1.6: nearest first, with a clear shot: not one behind a wall) */
 }
 /* 0.1.2: a gear's gun profile: the vanilla gun its round comes from (fire rate, pellets) */
 typedef struct GunProfile { uint32_t round; float every; uint32_t pellets; } GunProfile;
