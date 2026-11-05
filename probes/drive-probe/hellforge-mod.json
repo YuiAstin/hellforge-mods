@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.drive-probe",
   "name": "Drive Probe (research)",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Research for Koleda's Sinner: can an exosuit nobody pilots walk on its own legs? F7 while you pilot a suit: records its locomotion records for 12 s with the keys you hold (walk forward, strafe, turn). F8 after you climb out: drives the nearest empty suit toward where you look for 5 s with what F7 found, logging where it goes. F8 also checks whether the suit can get a navmesh path to you (set_destination). F9 stops. Host or solo. Turn off when done.",
   "gameplay": false,
   "code": {

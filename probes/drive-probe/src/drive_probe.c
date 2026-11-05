@@ -26,7 +26,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.1"
+#define VERSION "0.1.2"
 #include "kitbase/kb_core.h"
 
 static atomic_uint g_avatar;
@@ -38,15 +38,52 @@ static const uint64_t kExo[4] = {HF_ENTITY_EXO45_PATRIOT_EXOSUIT, HF_ENTITY_EXO4
                                  HF_ENTITY_EXO55_BREAKTHROUGH_EXOSUIT};
 static uint32_t g_exo[32];
 static uint64_t g_exoRes[32];
+/* 0.1.2: every vehicle counts (a mod's copy of a suit too: Koleda's Sinner), sorted on the game thread by its components */
+static uint32_t g_newEnt[128];
+static uint64_t g_newRes[128];
+static atomic_uint g_newHead;
+static unsigned g_newTail;
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
-    for (int k = 0; k < 4; k++)
-        if (s->resource == kExo[k])
+    unsigned h = atomic_load(&g_newHead);
+    g_newEnt[h % 128] = s->entity;
+    g_newRes[h % 128] = s->resource;
+    atomic_store(&g_newHead, h + 1);
+}
+static void AddExo(uint32_t e, uint64_t res, const char* what)
+{
+    for (int i = 0; i < 32; i++) if (!g_exo[i] || g_exo[i] == e) { g_exo[i] = e; g_exoRes[i] = res; break; }
+    Log("exosuit spawned: entity %u (resource %016llx, %s)", e, (unsigned long long)res, what);
+}
+static uint64_t g_vehRes[64];
+static uint8_t g_vehIs[64];
+static int IsSuit(uint64_t res)
+{
+    for (int k = 0; k < 4; k++) if (res == kExo[k]) return 1;
+    for (int i = 0; i < 64; i++)
+    {
+        if (g_vehRes[i] == res) return g_vehIs[i];
+        if (!g_vehRes[i])
         {
-            for (int i = 0; i < 32; i++) if (!g_exo[i] || g_exo[i] == s->entity) { g_exo[i] = s->entity; g_exoRes[i] = s->resource; break; }
-            Log("exosuit spawned: entity %u (resource %016llx)", s->entity, (unsigned long long)s->resource);
+            uint32_t st;
+            g_vehRes[i] = res;
+            /* a seat and a walker's locomotion, no wheels: an exosuit (or a copy of one) */
+            g_vehIs[i] = hf->component_record("SeatCollectionComponentData", res, &st) && !hf->component_record("AvatarComponentData", res, &st) &&
+                         !hf->component_record("BehaviorComponentData", res, &st);
+            if (g_vehIs[i]) Log("a vehicle type %016llx (seats, no behaviour): counted as a suit", (unsigned long long)res);
+            return g_vehIs[i];
         }
+    }
+    return 0;
+}
+static void SortSpawns(void)
+{
+    for (int k = 0; k < 16 && g_newTail != atomic_load(&g_newHead); k++, g_newTail++)
+    {
+        unsigned i = g_newTail % 128;
+        if (IsSuit(g_newRes[i])) AddExo(g_newEnt[i], g_newRes[i], "a vehicle");
+    }
 }
 static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 {
@@ -58,25 +95,33 @@ static int Pos(uint32_t e, float out[3])
     uint8_t d[24];
     return Descriptor(e, d) && UnitNode(Word(d + 12), 0, out);
 }
+/* 0.1.2: while she pilots, her own position may not read: the last one read is used */
+static float g_lastMe[3];
+static double g_lastMeAt = -100;
 static uint32_t NearestExo(float within, float* dist)
 {
     float me[3], p[3];
     uint32_t best = 0;
     float bd = within * within;
-    if (!Pos(atomic_load(&g_avatar), me)) return 0;
+    if (Pos(atomic_load(&g_avatar), me)) { memcpy(g_lastMe, me, 12); g_lastMeAt = g_now; }
+    else if (g_now - g_lastMeAt < 600) { memcpy(me, g_lastMe, 12); Log("(her position does not read now: using where she was %.0f s ago)", g_now - g_lastMeAt); }
+    else { Log("her position does not read (avatar %u)", atomic_load(&g_avatar)); return 0; }
+    int known = 0;
     for (int i = 0; i < 32; i++)
     {
         uint8_t d[24];
         if (!g_exo[i]) continue;
         if (!Descriptor(g_exo[i], d) || Quad(d) != g_exoRes[i]) { g_exo[i] = 0; continue; }
-        if (!Pos(g_exo[i], p)) continue;
+        known++;
+        if (!Pos(g_exo[i], p)) { Log("  suit %u: its position does not read", g_exo[i]); continue; }
         float d2 = Dist2(me, p);
         if (d2 < bd) { bd = d2; best = g_exo[i]; }
+        if (!best || g_exo[i] != best) Log("  suit %u (%016llx): %.1f m away", g_exo[i], (unsigned long long)g_exoRes[i], sqrtf(d2));
     }
+    if (!known) Log("  no suit known this mission (none seen spawning)");
     if (dist) *dist = sqrtf(bd);
     return best;
 }
-
 /* the records */
 #define VL_SIZE 0xA4
 #define LC_SIZE 0xA0
@@ -157,8 +202,8 @@ static const char* SlotName(int s, char* buf, size_t n)
 static void RecordStart(void)
 {
     float d;
-    uint32_t e = NearestExo(4, &d);
-    if (!e) { Log("F7: no exosuit within 4 m of you (pilot one first)"); return; }
+    uint32_t e = NearestExo(6, &d);
+    if (!e) { Log("F7: no exosuit within 6 m of you (pilot one first)"); return; }
     uintptr_t v = VlocoRec(e), l = LocoRec(e), mv = MoverRec(e);
     Log("F7: the suit %s a navigation record", NavRec(e) ? "HAS" : "has no");
     Log("F7: recording exosuit %u (%.1f m): vloco record %s, loco record %s, mover record %s; walk forward, stand, strafe, turn",
@@ -332,8 +377,14 @@ static void Tick(HfMod* mod, float dt, void* user)
     {
         g_inMission = in;
         if (!in) { DriveStop("mission end"); g_recExo = 0; memset(g_exo, 0, sizeof g_exo); }
+        g_newTail = atomic_load(&g_newHead);
     }
     if (!in || !game) return;
+    SortSpawns();
+    {
+        float me[3];
+        if (Pos(atomic_load(&g_avatar), me)) { memcpy(g_lastMe, me, 12); g_lastMeAt = g_now; }
+    }
     static int prev[3];
     int focused = Focused();
     int k[3] = {focused && (GetAsyncKeyState(VK_F7) & 0x8000), focused && (GetAsyncKeyState(VK_F8) & 0x8000), focused && (GetAsyncKeyState(VK_F9) & 0x8000)};
