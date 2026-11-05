@@ -8,6 +8,7 @@
 | [research/native-tables.md](research/native-tables.md) | The game's settings lists (explosion, arc, damage, projectile, stratagem), how More Plasma Stratagems adds explosions of its own, and how Leva 0.5.0 adds a private explosion and arc for her lockdown. Also its other reusable patterns (typed writes, private entities, Lua mod options, HellForge-built icons). |
 | [research/ai-modding.md](research/ai-modding.md) | AI modding in HellForge: friendly AI (sentries, guard dogs), enemy AI and the tools each relies on, tagged proven / static / speculative. |
 | [research/teleport-blink.md](research/teleport-blink.md) | How to move a Helldiver from a C mod (blink / teleport), from the LIFT-182 Warp Pack's own code. |
+| [research/booster-table.md](research/booster-table.md) | The BoosterSettings table and everything that adding a 22nd booster needs: row layout, booster effects in code, the game's booster accessors, the selection and network path, and the full patch list (117 table sites, 112 bounds and sentinels), from a static analysis of a `game.dll` memory dump. |
 | [research/ias-stutter.md](research/ias-stutter.md) | Why HD2Runtime + IAS stutter together, and the garbage-collector tuning that became Smooth GC. |
 
 The research notes were written while working, so their file paths point at a scratch folder (`<scratch>`, or `S` / `HF` / `RT` abbreviations defined at the top of each); the findings and addresses are what matter.
