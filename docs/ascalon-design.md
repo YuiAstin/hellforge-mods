@@ -11,7 +11,8 @@ perception research (docs/research/perception.md, when written) come first.
 - Her own: invisible until she attacks.
 - Talent **Mortal Interrogation**: hits slow 18% and deal 10% of her ATK as Arts damage a second for 25 s (3 stacks).
 - Talent **Penumbral Image**: +8 ASPD (+6 more with high ground adjacent).
-- S1 **Pursuit** (auto, 3 charges): the next attack at 210% ATK, twice.
+- S1 **Pursuit** (auto, 3 charges): the next attack at 210% ATK, twice; like all her attacks it hits everyone around
+  her (the trait), and Mortal Interrogation adds the DoT and slow.
 - S2 **Endowment** (35 s): ATK +130%, enemies in range -60% speed, kills spread a Talent 1 stack.
 - S3 **Descent** (45 s): ATK +50%, wider range, faster attacks, enemies in range -50% hit rate, taunts, heals 8% max
   HP on each miss or dodge.
@@ -38,7 +39,11 @@ perception research (docs/research/perception.md, when written) come first.
   flamer slow's build-up) and a small damage tick each second for 25 s.
 - **Penumbral Image (passive):** melee and fire rate a little faster while hidden (melee speed if a field allows it,
   else +10% damage).
-- **Z, Pursuit (3 charges, one back every 7 s):** her next melee hit lands twice at 210%. Silent.
+- **Pursuit (auto, 3 charges, one back every 7 s; no key):** as in Arknights it fires by itself: her next melee hit
+  with a charge sets off a gas burst around her (Faelynn's gas blast, own-blast guarded so it spares her): burst damage
+  to everyone within ~4 m, then the gas status ticks (the DoT) and a slow (the flamer slow's build-up) on each one hit.
+  It counts as melee: silent, she stays hidden. Mortal Interrogation stacks on everyone it hits.
+- **Z, free** (Pursuit needs no key; Z is spare for a later idea).
 - **X, Endowment (35 s):** her damage +130% and every enemy within 8 m slowed 60% (the slow status, refreshed); kills
   spread a Mortal Interrogation stack to enemies within 5 m.
 - **C, Descent (45 s):** she steps out of hiding on purpose: damage +50%, her melee hits everything within 3 m in
