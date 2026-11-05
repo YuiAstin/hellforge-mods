@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.code-dump",
+  "name": "Code Dump (research)",
+  "version": "0.1.0",
+  "description": "Research only, no gameplay effect: writes the unpacked game.dll (about 75 MB) to the session's logs folder for offline analysis. It is the game's code: keep it private. Turn off when done.",
+  "gameplay": false,
+  "code": {
+    "dll": "code_dump.dll",
+    "sdk": 13
+  }
+}

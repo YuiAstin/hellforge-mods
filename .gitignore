@@ -10,3 +10,6 @@ __pycache__/
 .idea/
 *.user
 *.bak
+
+# game code dumps (the game's own code: never commit or share)
+*.dump
