@@ -40,7 +40,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.5"
+#define VERSION "0.4.0"
 #define BUILD "25480438"
 
 #define KB_STEADY 1
@@ -69,8 +69,9 @@ static int s_corrMax = 6;
 static int s_barkBlasts = 6, s_barkDamage = 2000;
 
 /* Every setting: its .ini / Mod Options Menu name, variable and range (kitbase/kb_settings.h) */
+static int s_dashMove = 1;   /* 1: her dash goes the way she moves (facing when still or just hit); 0: her facing */
 static const KbSetting kSettings[] = {
-    KB_I("cp_max", s_cpMax, 1, 10), KB_I("ht_max", s_htMax, 0, 50), KB_F("ht_per_stack", s_htPer, 0, 1), KB_F("ht_seconds", s_htSeconds, 1, 120),
+    KB_I("cp_max", s_cpMax, 1, 10), KB_I("ht_max", s_htMax, 0, 50), KB_F("ht_per_stack", s_htPer, 0, 1), KB_F("ht_seconds", s_htSeconds, 1, 120), KB_I("dash_move", s_dashMove, 0, 1),
     KB_F("tm_cooldown", s_tmCd, 0, 600), KB_F("tm_radius", s_tmRadius, 1, 30), KB_F("tm_range", s_tmRange, 5, 200),
     KB_F("pursuit_window", s_pursuitWindow, 0.5, 30), KB_F("pursuit_bonus", s_pursuitBonus, 0, 5), KB_F("pursuit_hold", s_pursuitHold, 0.5, 30), KB_F("pursuit_speed", s_pursuitSpeed, 0, 1),
     KB_F("kh_cooldown", s_khCd, 0, 600), KB_F("kh_seconds", s_khSeconds, 1, 60), KB_F("kh_speed", s_khSpeed, 1, 3), KB_F("kh_mult", s_khMult, 1, 5),
@@ -559,6 +560,42 @@ static float SpeedMult(void)
     if (g_now < g_bonusUntil) m *= 1 + s_pursuitSpeed * (float)g_pursuitStage;
     return m;
 }
+static _Atomic unsigned long long g_hurtMs;   /* her last hit (the hit hook): her dashes trust her movement 0.4 s after */
+/* ---- the way she moves (her dashes go that way: kiting means running from what she shoots at). Her root position each
+ * update; her movement is the last ~0.2 s of it, when she covers at least 2 m/s and was not hit in the last 0.4 s (a hit's
+ * push is not where the player steers). Standing still or just hit: her facing, as before. */
+static float g_moveP[16][3];
+static double g_moveT[16];
+static unsigned g_moveN;
+static void MoveTrack(void)
+{
+    float p[3];
+    if (!PlayerPose(p, NULL)) return;
+    unsigned k = g_moveN++ % 16;
+    memcpy(g_moveP[k], p, sizeof p);
+    g_moveT[k] = g_now;
+}
+static int MoveDir(float dir[2])
+{
+    if (!s_dashMove || g_moveN < 2) return 0;
+    if (GetTickCount64() - atomic_load(&g_hurtMs) < 400) return 0;
+    unsigned last = (g_moveN - 1) % 16;
+    for (unsigned back = 1; back < 16 && back < g_moveN; back++)
+    {
+        unsigned k = (g_moveN - 1 - back) % 16;
+        double dt = g_moveT[last] - g_moveT[k];
+        if (dt < 0.15) continue;
+        if (dt > 0.5) return 0;
+        float dx = g_moveP[last][0] - g_moveP[k][0], dy = g_moveP[last][1] - g_moveP[k][1];
+        float d = sqrtf(dx * dx + dy * dy);
+        if (d / dt < 2.0) return 0;
+        dir[0] = dx / d; dir[1] = dy / d;
+        return 1;
+    }
+    return 0;
+}
+/* her hits (the kit base's hit hook): only noted, nothing changed */
+static int HurtNote(const uint8_t* h, void* result, unsigned long long now) { (void)h; (void)result; atomic_store(&g_hurtMs, now); return 0; }
 static void LoyalDash(void)
 {
     if (g_leap) return;
@@ -581,9 +618,13 @@ static void LoyalDash(void)
     float pos[3], aim[3];
     if (!PlayerPose(pos, aim)) { Log("Loyal Dash: her position or aim cannot be read"); return; }
     float h = sqrtf(aim[0] * aim[0] + aim[1] * aim[1]);
-    if (h < 0.05f) { Log("Loyal Dash: she is looking straight up or down"); return; }
-    g_leapDir[0] = aim[0] / h;
-    g_leapDir[1] = aim[1] / h;
+    if (MoveDir(g_leapDir)) { static int told; if (told++ < 3) Log("Loyal Dash: the way she moves (%.2f %.2f)", g_leapDir[0], g_leapDir[1]); }
+    else
+    {
+        if (h < 0.05f) { Log("Loyal Dash: she is looking straight up or down"); return; }
+        g_leapDir[0] = aim[0] / h;
+        g_leapDir[1] = aim[1] / h;
+    }
     g_leap = 1;
     g_leapT0 = g_now;
 }
@@ -1063,6 +1104,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
     if (!g_inMission || !kb_kit_on) return;   /* (standing by: another kit is picked) */
     MyItems();
+    MoveTrack();
     static int prev[3];
     int focused = Focused();
     int mods = focused ? ((GetAsyncKeyState(VK_SHIFT) & 0x8000) ? KM_SHIFT : 0) | ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? KM_CTRL : 0) |
@@ -1193,6 +1235,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     KB_OPTIONS(kOptions);
     kb_option_after = OptionAfter;
     kb_damage_taken = DamageTaken;
+    kb_hit_taken = HurtNote;
     kb_damage_dealt = DamageDealt;
     kb_hit_before = HitBefore;
     kb_hellbomb_veto = HellbombVeto;

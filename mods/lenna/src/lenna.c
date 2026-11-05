@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.10"
+#define VERSION "0.3.0"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -66,8 +66,9 @@ static float s_markMult = 1.3f, s_markSeconds = 6;
 static int s_ems = 0, s_arcRow = 157, s_arcBlast = 41;  /* 157: the G-31 Arc grenade's detonation (her arcs); 41: the GL-52 De-Escalator's burst (their blast) */  /* the EMS explosion row: 0 = the EMS Mortar Sentry shell's own (read at game start) */
 
 /* Every setting: its .ini / Mod Options Menu name, variable and range (kitbase/kb_settings.h) */
+static int s_dashMove = 1;   /* 1: her dash goes the way she moves (facing when still or just hit); 0: her facing */
 static const KbSetting kSettings[] = {
-    KB_I("ci_max", s_ciMax, 3, 20),
+    KB_I("ci_max", s_ciMax, 3, 20), KB_I("dash_move", s_dashMove, 0, 1),
     KB_F("we_cooldown", s_weCd, 0, 600), KB_F("we_window", s_weWindow, 0.5, 30), KB_I("we_hits", s_weHits, 0, 1000),
     KB_F("we_mult", s_weMult, 1, 20), KB_F("we_mult_enhanced", s_weMultEnh, 1, 20),
     KB_F("lp_cooldown", s_lpCd, 0, 600), KB_F("lp_up", s_lpUp, 0, 25), KB_F("lp_forward", s_lpForward, 0, 25),
@@ -346,6 +347,42 @@ static int GroundAt(uint32_t unit, float x, float y, float ref, float* z)
     return 1;
 }
 
+static _Atomic unsigned long long g_hurtMs;   /* her last hit (the hit hook): her dashes trust her movement 0.4 s after */
+/* ---- the way she moves (her dashes go that way: kiting means running from what she shoots at). Her root position each
+ * update; her movement is the last ~0.2 s of it, when she covers at least 2 m/s and was not hit in the last 0.4 s (a hit's
+ * push is not where the player steers). Standing still or just hit: her facing, as before. */
+static float g_moveP[16][3];
+static double g_moveT[16];
+static unsigned g_moveN;
+static void MoveTrack(void)
+{
+    float p[3];
+    if (!PlayerPose(p, NULL)) return;
+    unsigned k = g_moveN++ % 16;
+    memcpy(g_moveP[k], p, sizeof p);
+    g_moveT[k] = g_now;
+}
+static int MoveDir(float dir[2])
+{
+    if (!s_dashMove || g_moveN < 2) return 0;
+    if (GetTickCount64() - atomic_load(&g_hurtMs) < 400) return 0;
+    unsigned last = (g_moveN - 1) % 16;
+    for (unsigned back = 1; back < 16 && back < g_moveN; back++)
+    {
+        unsigned k = (g_moveN - 1 - back) % 16;
+        double dt = g_moveT[last] - g_moveT[k];
+        if (dt < 0.15) continue;
+        if (dt > 0.5) return 0;
+        float dx = g_moveP[last][0] - g_moveP[k][0], dy = g_moveP[last][1] - g_moveP[k][1];
+        float d = sqrtf(dx * dx + dy * dy);
+        if (d / dt < 2.0) return 0;
+        dir[0] = dx / d; dir[1] = dy / d;
+        return 1;
+    }
+    return 0;
+}
+/* her hits (the kit base's hit hook): only noted, nothing changed */
+static int HurtNote(const uint8_t* h, void* result, unsigned long long now) { (void)h; (void)result; atomic_store(&g_hurtMs, now); return 0; }
 static void LeapingPursuit(void)
 {
     if (g_now < g_cdLeap) return;
@@ -353,9 +390,13 @@ static void LeapingPursuit(void)
     float pos[3], aim[3];
     if (!PlayerPose(pos, aim)) { Log("Leaping Pursuit: her position or aim cannot be read"); return; }
     float h = sqrtf(aim[0] * aim[0] + aim[1] * aim[1]);
-    if (h < 0.05f) { Log("Leaping Pursuit: she is looking straight up or down"); return; }
-    g_leapDir[0] = aim[0] / h;
-    g_leapDir[1] = aim[1] / h;
+    if (MoveDir(g_leapDir)) { static int told; if (told++ < 3) Log("Leaping Pursuit: the way she moves (%.2f %.2f)", g_leapDir[0], g_leapDir[1]); }
+    else
+    {
+        if (h < 0.05f) { Log("Leaping Pursuit: she is looking straight up or down"); return; }
+        g_leapDir[0] = aim[0] / h;
+        g_leapDir[1] = aim[1] / h;
+    }
     g_leap = 1;          /* the teleport waits for an idle physics query (a frame or two) */
     g_leapT0 = g_now;
 }
@@ -1107,6 +1148,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (!g_inMission || !kb_kit_on) return;   /* (standing by: another kit is picked) */
     /* keys (edges) */
     MyItems();
+    MoveTrack();
     static int prev[3];
     int focused = Focused();
     int mods = focused ? ((GetAsyncKeyState(VK_SHIFT) & 0x8000) ? KM_SHIFT : 0) | ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? KM_CTRL : 0) |
@@ -1227,6 +1269,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     KB_OPTIONS(kOptions);
     kb_option_after = OptionAfter;
     kb_damage_taken = DamageTaken;
+    kb_hit_taken = HurtNote;
     kb_damage_dealt = DamageDealt;
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }

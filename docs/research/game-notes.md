@@ -97,3 +97,16 @@ To give a skill an explosion or arc of its own (own damage, own arc), see [nativ
   pointers one level deep for a valid camera matrix within 300 m, as the Apache does.
 - **What it replaces:** the forward row is the reticle's direction, with no head sway. Leva 0.5.5 (`aim_camera = 1`)
   uses it for her lines and fields.
+
+## Floating gun models (Gun Probe 0.1.9, 2026-11-04)
+
+- A HUD addon can show a gun hovering beside the view with no physics fight: spawn the Guard Dog's body
+  (`content/fac_helldivers/equipment/backpacks/drone_mg/drone_mg`, which holds where it is put), hide it with
+  `Unit.set_unit_visibility(dog, false)`, spawn the Guard Dog's own gun (`.../drone_mg/drone_mg_weapon`) and
+  `World.link_unit(world, gun, 1, dog, 1)` with local position 0, then move only the dog each frame
+  (`Unit.set_local_position` / `set_local_rotation` node 1). The gun stays on the dog to the centimetre.
+- What doesn't work: a support weapon's model (the MG-43 `machinegun`) is a dropped-weapon pickup with a physics body
+  that `Unit.disable_physics` does not stop; linked to a dog it jumps 5-7 m and falls. `Unit.num_actors` is not
+  reachable from HD2Runtime addons.
+- Both models load only with the Guard Dog in someone's loadout (`Application.can_get('unit', ...)`); a kit that
+  shows them without one needs their package requested (hd2.require_assets) first.

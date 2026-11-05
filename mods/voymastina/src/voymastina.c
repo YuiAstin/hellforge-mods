@@ -40,7 +40,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.0"
+#define VERSION "0.4.1"
 static int HerRide(uint32_t target);
 /* her two kits (p8): the Sinbreaker's GFL2 kit, the AK-15 kit on foot */
 static void AkHit(HfDamageEvent* d);
@@ -98,7 +98,7 @@ static int s_ppPer = 2, s_ppMax = 6, s_ppAp = 2;
 static float s_ppMult = 1.5f;
 static float s_lpClimb = 6, s_lpDrop = 12;
 /* the Sinbreaker (her mech, the GFL2 kit) and its earned Pile Bunker follow-up */
-static int s_sinOn = 1, s_sinUses = -1, s_mechAny = 0, s_sinGrant = 1, s_sinLoadout = 1;
+static int s_sinOn = 1, s_sinUses = -1, s_mechAny = 0, s_sinGrant = 1, s_sinLoadout = 1, s_sinFallback = 1, s_sinFreeBase = 2;
 static float s_sinCd = 120, s_mechLunge = 8;
 static int s_mpbOn = 1, s_mpbUnlock = 2, s_mpbDrag = 10, s_mpbRow = 242, s_mpbFallback = 125;
 static float s_mpbLength = 30, s_mpbWidth = 4, s_mpbHold = 0.4f, s_mpbDelay = 0.7f;
@@ -130,7 +130,7 @@ static const KbSetting kSettings[] = {
     KB_F("stab_regen", s_stabRegen, 0, 500), KB_F("stab_delay", s_stabDelay, 0, 30), KB_I("ap_bonus", s_apBonus, 0, 6),
     KB_I("pp_per", s_ppPer, 0, 10), KB_I("pp_max", s_ppMax, 1, 20), KB_I("pp_ap", s_ppAp, 0, 6), KB_F("pp_mult", s_ppMult, 1, 10),
     KB_F("lp_climb", s_lpClimb, 0.5, 30), KB_F("lp_drop", s_lpDrop, 0.5, 50),
-    KB_I("sin_on", s_sinOn, 0, 1), KB_F("sin_cooldown", s_sinCd, 1, 3600), KB_I("sin_uses", s_sinUses, -1, 100), KB_I("mech_any", s_mechAny, 0, 1), KB_I("sin_grant", s_sinGrant, 0, 1), KB_I("sin_loadout", s_sinLoadout, 0, 1), KB_F("mech_lunge", s_mechLunge, 0, 30),
+    KB_I("sin_on", s_sinOn, 0, 1), KB_F("sin_cooldown", s_sinCd, 1, 3600), KB_I("sin_uses", s_sinUses, -1, 100), KB_I("mech_any", s_mechAny, 0, 1), KB_I("sin_grant", s_sinGrant, 0, 1), KB_I("sin_loadout", s_sinLoadout, 0, 1), KB_I("sin_fallback", s_sinFallback, 0, 2), KB_I("sin_free_base", s_sinFreeBase, 1, 2), KB_F("mech_lunge", s_mechLunge, 0, 30),
     KB_I("mpb_on", s_mpbOn, 0, 1), KB_I("mpb_unlock", s_mpbUnlock, 0, 2), KB_F("mpb_length", s_mpbLength, 5, 80), KB_F("mpb_width", s_mpbWidth, 1, 20), KB_I("mpb_drag", s_mpbDrag, 0, 32),
     KB_I("mpb_explosion", s_mpbRow, 0, 100000), KB_I("mpb_fallback", s_mpbFallback, 0, 100000), KB_F("mpb_hold", s_mpbHold, 0, 5), KB_F("mpb_delay", s_mpbDelay, 0, 5),
     KB_F("rage_chance", s_rageChance, 0, 1), KB_F("rage_seconds", s_rageSeconds, 0, 60), KB_F("rage_bonus", s_rageBonus, 0, 10),
@@ -1567,11 +1567,14 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
 /* ---- the Sinbreaker: her exosuit (a copy of the EXO-55 Breakthrough) and its stratagem (hellforge_mod_init) -------- */
 static uint64_t g_sinRes;
 static uint32_t g_sinType;
+/* The free Sinbreaker, for players without the Exo Experts warbond: a copy of the EXO-49 Emancipator (or EXO-45 Patriot) */
+static uint64_t g_sinFreeRes;
+static uint32_t g_sinFreeType;
 static int IsExosuit(uint64_t r)
 {
     return r == 0x79E4B3D2DA5E45E3ull || r == 0xC2D449ECF7FACAB1ull || r == 0x7B2326F6FD9C8069ull || r == 0x35DBF54F016F3624ull;
 }
-static int HerMechKind(uint64_t r) { return r && ((g_sinRes && r == g_sinRes) || (s_mechAny && IsExosuit(r))); }
+static int HerMechKind(uint64_t r) { return r && ((g_sinRes && r == g_sinRes) || (g_sinFreeRes && r == g_sinFreeRes) || (s_mechAny && IsExosuit(r))); }
 
 /* ---- the seat (Khi's reading, as Apache - Rise Above and Mech Probe do it: the command bus game+0x3326E68, entry 117) */
 typedef struct { int found; uint32_t vehicle, role, node; int changing; } Seat;
@@ -1750,11 +1753,12 @@ static void MechLungeFrame(void)
     MechStrike(g_mlunge.emp);
 }
 
-/* ---- the earned follow-up: Pile Bunker kills a heavily armoured enemy (armour 4+) -> her next shield bash sends a
+/* ---- the earned follow-up: Pile Bunker kills a heavily armoured enemy (armour 4+) -> Pile Bunker's key again while it
+ * recharges (or, in the Breakthrough Sinbreaker, the shield bash) sends a
  * precision-strike line mpb_length m out from the suit, enemies and corpses on it are dragged to its end, and a Hellbomb
  * goes off there ---------------------------------------------------------------------------------------------------- */
 static int g_mpbReady;
-static double g_mpbFireAt;   /* the follow-up waits mpb_delay s after the bash starts: the swing finishes first */
+static double g_mpbFireAt;   /* when it goes: the key's, at once; the bash's, mpb_delay s after it starts (the swing finishes first) */
 static double g_mpbBoomAt;
 static float g_mpbBoomPos[3];
 static unsigned g_mpbFired, g_mpbEarned;
@@ -1797,7 +1801,7 @@ static void MpbKill(const HfKillEvent* k)
     if (s_mpbUnlock >= 2 && !heavy) { static unsigned told; if (told++ < 6) Log("Pile Bunker killed %016llx (%s): not heavily armoured, no follow-up", (unsigned long long)res, why); return; }
     g_mpbReady = 1;
     g_mpbEarned++;
-    Log("Pile Bunker killed %016llx (%s): follow-up ready on her next shield bash", (unsigned long long)res, why);
+    Log("Pile Bunker killed %016llx (%s): follow-up ready (Pile Bunker's key again, or the shield bash)", (unsigned long long)res, why);
 }
 /* the drag: living enemies stepped along the ground (the warp setter, as Mech Probe's Ctrl+F10), corpses pushed */
 typedef struct { uint32_t e, unit; float to[3]; } Dragged;
@@ -1858,6 +1862,16 @@ typedef struct { uint32_t actor; float dir[3]; } Pushed;
 static Pushed g_push[256];
 static int g_npush;
 static double g_pushUntil;
+/* 0.4.1b: whether an enemy moves on its own: it has an active navigation record ([game+0x3326418]: map +0x30, records
+ * +0x50, 0xA8 each, +0x10 active; Lost Contact's layout). A strider's pilot or seat rides its walker and has none, and the
+ * warp setter crashed on one (entity 1414, f96257fcae258caa, 2026-11-05) */
+static int Walks(uint32_t e)
+{
+    uintptr_t m = Pointer(game + 0x3326418), recs;
+    uint32_t index, active = 0;
+    if (!m || !Lookup(m + 0x30, e, 1048576, &index) || index > 65535 || !(recs = Pointer(m + 0x50))) return 0;
+    return ReadAt(recs + 0xA8u * index + 0x10, &active, 4) && (active & 0xFF) != 0;
+}
 static void MpbFire(void)
 {
     float p[3], dir[2], down[3] = {0, 0, -1};
@@ -1900,11 +1914,21 @@ static void MpbFire(void)
         int tp = pick[a]; pick[a] = pick[best]; pick[best] = tp;
         uint8_t d[24];
         if (!Descriptor(g_foe[pick[a]], d)) continue;
+        /* 0.4.1b: only an enemy this machine simulates (its descriptor's authority bit): the warp setter crashed twice on
+         * entities numbered 0x400000 and up (4195360, 4195381: not this machine's), 2026-11-05 */
+        if (!(Word(d + 20) & 1) || g_foe[pick[a]] >= 0x400000u || !Walks(g_foe[pick[a]]))
+        {
+            static unsigned toldSkip;
+            if (toldSkip++ < 8) Log("Pile Bunker follow-up: entity %u (%016llx) %s: not dragged", g_foe[pick[a]], (unsigned long long)Quad(d),
+                                    Walks(g_foe[pick[a]]) ? "is not simulated here" : "has no navigation record of its own (a rider)");
+            continue;
+        }
         Dragged* r = &g_drag[g_ndrag++];
         r->e = g_foe[pick[a]]; r->unit = Word(d + 12);
         float ang = (float)g_ndrag * 2.39996f, rad = 1.5f + 0.5f * (float)(g_ndrag % 4);   /* a ring around the end */
         r->to[0] = end[0] + cosf(ang) * rad; r->to[1] = end[1] + sinf(ang) * rad; r->to[2] = end[2];
         live++;
+        { static unsigned told; if (told++ < 24) Log("Pile Bunker follow-up: drags entity %u (%016llx)", r->e, (unsigned long long)Quad(d)); }
     }
     g_npush = 0;
     if (g_ndrag < s_mpbDrag)
@@ -1959,7 +1983,18 @@ static void MpbFrame(void)
         {
             Dragged* r = &g_drag[i];
             float q[3];
+            int32_t hp; uint32_t life;
+            uint8_t d[24];
             if (!r->e || !UnitNode(r->unit, 0, q)) { r->e = 0; continue; }
+            /* 0.4.1b: only while it lives and is still the same unit: one that died on the line has no movement record
+             * left, and the warp setter crashed on it (2026-11-05, game.dll+0x5A2C69, 8 dragged); a corpse stays put */
+            if (!HealthOf(r->e, &hp, &life) || hp <= 0 || !Descriptor(r->e, d) || Word(d + 12) != r->unit)
+            {
+                static unsigned told;
+                if (told++ < 6) Log("Pile Bunker follow-up: entity %u left the drag (%s)", r->e, !HealthOf(r->e, &hp, &life) || hp <= 0 ? "dead" : "gone");
+                r->e = 0;
+                continue;
+            }
             float v[2] = {r->to[0] - q[0], r->to[1] - q[1]}, h = sqrtf(v[0] * v[0] + v[1] * v[1]);
             if (h < 0.3f) continue;
             float left = (float)(g_dragUntil - g_now), speed = h / (left > 0.2f ? left : 0.2f);
@@ -2144,7 +2179,7 @@ static void KitFrame(void)
                 g_mech = mech; g_mechUnit = Word(d + 12);
                 MechParts(mech);
                 g_akEyeUntil = 0;
-                Log("she pilots the %s (entity %u, %d parts): her GFL2 kit", Quad(d) == g_sinRes ? "Sinbreaker" : "exosuit", mech, g_nMechParts);
+                Log("she pilots the %s (entity %u, %d parts): her GFL2 kit", Quad(d) == g_sinRes ? "Sinbreaker" : Quad(d) == g_sinFreeRes ? "free Sinbreaker" : "exosuit", mech, g_nMechParts);
             }
             else
             {
@@ -2229,42 +2264,59 @@ static int KitKey(int i)
 {
     if (g_mech)
     {
-        if (i == 2) { MechPileBunker(); return 1; }
+        if (i == 2)
+        {
+            /* while Pile Bunker recharges, C again sets off its earned follow-up (the Breakthrough's shield bash does too) */
+            if (g_now < g_cd[2] && !g_mlunge.on && s_mpbOn && g_mpbFireAt <= 0)
+            {
+                if (g_mpbReady || s_mpbUnlock == 0) { g_mpbFireAt = g_now; Log("Pile Bunker follow-up: set off with the key"); }
+                else { static unsigned told; if (told++ < 5) Log("Pile Bunker again: no follow-up earned (Pile Bunker must kill a heavily armoured enemy)"); }
+                return 1;
+            }
+            MechPileBunker();
+            return 1;
+        }
         return 0;   /* Sirius Fall and the GFL2 Eye as before */
     }
     if (i == 1) AkEye();
     else { static unsigned told; if (told++ < 3) Log("%s works in the Sinbreaker (on foot: X is her AK-15 Eye)", i == 0 ? "Sirius Fall" : "Pile Bunker"); }
     return 1;
 }
-static void SinbreakerInit(const HfApi* api, HfMod* mod)
+/* One Sinbreaker: an entity copied from base (its turn speed and main armour its own) and its LRRRR stratagem, dropped
+ * by Pelican. turn: the base's own turn speed (the Breakthrough's 65, read in 0.3.2). */
+static void SinbreakerAdd(const HfApi* api, HfMod* mod, uint64_t base, uint32_t baseStratagem, uint64_t package, float turnBase,
+                          const char* name, const char* designation, const char* what, uint64_t* res, uint32_t* type)
 {
-    if (!s_sinOn || api->size < offsetof(HfApi, add_stratagem) + sizeof api->add_stratagem || !api->add_entity || !api->add_stratagem) return;
+    char ename[64], sname[64];
+    snprintf(ename, sizeof ename, "yui/voymastina/%s", name);
+    snprintf(sname, sizeof sname, "yui/voymastina/%s_drop", name);
     HfEntity sin = {sizeof sin};
-    sin.base = HF_ENTITY_EXO55_BREAKTHROUGH_EXOSUIT;
+    sin.base = base;
     /* (no own_all: 0.3.5 crashed the game, helldivers2.exe+0xD3E4AC, the moment a Sinbreaker with records of its own in
      * every component spawned; the edits below give it its own Rotation and Health records only) */
-    sin.name = "yui/voymastina/sinbreaker";
+    sin.name = ename;
     sin.title = "Sinbreaker";
-    sin.designation = "EXO-55V";
+    sin.designation = designation;
     sin.description = "Voymastina's exoskeleton, built for her by Nele, with a pile bunker for an arm. While she pilots it she fights with "
                       "her full kit; if it falls she is thrown clear with a Blood-Curdling Howl.";
-    g_sinRes = api->add_entity(mod, &sin);
-    if (!g_sinRes) { api->log(mod, "the Sinbreaker could not be added (see the log above): her mech kit runs in no exosuit"); return; }
+    *res = api->add_entity(mod, &sin);
+    if (!*res) { api->log(mod, "the %s could not be added (see the log above)", what); return; }
     /* its own Rotation and Health records come only from edits made here (0.3.2's live edits were refused: "no record of
-     * its own"): its turn speed (the Breakthrough's 65, read in 0.3.2) and its main armour; the zones follow live */
+     * its own"): its turn speed and its main armour; the zones follow live */
     if (api->set_field)
     {
         HfField turn = HF_FIELD(Rotation, rotation_turn_speed), armour = HF_FIELD(Health, armor_118);
-        HfValue t = HF_F32(65.0f * s_sinTurn), a = HF_U32((uint32_t)(s_sinArmor > 0 ? s_sinArmor : 4));
-        int rt = s_sinTurn != 1 ? api->set_field(mod, g_sinRes, &turn, &t) : 0, ra = s_sinArmor > 0 ? api->set_field(mod, g_sinRes, &armour, &a) : 0;
-        api->log(mod, "the Sinbreaker: turn speed %.0f%s, main armour %d%s", 65.0 * s_sinTurn, rt ? " (refused)" : "", s_sinArmor, ra ? " (refused)" : "");
+        HfValue tv = HF_F32(turnBase * s_sinTurn), a = HF_U32((uint32_t)(s_sinArmor > 0 ? s_sinArmor : 4));
+        int rt = s_sinTurn != 1 ? api->set_field(mod, *res, &turn, &tv) : 0, ra = s_sinArmor > 0 ? api->set_field(mod, *res, &armour, &a) : 0;
+        api->log(mod, "the %s: turn speed %.0f%s, main armour %d%s", what, (double)(turnBase * s_sinTurn), rt ? " (refused)" : "", s_sinArmor, ra ? " (refused)" : "");
     }
-    static uint64_t payload[2];
-    payload[0] = g_sinRes;
+    static uint64_t payloads[2][2];
+    uint64_t* payload = payloads[base == HF_ENTITY_EXO55_BREAKTHROUGH_EXOSUIT ? 0 : 1];
+    payload[0] = *res;
     payload[1] = HF_ENTITY_PELICAN_TRANSPORT;
     HfStratagem st = {sizeof st};
-    st.base = HF_STRATAGEM_EXO55_BREAKTHROUGH_EXOSUIT;
-    st.name = "yui/voymastina/sinbreaker_drop";
+    st.base = baseStratagem;
+    st.name = sname;
     st.title = "Sinbreaker";
     st.description = "Voymastina's own exosuit, dropped by Pelican. Her GFL2 kit runs while she pilots it.";
     st.code = "LRRRR";
@@ -2272,11 +2324,28 @@ static void SinbreakerInit(const HfApi* api, HfMod* mod)
     st.uses = s_sinUses;
     st.payload = payload;
     st.payload_count = 2;
-    /* the Breakthrough's own package (its stratagem row's, HD2Runtime's stratagem catalogue): left 0, HellForge took the
+    /* the base suit's own package (its stratagem row's, HD2Runtime's stratagem catalogue): left 0, HellForge took the
      * Pelican's (131fe264b7380717), and a Sinbreaker called outside the loadout landed as a purple question mark */
-    st.package = 0x7DE417DB7552D9FCull;
-    g_sinType = api->add_stratagem(mod, &st);
-    api->log(mod, "the Sinbreaker: entity %016llx, stratagem %u (LRRRR, %.0f s, %d uses)", (unsigned long long)g_sinRes, g_sinType, (double)s_sinCd, s_sinUses);
+    st.package = package;
+    *type = api->add_stratagem(mod, &st);
+    api->log(mod, "the %s: entity %016llx, stratagem %u (LRRRR, %.0f s, %d uses)", what, (unsigned long long)*res, *type, (double)s_sinCd, s_sinUses);
+}
+/* The Sinbreaker on the EXO-55 Breakthrough (premium: the Exo Experts warbond; the shield bash also sets off Pile
+ * Bunker's follow-up), and the free one for everyone else on the EXO-49 Emancipator (sin_free_base 2) or the EXO-45
+ * Patriot (1). Each mission she is granted the one her profile may have (GrantFrame). */
+static void SinbreakerInit(const HfApi* api, HfMod* mod)
+{
+    if (!s_sinOn || api->size < offsetof(HfApi, add_stratagem) + sizeof api->add_stratagem || !api->add_entity || !api->add_stratagem) return;
+    SinbreakerAdd(api, mod, HF_ENTITY_EXO55_BREAKTHROUGH_EXOSUIT, HF_STRATAGEM_EXO55_BREAKTHROUGH_EXOSUIT,
+                  0x7DE417DB7552D9FCull /* packages/generated/loadout/combat_walker_breacher */, 65.0f, "sinbreaker", "EXO-55V", "Sinbreaker", &g_sinRes, &g_sinType);
+    if (!s_sinFallback) return;
+    /* the free bases' turn speed is not read yet: taken as the Breakthrough's (SinTune logs the base's own) */
+    if (s_sinFreeBase == 1)
+        SinbreakerAdd(api, mod, HF_ENTITY_EXO45_PATRIOT_EXOSUIT, HF_STRATAGEM_EXO45_PATRIOT,
+                      0x22749A294788AF66ull /* packages/generated/loadout/combat_walker */, 65.0f, "sinbreaker_free", "EXO-45V", "free Sinbreaker", &g_sinFreeRes, &g_sinFreeType);
+    else
+        SinbreakerAdd(api, mod, HF_ENTITY_EXO49_EMANCIPATOR_EXOSUIT, HF_STRATAGEM_EXO49_EMANCIPATOR_EXOSUIT,
+                      0xE72D3E9B05C3DB0Bull /* packages/generated/loadout/combat_walker_obsidian */, 65.0f, "sinbreaker_free", "EXO-49V", "free Sinbreaker", &g_sinFreeRes, &g_sinFreeType);
 }
 
 static uint32_t MechNow(void) { return g_mech; }
@@ -2326,13 +2395,27 @@ static int GrantPins(void)
         if (!hf->code_matches(game + k[i].at, k[i].bytes)) { Log("Sinbreaker grant: game.dll+0x%llX is not as researched: no grant", (unsigned long long)k[i].at); ok = 0; break; }
     return ok;
 }
+static int SinOwned(void);
+/* The Sinbreaker her profile may have: the Breakthrough one with the Exo Experts warbond, otherwise the free one (0:
+ * none). Settled once a session (SinOwned). */
+static uint32_t SinGranted(void)
+{
+    static int told;
+    /* sin_fallback 2: the free one even with the warbond (to try it, or by choice) */
+    if (g_sinType && s_sinFallback != 2 && SinOwned()) return g_sinType;
+    if (!s_sinFallback || !g_sinFreeType) { if (!told++) Log("Sinbreaker grant: no free Sinbreaker (sin_fallback 0): no grant"); return 0; }
+    if (!told++) Log("Sinbreaker grant: the free Sinbreaker (no premium content)");
+    return g_sinFreeType;
+}
 static void SinPackage(void)
 {
-    if (g_pkgState == 2 || !g_sinType || !hf->stratagem_row || hf->size < offsetof(HfApi, load_package) + sizeof hf->load_package) return;
+    if (g_pkgState == 2 || !(g_sinType || g_sinFreeType) || !hf->stratagem_row || hf->size < offsetof(HfApi, load_package) + sizeof hf->load_package) return;
     static double next;
     if (g_now < next) return;
     next = g_now + 2;
-    uintptr_t row = hf->stratagem_row(g_sinType);
+    uint32_t type = SinGranted();
+    if (!type) { g_pkgState = 2; return; }
+    uintptr_t row = hf->stratagem_row(type);
     uint64_t pkg = 0;
     if (!row || !ReadAt(row + 0xA8, &pkg, 8) || !pkg || pkg == ~0ull) { if (!g_pkgState) { g_pkgState = 2; Log("Sinbreaker: its stratagem names no package"); } return; }
     int r = hf->load_package(self, pkg);
@@ -2351,27 +2434,28 @@ static int SinOwned(void)
     known = 0;
     const char* folder = hf->size >= offsetof(HfApi, logs_folder) + sizeof hf->logs_folder && hf->logs_folder ? hf->logs_folder(self) : "";
     char path[1024];
-    if (!folder || !folder[0]) { Log("Sinbreaker grant: the session's logs folder is unknown: no grant (premium content)"); return 0; }
+    if (!folder || !folder[0]) { Log("Sinbreaker grant: the session's logs folder is unknown: taken as not owned (premium content)"); return 0; }
     snprintf(path, sizeof path, "%s\\premium-locked.json", folder);
     FILE* f = OpenUtf8(path, L"rb");
-    if (!f) { Log("Sinbreaker grant: %s is unreadable: no grant (premium content)", path); return 0; }
+    if (!f) { Log("Sinbreaker grant: %s is unreadable: taken as not owned (premium content)", path); return 0; }
     char buf[8192];
     size_t n = fread(buf, 1, sizeof buf - 1, f);
     fclose(f);
     buf[n] = 0;
-    if (strstr(buf, "yui.voymastina")) { Log("Sinbreaker grant: this profile does not own the Exo Experts warbond (the EXO-55 Breakthrough): no grant"); return 0; }
+    if (strstr(buf, "yui.voymastina")) { Log("Sinbreaker grant: this profile does not own the Exo Experts warbond (the EXO-55 Breakthrough)"); return 0; }
     known = 1;
     return 1;
 }
 static void GrantFrame(void)
 {
-    if (!g_sinType || !s_sinGrant || g_grantDone || !g_alive) return;
+    if (!(g_sinType || g_sinFreeType) || !s_sinGrant || g_grantDone || !g_alive) return;
     if (g_grantAt <= 0) { g_grantAt = g_now + 3; return; }   /* once she is down on the ground a moment */
     if (g_now < g_grantAt) return;
     g_grantAt = g_now + 1;
     if (++g_grantTries > 20) { g_grantDone = 1; Log("Sinbreaker grant: her stratagem record never became readable"); return; }
     if (!GrantPins()) { g_grantDone = 1; return; }
-    if (!SinOwned()) { g_grantDone = 1; return; }
+    uint32_t want = SinGranted();
+    if (!want) { g_grantDone = 1; return; }
     uintptr_t st = LocalStratagems(), clockObj = Pointer(game + 0x3326348u);
     uint32_t count = 0;
     uint64_t now = 0;
@@ -2381,14 +2465,14 @@ static void GrantFrame(void)
     {
         uint8_t e[0x30];
         if (!ReadAt(st + 0x188 + i * 0x30u, e, sizeof e)) return;
-        if (Word(e) == g_sinType) { g_grantDone = 1; Log("Sinbreaker: already in her stratagems (slot %u)", i); return; }
+        if (Word(e) == want) { g_grantDone = 1; Log("Sinbreaker: already in her stratagems (slot %u)", i); return; }
         if (tmpl < 0 && e[9] == 1 && Quad(e + 0x20) <= now) tmpl = (int)i;
     }
     g_grantDone = 1;
     if (count >= 16) { Log("Sinbreaker grant: her stratagem list is full (16)"); return; }
     uint8_t e[0x30] = {0};
     if (tmpl >= 0) ReadAt(st + 0x188 + (uint32_t)tmpl * 0x30u, e, sizeof e);
-    uint32_t type = g_sinType, uses = s_sinUses < 0 ? 0xFFFFFFFFu : (uint32_t)s_sinUses;
+    uint32_t type = want, uses = s_sinUses < 0 ? 0xFFFFFFFFu : (uint32_t)s_sinUses;
     uint64_t zero = 0;
     memcpy(e, &type, 4);
     memcpy(e + 4, &uses, 4);
@@ -2398,7 +2482,7 @@ static void GrantFrame(void)
     memcpy(e + 0x20, &zero, 8);
     uint32_t next = count + 1;
     if (hf->write(st + 0x188 + count * 0x30u, e, sizeof e) || hf->write(st + 0x788, &next, 4)) { Log("Sinbreaker grant: the write failed"); return; }
-    Log("Sinbreaker: granted outside the loadout (slot %u of %u, template slot %d, uses %s): call it with LRRRR", count, next, tmpl,
+    Log("%s: granted outside the loadout (slot %u of %u, template slot %d, uses %s): call it with LRRRR", want == g_sinType ? "Sinbreaker" : "the free Sinbreaker", count, next, tmpl,
         s_sinUses < 0 ? "unlimited" : "limited");
 }
 static void GrantReset(void) { g_grantDone = 0; g_grantTries = 0; g_grantAt = 0; }
@@ -2406,12 +2490,17 @@ static void GrantReset(void) { g_grantDone = 0; g_grantTries = 0; g_grantAt = 0;
 static void SinHide(void)
 {
     static int done;
-    if (done || s_sinLoadout || !g_sinType || !hf->stratagem_row) return;
-    uintptr_t row = hf->stratagem_row(g_sinType);
-    uint8_t sel;
-    if (!row || !ReadAt(row + 0x80, &sel, 1)) return;
+    if (done || s_sinLoadout || !(g_sinType || g_sinFreeType) || !hf->stratagem_row) return;
+    const uint32_t types[2] = {g_sinType, g_sinFreeType};
+    for (int k = 0; k < 2; k++)
+    {
+        if (!types[k]) continue;
+        uintptr_t row = hf->stratagem_row(types[k]);
+        uint8_t sel;
+        if (!row || !ReadAt(row + 0x80, &sel, 1)) return;
+        if (sel & 2) { sel &= (uint8_t)~2; hf->write(row + 0x80, &sel, 1); Log("%s: kept out of the loadout picker (sin_loadout 0)", k ? "the free Sinbreaker" : "Sinbreaker"); }
+    }
     done = 1;
-    if (sel & 2) { sel &= (uint8_t)~2; hf->write(row + 0x80, &sel, 1); Log("Sinbreaker: kept out of the loadout picker (sin_loadout 0)"); }
 }
 
 /* ---- her guns on foot (AK-15): +ak_ergo ergonomics and x ak_reload reload time on every weapon she holds, as live edits
@@ -2506,10 +2595,8 @@ static int RaiseArmour(uint64_t res, const char* what)
     Log("Sinbreaker: %s %016llx: armour %d on %d of %d armoured values", what, (unsigned long long)res, s_sinArmor, raised, zones);
     return raised;
 }
-static void SinTune(void)
+static void SinTuneOne(uint64_t res, const char* what)
 {
-    if (g_sinTuned || !g_sinRes) return;
-    g_sinTuned = 1;
     static const struct { HfField f; const char* name; } turn[] = {
         {HF_FIELD(Rotation, rotation_turn_speed), "turn speed"}, {HF_FIELD(Rotation, rotation_acceleration), "turn acceleration"},
         {HF_FIELD(Rotation, rotation_deceleration), "turn deceleration"}, {HF_FIELD(VehicleMotion, steering_response_speed), "steering response"}};
@@ -2517,19 +2604,35 @@ static void SinTune(void)
     {
         HfLiveValue v;
         memset(&v, 0, sizeof v);
-        if (!hf->get_live(self, g_sinRes, &turn[i].f, &v) || v.base.number <= 0) { Log("Sinbreaker: no %s to change", turn[i].name); continue; }
+        if (!hf->get_live(self, res, &turn[i].f, &v) || v.base.number <= 0) { Log("%s: no %s to change", what, turn[i].name); continue; }
         HfValue x = HF_F32(v.base.number * s_sinTurn);
-        int r = hf->set_live(self, g_sinRes, &turn[i].f, &x, 0);
-        Log("Sinbreaker: %s %.2f -> %.2f%s", turn[i].name, v.base.number, v.base.number * s_sinTurn, r ? "" : " (refused)");
+        int r = hf->set_live(self, res, &turn[i].f, &x, 0);
+        Log("%s: %s %.2f -> %.2f%s", what, turn[i].name, v.base.number, v.base.number * s_sinTurn, r ? "" : " (refused)");
     }
     if (s_sinArmor <= 0) return;
-    RaiseArmour(g_sinRes, "the suit");
+    RaiseArmour(res, what);
     uint32_t stride = 0;
-    uintptr_t m = hf->component_record("MountComponentData", g_sinRes, &stride);
+    uintptr_t m = hf->component_record("MountComponentData", res, &stride);
     for (int k = 0; m && k < 5; k++)
     {
         uint64_t arm = 0;
         if (ReadAt(m + 24u * (uint32_t)k, &arm, 8) && arm) RaiseArmour(arm, "its mount");
+    }
+}
+/* both Sinbreakers, once, in the first mission frame; and the free base's own turn speed, for the record */
+static void SinTune(void)
+{
+    if (g_sinTuned || !(g_sinRes || g_sinFreeRes)) return;
+    g_sinTuned = 1;
+    if (g_sinRes) SinTuneOne(g_sinRes, "Sinbreaker");
+    if (g_sinFreeRes)
+    {
+        SinTuneOne(g_sinFreeRes, "free Sinbreaker");
+        HfField turn = HF_FIELD(Rotation, rotation_turn_speed);
+        HfLiveValue v;
+        memset(&v, 0, sizeof v);
+        uint64_t base = s_sinFreeBase == 1 ? HF_ENTITY_EXO45_PATRIOT_EXOSUIT : HF_ENTITY_EXO49_EMANCIPATOR_EXOSUIT;
+        if (hf->get_live(self, base, &turn, &v)) Log("free Sinbreaker: its base's own turn speed %.1f (set from 65 x sin_turn)", v.base.number);
     }
 }
 
