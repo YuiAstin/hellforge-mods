@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.3"
+#define VERSION "0.1.4"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -81,6 +81,8 @@ static float s_s3Cd = 90;
 static int s_cleanse = 1;
 /* driving (sinner_drive.h): the probe's numbers; -1 not known */
 static int s_drive = 1, s_driveTest = 0;
+static int s_turnOn = 1;
+static float g_moveDir[2];
 static int s_locoManager = -1, s_locoMap = -1, s_locoRecords = -1, s_locoStride = 164;
 static int s_stickFwd = -1, s_stickSide = -1, s_stickTurn = -1;
 /* aiming */
@@ -102,7 +104,7 @@ static const KbSetting kSettings[] = {
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("kr_seconds", s_krSeconds, 0, 120), KB_F("kr_mult", s_krMult, 1, 5), KB_F("kr_heal", s_krHeal, 0, 1000),
     KB_F("kr_sinner_heal", s_krSinnerHeal, 0, 1),
     KB_F("s3_cooldown", s_s3Cd, 0, 3600), KB_I("cleanse", s_cleanse, 0, 2),
-    KB_I("drive", s_drive, 0, 1), KB_I("drive_test", s_driveTest, 0, 1), KB_I("loco_manager", s_locoManager, -1, 100000000),
+    KB_I("drive", s_drive, 0, 1), KB_I("turn", s_turnOn, 0, 1), KB_I("drive_test", s_driveTest, 0, 1), KB_I("loco_manager", s_locoManager, -1, 100000000),
     KB_I("loco_map", s_locoMap, -1, 65536), KB_I("loco_records", s_locoRecords, -1, 65536), KB_I("loco_stride", s_locoStride, 16, 4096),
     KB_I("stick_offset_fwd", s_stickFwd, -1, 4096), KB_I("stick_offset_side", s_stickSide, -1, 4096), KB_I("stick_offset_turn", s_stickTurn, -1, 4096),
     KB_I("line_of_sight", s_sight, 0, 1), KB_F("first_person", s_fpDistance, 0.1, 2),
@@ -159,7 +161,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "s3_cooldown = %g\ncleanse = %d\n"
                "; Driving with the game's own locomotion (the probe's numbers; -1 unknown: the Sinner slides instead).\n"
                "; drive_test 1 writes the stick without the engine and mover calls.\n"
-               "drive = %d\ndrive_test = %d\nloco_manager = %d\nloco_map = %d\nloco_records = %d\nloco_stride = %d\n"
+               "; turn 1: it turns toward what it fires at, else the way it slides (its turn record, 0.1.4).\n"
+               "turn = %d\ndrive = %d\ndrive_test = %d\nloco_manager = %d\nloco_map = %d\nloco_records = %d\nloco_stride = %d\n"
                "stick_offset_fwd = %d\nstick_offset_side = %d\nstick_offset_turn = %d\n"
                "; Aiming: line_of_sight 1, Eye of the Snow Wolf's target must be in sight. first_person: the camera this close to\n"
                "; her head (m) counts as first person.\nline_of_sight = %d\nfirst_person = %g\n"
@@ -174,7 +177,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_fireRange, s_pullOn, (double)s_pullEvery, (double)s_pullRadius, s_pullExplosion,
             (double)s_s1Cd, s_s1Rounds, (double)s_s1Every, (double)s_s1Cone, (double)s_s1Range, s_s1Round,
             (double)s_s2Cd, (double)s_krSeconds, (double)s_krMult, (double)s_krHeal, (double)s_krSinnerHeal, (double)s_s3Cd, s_cleanse,
-            s_drive, s_driveTest, s_locoManager, s_locoMap, s_locoRecords, s_locoStride, s_stickFwd, s_stickSide, s_stickTurn,
+            s_turnOn, s_drive, s_driveTest, s_locoManager, s_locoMap, s_locoRecords, s_locoStride, s_stickFwd, s_stickSide, s_stickTurn,
             s_sight, (double)s_fpDistance);
 }
 
@@ -227,11 +230,43 @@ static int HealthOf(uint32_t entity, int32_t* health, uint32_t* life)
     return 1;
 }
 static int Alive(uint32_t e) { int32_t hp; uint32_t life; return HealthOf(e, &hp, &life) && hp > 0; }
+/* 0.1.4: the middle of a unit's body: the centre of its scene-graph nodes' box (a Bile Titan's root is on the ground) */
+#define BODIES 64
+static struct { uint32_t unit; double at; float off[3]; } g_body[BODIES];
+static int BodyOffset(uint32_t unit, const float root[3], float off[3])
+{
+    unsigned h = (unit * 2654435761u) % BODIES;
+    if (g_body[h].unit == unit && g_now - g_body[h].at < 1.0) { memcpy(off, g_body[h].off, 12); return 1; }
+    uintptr_t registry = Pointer(exe + 0x1A100F0), objects, object, nodes;
+    uint32_t count = 0, id, slot = unit & 0x3FFFFF;
+    static float m[256 * 16];
+    if (!registry || !(objects = Pointer(registry + 0x88)) || !(object = Pointer(objects + 8u * slot)) || !ReadAt(object + 8, &id, 4) || id != unit ||
+        !ReadAt(object + 0x70, &count, 4) || !count || count > 4096 || !(nodes = Pointer(object + 0x88)))
+        return 0;
+    if (count > 256) count = 256;
+    if (!ReadAt(nodes, m, (size_t)count * 64)) return 0;
+    float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+    int used = 0;
+    for (uint32_t i = 0; i < count; i++)
+    {
+        const float* t = m + 16 * i + 12;
+        if (!isfinite(t[0]) || !isfinite(t[1]) || !isfinite(t[2]) || fabsf(t[0] - root[0]) > 30 || fabsf(t[1] - root[1]) > 30 || fabsf(t[2] - root[2]) > 30) continue;
+        for (int k = 0; k < 3; k++) { if (t[k] < lo[k]) lo[k] = t[k]; if (t[k] > hi[k]) hi[k] = t[k]; }
+        used++;
+    }
+    if (used < 2) return 0;
+    for (int k = 0; k < 3; k++) off[k] = (lo[k] + hi[k]) / 2 - root[k];
+    if (off[2] < 0.5f) off[2] = 0.5f;
+    g_body[h].unit = unit; g_body[h].at = g_now; memcpy(g_body[h].off, off, 12);
+    return 1;
+}
 static int TargetPos(uint32_t e, uint64_t res, float out[3])
 {
     uint8_t d[24];
     if (!Descriptor(e, d) || (res && Quad(d) != res) || !UnitNode(Word(d + 12), 0, out)) return 0;
-    out[2] += 1.0f;
+    float off[3];
+    if (BodyOffset(Word(d + 12), out, off)) { for (int k = 0; k < 3; k++) out[k] += off[k]; }
+    else out[2] += 1.0f;
     return 1;
 }
 static uint32_t UnitOf(uint32_t e)
@@ -984,6 +1019,7 @@ static int Slide(const float p[3], const float to[3], double dt)
     float dest[3] = {p[0] + dir[0] * step, p[1] + dir[1] * step, p[2]}, g[3];
     if (!Ground(dest, g) || g[2] - p[2] > 0.5f || p[2] - g[2] > 3.0f) return 0;
     g_setPosition(NULL, g_sinner, g);
+    g_moveDir[0] = dir[0]; g_moveDir[1] = dir[1];
     if (g_slides++ == 0) Log("the Sinner slides (the warp setter; its own locomotion is not driven yet)");
     return 1;
 }
@@ -1173,32 +1209,65 @@ static const GunProfile* Profile(int gear)
     Log("the Sinner's %s: round %u, one every %.3f s, %u pellet(s) a shot", gear == 3 ? "rockets" : kGear[gear], g->round, (double)g->every, g->pellets);
     return g;
 }
+static float g_faceTo[2];
+static double g_faceAt = -100;
+/* 0.1.4: turning it: Exo Companion's rot_set (game.dll+0x755080) writes a direction into a walker's turn record
+ * ([game+0x3326CE0]: map +0x30, records +0x58, 0x3F0 each, the direction at +0); written here directly, only when its
+ * record is found. Toward its target while it fires, else the way it slides. The log says whether it turns */
+static double g_turnLogAt, g_turnSince = -1;
+static void TurnFrame(void)
+{
+    if (!s_turnOn || !g_sinner || !g_landed || g_piloting) return;
+    float dir[3] = {0, 0, 0};
+    if (g_now - g_faceAt < 1.0) { dir[0] = g_faceTo[0]; dir[1] = g_faceTo[1]; }
+    else if (g_moveDir[0] != 0 || g_moveDir[1] != 0) { dir[0] = g_moveDir[0]; dir[1] = g_moveDir[1]; }
+    else return;
+    uintptr_t mgr = Pointer(game + 0x3326CE0), recs;
+    uint32_t i;
+    if (!mgr || !Lookup(mgr + 0x30, g_sinner, 1048576, &i) || i >= 65536 || !(recs = Pointer(mgr + 0x58)))
+    {
+        static unsigned told;
+        if (!told++) Log("turning: the Sinner has no turn record (it keeps facing where it landed)");
+        return;
+    }
+    hf->write(recs + 0x3F0ull * i, dir, 12);
+    if (g_turnSince < 0) g_turnSince = g_now;
+    float m[16];
+    static unsigned logs;
+    if (logs < 6 && g_now >= g_turnLogAt && UnitPose(g_sinUnit, 0, m))
+    {
+        g_turnLogAt = g_now + 2;
+        logs++;
+        float fh = sqrtf(m[4] * m[4] + m[5] * m[5]);
+        double dot = fh > 0.05f ? (m[4] * dir[0] + m[5] * dir[1]) / fh : 0;
+        Log("turning: its facing against where it should face: %.0f degrees off (%.1f s of turning)", acos(dot > 1 ? 1 : dot < -1 ? -1 : dot) * 57.2958, g_now - g_turnSince);
+    }
+}
 static int g_shootRocket;   /* 0.1.3: this shot is the left arm's rocket */
 static double g_rocketNext;
 static int SinnerShoot(int arm, uint32_t target, const float at[3])
 {
     float p[3], m[16], from[3], d[3];
     if (!SinPos(p)) return 0;
+    /* 0.1.4: the arms as if it faced its target (its body turns slowly or not at all while it slides: shots from its
+     * own facing crossed its body and caught on it) */
     float fw[2];
-    if (UnitPose(g_sinUnit, 0, m) && sqrtf(m[4] * m[4] + m[5] * m[5]) > 0.05f)
+    (void)m;
     {
-        float fh = sqrtf(m[4] * m[4] + m[5] * m[5]);
-        fw[0] = m[4] / fh; fw[1] = m[5] / fh;
+        float v[2] = {at[0] - p[0], at[1] - p[1]}, vn = sqrtf(v[0] * v[0] + v[1] * v[1]);
+        if (vn < 0.1f) return 0;
+        fw[0] = v[0] / vn; fw[1] = v[1] / vn;
     }
-    else
-    {
-        float v[2] = {at[0] - p[0], at[1] - p[1]}, n = sqrtf(v[0] * v[0] + v[1] * v[1]);
-        if (n < 0.1f) return 0;
-        fw[0] = v[0] / n; fw[1] = v[1] / n;
-    }
+    g_faceTo[0] = fw[0]; g_faceTo[1] = fw[1]; g_faceAt = g_now;
     float rt[2] = {fw[1], -fw[0]}, side = arm ? 1.3f : -1.3f;
-    from[0] = p[0] + rt[0] * side + fw[0] * 0.6f;
-    from[1] = p[1] + rt[1] * side + fw[1] * 0.6f;
+    from[0] = p[0] + rt[0] * side + fw[0] * 1.2f;
+    from[1] = p[1] + rt[1] * side + fw[1] * 1.2f;
     from[2] = p[2] + 2.4f;
     for (int k = 0; k < 3; k++) d[k] = at[k] - from[k];
     float n = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
     if (!(n > 2.5f)) return 0;
     for (int k = 0; k < 3; k++) { d[k] /= n; from[k] += d[k] * 1.8f; }   /* clear of its own body and arms */
+    if (n < 3.2f) return 0;
     uint32_t id;
     if (s_sinSight && WorldId(&id) && QueryIdle())
     {
@@ -1741,6 +1810,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (g_alive) EyeFrame();
     MoveFrame(step);
     FireFrame();
+    TurnFrame();
     PullFrame();
     HudFrame();
     Exhaustion();
