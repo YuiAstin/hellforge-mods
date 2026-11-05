@@ -8,7 +8,7 @@
  *       [game+0x3326CF8] map +0x20, records +0x50, 0xA0 each) every 0.1 s, each changed field logged with the keys you
  *       hold. Walk forward (W) a few seconds, stand, strafe (A, D), turn. At the end: the fields that follow W / A / D,
  *       and the suit's state (+0x50) and mover flag while piloted.
- *   F8  (after you climb out, near the suit) 5 s of driving the nearest exosuit: the mover on (game+0x6FE480), its state
+ *   F8  (after you climb out, near the suit; Shift+F8 cycles four modes, 0.1.4) 5 s of driving the nearest exosuit: the mover on (game+0x6FE480), its state
  *       set to the piloted one (game+0x59CA90), and the field F7 found for W written each frame at its W value; where
  *       the suit is logged every 0.25 s (does it walk?). Then everything written is put back.
  *   F9  stop now (and put back).
@@ -26,7 +26,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.3"
+#define VERSION "0.1.4"
 #include "kitbase/kb_core.h"
 
 static atomic_uint g_avatar;
@@ -187,6 +187,15 @@ static unsigned g_diffLines;
 /* what F7 found */
 static int g_fwdSlot = -1, g_sideSlot = -1;
 static float g_fwdValue, g_sideValue;
+/* 0.1.4: F8's modes (Shift+F8 cycles): what 0.1.3's recording showed: loco+0x48/+0x70 the speed (0 -> 6.5 with W),
+ * loco+0x54 the stick's direction in degrees (0 forward, 90 right, -90 left). Each mode writes speed 6.5 and
+ * direction 0 every frame, plus: 0 the mover and the piloted state, 1 neither, 2 the mover only, 3 the state only */
+static int g_mode;
+static const char* const kModes[4] = {"mover + piloted state", "neither", "the mover only", "the piloted state only"};
+#define SLOT_SPEED 59      /* loco+0x48 (41 vloco slots, then loco) */
+#define SLOT_SPEED2 69     /* loco+0x70 */
+#define SLOT_DIR 62        /* loco+0x54 */
+static uint32_t g_saveSpeed[3];
 static uint32_t g_pilotState;
 static uint8_t g_pilotMover;
 enum { K_W = 1, K_A = 2, K_S = 4, K_D = 8, K_SPACE = 16, K_SHIFT = 32 };
@@ -297,7 +306,7 @@ static void RecordFrame(void)
 /* ---- F8: driving ---------------------------------------------------------------------------------------------- */
 static uint32_t g_drvExo;
 static double g_drvUntil, g_drvNext;
-static uint32_t g_saveFwd, g_saveState;
+static uint32_t g_saveState;
 static uint8_t g_saveMover;
 static int g_moverSet, g_stateSet, g_fwdSet;
 static float g_drvStart[3];
@@ -308,12 +317,16 @@ static uintptr_t SlotAddr(uint32_t e, int s)
     uintptr_t l = LocoRec(e);
     return l ? l + (4u * s - VL_SIZE) : 0;
 }
+static float g_meStart[3];
 static void DriveStop(const char* why)
 {
     if (!g_drvExo) return;
     uint32_t e = g_drvExo;
     float p[3];
-    if (g_fwdSet) { uintptr_t a = SlotAddr(e, g_fwdSlot); if (a) hf->write(a, &g_saveFwd, 4); }
+    {
+        const int slots[3] = {SLOT_SPEED, SLOT_SPEED2, SLOT_DIR};
+        for (int k = 0; k < 3; k++) { uintptr_t a = SlotAddr(e, slots[k]); if (a) hf->write(a, &g_saveSpeed[k], 4); }
+    }
     if (g_stateSet && g_state) g_state(NULL, e, g_saveState);
     if (g_moverSet && g_mover) g_mover(NULL, e, g_saveMover);
     if (Pos(e, p)) Log("F8 %s: the suit moved %.1f m in all; put back", why, sqrtf(Dist2(p, g_drvStart)));
@@ -332,10 +345,16 @@ static void DriveStart(void)
     Pos(e, g_drvStart);
     if (mv) ReadAt(mv + 0xD18, &g_saveMover, 1);
     if (v) ReadAt(v + 0x50, &g_saveState, 4);
-    if (g_mover) { g_mover(NULL, e, 1); g_moverSet = 1; }
-    if (g_state && g_pilotState && v && g_pilotState != g_saveState) { g_state(NULL, e, g_pilotState); g_stateSet = 1; }
-    uintptr_t a = SlotAddr(e, g_fwdSlot);
-    if (a && ReadAt(a, &g_saveFwd, 4)) g_fwdSet = 1;
+    uint32_t piloted = g_pilotState ? g_pilotState : 0x147E0EF3u;   /* (0.1.3's recording) */
+    if (g_mover && (g_mode == 0 || g_mode == 2)) { g_mover(NULL, e, 1); g_moverSet = 1; }
+    if (g_state && v && piloted != g_saveState && (g_mode == 0 || g_mode == 3)) { g_state(NULL, e, piloted); g_stateSet = 1; }
+    {
+        const int slots[3] = {SLOT_SPEED, SLOT_SPEED2, SLOT_DIR};
+        g_fwdSet = 1;
+        for (int k = 0; k < 3; k++) { uintptr_t a = SlotAddr(e, slots[k]); if (!a || !ReadAt(a, &g_saveSpeed[k], 4)) g_fwdSet = 0; }
+    }
+    Log("F8 mode %d: %s; speed 6.5 and direction 0 written each frame%s", g_mode, kModes[g_mode], g_fwdSet ? "" : " (the fields do not read: nothing written)");
+    Pos(atomic_load(&g_avatar), g_meStart);
     uint8_t after = 0;
     uint32_t st = 0;
     if (mv) ReadAt(mv + 0xD18, &after, 1);
@@ -354,8 +373,11 @@ static void DriveFrame(void)
     if (!g_drvExo) return;
     if (g_fwdSet)
     {
-        uintptr_t a = SlotAddr(g_drvExo, g_fwdSlot);
-        if (a) hf->write(a, &g_fwdValue, 4);
+        const float speed = 6.5f, dir = 0;
+        uintptr_t a;
+        if ((a = SlotAddr(g_drvExo, SLOT_SPEED))) hf->write(a, &speed, 4);
+        if ((a = SlotAddr(g_drvExo, SLOT_SPEED2))) hf->write(a, &speed, 4);
+        if ((a = SlotAddr(g_drvExo, SLOT_DIR))) hf->write(a, &dir, 4);
     }
     if (g_now >= g_drvNext)
     {
@@ -364,8 +386,12 @@ static void DriveFrame(void)
         uintptr_t v = VlocoRec(g_drvExo);
         uint32_t st = 0;
         if (v) ReadAt(v + 0x50, &st, 4);
+        float me[3], vel[3] = {0, 0, 0};
+        int meOk = Pos(atomic_load(&g_avatar), me);
+        if (v) ReadAt(v + 0x0C, vel, 12);
         if (Pos(g_drvExo, p))
-            Log("  t%.2f suit at %.2f %.2f %.2f (%.2f m from the start), state %08X", 5 - (g_drvUntil - g_now), p[0], p[1], p[2], sqrtf(Dist2(p, g_drvStart)), st);
+            Log("  t%.2f suit at %.2f %.2f %.2f (%.2f m from the start, velocity %.2f %.2f %.2f), state %08X; you %.2f m from where you stood", 5 - (g_drvUntil - g_now),
+                p[0], p[1], p[2], sqrtf(Dist2(p, g_drvStart)), vel[0], vel[1], vel[2], st, meOk ? sqrtf(Dist2(me, g_meStart)) : -1.0);
         uintptr_t nav = NavRec(g_drvExo);
         float dst[3], wp[3], goal[3];
         uint32_t act = 0;
@@ -396,7 +422,11 @@ static void Tick(HfMod* mod, float dt, void* user)
     int focused = Focused();
     int k[3] = {focused && (GetAsyncKeyState(VK_F7) & 0x8000), focused && (GetAsyncKeyState(VK_F8) & 0x8000), focused && (GetAsyncKeyState(VK_F9) & 0x8000)};
     if (k[0] && !prev[0]) RecordStart();
-    if (k[1] && !prev[1]) { DriveStop("restarted"); DriveStart(); }
+    if (k[1] && !prev[1])
+    {
+        if (GetAsyncKeyState(VK_SHIFT) & 0x8000) { g_mode = (g_mode + 1) % 4; Log("Shift+F8: F8 mode %d: %s", g_mode, kModes[g_mode]); }
+        else { DriveStop("restarted"); DriveStart(); }
+    }
     if (k[2] && !prev[2]) { DriveStop("stopped (F9)"); if (g_recExo) { g_recExo = 0; Log("F7 stopped"); } }
     memcpy(prev, k, sizeof prev);
     RecordFrame();
