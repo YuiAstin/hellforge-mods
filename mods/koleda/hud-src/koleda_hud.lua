@@ -662,6 +662,17 @@ pcall(ffi.cdef, [[ typedef int (*kolsnd1)(unsigned int version, unsigned int aft
 typedef const char *(*kolsndname1)(int i); ]])
 local SND = {fn = nil, name_fn = nil, look = 0, seq = 0, buf = ffi.new('float[80]'), names = {}, asked = {}, tokens = 20, failed = false, told = 0, skip = true}
 local function snd_log(m) if SND.told < 12 then SND.told = SND.told + 1; log('[Koleda HUD] sounds: ' .. m) end end
+-- 0.1.14: where a sound plays: on the Sinner's own unit (its sounds follow it); a post at a position was accepted but
+-- never heard
+local WK   -- (the walk's state, below)
+local function snd_opts(x, y, z)
+    local st = rawget(_G, 'stingray')
+    if WK and WK.unit and st then
+        local oka, al = pcall(st.Unit.alive, WK.unit)
+        if oka and al == true then return {unit = WK.unit} end
+    end
+    return {}
+end
 local function sound_step(dt)
     if SND.failed then return end
     if not SND.fn then
@@ -726,7 +737,7 @@ local function sound_step(dt)
                 if L and L.h and (SND.t - L.started > 2 or (L.x - x) ^ 2 + (L.y - y) ^ 2 > 36) then pcall(function() L.h:stop() end); L.h = nil end
                 if not (L and L.h) and SND.tokens >= 1 then
                     SND.tokens = SND.tokens - 1
-                    local okP, h, why = pcall(hd2.sounds.play, use, {position = {x, y, z}})
+                    local okP, h, why = pcall(hd2.sounds.play, use, snd_opts(x, y, z))
                     if okP and h then SND.loops[use] = {h = h, started = SND.t, last = SND.t, x = x, y = y}
                     else
                         snd_log(use .. ' did not play: ' .. tostring(okP and why or h))
@@ -737,7 +748,7 @@ local function sound_step(dt)
                 elseif L then L.last = SND.t end
             elseif use and SND.tokens >= 1 then
                 SND.tokens = SND.tokens - 1
-                local okP, h, why = pcall(hd2.sounds.play, use, {position = {x, y, z}})
+                local okP, h, why = pcall(hd2.sounds.play, use, snd_opts(x, y, z))
                 if not okP or not h then
                     snd_log(use .. ' did not play: ' .. tostring(okP and why or h))
                     SND.miss = SND.miss or {}
@@ -760,7 +771,7 @@ end
 -- at). koleda.dll's koleda_walk gives the goal; koleda_walk_ack(1, 1) tells it the Sinner answers (the slide stops).
 pcall(ffi.cdef, [[ typedef int (*kolwalk1)(unsigned int version, float *out);
 typedef int (*kolwalkack1)(unsigned int version, int walking); ]])
-local WK = {fn = nil, ack = nil, look = 0, buf = ffi.new('float[12]'), unit = nil, scan = 0, failed = false, told = 0,
+WK = {fn = nil, ack = nil, look = 0, buf = ffi.new('float[12]'), unit = nil, scan = 0, failed = false, told = 0,
     walking = false, cmd = 0, torso = 0, last = nil, next_sample = 0, t = 0, answers = false, still = 0, frozen_until = 0}
 local WALK_STATE = {2, 2, 2, 0, 0, 1, 0, 2, 0, 0, 0}
 local IDLE_STATE = {0, 0, 0, 0, 0, 1, 0, 2, 0, 0, 0}
@@ -861,9 +872,13 @@ local function walk_tick(dt)
     WK.t = WK.t + dt
     local b = WK.buf
     if WK.fn(1, b) ~= 1 or b[0] < 0.5 then
-        if WK.walking then stop_walking(s, 'it is not hers to move now') end
-        WK.unit = nil
+        -- 0.1.14: no call on its unit here (at mission end it is gone: setting its state crashed the game)
+        WK.walking, WK.unit = false, nil
         return
+    end
+    if WK.unit then
+        local oka, alive = pcall(s.Unit.alive, WK.unit)
+        if not oka or alive ~= true then WK.walking, WK.unit = false, nil end
     end
     local sx, sy, sz = b[5], b[6], b[7]
     if WK.unit then
@@ -954,7 +969,7 @@ overlay:draw(function(d, dt)
     end
     if not find(dt) then return end
     if state.in_mission == 0 then return end
-    if not WK.failed and WK.unit then pcall(write_vars, rawget(_G, 'stingray')) end   -- (again in render: the game rewrites them)
+    if not WK.failed and WK.unit and WK.fn and WK.fn(1, WK.buf) == 1 and WK.buf[0] > 0.5 then local st = rawget(_G, 'stingray'); local oka, al = pcall(st.Unit.alive, WK.unit); if oka and al == true then pcall(write_vars, st) end end   -- (again in render: the game rewrites them)
     if not SND.failed then
         local okS, errS = pcall(sound_step, dt)
         if not okS then SND.failed = true; log('[Koleda HUD] sounds failed, off for this session: ' .. tostring(errS)) end

@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.13"
+#define VERSION "0.1.14"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -1115,9 +1115,12 @@ static void MoveFrame(double dt)
     float to[3], start = g_gear == GEAR_N ? s_guardStart : s_leashStart, stop = s_leashStop < start ? s_leashStop : start * 0.6f, tp[3];
     float h = sqrtf(aim[0] * aim[0] + aim[1] * aim[1]);
     float f[2] = {h > 0.05f ? aim[0] / h : 1, h > 0.05f ? aim[1] / h : 0};
-    to[0] = me[0] + f[1] * s_followDist * 0.6f - f[0] * s_followDist * 0.8f;
-    to[1] = me[1] - f[0] * s_followDist * 0.6f - f[1] * s_followDist * 0.8f;
+    /* 0.1.14: a ring around her, not a point that swung with her aim (it kept shuffling): it stays put while it is within
+     * 3 m of follow_distance, else it walks to the nearest point at follow_distance */
+    if (dHer > 0.3f) { to[0] = me[0] + (p[0] - me[0]) / dHer * s_followDist; to[1] = me[1] + (p[1] - me[1]) / dHer * s_followDist; }
+    else { to[0] = me[0] - f[0] * s_followDist; to[1] = me[1] - f[1] * s_followDist; }
     to[2] = me[2];
+    start = 3; stop = 0.75f;
     if (g_gear == GEAR_PLUS && PlusTarget(tp))
     {
         float v[2] = {tp[0] - me[0], tp[1] - me[1]}, len = sqrtf(v[0] * v[0] + v[1] * v[1]);
@@ -1336,6 +1339,7 @@ static int ProjBudget(void)
 }
 static int g_shootRocket;   /* 0.1.3: this shot is the left arm's rocket */
 static double g_rocketNext;
+static unsigned g_rocketsFired;
 static int SinnerShoot(int arm, uint32_t target, const float at[3])
 {
     float p[3], m[16], from[3], d[3];
@@ -1430,7 +1434,7 @@ static void FireFrame(void)
     if (g_gear == GEAR_PLUS && g_round[4] && g_now >= g_rocketNext)
     {
         g_shootRocket = 1;
-        if (SinnerShoot(0, t, at)) g_rocketNext = g_now + (s_gunEvery > 0 ? s_gunEvery * 2 : Profile(3)->every);
+        if (SinnerShoot(0, t, at)) { g_rocketNext = g_now + (s_gunEvery > 0 ? s_gunEvery * 2 : Profile(3)->every); if (g_rocketsFired++ < 3) Log("the Sinner fires a rocket (projectile %u) at entity %u", g_round[4], t); }
         g_shootRocket = 0;
     }
     g_arm = 1;
@@ -1757,6 +1761,8 @@ static void Reset(const char* why)
             "%u health writes, %u slides, %u warps, %u push steps, %u pulls, %u hits of hers cancelled, %u path sends",
             why, g_casts[0], g_casts[1], g_casts[2], g_eyeRounds, g_volleys, g_winners, g_upGained, g_shareHits, g_shared, g_healthWrites,
             g_slides, g_warps, g_pushes, g_pulls, g_spared, g_navSends);
+    if (g_rocketsFired) Log("%s: %u rockets fired (S+ only)", why, g_rocketsFired);
+    g_rocketsFired = 0;
     if (g_gapHits)
         Log("%s: its rounds' hits by distance from where they started: %u under 5 m, %u 5-10, %u 10-20, %u 20-40, %u beyond (nearest %.1f m)",
             why, g_gapBins[0], g_gapBins[1], g_gapBins[2], g_gapBins[3], g_gapBins[4], (double)g_gapMin);
