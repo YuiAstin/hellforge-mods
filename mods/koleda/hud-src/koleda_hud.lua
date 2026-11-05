@@ -459,7 +459,7 @@ local OPTIONS = {
     {'leash_stop', 'slider', 'Sinner: Stop Within', 1, 30, 1, 'It stops this close to her.'},
     {'leash_warp', 'slider', 'Sinner: Warp Beyond', 10, 200, 5, 'Farther than this from her, it is warped beside her.'},
     {'slide_speed', 'slider', 'Sinner: Slide Speed', 0.5, 15, 0.5, 'Metres a second while it slides (without its own walk).'},
-    {'gun_every', 'slider', 'Sinner: Fire Interval', 0.1, 3, 0.05, 'Seconds between its shots.', true},
+    {'gun_every', 'slider', 'Sinner: Fire Interval', 0, 3, 0.05, 'Seconds between its shots (0: the fire rate of the gun each gear\'s round comes from).', true},
     {'plus_rate', 'slider', 'Sinner: S+ Interval', 0.2, 1, 0.05, 'Its interval in S+ gear, times this.'},
     {'fire_range', 'slider', 'Sinner: Range', 10, 150, 5, 'Metres it looks for enemies.'},
     {'guard_range', 'slider', 'Sinner: N Gear Range', 5, 80, 1, 'In N gear, the enemies this close to her.'},
