@@ -733,6 +733,150 @@ local function sound_step(dt)
     SND.skip = false
 end
 
+-- ---- walking the Sinner on its own legs (0.1.7). The method is Exo Autopilot's (by marti; Chef Shared Loader): an
+-- EXO-45 walks through its animation state machine. Its walk state (recorded piloting it) is set once, then every
+-- frame (in update and in render: the game rewrites them) move_speed (5.625: half its sprint), move_angle (degrees,
+-- against its facing: the way to go) and the torso's yaw (0.5 - degrees / 360, -90 .. 90: here toward what it fires
+-- at). koleda.dll's koleda_walk gives the goal; koleda_walk_ack(1, 1) tells it the Sinner answers (the slide stops).
+pcall(ffi.cdef, [[ typedef int (*kolwalk1)(unsigned int version, float *out);
+typedef int (*kolwalkack1)(unsigned int version, int walking); ]])
+local WK = {fn = nil, ack = nil, look = 0, buf = ffi.new('float[12]'), unit = nil, scan = 0, failed = false, told = 0,
+    walking = false, cmd = 0, torso = 0, last = nil, next_sample = 0, t = 0, answers = false, still = 0, frozen_until = 0}
+local WALK_STATE = {2, 2, 2, 0, 0, 1, 0, 2, 0, 0, 0}
+local IDLE_STATE = {0, 0, 0, 0, 0, 1, 0, 2, 0, 0, 0}
+local WALK_SPEED, K_GAIN, SAMPLE = 5.625, 0.5, 0.3
+local function wk_log(m) if WK.told < 30 then WK.told = WK.told + 1; log('[Koleda HUD] walk: ' .. m) end end
+local function wrap(a) return ((a + 540) % 360) - 180 end
+local function clampv(v, a, b) if v < a then return a elseif v > b then return b end return v end
+local function S_() return rawget(_G, 'stingray') end
+local function upos(s, u) local ok, v = pcall(s.Unit.world_position, u, 1); if not ok or not v then return nil end local x, y, z = s.Vector3.to_elements(v); return {x, y, z} end
+local function uyaw(s, u)
+    local ok, q = pcall(s.Unit.world_rotation, u, 1)
+    if not ok or not q then return nil end
+    local okf, f = pcall(s.Quaternion.forward, q)
+    if not okf or not f then return nil end
+    local fx, fy = s.Vector3.to_elements(f)
+    return math.deg(math.atan2(fy, fx))
+end
+local function anim_count(s, u)
+    local okh, has = pcall(s.Unit.has_animation_state_machine, u)
+    if not okh or has ~= true then return 0 end
+    local r = {pcall(s.Unit.animation_get_state, u)}
+    if not r[1] then return 0 end
+    return #r - 1
+end
+local function var(s, u, name)
+    local ok, has = pcall(s.Unit.animation_has_variable, u, name)
+    if not ok or has ~= true then return nil end
+    local ok2, i = pcall(s.Unit.animation_find_variable, u, name)
+    return ok2 and type(i) == 'number' and i >= 0 and i or nil
+end
+-- the Sinner's unit: the walker (move_angle, move_speed, an 11-layer state machine) within 2 m of its root
+local function find_unit(s, x, y, z)
+    local okw, w = pcall(s.Application.main_world)
+    if not okw or not w then return nil end
+    local oku, all = pcall(s.World.units, w)
+    if not oku or type(all) ~= 'table' then return nil end
+    for _, u in ipairs(all) do
+        local p = upos(s, u)
+        if p and (p[1] - x) ^ 2 + (p[2] - y) ^ 2 + (p[3] - z) ^ 2 < 4 and var(s, u, 'move_angle') and var(s, u, 'move_speed') and anim_count(s, u) == #WALK_STATE then
+            return u
+        end
+    end
+    return nil
+end
+local function set_state(s, u, st) return pcall(s.Unit.animation_set_state, u, unpack(st)) end
+local function write_vars(s)
+    local u = WK.unit
+    if not u or not WK.ma then return end
+    if WK.walking then
+        pcall(s.Unit.animation_set_variable, u, WK.ms, WALK_SPEED)
+        pcall(s.Unit.animation_set_variable, u, WK.ma, WK.cmd)
+    end
+    if WK.ty then pcall(s.Unit.animation_set_variable, u, WK.ty, 0.5 - WK.torso / 360) end
+end
+local function stop_walking(s, why)
+    if WK.walking and WK.unit then set_state(s, WK.unit, IDLE_STATE) end
+    WK.walking = false
+    if why then wk_log('stopped: ' .. why) end
+end
+local function walk_tick(dt)
+    if WK.failed then return end
+    local s = S_()
+    if type(s) ~= 'table' or not (s.Unit and s.Vector3 and s.Quaternion and s.World and s.Application) then return end
+    if not WK.fn then
+        WK.look = WK.look - dt
+        if WK.look > 0 then return end
+        WK.look = 2
+        local module = k32.kolhud1_GetModuleHandleA('koleda.dll')
+        if module == nil then return end
+        local p1, p2 = k32.kolhud1_GetProcAddress(module, 'koleda_walk'), k32.kolhud1_GetProcAddress(module, 'koleda_walk_ack')
+        if p1 == nil or p2 == nil then return end
+        WK.fn, WK.ack = ffi.cast('kolwalk1', p1), ffi.cast('kolwalkack1', p2)
+    end
+    WK.t = WK.t + dt
+    local b = WK.buf
+    if WK.fn(1, b) ~= 1 or b[0] < 0.5 then
+        if WK.walking then stop_walking(s, 'it is not hers to move now') end
+        WK.unit = nil
+        return
+    end
+    local sx, sy, sz = b[5], b[6], b[7]
+    if WK.unit then
+        local p = upos(s, WK.unit)
+        if not p or (p[1] - sx) ^ 2 + (p[2] - sy) ^ 2 > 25 then WK.unit = nil; WK.walking = false end
+    end
+    if not WK.unit then
+        if WK.t < WK.scan then return end
+        WK.scan = WK.t + 2
+        WK.unit = find_unit(s, sx, sy, sz)
+        if not WK.unit then wk_log('its unit was not found by its root (it slides)'); return end
+        WK.ma, WK.ms, WK.ty = var(s, WK.unit, 'move_angle'), var(s, WK.unit, 'move_speed'), var(s, WK.unit, 'yaw')
+        WK.answers, WK.still, WK.torso = false, 0, 0
+        wk_log('found its unit: move_angle, move_speed' .. (WK.ty and ', yaw' or ' (no torso yaw)'))
+    end
+    local s_ = s
+    local p, y = upos(s_, WK.unit), uyaw(s_, WK.unit)
+    if not p or not y then return end
+    local want = b[1] > 0.5 and WK.t >= WK.frozen_until
+    local bearing = math.deg(math.atan2(b[3] - p[2], b[2] - p[1]))
+    if want and not WK.walking then
+        if anim_count(s_, WK.unit) ~= #WALK_STATE then return end
+        set_state(s_, WK.unit, WALK_STATE)
+        WK.walking, WK.cmd, WK.last, WK.next_sample = true, wrap(-wrap(bearing - y)), p, WK.t + SAMPLE
+    elseif not want and WK.walking then
+        stop_walking(s_)
+    end
+    if WK.walking and WK.t >= WK.next_sample then
+        -- steering as Exo Autopilot: where it actually went against where it should go, cmd corrected by half the error
+        WK.next_sample = WK.t + SAMPLE
+        local dx, dy = p[1] - WK.last[1], p[2] - WK.last[2]
+        local moved = math.sqrt(dx * dx + dy * dy)
+        if moved > 0.2 then
+            local march = math.deg(math.atan2(dy, dx))
+            local err = wrap(bearing - march)
+            WK.cmd = wrap(WK.cmd - K_GAIN * err)
+            if math.abs(err) > 120 then WK.cmd = wrap(-wrap(bearing - y)) end
+            if not WK.answers then WK.answers = true; wk_log('it walks on its own legs') end
+            WK.still = 0
+        else
+            WK.still = WK.still + SAMPLE
+            if not WK.answers and WK.still >= 2.4 then
+                stop_walking(s_, 'it walks in place (not answering): the slide instead for 10 s')
+                WK.frozen_until = WK.t + 10
+            end
+        end
+        WK.last = p
+    end
+    -- the torso toward what it fires at (else ahead), at most 90 degrees, 180 degrees a second
+    local tw = 0
+    if b[8] > 0.5 then tw = clampv(wrap(math.deg(math.atan2(b[10], b[9])) - y), -90, 90) end
+    WK.torso = WK.torso + clampv(tw - WK.torso, -180 * dt, 180 * dt)
+    write_vars(s_)
+    WK.ack(1, (WK.walking and WK.answers) and 1 or 0)
+end
+pcall(function() hd2.on_frame(function(dt) local ok, err = pcall(walk_tick, tonumber(dt) or 0); if not ok then WK.failed = true; log('[Koleda HUD] walk failed, off for this session: ' .. tostring(err)) end end, {owner = OWNER}) end)
+
 local overlay = hd2.ui.overlay({id = 'kit', owner = OWNER})
 overlay:draw(function(d, dt)
     dt = tonumber(dt) or 0
@@ -744,6 +888,7 @@ overlay:draw(function(d, dt)
     end
     if not find(dt) then return end
     if state.in_mission == 0 then return end
+    if not WK.failed and WK.walking then pcall(write_vars, rawget(_G, 'stingray')) end   -- (again in render: the game rewrites them)
     if not SND.failed then
         local okS, errS = pcall(sound_step, dt)
         if not okS then SND.failed = true; log('[Koleda HUD] sounds failed, off for this session: ' .. tostring(errS)) end

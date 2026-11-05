@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.6"
+#define VERSION "0.1.7"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -82,7 +82,10 @@ static float s_s3Cd = 90;
 static int s_cleanse = 1;
 /* driving (sinner_drive.h): the probe's numbers; -1 not known */
 static int s_drive = 1, s_driveTest = 0;
-static int s_turnOn = 1;
+static int s_turnOn = 0;   /* 0.1.7: off (the HUD side walks and turns it through its animation, Exo Autopilot's way) */
+static float g_walkGoal[3];
+static int g_walkWant;
+static double g_walkAckAt = -100;
 static float g_moveDir[2];
 static int s_locoManager = -1, s_locoMap = -1, s_locoRecords = -1, s_locoStride = 164;
 static int s_stickFwd = -1, s_stickSide = -1, s_stickTurn = -1;
@@ -1093,7 +1096,7 @@ static uint32_t PlusTarget(float at[3])
 static void MoveFrame(double dt)
 {
     float me[3], p[3], aim[3];
-    if (!g_sinner || !g_landed || g_piloting) { if (g_driving && g_sinner) SinnerDriveStick(g_sinner, 0, 0, 0); g_moving = 0; return; }
+    if (!g_sinner || !g_landed || g_piloting) { if (g_driving && g_sinner) SinnerDriveStick(g_sinner, 0, 0, 0); g_moving = 0; g_walkWant = 0; return; }
     if (!PlayerPose(me, aim) || !SinPos(p)) return;
     if (g_leash == 2 && g_now - g_warpAt > 1.5) g_leash = 0;
     float dHer = Flat(p, me);
@@ -1116,6 +1119,7 @@ static void MoveFrame(double dt)
     else if (g_moving && dTo < stop) g_moving = 0;
     if (!g_moving)
     {
+        g_walkWant = 0;
         if (g_driving) SinnerDriveStick(g_sinner, 0, 0, 0);
         if (g_leash == 1 || g_leash == 4) g_leash = 0;
         g_pushing = 0;
@@ -1136,7 +1140,9 @@ static void MoveFrame(double dt)
             SinnerDriveStick(g_sinner, ahead > 0 ? ahead : 0, 0, side * 2);
         }
     }
-    else Slide(p, to, dt);
+    else if (g_now - g_walkAckAt > 0.6) Slide(p, to, dt);   /* 0.1.7: the slide only while the HUD side is not walking it */
+    memcpy(g_walkGoal, to, 12);
+    g_walkWant = 1;
     StuckFrame(p, to);
 }
 
@@ -1778,6 +1784,31 @@ HF_MOD_EXPORT int koleda_sounds(unsigned version, unsigned after, float* out, in
 HF_MOD_EXPORT const char* koleda_sound_name(int i)
 {
     return i >= 0 && i < (int)(sizeof kWeaponSound / sizeof kWeaponSound[0]) ? kWeaponSound[i].name : NULL;
+}
+/* 0.1.7: walking it (the HUD side, through its animation: Exo Autopilot by marti's method): 12 floats: active (landed,
+ * nobody in it, this kit acting), want to move, the goal (3), the Sinner's root (3), facing a target (1/0), the target's
+ * direction (2), unused. koleda_walk_ack(1, 1) each frame it walks and answers: the slide stays off meanwhile */
+HF_MOD_EXPORT int koleda_walk(unsigned version, float* out)
+{
+    if (version != 1 || !out) return 0;
+    memset(out, 0, 12 * sizeof(float));
+    int active = g_inMission && kb_kit_on && g_sinner && g_landed && !g_piloting && g_sinPosOk;
+    out[0] = (float)active;
+    if (!active) return 1;
+    out[1] = (float)g_walkWant;
+    memcpy(out + 2, g_walkGoal, 12);
+    memcpy(out + 5, g_sinPos, 12);
+    out[8] = g_now - g_faceAt < 1.0 ? 1.0f : 0.0f;
+    out[9] = g_faceTo[0]; out[10] = g_faceTo[1];
+    return 1;
+}
+HF_MOD_EXPORT int koleda_walk_ack(unsigned version, int walking)
+{
+    if (version != 1) return 0;
+    if (walking) g_walkAckAt = g_now;
+    static int told;
+    if (walking && !told) { told = 1; Log("the HUD side walks the Sinner (its own legs): the slide is off while it does"); }
+    return 1;
 }
 HF_MOD_EXPORT int koleda_marks(unsigned version, float* out, int max)
 {

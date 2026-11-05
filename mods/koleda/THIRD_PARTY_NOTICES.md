@@ -28,5 +28,10 @@ The marker over the Sinner: parts adapted from **Chef Shared Loader by Th3chef**
 (https://github.com/Th3chef/Chef-Shared-Loader): finding the view camera, projecting a world point to the screen and the
 behind-the-camera check, used with Th3chef's permission. None of the loader itself is included.
 
+The Sinner's walking (hud-src/koleda_hud.lua, 0.1.7) follows Exo Autopilot 1.2 by marti (a Chef Shared Loader mod): an
+EXO-45 walks through its own animation state machine, its walk state and the move_angle / move_speed / yaw variables
+held every frame, and its steering correction. Its method only; none of its code is included. Credit to marti; ask
+before a public release.
+
 Koleda is a character of Girls' Frontline 2: Exilium (MICA Team / Sunborn). This is an unofficial fan mod; no character
 model or game art is included.
