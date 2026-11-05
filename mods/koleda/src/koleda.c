@@ -345,6 +345,7 @@ static int WorldId(uint32_t* id)
     *id = g_worldId((const void*)world);
     return *id < 4;
 }
+static uint32_t g_sinner;   /* (defined below) */
 /* the first wall along a ray (len + 1: clear); *hitTarget when the target's unit is met first; skip: a second unit to
  * see through (the Sinner) */
 static float FirstWall(uint32_t id, const float from[3], const float dir[3], float len, uint32_t me, uint32_t tu, uint32_t skip, int* hitTarget)
@@ -392,7 +393,7 @@ static int InSight(const float cam[3], const float fwd[3], const float q[3], uin
             len = d + 2;
         }
         int hitTarget = 0;
-        float w = FirstWall(id, cam, dir, len, me, tu, 0, &hitTarget);
+        float w = FirstWall(id, cam, dir, len, me, tu, UnitOf(g_sinner), &hitTarget);   /* 0.1.1: through the Sinner */
         float reach = r < 2 ? len : len - 2;
         if (hitTarget || w > reach - 1.5f) return 1;
     }
@@ -434,7 +435,6 @@ static int Walks(uint32_t e)
 }
 /* whether the warp setter may move this entity: this machine's, numbered under 0x400000, alive, and (warp_needs_walks)
  * with a navigation record. why: the reason when not */
-static uint32_t g_sinner;   /* (defined below) */
 static int Movable(uint32_t e, const char** why)
 {
     uint8_t d[24];
