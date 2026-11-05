@@ -3,10 +3,10 @@
  * 25480438) found the game's own seat code; nothing here has run yet. Host or solo; turn it off when done.
  *
  *   always  your seat entry is logged whenever it changes (sit in each FRV seat by hand: that maps seat -> role -> node)
- *   F5      the nearest FRV (and its gun): for each seat index 0..7, its role (0x636E70) and node (0x636A30)
- *   Shift+F5 enter it the game's way: 0x63ACF0(NULL, you, frv, seat) (as a finished "get in" interaction; you play the
- *           get-in). The driver seat (role 1), or the seat Alt+F5 picked (each press: the next index, then the driver's again)
- *   Ctrl+F5 enter it instantly: the game's own spawn-already-seated sequence (0x639830's): set_entering with instant 1,
+ *   F1      the nearest FRV (and its gun): for each seat index 0..7, its role (0x636E70) and node (0x636A30)
+ *   Shift+F1 enter it the game's way: 0x63ACF0(NULL, you, frv, seat) (as a finished "get in" interaction; you play the
+ *           get-in). The driver seat (role 1), or the seat Alt+F1 picked (each press: the next index, then the driver's again)
+ *   Ctrl+F1 enter it instantly: the game's own spawn-already-seated sequence (0x639830's): set_entering with instant 1,
  *           the seat node, the peers told, one seater update
  *   Insert  the FRV gun: its muzzle node hash (ProjectileWeapon +0x21C), its nodes' positions from its root, the one
  *           furthest along its barrel. Shift+Insert turns one of its nodes 45 degrees (the next node each press) and logs
@@ -27,7 +27,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 #include "kitbase/kb_core.h"
 
 static atomic_uint g_avatar;
@@ -52,8 +52,22 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 typedef struct { uint32_t frv, gun; uint64_t frvRes, gunRes; int after; } Car;
 static Car g_car[16];
 static int g_cars;
+static const char* Kinds(uint64_t r, char* out)
+{
+    static const char* names[] = {"ProjectileWeapon", "SeatCollection", "Mount", "Turret", "WeaponData", "Vehicle", "VehicleMotion"};
+    uint32_t st;
+    char name[64];
+    out[0] = 0;
+    for (unsigned i = 0; i < sizeof names / sizeof *names; i++)
+    {
+        snprintf(name, sizeof name, "%sComponentData", names[i]);
+        if (hf->component_record(name, r, &st)) { strcat(out, " "); strcat(out, names[i]); }
+    }
+    return out[0] ? out : " (none of the listed components)";
+}
 static void SortSpawns(void)
 {
+    char kinds[160];
     for (int k = 0; k < 32 && g_newTail != atomic_load(&g_newHead); k++, g_newTail++)
     {
         unsigned i = g_newTail % 128;
@@ -64,9 +78,7 @@ static void SortSpawns(void)
             if (g_car[c].after > 0)
             {
                 g_car[c].after--;
-                Log("  spawned after FRV %u: entity %u, resource %016llx%s%s", g_car[c].frv, e, (unsigned long long)r,
-                    hf->component_record("ProjectileWeaponComponentData", r, &st) ? " (a projectile weapon)" : "",
-                    hf->component_record("SeatCollectionComponentData", r, &st) ? " (seats)" : "");
+                Log("  spawned after FRV %u: entity %u, resource %016llx:%s", g_car[c].frv, e, (unsigned long long)r, Kinds(r, kinds));
                 if (!g_car[c].gun && hf->component_record("ProjectileWeaponComponentData", r, &st)) { g_car[c].gun = e; g_car[c].gunRes = r; Log("  -> its gun"); }
             }
         if (IsFrv(r))
@@ -74,7 +86,14 @@ static void SortSpawns(void)
             Car* c = &g_car[g_cars < 16 ? g_cars++ : 15];
             memset(c, 0, sizeof *c);
             c->frv = e; c->frvRes = r; c->after = 8;
-            Log("FRV spawned: entity %u (resource %016llx)", e, (unsigned long long)r);
+            Log("FRV spawned: entity %u (resource %016llx):%s; the spawns just before it:", e, (unsigned long long)r, Kinds(r, kinds));
+            for (unsigned b = 1; b <= 6 && b <= g_newTail; b++)
+            {
+                unsigned j = (g_newTail - b) % 128;
+                Log("  before: entity %u, resource %016llx:%s", g_newEnt[j], (unsigned long long)g_newRes[j], Kinds(g_newRes[j], kinds));
+                if (!c->gun && (hf->component_record("ProjectileWeaponComponentData", g_newRes[j], &st) || hf->component_record("MountComponentData", g_newRes[j], &st)) && g_newEnt[j] + 8 > e)
+                { c->gun = g_newEnt[j]; c->gunRes = g_newRes[j]; Log("  -> its gun (a guess)"); }
+            }
         }
     }
 }
@@ -182,12 +201,13 @@ static void WatchSeat(void)
     g_haveEntry = 1;
 }
 
-/* ---- F5: the seats of the nearest FRV and of its gun ---------------------------------------------------------------- */
+/* ---- F1: the seats of the nearest FRV and of its gun ---------------------------------------------------------------- */
 static void Survey(uint32_t coll, const char* what)
 {
     uintptr_t C = CollMgr();
     uint32_t idx = 0, me = atomic_load(&g_avatar);
-    if (!C || !g_role || !g_node) { Log("F5: the seat code is not pinned: no survey"); return; }
+    (void)me;
+    if (!C) { Log("F1: no seat-collection manager"); return; }
     if (Lookup(C + 0x20, coll, 1048576, &idx) && idx < 65536)
     {
         uintptr_t recs = Pointer(C + 0x48), occ = Pointer(C + 0x50);
@@ -197,15 +217,17 @@ static void Survey(uint32_t coll, const char* what)
         if (occ) ReadAt(occ + 12ull * idx, mask, 12);
         char hex[25];
         HexOf(mask, 12, hex);
-        Log("F5: %s %u: seat-collection record %u, kind %u, occupancy %s", what, coll, idx, kind, hex);
+        Log("F1: %s %u: seat-collection record %u, kind %u, occupancy %s", what, coll, idx, kind, hex);
     }
-    else { Log("F5: %s %u has no seat collection", what, coll); return; }
-    for (uint32_t e = 0; e < 8; e++)
+    else { Log("F1: %s %u has no seat collection", what, coll); return; }
+    /* 0.1.1: read only. 0.1.0 called the seat role and node functions here for each seat: the first call read seats
+     * 0-4 as roles 2 3 4 0 1 (seat 4 the driver's), then the occupancy went ff -> e0 and every seat read "none": they
+     * claim a seat. Never called here again */
     {
-        int role = g_role((void*)C, coll, 0, e);
-        if (role == -1) { Log("  seat %u: none", e); continue; }
-        uint32_t node = g_node((void*)C, coll, me, e);
-        Log("  seat %u: role %d, node %u", e, role, node);
+        uintptr_t recs = Pointer(C + 0x48);
+        uint8_t rec[0x64];
+        char hex[0x64 * 2 + 1];
+        if (recs && ReadAt(recs + 0x64ull * idx, rec, sizeof rec)) { HexOf(rec, sizeof rec, hex); Log("  its record: %s", hex); }
     }
 }
 static void SurveyNearest(void)
@@ -213,20 +235,21 @@ static void SurveyNearest(void)
     float d;
     Car* c = Nearest(&d);
     if (!c) return;
-    Log("F5: FRV %u (%016llx), %.1f m away; its gun %u (%016llx)", c->frv, (unsigned long long)c->frvRes, d, c->gun, (unsigned long long)c->gunRes);
+    Log("F1: FRV %u (%016llx), %.1f m away; its gun %u (%016llx)", c->frv, (unsigned long long)c->frvRes, d, c->gun, (unsigned long long)c->gunRes);
     Survey(c->frv, "the FRV");
     if (c->gun) Survey(c->gun, "its gun");
 }
 
-/* ---- Shift+F5 / Ctrl+F5: entering ---------------------------------------------------------------------------------------- */
+/* ---- Shift+F1 / Ctrl+F1: entering ---------------------------------------------------------------------------------------- */
 static int g_pick = -1;   /* -1: the driver's (role 1); else this seat index */
+/* the M-102's seats as 0.1.0's one survey read them (index -> role): 0 -> 2, 1 -> 3, 2 -> 4, 3 -> 0, 4 -> 1 (driver) */
+static const int kFrvRole[5] = {2, 3, 4, 0, 1};
 static int ChooseSeat(uint32_t coll, uint32_t* entrance, int* role)
 {
-    uintptr_t C = CollMgr();
-    if (!C || !g_role) return 0;
-    if (g_pick >= 0) { *entrance = (uint32_t)g_pick; *role = g_role((void*)C, coll, 0, *entrance); return *role != -1; }
-    for (uint32_t e = 0; e < 8; e++) { int r = g_role((void*)C, coll, 0, e); if (r == 1) { *entrance = e; *role = r; return 1; } }
-    return 0;
+    (void)coll;
+    *entrance = g_pick >= 0 ? (uint32_t)g_pick : 4;
+    *role = *entrance < 5 ? kFrvRole[*entrance] : -1;
+    return 1;
 }
 static int Ready(Car** out, uint32_t* entrance, int* role, uint32_t* idx, const char* key)
 {
@@ -240,7 +263,7 @@ static int Ready(Car** out, uint32_t* entrance, int* role, uint32_t* idx, const 
     if (!at || !SeaterIndex(me, idx)) { Log("%s: you have no seater entry (seater manager %p)", key, (void*)SeaterMgr()); return 0; }
     ReadAt(at, &in, 4);
     if (in && in == c->frv) { Log("%s: you are already in that FRV (get out first)", key); return 0; }
-    if (!ChooseSeat(c->frv, entrance, role)) { Log("%s: FRV %u has no %s", key, c->frv, g_pick >= 0 ? "such seat" : "driver seat (role 1)"); return 0; }
+    ChooseSeat(c->frv, entrance, role);
     Log("%s: FRV %u, %.1f m away, seat %u (role %d); you are seater %u (entry +0 was %u)", key, c->frv, d, *entrance, *role, *idx, in);
     *out = c;
     return 1;
@@ -250,20 +273,20 @@ static void EnterGameWay(void)
     Car* c;
     uint32_t e, idx;
     int role;
-    if (!g_begin) { Log("Shift+F5: 0x63ACF0 is not the reviewed code: not called"); return; }
-    if (!Ready(&c, &e, &role, &idx, "Shift+F5")) return;
+    if (!g_begin) { Log("Shift+F1: 0x63ACF0 is not the reviewed code: not called"); return; }
+    if (!Ready(&c, &e, &role, &idx, "Shift+F1")) return;
     g_watchUntil = g_now + 3;
     g_haveEntry = -1;
     g_begin(NULL, atomic_load(&g_avatar), c->frv, e);
-    Log("Shift+F5: 0x63ACF0 called; your seat entry follows for 3 s");
+    Log("Shift+F1: 0x63ACF0 called; your seat entry follows for 3 s");
 }
 static void EnterInstant(void)
 {
     Car* c;
     uint32_t e, idx, me = atomic_load(&g_avatar);
     int role;
-    if (!g_setEntering || !g_rpcEntering || !g_node || !g_setNode || !g_rpcNode || !g_update) { Log("Ctrl+F5: part of the instant sequence is not the reviewed code: not called"); return; }
-    if (!Ready(&c, &e, &role, &idx, "Ctrl+F5")) return;
+    if (!g_setEntering || !g_rpcEntering || !g_node || !g_setNode || !g_rpcNode || !g_update) { Log("Ctrl+F1: part of the instant sequence is not the reviewed code: not called"); return; }
+    if (!Ready(&c, &e, &role, &idx, "Ctrl+F1")) return;
     uintptr_t S = SeaterMgr(), C = CollMgr(), at;
     g_watchUntil = g_now + 3;
     g_haveEntry = -1;
@@ -274,7 +297,7 @@ static void EnterInstant(void)
     g_setNode((void*)S, 0, c->frv, me, node);
     g_rpcNode(-2, c->frv, me, node);
     g_update((void*)S, idx);
-    Log("Ctrl+F5: the instant sequence ran (seat node %u); your seat entry follows for 3 s", node);
+    Log("Ctrl+F1: the instant sequence ran (seat node %u); your seat entry follows for 3 s", node);
 }
 
 /* ---- Insert: the gun's nodes and muzzle; Shift+Insert: turn one node -------------------------------------------------- */
@@ -296,7 +319,15 @@ static void GunNodes(void)
     float d;
     Car* c = Nearest(&d);
     if (!c) return;
-    if (!c->gun) { Log("Insert: FRV %u: its gun was not seen spawning", c->frv); return; }
+    {
+        uint32_t st = 0;
+        uintptr_t mt = hf->component_record("MountComponentData", c->frvRes, &st);
+        uint8_t rec[96];
+        char hex[193];
+        if (mt && ReadAt(mt, rec, sizeof rec)) { HexOf(rec, sizeof rec, hex); Log("Insert: the FRV's MountComponentData (stride %u): %s", st, hex); }
+        else Log("Insert: the FRV has no MountComponentData record");
+    }
+    if (!c->gun) { Log("Insert: FRV %u: its gun is not known: the FRV's own nodes instead", c->frv); c->gun = c->frv; c->gunRes = c->frvRes; }
     uint32_t st = 0, fire = 0, unit = UnitOf(c->gun), count = 0;
     uintptr_t pw = hf->component_record("ProjectileWeaponComponentData", c->gunRes, &st), nodes = 0;
     if (pw) ReadAt(pw + 0x21C, &fire, 4);
@@ -379,10 +410,10 @@ static void Tick(HfMod* mod, float dt, void* user)
     static int prev[2];
     int focused = Focused(), shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0, ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0,
         alt = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
-    int k[2] = {focused && (GetAsyncKeyState(VK_F5) & 0x8000), focused && (GetAsyncKeyState(VK_INSERT) & 0x8000)};
+    int k[2] = {focused && (GetAsyncKeyState(VK_F1) & 0x8000), focused && (GetAsyncKeyState(VK_INSERT) & 0x8000)};
     if (k[0] && !prev[0])
     {
-        if (alt) { g_pick = g_pick < 7 ? g_pick + 1 : -1; if (g_pick < 0) Log("Alt+F5: the seat to enter: the driver's (role 1)"); else Log("Alt+F5: the seat to enter: index %d", g_pick); }
+        if (alt) { g_pick = g_pick < 7 ? g_pick + 1 : -1; if (g_pick < 0) Log("Alt+F1: the seat to enter: the driver's (role 1)"); else Log("Alt+F1: the seat to enter: index %d", g_pick); }
         else if (ctrl) EnterInstant();
         else if (shift) EnterGameWay();
         else SurveyNearest();
@@ -416,7 +447,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         g_setRot = (SetLocalRotFn)(exe + 0x1FC7A0);
     else Log("Unit.set_local_rotation is not the code Apache decoded: Shift+Insert off");
     Pin((void**)&g_resolve, exe + 0x9D8C0, "48 89 5c 24 08 48 89 74 24 10 57 48 83 ec 20 48 8b 35 1a 28 97 01 8b d9 48 8d 8e d0 00 00 00", "unit_resolve (exe+0x9D8C0)");
-    Log("ready: your seat is logged when it changes; F5 the nearest FRV's seats, Shift+F5 / Ctrl+F5 enter it (game way / instant), Alt+F5 the seat to enter, Insert its gun");
+    Log("ready: your seat is logged when it changes; F1 the nearest FRV's seats, Shift+F1 / Ctrl+F1 enter it (game way / instant), Alt+F1 the seat to enter, Insert its gun");
 }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {

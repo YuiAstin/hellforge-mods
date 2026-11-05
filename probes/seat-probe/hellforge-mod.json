@@ -2,8 +2,8 @@
   "format": 1,
   "id": "yui.seat-probe",
   "name": "Seat Probe (research)",
-  "version": "0.1.0",
-  "description": "Research for Koleda's FRV Sinner: can a mod put you straight into a vehicle seat, and where is the FRV gun's muzzle? Logs your seat whenever it changes. F5: the nearest FRV's seats (role and node per seat). Shift+F5: enter its driver seat the game's way (you play the get-in). Ctrl+F5: enter it instantly (the game's spawn-seated sequence). Alt+F5: pick the next seat index to enter instead. Insert: the FRV gun's nodes and muzzle; Shift+Insert turns one gun node (the next each press). Host or solo. Turn off when done.",
+  "version": "0.1.1",
+  "description": "Research for Koleda's FRV Sinner: can a mod put you straight into a vehicle seat, and where is the FRV gun's muzzle? Logs your seat whenever it changes. F1: the nearest FRV's seats (role and node per seat). Shift+F1: enter its driver seat the game's way (you play the get-in). Ctrl+F1: enter it instantly (the game's spawn-seated sequence). Alt+F1: pick the next seat index to enter instead. Insert: the FRV gun's nodes and muzzle; Shift+Insert turns one gun node (the next each press). Host or solo. Turn off when done.",
   "gameplay": false,
   "code": {
     "dll": "seat_probe.dll",
