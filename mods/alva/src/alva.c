@@ -8,8 +8,8 @@
  *     (kitbase/kb_allies.h).
  *   Freezing Touch (passive): her hits and interceptions build Confectance (at most conf_max); her hits chill enemies
  *     (the flamer slow); a fully chilled enemy freezes (a stun) for frozen_seconds. A frozen enemy takes no damage
- *     except from an explosion (not her own EMS bursts): that one hit deals shatter_mult times and ends the freeze
- *     (0.2.0). Her snow fields (Frosted Echo's nitrogen field, and a small one where each of its bursts lands) freeze
+ *     except from an explosion (not EMS): that one hit, with its shell's direct hit, deals shatter_mult times and
+ *     ends the freeze (0.2.0, 0.2.1). Her snow fields (Frosted Echo's nitrogen field, and a small one where each of its bursts lands) freeze
  *     whoever stands in them after field_freeze_seconds, divided by how many fields overlap there. Each skill she uses adds Battle Prep: at prep_max, the skill with the longest cooldown left
  *     is ready again.
  *   Snow Wolf's Heart (key_s1, default Z): Covering Mode for s1_seconds: an enemy that hits an ally within s1_range m of
@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her chill bursts come often */
@@ -115,8 +115,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "conf_max = %d\nconf_every = %g\nprep_max = %d\n"
                "; Chill (out of 100) from her shots, interception shots, EMS bursts, Nix Requiem rounds and the nitrogen field (each\n"
                "; half second); every chill slows (slow_buildup). At 100 an enemy freezes (a stun, stun_buildup) for frozen_seconds.\n"
-               "; A frozen enemy takes no damage except from an explosion (not her EMS bursts): that hit deals shatter_mult times\n"
-               "; its damage, once, and the enemy thaws. Snow fields (Frosted Echo's nitrogen field, and one of burst_field_radius m\n"
+               "; A frozen enemy takes no damage except from an explosion (not EMS, anyone's): that hit deals shatter_mult times\n"
+               "; its damage, once, and the enemy thaws; a shell's direct hit (an orbital's, a recoilless's) joins its blast. Snow fields (Frosted Echo's nitrogen field, and one of burst_field_radius m\n"
                "; for burst_field_seconds where each of its bursts lands) freeze an enemy standing in them in field_freeze_seconds,\n"
                "; divided by how many fields overlap there.\n"
                "chill_hit = %g\nchill_shot = %g\nchill_burst = %g\nchill_s3 = %g\nfield_freeze_seconds = %g\nburst_field_radius = %g\nburst_field_seconds = %g\n"
@@ -406,7 +406,9 @@ static int FoeIndex(uint32_t e) { for (int k = 0; k < FOES; k++) if (e && g_foe[
 
 /* ---- Freezing Touch: chill, frozen, shatter ---------------------------------------------------------------------- */
 #define COLD 256
-typedef struct Cold { uint32_t e; float chill; double frozenUntil, at, fxAt; } Cold;
+typedef struct Cold { uint32_t e; float chill; double frozenUntil, at, fxAt;
+                      /* 0.2.1: a shell's direct hit and its blast are one shatter (either order, same owner, 0.25 s) */
+                      int shrug; uint32_t shrugOwner, shatterOwner; double shrugAt, shatterAt; } Cold;
 static Cold g_cold[COLD];
 static Cold* ColdOf(uint32_t e, int make)
 {
@@ -901,12 +903,9 @@ static int OwnBurstAt(const float p[3])
     }
     return 0;
 }
-static void Shatter(HfDamageEvent* d)
+static void ShatterNumber(HfDamageEvent* d, int before, const char* what)
 {
-    int before = d->amount;
     ScaleDamage(d, s_shatterMult);
-    Cold* c = ColdOf(d->target, 0);
-    if (c) { c->frozenUntil = 0; c->chill = 0; }
     g_shatters++;
     g_shatterBonus += d->amount - before;
     unsigned q = g_shSeq + 1;
@@ -914,7 +913,18 @@ static void Shatter(HfDamageEvent* d)
     r[0] = d->position[0]; r[1] = d->position[1]; r[2] = d->position[2]; r[3] = (float)d->amount; r[4] = (float)q;
     g_shSeq = q;
     static unsigned told;
-    if (told++ < 20) Log("SHATTER: entity %u, an explosion's hit (owner %u) %d -> %d; thawed", d->target, d->owner, before, d->amount);
+    if (told++ < 20) Log("SHATTER: entity %u, %s (owner %u, kind %u) %d -> %d", d->target, what, d->owner, d->kind, before, d->amount);
+}
+static void Shatter(HfDamageEvent* d, Cold* c)
+{
+    /* the same shell's direct hit, shrugged off just before, joins the blast */
+    if (c->shrug > 0 && g_now - c->shrugAt <= 0.25 && c->shrugOwner == d->owner) { d->amount += c->shrug; ShatterNumber(d, d->amount, "an explosion with its shell's direct hit"); }
+    else ShatterNumber(d, d->amount, "an explosion");
+    c->shrug = 0;
+    c->frozenUntil = 0;
+    c->chill = 0;
+    c->shatterAt = g_now;
+    c->shatterOwner = d->owner;
 }
 static void DamageSeen(HfDamagePreEvent* e, HfDamageEvent* d)
 {
@@ -926,10 +936,34 @@ static void DamageSeen(HfDamagePreEvent* e, HfDamageEvent* d)
         return;
     }
     /* 0.2.0: frozen: no damage but an explosion's (not her EMS bursts'), which shatters it once and thaws it */
-    if (d->amount > 0 && FoeIndex(d->target) >= 0 && Frozen(d->target))
+    if (d->amount > 0 && FoeIndex(d->target) >= 0)
     {
-        if (d->kind == 4 && !OwnBurstAt(d->position)) Shatter(d);
-        else { e->cancel = 1; g_shrugged++; return; }
+        Cold* c = ColdOf(d->target, 0);
+        /* EMS (anyone's: her bursts, an EMS mortar, an EMS strike), its shell's direct hit and its blast alike, neither
+         * hurts a frozen enemy nor shatters it: EMS is what freezes */
+        int ems = OwnBurstAt(d->position) || BoomNear(d->position, 8, 600, 1);
+        if (c && c->frozenUntil > g_now)
+        {
+            if (d->kind == 4 && !ems) Shatter(d, c);
+            else if (ems) { e->cancel = 1; g_shrugged++; return; }
+            else
+            {
+                /* shrugged off, but kept a moment: the blast of the same shell may follow */
+                if (g_now - c->shrugAt > 0.25 || c->shrugOwner != d->owner) c->shrug = 0;
+                c->shrug += d->amount;
+                c->shrugAt = g_now;
+                c->shrugOwner = d->owner;
+                e->cancel = 1;
+                g_shrugged++;
+                return;
+            }
+        }
+        else if (c && c->shatterAt > 0 && g_now - c->shatterAt <= 0.25 && d->owner == c->shatterOwner && d->kind != 4 && !ems)
+        {
+            /* the direct hit of the shell that just shattered it (its blast came first) */
+            c->shatterAt = 0;
+            ShatterNumber(d, d->amount, "its shell's direct hit, after the blast");
+        }
     }
     Threat(d);
     AllyAbsorb(e, d);
