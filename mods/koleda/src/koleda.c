@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.16"
+#define VERSION "0.2.0"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -99,6 +99,10 @@ static int s_stickFwd = -1, s_stickSide = -1, s_stickTurn = -1;
 /* aiming */
 static int s_sight = 1;
 static float s_fpDistance = 0.45f;
+/* 0.2.0: the FRV Sinner (her M-103 Supply FRV) */
+static int s_frvOn = 1, s_releaseRow = 266;
+static float s_frvDmgN = 1.0f, s_frvDmgS = 1.25f, s_frvDmgPlus = 1.6f, s_frvGuardN = 0.7f, s_frvParked = 0.8f, s_frvRepair = 0.02f;
+static float s_releaseEvery = 4, s_releaseRadius = 4, s_rideRange = 60;
 
 static const KbSetting kSettings[] = {
     KB_I("upshift_max", s_upMax, 1, 20), KB_F("upshift_decay", s_upDecay, 1, 600), KB_F("upshift_damage", s_upDamage, 0, 1), KB_F("upshift_every", s_upEvery, 0, 60),
@@ -119,6 +123,10 @@ static const KbSetting kSettings[] = {
     KB_I("loco_map", s_locoMap, -1, 65536), KB_I("loco_records", s_locoRecords, -1, 65536), KB_I("loco_stride", s_locoStride, 16, 4096),
     KB_I("stick_offset_fwd", s_stickFwd, -1, 4096), KB_I("stick_offset_side", s_stickSide, -1, 4096), KB_I("stick_offset_turn", s_stickTurn, -1, 4096),
     KB_I("line_of_sight", s_sight, 0, 1), KB_F("first_person", s_fpDistance, 0.1, 2),
+    KB_I("frv_sinner", s_frvOn, 0, 1), KB_F("frv_damage_n", s_frvDmgN, 0, 10), KB_F("frv_damage_s", s_frvDmgS, 0, 10), KB_F("frv_damage_plus", s_frvDmgPlus, 0, 10),
+    KB_F("frv_taken_n", s_frvGuardN, 0, 1), KB_F("frv_taken_parked", s_frvParked, 0, 1), KB_F("frv_repair", s_frvRepair, 0, 1),
+    KB_I("release_explosion", s_releaseRow, 0, 100000), KB_F("release_every", s_releaseEvery, 0.5, 60), KB_F("release_radius", s_releaseRadius, 1, 20),
+    KB_F("ride_range", s_rideRange, 1, 1000),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
 };
@@ -180,6 +188,16 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "stick_offset_fwd = %d\nstick_offset_side = %d\nstick_offset_turn = %d\n"
                "; Aiming: line_of_sight 1, Eye of the Snow Wolf's target must be in sight. first_person: the camera this close to\n"
                "; her head (m) counts as first person.\nline_of_sight = %d\nfirst_person = %g\n"
+               "; The FRV Sinner (frv_sinner 0: off). With the M-103 Supply FRV in her loadout, Hallucination clears its\n"
+               "; cooldown and the FRV she calls becomes the Sinner: its own turret fights (her damage on it by gear:\n"
+               "; frv_damage_n / _s / _plus, times Upshift and Kinetic Recovery), it takes part of her hits, Winner! repairs it.\n"
+               "; Hallucination while it stands: Let's Go for a Ride! (she is put in its driver seat, else a free passenger\n"
+               "; seat, within ride_range m); pressed again inside it: Winner!. It takes frv_taken_n of the damage in N and\n"
+               "; frv_taken_parked while it stands still; each hit on it repairs frv_repair of its health (at most once a\n"
+               "; second). Kinetic Release: while its turret fights in S / S+, every release_every s, release_explosion (266)\n"
+               "; goes off 3 (S) or 6 (S+) times release_radius m around it. In S+ it pulls enemies to it (Let's Drift!).\n"
+               "frv_sinner = %d\nfrv_damage_n = %g\nfrv_damage_s = %g\nfrv_damage_plus = %g\nfrv_taken_n = %g\nfrv_taken_parked = %g\nfrv_repair = %g\n"
+               "release_explosion = %d\nrelease_every = %g\nrelease_radius = %g\nride_range = %g\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint. hellbomb_on_exhaustion 1 sets off a\n"
                "; Hellbomb on her if she runs her stamina dry (a T-Doll's price).\n"
                "hp_mult = 1.5\nstamina_mult = 2\nhellbomb_on_exhaustion = 1\n",
@@ -192,7 +210,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_s1Cd, s_s1Rounds, (double)s_s1Every, (double)s_s1Cone, (double)s_s1Range, s_s1Round,
             (double)s_s2Cd, (double)s_krSeconds, (double)s_krMult, (double)s_krHeal, (double)s_krSinnerHeal, (double)s_s3Cd, s_cleanse,
             (double)s_followDist, (double)s_personal, (double)s_maxRounds, (double)s_roundSpeed, s_turnOn, s_drive, s_driveTest, s_locoManager, s_locoMap, s_locoRecords, s_locoStride, s_stickFwd, s_stickSide, s_stickTurn,
-            s_sight, (double)s_fpDistance);
+            s_sight, (double)s_fpDistance, s_frvOn, (double)s_frvDmgN, (double)s_frvDmgS, (double)s_frvDmgPlus, (double)s_frvGuardN, (double)s_frvParked,
+            (double)s_frvRepair, s_releaseRow, (double)s_releaseEvery, (double)s_releaseRadius, (double)s_rideRange);
 }
 
 #include "sinner_drive.h"
@@ -587,6 +606,17 @@ static void Gear(int gear, const char* why)
 /* her exosuit (a copy of the EXO-45 Patriot) and its stratagem, made in hellforge_mod_init */
 static uint64_t g_sinRes;
 static uint32_t g_sinType;
+/* 0.2.0: the FRV Sinner: her own M-103 Supply FRV, its automatic turret its gun */
+#define FRV_RES HF_ENTITY_M103_SUPPLY_FRV
+#define FRV_TURRET UINT64_C(0x4DF41F84668D07FB)
+#define FRV_STRATAGEM HF_STRATAGEM_M103_SUPPLY_FRV
+static int g_frv;                      /* the standing Sinner is the FRV */
+static uint32_t g_frvNet, g_turretNet, g_turretCandNet;
+static double g_turretCandAt = -100;
+static int g_frvParked;
+static atomic_int g_repairPending;
+static unsigned g_turretHits, g_noDeath, g_releases, g_rides;
+static uint64_t SinRes(void) { return g_frv ? FRV_RES : g_sinRes; }
 /* the one standing: its entity, unit, when it spawned, whether it has landed */
 static uint32_t g_sinner, g_sinUnit;
 static double g_sinBorn;
@@ -740,6 +770,38 @@ static int GrantCall(int uses)
         uses < 0 ? "unlimited" : "1");
     return 1;
 }
+/* 0.2.0: is a stratagem in her own list (the M-103 in her loadout); its entry's cooldown cleared (Hallucination with
+ * the FRV). 1 found / done, 0 not there, -1 her record unreadable */
+static int HasStratagem(uint32_t type)
+{
+    if (!GrantPins()) return 0;
+    uintptr_t st = LocalStratagems();
+    uint32_t count = 0;
+    if (!st || !ReadAt(st + 0x788, &count, 4) || count > 16) return -1;
+    for (uint32_t i = 0; i < count; i++)
+    {
+        uint32_t t = 0;
+        if (ReadAt(st + 0x188 + i * 0x30u, &t, 4) && t == type) return 1;
+    }
+    return 0;
+}
+static int ClearCooldown(uint32_t type)
+{
+    if (!GrantPins()) return 0;
+    uintptr_t st = LocalStratagems();
+    uint32_t count = 0;
+    uint64_t zero = 0;
+    if (!st || !ReadAt(st + 0x788, &count, 4) || count > 16) return -1;
+    for (uint32_t i = 0; i < count; i++)
+    {
+        uintptr_t at = st + 0x188 + i * 0x30u;
+        uint32_t t = 0;
+        if (!ReadAt(at, &t, 4) || t != type) continue;
+        if (hf->write(at + 0x10, &zero, 8) || hf->write(at + 0x18, &zero, 8) || hf->write(at + 0x20, &zero, 8)) { Log("the FRV call: the cooldown write failed"); return 0; }
+        return 1;
+    }
+    return 0;
+}
 /* call_mode 0: once at the drop, unlimited (the Sinbreaker's way) */
 static int g_grantDone, g_grantTries;
 static double g_grantAt;
@@ -798,9 +860,10 @@ static int SinnerMaxRead(void)
     HfField f = HF_FIELD(Health, health);
     HfLiveValue v;
     memset(&v, 0, sizeof v);
-    if (g_sinRes && hf->get_live(self, g_sinRes, &f, &v) && v.base.number >= 1 && v.base.number < 1e7) return (int)v.base.number;
+    uint64_t res = SinRes();
+    if (res && hf->get_live(self, res, &f, &v) && v.base.number >= 1 && v.base.number < 1e7) return (int)v.base.number;
     uint32_t stride = 0;
-    uintptr_t h = g_sinRes ? hf->component_record("HealthComponentData", g_sinRes, &stride) : 0;
+    uintptr_t h = res ? hf->component_record("HealthComponentData", res, &stride) : 0;
     int32_t hp = 0;
     if (h && ReadAt(h, &hp, 4) && hp >= 1 && hp < 10000000) return hp;
     return 0;
@@ -890,6 +953,9 @@ static void SinnerLost(const char* why)
     g_sinner = g_sinUnit = 0;
     g_landed = g_winnerUsed = g_piloting = 0;
     g_driving = g_driveTried = 0;
+    g_frv = 0;
+    g_frvNet = g_turretNet = 0;
+    g_frvParked = 0;
     g_nparts = 0;
     g_sinPosOk = 0;
     atomic_store(&g_sinHpNow, 0);
@@ -1115,7 +1181,7 @@ static uint32_t PlusTarget(float at[3])
 static void MoveFrame(double dt)
 {
     float me[3], p[3], aim[3];
-    if (!g_sinner || !g_landed || g_piloting) { if (g_driving && g_sinner) SinnerDriveStick(g_sinner, 0, 0, 0); g_moving = 0; g_walkWant = 0; return; }
+    if (!g_sinner || !g_landed || g_piloting || g_frv) { if (g_driving && g_sinner) SinnerDriveStick(g_sinner, 0, 0, 0); g_moving = 0; g_walkWant = 0; return; }
     if (!PlayerPose(me, aim) || !SinPos(p)) return;
     if (g_leash == 2 && g_now - g_warpAt > 1.5) g_leash = 0;
     float dHer = Flat(p, me);
@@ -1309,7 +1375,7 @@ static double g_faceAt = -100;
 static double g_turnLogAt, g_turnSince = -1;
 static void TurnFrame(void)
 {
-    if (!s_turnOn || !g_sinner || !g_landed || g_piloting) return;
+    if (!s_turnOn || !g_sinner || !g_landed || g_piloting || g_frv) return;
     float dir[3] = {0, 0, 0};
     if (g_now - g_faceAt < 1.0) { dir[0] = g_faceTo[0]; dir[1] = g_faceTo[1]; }
     else if (g_moveDir[0] != 0 || g_moveDir[1] != 0) { dir[0] = g_moveDir[0]; dir[1] = g_moveDir[1]; }
@@ -1477,7 +1543,7 @@ static int SinnerShoot(int arm, uint32_t target, const float at[3])
 }
 static void FireFrame(void)
 {
-    if (!s_sinFire || !g_sinner || !g_landed || g_piloting || g_now < g_fireNext) return;
+    if (!s_sinFire || !g_sinner || !g_landed || g_piloting || g_frv || g_now < g_fireNext) return;
     float p[3], at[3];
     if (!SinPos(p)) return;
     uint32_t t = FireTarget(p, at);
@@ -1508,7 +1574,7 @@ static double g_dragUntil, g_dragLast, g_pullAt;
 static void PullFrame(void)
 {
     float p[3];
-    if (s_pullOn && g_sinner && g_landed && !g_piloting && g_gear == GEAR_PLUS && g_now - g_pullAt >= s_pullEvery && SinPos(p))
+    if ((s_pullOn || g_frv) && g_sinner && g_landed && (g_frv || !g_piloting) && g_gear == GEAR_PLUS && g_now - g_pullAt >= s_pullEvery && SinPos(p))
     {
         float q[3];
         int n = 0;
@@ -1539,7 +1605,7 @@ static void PullFrame(void)
                 atomic_store(&g_ownMs[slot], GetTickCount64());
                 Act("KANSEI DORIFTO's blast", hf->spawn_explosion(self, (uint32_t)s_pullExplosion, p));
             }
-            Log("KANSEI DORIFTO: %d enemies dragged to the Sinner", n);
+            Log("%s: %d enemies dragged to the Sinner", g_frv ? "Let's Drift!" : "KANSEI DORIFTO", n);
             SinnerAction("KANSEI DORIFTO");
         }
     }
@@ -1576,7 +1642,7 @@ static void SinnerFrame(void)
     uint8_t d[24];
     int32_t hp = 0;
     uint32_t life = 0;
-    if (!Descriptor(g_sinner, d) || Quad(d) != g_sinRes) { SinnerLost("it left the world"); return; }
+    if (!Descriptor(g_sinner, d) || Quad(d) != SinRes()) { SinnerLost("it left the world"); return; }
     if (HealthOf(g_sinner, &hp, &life) && (hp <= 0 || life != 0)) { SinnerLost("destroyed"); return; }
     g_sinUnit = Word(d + 12);
     g_sinHp = hp;
@@ -1590,18 +1656,133 @@ static void SinnerFrame(void)
         nextSeat = g_now + 0.25;
         int was = g_piloting;
         g_piloting = SeatVehicle() == g_sinner;
-        if (was != g_piloting) Log(g_piloting ? "she pilots the Sinner: it stops driving itself" : "she left the Sinner: it drives itself again");
+        if (was != g_piloting) Log(g_frv ? (g_piloting ? "she rides the FRV Sinner" : "she left the FRV Sinner") :
+                                   g_piloting ? "she pilots the Sinner: it stops driving itself" : "she left the Sinner: it drives itself again");
     }
     float me[3];
     atomic_store(&g_shareOk, g_landed && !g_piloting && g_sinPosOk && PlayerPose(me, NULL) && Flat(me, g_sinPos) <= s_shareRange);
     int pending = atomic_exchange(&g_sharePending, 0);
     if (pending > 0) SinnerSetHealth(g_sinHp - pending, "the damage share");
     /* the game's locomotion, tried once a Sinner has landed */
-    if (g_landed && !g_driveTried && !g_piloting)
+    if (g_landed && !g_driveTried && !g_piloting && !g_frv)
     {
         g_driveTried = 1;
         g_driving = SinnerDriveStart(g_sinner);
         if (!g_driving) Log("the Sinner: no game locomotion (sinner_drive.h: %s): the slide instead", s_drive ? "its layout is not known yet" : "drive 0");
+    }
+}
+
+/* ==== 0.2.0: the FRV Sinner ========================================================================================== */
+/* ---- Let's Go for a Ride!: she is put straight into its seat (the game's own spawn-already-seated sequence, game.dll
+ * 0x639830's; Seat Probe 0.1.1 / 0.1.2: it seats her at once, from where she stands, and she gets out as usual). The
+ * seater manager [game+0x3326D78] (hash +0x20, 64-byte entries +0x48: +0 the vehicle, +0x10 the seat), the seat
+ * collections [game+0x3326D88]. The FRVs' seats: 3 the driver's, 0 1 4 passengers' (2 the M-102's gunner) -------- */
+typedef void (*SetEnteringFn)(void* S, uint32_t index, uint32_t coll, uint32_t entrance, uint8_t instant);
+typedef void (*RpcEnteringFn)(int peers, uint32_t seater, uint32_t coll, uint32_t entrance);
+typedef uint32_t (*SeatNodeFn)(void* C, uint32_t coll, uint32_t seater, uint32_t entrance);
+typedef void (*SetSeatNodeFn)(void* S, uint64_t unused, uint32_t coll, uint32_t seater, uint32_t node);
+typedef void (*RpcSeatNodeFn)(int peers, uint32_t coll, uint32_t seater, uint32_t node);
+typedef void (*SeaterUpdateFn)(void* S, uint32_t index);
+static SetEnteringFn g_setEntering;
+static RpcEnteringFn g_rpcEntering;
+static SeatNodeFn g_seatNode;
+static SetSeatNodeFn g_setSeatNode;
+static RpcSeatNodeFn g_rpcSeatNode;
+static SeaterUpdateFn g_seaterUpdate;
+static void SeatPins(void)
+{
+    struct { void** slot; uintptr_t at; const char* bytes; } k[] = {
+        {(void**)&g_setEntering, 0x63A7B0, "40 53 55 56 57 41 55 41 56 41 57 48 81 ec c0 00 00 00 48 8b 05 47 18 00 02"},
+        {(void**)&g_seatNode, 0x636A30, "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 18 48 89 7c 24 20 41 55 41 56 41 57 48 83 ec 20 33 f6"},
+        {(void**)&g_setSeatNode, 0x63E1A0, "45 85 c0 0f 84 91 03 00 00 4c 8b dc 53 57 41 54 48 83 ec 70 48 8b 05 55 de ff 01"},
+        {(void**)&g_seaterUpdate, 0x639B40, "48 89 5c 24 18 55 56 57 41 54 41 55 41 56 41 57 48 81 ec 00 01 00 00 0f 29 b4 24 f0 00 00 00"},
+        {(void**)&g_rpcEntering, 0xBEA400, "48 89 5c 24 10 44 89 4c 24 20 57 48 83 ec 60 48 8b 05 fa 1b a5 01"},
+        {(void**)&g_rpcSeatNode, 0xBE22B0, "48 89 5c 24 10 44 89 4c 24 20 57 48 83 ec 60 48 8b 05 4a 9d a5 01"}};
+    for (unsigned i = 0; i < sizeof k / sizeof k[0]; i++)
+        if (!hf->code_matches(game + k[i].at, k[i].bytes))
+        {
+            Log("Let's Go for a Ride!: game.dll+0x%llX is not the reviewed code: no ride", (unsigned long long)k[i].at);
+            g_setEntering = NULL;
+            return;
+        }
+        else *k[i].slot = (void*)(game + k[i].at);
+    Log("Let's Go for a Ride! ready (the game's seat code)");
+}
+/* who sits where: is that seat of that vehicle taken */
+static int SeatTaken(uint32_t vehicle, uint32_t seat)
+{
+    uintptr_t S = Pointer(game + 0x3326D78), entries;
+    uint32_t count = 0;
+    if (!S || !ReadAt(S + 12, &count, 4) || count > 4096 || !(entries = Pointer(S + 0x48))) return 1;
+    for (uint32_t i = 0; i < count; i++)
+    {
+        uint8_t e[0x14];
+        if (ReadAt(entries + 64ull * i, e, sizeof e) && Word(e) == vehicle && Word(e + 0x10) == seat) return 1;
+    }
+    return 0;
+}
+static void Ride(void)
+{
+    uint32_t me = atomic_load(&g_avatar), idx = 0;
+    uintptr_t S = Pointer(game + 0x3326D78), C = Pointer(game + 0x3326D88), entries;
+    float here[3];
+    if (!g_setEntering) { Log("Let's Go for a Ride!: the seat code is not available on this build"); return; }
+    if (!me || !S || !C || !Lookup(S + 0x20, me, 1048576, &idx) || idx >= 65536 || !(entries = Pointer(S + 0x48))) { Log("Let's Go for a Ride!: her seat record cannot be read"); return; }
+    uint32_t in = 0;
+    ReadAt(entries + 64ull * idx, &in, 4);
+    if (in) { Log("Let's Go for a Ride!: she is already in a vehicle (%u)", in); return; }
+    if (!PlayerPose(here, NULL) || !g_sinPosOk || Flat(here, g_sinPos) > s_rideRange) { Log("Let's Go for a Ride!: the FRV is beyond ride_range (%.0f m)", (double)s_rideRange); return; }
+    static const uint32_t order[4] = {3, 4, 0, 1};
+    int seat = -1;
+    for (int k = 0; k < 4 && seat < 0; k++) if (!SeatTaken(g_sinner, order[k])) seat = (int)order[k];
+    if (seat < 0) { Log("Let's Go for a Ride!: every seat is taken"); return; }
+    uint32_t e = (uint32_t)seat;
+    g_setEntering((void*)S, idx, g_sinner, e, 1);
+    g_rpcEntering(-2, me, g_sinner, e);
+    hf->write(entries + 64ull * idx + 0x10, &e, 4);
+    uint32_t node = g_seatNode((void*)C, g_sinner, me, e);
+    g_setSeatNode((void*)S, 0, g_sinner, me, node);
+    g_rpcSeatNode(-2, g_sinner, me, node);
+    g_seaterUpdate((void*)S, idx);
+    g_rides++;
+    Log("Let's Go for a Ride!: into the FRV's %s seat (seat %u)", e == 3 ? "driver" : "passenger", e);
+    Upshift(1, "Let's Go for a Ride!");
+}
+/* ---- its turret's fight, Kinetic Release, its repair, whether it is parked ----------------------------------------- */
+static double g_frvFightAt = -100, g_frvLookNext, g_releaseNext, g_repairNext, g_parkAt;
+static float g_parkFrom[3];
+static void FrvFrame(void)
+{
+    if (!g_frv || !g_sinner || !g_landed || !g_sinPosOk) return;
+    float p[3], at[3];
+    memcpy(p, g_sinPos, 12);
+    if (g_now - g_parkAt >= 0.5) { g_frvParked = Dist2(p, g_parkFrom) < 0.3f * 0.3f; memcpy(g_parkFrom, p, 12); g_parkAt = g_now; }
+    if (g_now >= g_frvLookNext)
+    {
+        g_frvLookNext = g_now + 0.5;
+        if (FireTarget(p, at)) { g_frvFightAt = g_now; SinnerAction("its turret"); }
+    }
+    if (atomic_exchange(&g_repairPending, 0) && g_now >= g_repairNext && s_frvRepair > 0 && g_sinMax > 0)
+    {
+        g_repairNext = g_now + 1;
+        SinnerSetHealth(g_sinHp + (int32_t)(g_sinMax * s_frvRepair + 0.5f), "Gear Shift's repair");
+    }
+    if (g_gear != GEAR_N && s_releaseRow > 0 && g_now - g_frvFightAt < 1.0 && g_now >= g_releaseNext)
+    {
+        g_releaseNext = g_now + s_releaseEvery;
+        int n = g_gear == GEAR_PLUS ? 6 : 3, done = 0;
+        for (int i = 0; i < n; i++)
+        {
+            float a = (float)i * 6.2831853f / (float)n + (float)g_releases, q[3] = {p[0] + cosf(a) * s_releaseRadius, p[1] + sinf(a) * s_releaseRadius, p[2]}, g[3];
+            if (!Ground(q, g)) memcpy(g, q, 12);
+            unsigned slot = g_ownNext++ % KB_OWN_SLOTS;   /* her own blast: it spares her */
+            memcpy(g_ownPos[slot], g, 12);
+            atomic_store(&g_ownEmp[slot], 0);
+            atomic_store(&g_ownMs[slot], GetTickCount64());
+            if (hf->spawn_explosion(self, (uint32_t)s_releaseRow, g) == HF_ACT_REQUESTED) done++;
+        }
+        g_releases++;
+        if (g_releases <= 5) Log("Kinetic Release%s: %d of %d blasts around the FRV", g_gear == GEAR_PLUS ? "+" : "", done, n);
     }
 }
 
@@ -1689,8 +1870,18 @@ static void Winner(void)
 }
 static void Hallucination(void)
 {
+    if (g_sinner && g_frv && g_landed && !g_piloting) { Ride(); return; }
     if (g_sinner) { Winner(); return; }
     if (g_now < g_cd[2]) return;
+    if (s_frvOn && s_sinOn && HasStratagem(FRV_STRATAGEM) > 0)
+    {
+        int r = ClearCooldown(FRV_STRATAGEM);
+        if (r <= 0) { if (r < 0) Log("Hallucination: her stratagem record cannot be read yet"); return; }
+        g_cd[2] = g_now + s_s3Cd;
+        g_casts[2]++;
+        Log("Hallucination: her M-103 Supply FRV is ready to call (its cooldown cleared); the one she calls becomes the Sinner");
+        return;
+    }
     if (!s_sinOn || !g_sinType) { static unsigned told; if (told++ < 3) Log("Hallucination: there is no Sinner in this session (sinner 0, or it could not be added)"); return; }
     if (!s_callMode) { static unsigned told; if (told++ < 5) Log("Hallucination: call the Sinner with its stratagem (RRLLD; call_mode 0 grants it at the drop)"); return; }
     int r = GrantCall(1);
@@ -1724,6 +1915,31 @@ static unsigned g_spared;
 static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     (void)me;
+    uint32_t fsin = g_sinner;
+    if (g_frv && fsin && d->amount > 0 && !MineHit(d))
+    {
+        /* 0.2.0: hits on the FRV Sinner: less in N and while it is parked, never fatal (No Time to Die), each one a
+         * repair (Gear Shift). Its turret's hits: hers, by gear, Upshift and Kinetic Recovery */
+        if (d->target == fsin)
+        {
+            double m = (g_gear == GEAR_N ? s_frvGuardN : 1.0) * (g_frvParked ? s_frvParked : 1.0);
+            if (m != 1) ScaleDamage(d, m);
+            int32_t hp = atomic_load(&g_sinHpNow) - atomic_load(&g_sharePending);
+            if (hp > 1 && d->amount >= hp) { d->amount = hp - 1; g_noDeath++; }
+            atomic_store(&g_repairPending, 1);
+            return;
+        }
+        if ((g_turretNet && (d->dealer == g_turretNet || d->owner == g_turretNet)) || (g_frvNet && (d->dealer == g_frvNet || d->owner == g_frvNet)))
+        {
+            double m = (g_gear == GEAR_PLUS ? s_frvDmgPlus : g_gear == GEAR_S ? s_frvDmgS : s_frvDmgN) * (1 + g_up * (double)s_upDamage);
+            if (g_now < g_krUntil) m *= s_krMult;
+            if (m != 1) ScaleDamage(d, m);
+            static atomic_uint told;
+            if (atomic_fetch_add(&told, 1) < 6) Log("its turret hits entity %u (dealer %u, owner %u): x%.2f", d->target, d->dealer, d->owner, m);
+            g_turretHits++;
+            return;
+        }
+    }
     if (d->amount <= 0 || !MineHit(d)) return;
     uint32_t sin = g_sinner;
     /* her hits (and the Sinner's rounds, which are hers) spare the Sinner, and its rounds spare her allies */
@@ -1780,6 +1996,18 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
         if (g_callPending || !s_callMode || !g_sinner) Adopt(s->entity);
         return;
     }
+    if (s->resource == FRV_TURRET) { g_turretCandNet = s->network; g_turretCandAt = g_now; if (g_frv && g_sinner && !g_turretNet && g_now - g_sinBorn < 2) g_turretNet = s->network; return; }
+    if (s->resource == FRV_RES)
+    {
+        /* 0.2.0: her M-103, with it in her loadout and no Sinner standing: the FRV Sinner */
+        if (!g_inMission || !kb_kit_on || !s->authority || !s_frvOn || !s_sinOn || g_sinner || HasStratagem(FRV_STRATAGEM) <= 0) return;
+        Adopt(s->entity);
+        g_frv = 1;
+        g_frvNet = s->network;
+        g_turretNet = g_now - g_turretCandAt < 2 ? g_turretCandNet : 0;
+        Log("the FRV Sinner: her M-103 (entity %u, network %u), its turret network %u", s->entity, s->network, g_turretNet);
+        return;
+    }
     if (s->resource != AVATAR) { if (FoeKind(s->resource)) AddFoe(s->entity, s->resource); return; }
     if (!s->authority) return;
     g_spawnEntity[g_spawnNext % 8] = s->entity;
@@ -1827,6 +2055,12 @@ static void Reset(const char* why)
     g_boomPending = 0;
     g_boomArmed = 0;
     if (g_sinner) Log("the Sinner (entity %u) is gone with the mission", g_sinner);
+    if (g_turretHits || g_rides || g_releases || g_noDeath)
+        Log("%s: the FRV Sinner: %u turret hits, %u rides, %u Kinetic Releases, %u fatal hits survived", why, g_turretHits, g_rides, g_releases, g_noDeath);
+    g_turretHits = g_rides = g_releases = g_noDeath = 0;
+    g_frv = 0;
+    g_frvNet = g_turretNet = 0;
+    g_frvParked = 0;
     g_sinner = g_sinUnit = 0;   /* (no drive stop: its world is gone) */
     g_nparts = 0;
     g_sinPosOk = 0;
@@ -1866,6 +2100,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     game = g;
     exe = x;
     HitsInstall("own-blast guard");
+    SeatPins();
     if (hf->code_matches(exe + 0x79F860, "33 c0 4c 8d 05 c7 b2 01 02 0f 1f 80 00 00 00 00 49 39 0c c0 74 0c ff c0 83 f8 04 75 f3") &&
         hf->code_matches(exe + 0x7F4590, "48 8b c4 f3 0f 11 58 20 89 48 08 55 53 56 57 41 54 41 55 41 56 41 57 48"))
     {
@@ -1945,7 +2180,7 @@ HF_MOD_EXPORT int koleda_walk(unsigned version, float* out)
 {
     if (version != 1 || !out) return 0;
     memset(out, 0, 12 * sizeof(float));
-    int active = g_inMission && kb_kit_on && g_sinner && g_landed && !g_piloting && g_sinPosOk;
+    int active = g_inMission && kb_kit_on && g_sinner && g_landed && !g_piloting && g_sinPosOk && !g_frv;
     out[0] = (float)active;
     if (!active) return 1;
     out[1] = (float)g_walkWant;
@@ -2048,6 +2283,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     FireFrame();
     TurnFrame();
     PullFrame();
+    FrvFrame();
     HudFrame();
     Exhaustion();
     atomic_exchange(&g_ownStopped, 0);

@@ -48,7 +48,12 @@ are a ride, a drift, a sprint and a gear shift). What the sheet adds or corrects
   Name (her and its attacks lower the target's defence first); Choosing Life in Death (in S / S+, each enemy death
   raises the Sinner's attack).
 
-## The FRV Sinner (Yui, 2026-11-06; planned, nothing built)
+## The FRV Sinner (Yui, 2026-11-06; built in 0.2.0, untested)
+
+0.2.0 builds it on the **M-103 Supply FRV**, whose automatic turret is its gun (no spawned rounds, no aiming): her
+turret's hits are scaled by gear, Upshift and Kinetic Recovery. Seats from Seat Probe 0.1.1 / 0.1.2 (driver 3, passengers
+0 1 4); the ride is the game's instant seat sequence, proven by the probe. Full Speed Sprint! is not built yet (it needs
+Apache's physics impulse). The plan below is the first sketch.
 
 When she brings the M-102 FRV instead of the Patriot, the Sinner is that car. It never drives itself.
 
