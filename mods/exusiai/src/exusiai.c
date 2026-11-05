@@ -38,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.2"
+#define VERSION "0.2.3"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -63,7 +63,11 @@ static int s_gunRound = 7, s_noFriendlyFire = 1;
 /* her guns' own rounds (copies of vanilla ones, add_projectile): the summoned pair, then Overloading Mode's four */
 static int s_rBase[5] = {241, 179, 226,   /* R-63CS Diligence Counter Sniper, SG-225 Breaker, APW-1 Anti-Materiel Rifle */
                          177, 276};   /* JAR-5 Dominator, AR-23 Liberator */
-static float s_rEvery[4] = {0.8f, 1.6f, 0.6f, 0.15f};   /* Overloading Mode's: the nearest, the armoured, her attacker, the weakest */
+static float s_rEvery[4] = {0, 0, 0, 0};   /* Overloading Mode's: the nearest, the armoured, her attacker, the weakest (0.2.3: 0 = its gun's own rate) */
+/* 0.2.3: the guns whose rounds Overloading Mode's four fire, for their fire rate and pellets */
+static const uint64_t kRoleGun[4] = {HF_ENTITY_SG225_BREAKER, HF_ENTITY_APW1_ANTIMATERIEL_RIFLE, HF_ENTITY_JAR5_DOMINATOR, HF_ENTITY_AR23_LIBERATOR};
+static float s_pairHold = 0.6f;
+static int s_pairRate = 1;
 static int s_pellets = 6, s_pairPrimary = 1;
 static float s_pelletSpread = 5;
 
@@ -71,13 +75,13 @@ static float s_pelletSpread = 5;
 static const KbSetting kSettings[] = {
     KB_F("fire_rate", s_fireRate, 1, 3), KB_F("bless_mult", s_blessMult, 1, 3),
     KB_I("ch_every", s_chEvery, 1, 20), KB_I("ch_free", s_chFree, 0, 10), KB_F("ch_gap", s_chGap, 0.05, 1), KB_F("ch_spread", s_chSpread, 0, 5),
-    KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("s2_seconds", s_s2Seconds, 1, 120), KB_F("gun_every", s_gunEvery, 0.05, 5),
+    KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("s2_seconds", s_s2Seconds, 1, 120), KB_F("gun_every", s_gunEvery, 0.05, 5), KB_I("pair_rate", s_pairRate, 0, 1), KB_F("pair_hold", s_pairHold, 0.1, 5),
     KB_F("s3_cooldown", s_s3Cd, 0, 600), KB_F("s3_seconds", s_s3Seconds, 1, 120), KB_F("s3_every", s_s3Every, 0.05, 5), KB_F("s3_range", s_s3Range, 5, 200),
     KB_I("gun_round", s_gunRound, 1, 100000), KB_I("no_friendly_fire", s_noFriendlyFire, 0, 1),
     KB_I("round_pair", s_rBase[0], 1, 350), KB_I("round_nearest", s_rBase[1], 1, 350), KB_I("round_armoured", s_rBase[2], 1, 350),
     KB_I("round_attacker", s_rBase[3], 1, 350), KB_I("round_weakest", s_rBase[4], 1, 350),
-    KB_F("every_nearest", s_rEvery[0], 0.05, 10), KB_F("every_armoured", s_rEvery[1], 0.05, 10), KB_F("every_attacker", s_rEvery[2], 0.05, 10),
-    KB_F("every_weakest", s_rEvery[3], 0.05, 10), KB_I("pellets", s_pellets, 1, 16), KB_I("pair_primary", s_pairPrimary, 0, 1), KB_F("pellet_spread", s_pelletSpread, 0, 30),
+    KB_F("every_nearest", s_rEvery[0], 0, 10), KB_F("every_armoured", s_rEvery[1], 0, 10), KB_F("every_attacker", s_rEvery[2], 0, 10),
+    KB_F("every_weakest", s_rEvery[3], 0, 10), KB_I("pellets", s_pellets, 1, 16), KB_I("pair_primary", s_pairPrimary, 0, 1), KB_F("pellet_spread", s_pelletSpread, 0, 30),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
 };
@@ -95,10 +99,12 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Charging Mode: every ch_every bursts she fires, the next sets off ch_free more bursts of her gun's rounds for free.\n"
                "; ch_gap: a pause longer than this (s) ends a burst; ch_spread: the free rounds' spread (degrees).\n"
                "ch_every = %d\nch_free = %d\nch_gap = %g\nch_spread = %g\n"
-               "; Summoned guns: cooldown; for s2_seconds two guns at her shoulders fire at what she hits (each at most once every\n"
-               "; gun_every s).\ns2_cooldown = %g\ns2_seconds = %g\ngun_every = %g\n"
+               "; Summoned guns: cooldown; for s2_seconds two guns beside her fire at what she last hit while she keeps hitting it\n"
+               "; (her last hit within pair_hold s). pair_rate 1: each at her primary's fire rate (the two alternate); 0: once\n"
+               "; every gun_every s.\ns2_cooldown = %g\ns2_seconds = %g\ngun_every = %g\npair_rate = %d\npair_hold = %g\n"
                "; Overloading Mode: cooldown; for s3_seconds four more guns each pick their own target within s3_range m (the\n"
-               "; nearest, the most heavily armoured, whoever last hit her, the weakest), each firing every every_<its target> s.\n"
+               "; nearest, the most heavily armoured, whoever last hit her, the weakest), each firing every every_<its target> s\n"
+               "; (0: at the fire rate of the gun its round comes from).\n"
                "; (s3_every: no longer used.)\n"
                "s3_cooldown = %g\ns3_seconds = %g\ns3_every = %g\ns3_range = %g\n"
                "; Her guns' own rounds: copies of these vanilla projectiles (types 1-350). round_pair: the summoned pair (241: the\n"
@@ -117,7 +123,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Hellbomb on her if she runs her stamina dry (a T-Doll's price; off for her).\n"
                "hp_mult = 1.13\nstamina_mult = 1\nhellbomb_on_exhaustion = 0\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_fireRate, (double)s_blessMult, s_chEvery, s_chFree,
-            (double)s_chGap, (double)s_chSpread, (double)s_s2Cd, (double)s_s2Seconds, (double)s_gunEvery, (double)s_s3Cd,
+            (double)s_chGap, (double)s_chSpread, (double)s_s2Cd, (double)s_s2Seconds, (double)s_gunEvery, s_pairRate, (double)s_pairHold, (double)s_s3Cd,
             (double)s_s3Seconds, (double)s_s3Every, (double)s_s3Range, s_rBase[0], s_rBase[1], s_rBase[2], s_rBase[3], s_rBase[4],
             (double)s_rEvery[0], (double)s_rEvery[1], (double)s_rEvery[2], (double)s_rEvery[3], s_pellets, (double)s_pelletSpread, s_pairPrimary, s_gunRound, s_noFriendlyFire);
 }
@@ -182,8 +188,8 @@ static int ArmourOf(uint64_t res)
 /* ---- the guns -------------------------------------------------------------------------------------------------- */
 /* where each hovers, from her head along her aim: right, up, forward (m). 0-1: the summoned pair at her shoulders;
  * 2-5: Overloading Mode's four, in an arc behind and above her. */
-static const float kGunAt[6][3] = {{-0.55f, 0.25f, 0.3f}, {0.55f, 0.25f, 0.3f},
-                                   {-1.1f, 0.6f, -0.3f}, {1.1f, 0.6f, -0.3f}, {-0.6f, 1.1f, -0.5f}, {0.6f, 1.1f, -0.5f}};
+static const float kGunAt[6][3] = {{-1.15f, 0.45f, 0.2f}, {1.15f, 0.45f, 0.2f},   /* 0.2.3: wider (0.55 m sat on her shoulders) */
+                                   {-1.8f, 0.8f, -0.4f}, {1.8f, 0.8f, -0.4f}, {-0.95f, 1.5f, -0.6f}, {0.95f, 1.5f, -0.6f}};
 static const char* const kPriority[4] = {"the nearest", "the most heavily armoured", "whoever last hit her", "the weakest"};
 static double g_gunNext[6];
 static uint32_t g_gunTarget[6];
@@ -191,6 +197,10 @@ static uint32_t g_gunTarget[6];
 typedef struct Shot { float p[3]; uint32_t target; } Shot;
 static Shot g_assist[8];
 static int g_nassist;
+/* 0.2.3: the pair's target: what she last hit, and when */
+static uint32_t g_pairTarget;
+static float g_pairPos[3];
+static double g_pairAt = -100, g_pairSince = -100;
 /* the guns' own shots lately (where they were aimed): a hit there is a gun's, not hers (no assist, no charge) */
 static float g_gunAim[16][3];
 static double g_gunAimAt[16];
@@ -225,7 +235,7 @@ static void RoundsAdd(void)
         if (!g_round[r]) { g_round[r] = p.base; Log("her %s round: no copy of projectile %u (the vanilla round fires)", kRole[r], p.base); }
     }
 }
-typedef struct GunInfo GunInfo;
+typedef struct GunInfo { uint64_t res; uint32_t projectile, burst; float rpm; } GunInfo;
 static const GunInfo* InfoOf(uint64_t res);
 static uint32_t InfoProjectile(const GunInfo* g);
 static int NoSpawn(uint32_t type);
@@ -243,6 +253,14 @@ static uintptr_t g_rowAnchor;
 static uint32_t g_rowAnchorType;
 static uint32_t PelletsOf(uint32_t type)
 {
+    /* 0.2.3: the row's pellet count as the game reads it (the list-offset read below found her copies only) */
+    if (type)
+    {
+        HfField f = HF_FIELD(ProjectileSettings, pellet_count);
+        HfLiveValue v;
+        memset(&v, 0, sizeof v);
+        if (hf->get_live && hf->get_live(self, (HfRef)type, &f, &v) && v.base.number >= 1 && v.base.number <= 32) return (uint32_t)v.base.number;
+    }
     if (!g_rowAnchor || !type || type > 1000) return 0;
     uintptr_t row = g_rowAnchor + ((intptr_t)type - (intptr_t)g_rowAnchorType) * 272;
     uint32_t t = 0, n = 0;
@@ -276,6 +294,7 @@ static int Fire(int i, const float at[3])
     memcpy(g_gunLook[i], at, 12);
     int role = i < 2 ? 0 : i - 1, pellets = role == 1 ? s_pellets : 1;
     uint32_t round = RoundOf(i);
+    if (role == 1) { uint32_t pn = PelletsOf(round); if (pn > 1) pellets = (int)pn; }   /* 0.2.3: the shotgun's own pellet count */
     if (role == 0 && round == PrimaryRound())
     {
         uint32_t n = PelletsOf(round);   /* a shotgun primary: its whole shot, each pellet its own round */
@@ -361,21 +380,43 @@ static uint32_t Pick(int i, float at[3])
     }
     return best;
 }
+static int FoePos(uint32_t e, float out[3])
+{
+    for (int k = 0; k < FOES; k++) if (g_foe[k] == e) return TargetPos(e, g_foeRes[k], out);
+    return 0;
+}
+static double RoleEvery(int role)
+{
+    if (s_rEvery[role] > 0) return s_rEvery[role];
+    const GunInfo* gi = InfoOf(kRoleGun[role]);
+    double every = gi && gi->rpm > 0 ? 60.0 / gi->rpm : 0.5;
+    return every < 0.05 ? 0.05 : every;
+}
 static void GunsFrame(void)
 {
     int s2 = g_now < g_s2Until, s3 = g_now < g_s3Until;
     /* the summoned pair: at what she hit */
-    while (g_nassist > 0)
+    g_nassist = 0;
+    if (s2 && g_now - g_pairAt <= s_pairHold)
     {
-        Shot s = g_assist[--g_nassist];
-        if (!s2) continue;
-        for (int i = 0; i < 2; i++) if (g_now >= g_gunNext[i] && Fire(i, s.p)) g_gunNext[i] = g_now + s_gunEvery;
+        const GunInfo* gi = s_pairRate && g_primaryRes ? InfoOf(g_primaryRes) : NULL;
+        double every = gi && gi->rpm > 0 ? 60.0 / gi->rpm : s_gunEvery;
+        if (every < 0.05) every = 0.05;
+        if (g_pairSince < 0) { g_pairSince = g_now; g_gunNext[0] = g_now; g_gunNext[1] = g_now + every / 2; }   /* they alternate */
+        float at[3];
+        memcpy(at, g_pairPos, 12);
+        if (g_pairTarget) FoePos(g_pairTarget, at);   /* follows it */
+        for (int i = 0; i < 2; i++)
+            if (g_now >= g_gunNext[i] && Fire(i, at)) g_gunNext[i] = (g_gunNext[i] + every > g_now ? g_gunNext[i] : g_now) + every;
+        static unsigned told;
+        if (!told++) Log("the pair: each fires every %.3f s (%s)", every, gi ? "her primary's rate" : "gun_every");
     }
+    else g_pairSince = -1;
     if (!s3) return;
     for (int i = 2; i < 6; i++)
     {
         if (g_now < g_gunNext[i]) continue;
-        g_gunNext[i] = g_now + s_rEvery[i - 2];
+        g_gunNext[i] = g_now + RoleEvery(i - 2);
         float at[3];
         uint32_t t = Pick(i, at);
         if (t != g_gunTarget[i])
@@ -393,7 +434,6 @@ static void GunsFrame(void)
 /* her gun in hand (the weapon event) and what its rounds are: its projectile type, burst size and fire rate */
 static uint32_t g_heldEntity;
 static uint64_t g_heldRes;
-struct GunInfo { uint64_t res; uint32_t projectile, burst; float rpm; };
 static GunInfo g_gunInfo[24];
 static int g_ngunInfo;
 static const GunInfo* InfoOf(uint64_t res)
@@ -614,6 +654,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     if (mult != 1) ScaleDamage(d, mult);
     if (gun) return;
     NoteTarget(d);
+    if (g_now < g_s2Until) { g_pairTarget = d->target; memcpy(g_pairPos, d->position, 12); g_pairAt = g_now; }
     if (g_now < g_s2Until && g_nassist < 8)
     {
         memcpy(g_assist[g_nassist].p, d->position, sizeof d->position);
