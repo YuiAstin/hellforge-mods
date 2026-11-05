@@ -625,6 +625,8 @@ local function sound_step(dt)
     SND.tokens = math.min(10, SND.tokens + dt * 10)
     SND.t = (SND.t or 0) + dt
     SND.use = SND.use or {}
+    SND.bad = SND.bad or {}
+    SND.FALLBACKS = SND.FALLBACKS or {'support/m1000', 'support/ac8', 'vehicle/patriot/rockets'}
     SND.loops = SND.loops or {}
     local n = SND.fn(1, SND.seq, SND.buf, 16)
     for i = 0, n - 1 do
@@ -641,7 +643,14 @@ local function sound_step(dt)
             local use = name and SND.use[name]
             if name and use == nil then
                 local okD, desc = pcall(hd2.sounds.describe, name)
-                if okD and type(desc) == 'table' and not desc.midi and not desc.resident_only then use = name else use = 'sentry/machine_gun' end
+                if okD and type(desc) == 'table' and not desc.midi and not desc.resident_only and not SND.bad[name] then use = name
+                else
+                    -- the first fallback whose bank loads (HellForge loads only the packages its catalogue names: the
+                    -- sentries' were refused; the M-1000 Maxigun's is a loadout package)
+                    use = nil
+                    for _, f in ipairs(SND.FALLBACKS) do if not SND.bad[f] then use = f break end end
+                    if not use then SND.use[name] = false return end
+                end
                 local okF, fd = pcall(hd2.sounds.describe, use)
                 SND.use[name] = use
                 SND.kind = SND.kind or {}
@@ -652,6 +661,7 @@ local function sound_step(dt)
                 SND.asked[use] = true
                 local okA, errA = pcall(hd2.require_assets, {id = 'exu-snd-' .. (use:gsub('[^%w]', '-')), targets = {hd2.sounds.asset(use)}})
                 snd_log(use .. ': its bank ' .. (okA and 'asked for' or ('not loaded: ' .. tostring(errA))))
+                if not okA then SND.bad[use] = true; SND.use = {} end   -- (every gun picks again)
             end
             local x, y, z = SND.buf[b], SND.buf[b + 1], SND.buf[b + 2]
             if use and SND.kind[use] == 'loop' then
@@ -661,12 +671,22 @@ local function sound_step(dt)
                     SND.tokens = SND.tokens - 1
                     local okP, h, why = pcall(hd2.sounds.play, use, {position = {x, y, z}})
                     if okP and h then SND.loops[use] = {h = h, started = SND.t, last = SND.t, x = x, y = y}
-                    else snd_log(use .. ' did not play: ' .. tostring(okP and why or h)) end
+                    else
+                        snd_log(use .. ' did not play: ' .. tostring(okP and why or h))
+                        SND.miss = SND.miss or {}
+                        SND.miss[use] = (SND.miss[use] or 0) + 1
+                        if SND.miss[use] >= 6 and SND.t > 8 then SND.bad[use] = true; SND.use = {}; snd_log(use .. ': never plays, the next one instead') end
+                    end
                 elseif L then L.last = SND.t end
             elseif use and SND.tokens >= 1 then
                 SND.tokens = SND.tokens - 1
                 local okP, h, why = pcall(hd2.sounds.play, use, {position = {x, y, z}})
-                if not okP or not h then snd_log(use .. ' did not play: ' .. tostring(okP and why or h)) end
+                if not okP or not h then
+                    snd_log(use .. ' did not play: ' .. tostring(okP and why or h))
+                    SND.miss = SND.miss or {}
+                    SND.miss[use] = (SND.miss[use] or 0) + 1
+                    if SND.miss[use] >= 6 and SND.t > 8 then SND.bad[use] = true; SND.use = {}; snd_log(use .. ': never plays, the next one instead') end
+                end
             end
         end
     end
