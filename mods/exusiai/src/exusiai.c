@@ -38,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.10"
+#define VERSION "0.2.11"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -922,6 +922,11 @@ static void Reset(const char* why)
     Body(start);
     /* the Guard Dog's package: its rounds fly (and sound) only once that is in */
     if (start && !hf->load_package(self, UINT64_C(0xA14F1A98C80575AF))) Log("the Guard Dog's package could not be loaded ahead: the guns' models and first shots may wait");
+    /* 0.2.11: her guns' models (drone_mg and drone_mg_weapon) are not in that one (the Drone Assault Rifle Backpack's):
+     * they showed only in matches that also had the AR-23 Liberator's package in. Load the AX/AR-23 Guard Dog's own
+     * loadout package and the Liberator's too. */
+    if (start && !hf->load_package(self, UINT64_C(0xBE6C260FADCB8719))) Log("the AX/AR-23 Guard Dog's own package could not be loaded: her guns' models may not show");
+    if (start && !hf->load_package(self, UINT64_C(0xDBD9381F9EA9788F))) Log("the AR-23 Liberator's package could not be loaded: her guns' models may not show");
     if (start && s_hellbomb && s_hellbombRow == 125 && !hf->load_package(self, UINT64_C(0x346D785D6CA13FF4))) Log("the Hellbomb's package could not be loaded ahead");
     g_boomPending = 0;
     g_boomArmed = 0;
