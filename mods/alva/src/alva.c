@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.2"
+#define VERSION "0.1.3"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her chill bursts come often */
@@ -68,6 +68,8 @@ static int s_sight = 1;
 static int s_chillFx = 1, s_fxExplosion = 150;
 static int s_emsImmune = 1, s_allyGuard = 1, s_emsSt[4] = {37, 38, 39, 0}, s_emsBoom[2] = {0, 0};
 static float s_fxEvery = 0.4f, s_fxRate = 8;
+static int s_emsShell = 154;
+static float s_emsShellHeight = 4;
 static float s_fpDistance = 0.45f;
 
 static const KbSetting kSettings[] = {
@@ -86,7 +88,7 @@ static const KbSetting kSettings[] = {
     KB_F("s3_cooldown", s_s3Cd, 0, 3600), KB_F("s3_every", s_s3Every, 0.05, 5), KB_F("s3_cone", s_s3Cone, 0.5, 45), KB_F("s3_range", s_s3Range, 10, 1000),
     KB_I("s3_round", s_s3Round, 1, 100000), KB_I("s3_freeze_at", s_s3FreezeAt, 1, 50),
     KB_I("chill_fx", s_chillFx, 0, 1), KB_I("chill_fx_explosion", s_fxExplosion, 1, 100000), KB_F("chill_fx_every", s_fxEvery, 0, 10),
-    KB_F("chill_fx_rate", s_fxRate, 0.5, 60),
+    KB_F("chill_fx_rate", s_fxRate, 0.5, 60), KB_I("ems_shell", s_emsShell, 0, 100000), KB_F("ems_shell_height", s_emsShellHeight, 0.5, 30),
     KB_I("ems_immune", s_emsImmune, 0, 1), KB_I("ally_guard", s_allyGuard, 0, 1),
     KB_I("ems_status_1", s_emsSt[0], 0, 255), KB_I("ems_status_2", s_emsSt[1], 0, 255), KB_I("ems_status_3", s_emsSt[2], 0, 255),
     KB_I("ems_status_4", s_emsSt[3], 0, 255), KB_I("ems_explosion_1", s_emsBoom[0], 0, 100000), KB_I("ems_explosion_2", s_emsBoom[1], 0, 100000),
@@ -115,6 +117,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; chill_fx 1: every chill on an enemy sets off a burst on it (chill_fx_explosion, 150: the EMS mortar's; it stuns too),\n"
                "; at most one per enemy each chill_fx_every s and chill_fx_rate a second in all. Her bursts spare her allies.\n"
                "chill_fx = %d\nchill_fx_explosion = %d\nchill_fx_every = %g\nchill_fx_rate = %g\n"
+               "; ems_shell 154 (the EMS mortar's shell): her EMS bursts (chill bursts, Frosted Echo) are that shell fired straight down\n"
+               "; from ems_shell_height m above, so they look like the mortar's (an explosion row alone leaves only a crater). 0: the rows.\n"
+               "ems_shell = %d\nems_shell_height = %g\n"
                "; ally_guard 1: a status from her own blasts never lands on an ally (gas and fire from anyone still do).\n"
                "; ems_immune 1: no EMS stun on her, from anyone: the statuses ems_status_1..4 (37-39: the stuns), and any other\n"
                "; status that lands on her right after an EMS blast near her (EMS mortar, her bursts, ems_explosion_1..2).\n"
@@ -138,7 +143,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "hp_mult = 1.5\nstamina_mult = 2\nhellbomb_on_exhaustion = 1\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_shieldAmount, (double)s_shieldRange, (double)s_shieldEvery,
             s_shieldOnCast, s_confMax, (double)s_confEvery, s_prepMax, (double)s_chillHit, (double)s_chillShot, (double)s_chillBurst,
-            (double)s_chillS3, (double)s_chillField, (double)s_frozenSeconds, (double)s_shatterMult, (double)s_stunBuildup, (double)s_slowBuildup, s_chillFx, s_fxExplosion, (double)s_fxEvery, (double)s_fxRate,
+            (double)s_chillS3, (double)s_chillField, (double)s_frozenSeconds, (double)s_shatterMult, (double)s_stunBuildup, (double)s_slowBuildup, s_chillFx, s_fxExplosion, (double)s_fxEvery, (double)s_fxRate, s_emsShell, (double)s_emsShellHeight,
             s_allyGuard, s_emsImmune, s_emsSt[0], s_emsSt[1], s_emsSt[2], s_emsSt[3], s_emsBoom[0], s_emsBoom[1],
             (double)s_s1Cd, (double)s_s1Seconds, (double)s_s1Range, (double)s_s1Reach, (double)s_s1Every, s_s1Round, (double)s_s2Cd,
             (double)s_s2Every, (double)s_s2Spread, (double)s_s2FieldSeconds, (double)s_s2FieldRadius, (double)s_s2Cone, (double)s_s2Range,
@@ -406,6 +411,17 @@ static Cold* ColdOf(uint32_t e, int make)
     return c;
 }
 static void Own(const float at[3]);
+/* 0.1.3: an EMS burst as the EMS mortar's own shell, fired straight down onto the point (its look and sound: a row
+ * spawned alone left only a crater); ems_shell 0, or a row other than 150, spawns the row */
+static int EmsBurst(uint32_t row, const float at[3])
+{
+    if (s_emsShell > 0 && row == 150u)
+    {
+        float from[3] = {at[0], at[1], at[2] + s_emsShellHeight}, down[3] = {0, 0, -1};
+        return hf->spawn_projectile(self, (uint32_t)s_emsShell, from, down);
+    }
+    return hf->spawn_explosion(self, row, at);
+}
 static unsigned g_fx, g_fxSkipped;
 static double g_fxTokens;
 /* the snow: a burst on a chilled enemy (her blasts spare allies) */
@@ -418,7 +434,7 @@ static void ChillFx(Cold* c, uint32_t e)
     if (!TargetPos(e, g_foeRes[k], p)) return;
     p[2] -= 0.5f;
     Own(p);
-    int r = hf->spawn_explosion(self, (uint32_t)s_fxExplosion, p);
+    int r = EmsBurst((uint32_t)s_fxExplosion, p);
     if (r == HF_ACT_WAITING) return;
     if (!Act("a chill burst", r)) return;
     c->fxAt = g_now;
@@ -666,7 +682,7 @@ static void EchoFrame(void)
         float a = (float)rand() / RAND_MAX * 6.2831853f, r = (float)rand() / RAND_MAX * s_s2Spread;
         p[0] += cosf(a) * r; p[1] += sinf(a) * r;
         Own(p);
-        int res = hf->spawn_explosion(self, EmsRow(), p);
+        int res = EmsBurst(EmsRow(), p);
         if (res == HF_ACT_WAITING) { g_echoNext = g_now + 0.1; return; }
         Act("an EMS burst", res);
         g_bursts++;
