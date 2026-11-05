@@ -769,8 +769,8 @@ typedef void (*RemoveStatusFn)(void*, uint32_t, uint32_t);
 static HasStatusFn g_hasStatus;
 static RemoveStatusFn g_removeStatus;
 /* their first bytes, as reviewed: not known yet (the log prints them at load); NULL: not pinned */
-static const char* const kHasPin = NULL;
-static const char* const kRemovePin = NULL;
+static const char* const kHasPin = "48 89 5c 24 10 48 89 6c 24 20 56 57 41 54 41 56 41 57 48 83";   /* game+0x69B1F0, from the build 25480438 dump */
+static const char* const kRemovePin = "48 89 5c 24 08 48 89 6c 24 18 48 89 74 24 20 57 41 56 41 57";   /* game+0x69AEC0 */
 static const uint32_t kDebuffs[] = {5, 6, 32, 37, 38, 39, 42, 43, 44, 45, 67};
 static void StatusPrepare(void)
 {
