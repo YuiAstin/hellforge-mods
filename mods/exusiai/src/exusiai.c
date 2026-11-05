@@ -38,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.4"
+#define VERSION "0.2.5"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -49,6 +49,7 @@
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
 #include "kitbase/kb_roster.h"
+#include "weapon_sounds.h"
 
 /* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
 KB_ROSTER_EXPORTS(exusiai)
@@ -332,6 +333,8 @@ static int Fire(int i, const float at[3])
         if (!Act("a summoned gun's shot", r)) return 0;
     }
     g_gunShotAt[i] = g_now;
+    /* 0.2.5: its gun's firing sound, played by the HUD side (exusiai_sounds) */
+    ShotSound(role == 0 ? (round == PrimaryRound() && g_primaryRes ? g_primaryRes : HF_ENTITY_R63CS_DILIGENCE_COUNTER_SNIPER) : kRoleGun[role - 1], from);
     unsigned slot = g_gunAimNext++ % 16;
     memcpy(g_gunAim[slot], at, sizeof g_gunAim[slot]);
     g_gunAimAt[slot] = g_now;
@@ -829,6 +832,16 @@ static void GunsOut(void)
         o[7] = (float)(g_gunShotAt[i] > 0 ? g_now - g_gunShotAt[i] : 99);
     }
     atomic_fetch_add(&g_gunsSeq, 1);
+}
+/* 0.2.5: her guns' shots since `after` for their sounds: 5 floats each (x, y, z, the sound, sequence); the sound's name */
+HF_MOD_EXPORT int exusiai_sounds(unsigned version, unsigned after, float* out, int max)
+{
+    if (version != 1 || !out || max <= 0) return 0;
+    return ShotSounds(after, out, max);
+}
+HF_MOD_EXPORT const char* exusiai_sound_name(int i)
+{
+    return i >= 0 && i < (int)(sizeof kWeaponSound / sizeof kWeaponSound[0]) ? kWeaponSound[i].name : NULL;
 }
 HF_MOD_EXPORT int exusiai_guns(unsigned version, float* out, int max)
 {

@@ -599,6 +599,54 @@ local function gm_step()
     end
 end
 
+-- ---- gunshot sounds: the DLL's shots (exusiai.dll's exusiai_sounds: x, y, z, sound, sequence; exusiai_sound_name) played with
+-- HD2Runtime's hd2.sounds (its weapon firing-sound catalogue), at the muzzle, each sound's bank loaded once
+pcall(ffi.cdef, [[ typedef int (*exusnd1)(unsigned int version, unsigned int after, float *out, int max);
+typedef const char *(*exusndname1)(int i); ]])
+local SND = {fn = nil, name_fn = nil, look = 0, seq = 0, buf = ffi.new('float[80]'), names = {}, asked = {}, tokens = 20, failed = false, told = 0, skip = true}
+local function snd_log(m) if SND.told < 12 then SND.told = SND.told + 1; log('[Exusiai HUD] sounds: ' .. m) end end
+local function sound_step(dt)
+    if SND.failed then return end
+    if not SND.fn then
+        SND.look = SND.look - dt
+        if SND.look > 0 then return end
+        SND.look = 2
+        local module = k32.exuhud1_GetModuleHandleA('exusiai.dll')
+        if module == nil then return end
+        local p1 = k32.exuhud1_GetProcAddress(module, 'exusiai_sounds')
+        local p2 = k32.exuhud1_GetProcAddress(module, 'exusiai_sound_name')
+        if p1 == nil or p2 == nil then return end
+        if type(hd2.sounds) ~= 'table' or type(hd2.sounds.play) ~= 'function' then SND.failed = true; log('[Exusiai HUD] sounds: hd2.sounds is not in this HD2Runtime'); return end
+        SND.fn, SND.name_fn = ffi.cast('exusnd1', p1), ffi.cast('exusndname1', p2)
+    end
+    SND.tokens = math.min(24, SND.tokens + dt * 24)          -- HD2Runtime allows a mod 32 posts a second
+    local n = SND.fn(1, SND.seq, SND.buf, 16)
+    for i = 0, n - 1 do
+        local b = i * 5
+        if SND.buf[b + 4] > SND.seq then SND.seq = SND.buf[b + 4] end
+        if not SND.skip then
+            local idx = math.floor(SND.buf[b + 3] + 0.5)
+            local name = SND.names[idx]
+            if name == nil then
+                local c = SND.name_fn(idx)
+                name = c ~= nil and ffi.string(c) or false
+                SND.names[idx] = name
+            end
+            if name and not SND.asked[name] then
+                SND.asked[name] = true
+                local okA, errA = pcall(hd2.require_assets, {id = 'exu-snd-' .. name:gsub('[^%w]', '-'), targets = {hd2.sounds.asset(name)}})
+                snd_log(name .. ': its bank ' .. (okA and 'asked for' or ('not loaded: ' .. tostring(errA))))
+            end
+            if name and SND.tokens >= 1 then
+                SND.tokens = SND.tokens - 1
+                local okP, h, why = pcall(hd2.sounds.play, name, {position = {SND.buf[b], SND.buf[b + 1], SND.buf[b + 2]}})
+                if not okP or not h then snd_log(name .. " did not play: " .. tostring(okP and why or h)) end
+            end
+        end
+    end
+    SND.skip = false
+end
+
 local overlay = hd2.ui.overlay({id = 'kit', owner = OWNER})
 overlay:draw(function(d, dt)
     dt = tonumber(dt) or 0
@@ -619,6 +667,10 @@ overlay:draw(function(d, dt)
     end
     local okA, errA = pcall(ammo_step)
     if not okA then A.failed = true; log('[Exusiai HUD] ammo failed: ' .. tostring(errA)) end
+    if not SND.failed then
+        local okS, errS = pcall(sound_step, dt)
+        if not okS then SND.failed = true; log('[Exusiai HUD] sounds failed, off for this session: ' .. tostring(errS)) end
+    end
     if not GM.failed then
         local okG, errG = pcall(gm_step)
         if not okG then GM.failed = true; log('[Exusiai HUD] guns: models failed, off for this session: ' .. tostring(errG)) end
