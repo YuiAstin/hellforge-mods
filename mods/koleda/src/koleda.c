@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.15"
+#define VERSION "0.1.16"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -646,6 +646,15 @@ static void RoundsAdd(void)
         memset(&p, 0, sizeof p);
         p.size = sizeof p;
         p.base = (uint32_t)base[r];
+        if (r == 4 && base[r] == 128)
+        {
+            /* 0.1.16: the Patriot's rocket row (128) is not one HellForge knows the packages of, so a copy of it cannot be
+             * spawned (0.1.15's fell back to the Guard Dog's bullet). Its look and its damage on a recoilless rifle's
+             * rocket (153, spawnable), its blast and speed set on the copy below (RocketRow) */
+            p.base = 153;
+            p.visual_from = 128;
+            p.damage = 239;
+        }
         snprintf(names[r], sizeof names[r], "yui/koleda/%s", tag[r]);
         p.name = names[r];
         g_round[r] = hf->add_projectile ? hf->add_projectile(self, &p) : 0;
@@ -1350,6 +1359,18 @@ static int ProjBudget(void)
     if (g_projTokens > s_maxRounds) g_projTokens = s_maxRounds;
     return (int)g_projTokens;
 }
+/* 0.1.16: the rocket copy made the Patriot's: its blast (395), its speed (200 m/s), no blast when it expires */
+static int g_rocketRowSet;
+static void RocketRow(void)
+{
+    if (g_rocketRowSet || !g_round[4] || s_roundRocket != 128 || !hf->set_live) return;
+    g_rocketRowSet = 1;
+    HfField fe = HF_FIELD(ProjectileSettings, impact_explosion), fx = HF_FIELD(ProjectileSettings, expiry_explosion), fv = HF_FIELD(ProjectileSettings, velocity);
+    HfValue ve = HF_U32(395), vx = HF_U32(0), vv = HF_F32(200);
+    int a = hf->set_live(self, (HfRef)g_round[4], &fe, &ve, 0), b = hf->set_live(self, (HfRef)g_round[4], &fx, &vx, 0), c = hf->set_live(self, (HfRef)g_round[4], &fv, &vv, 0);
+    Log("the rocket (projectile %u, a recoilless rocket made the Patriot's): its blast 395 %s, no expiry blast %s, 200 m/s %s", g_round[4],
+        a ? "set" : "refused", b ? "set" : "refused", c ? "set" : "refused");
+}
 static int g_shootRocket;   /* 0.1.3: this shot is the left arm's rocket */
 static double g_rocketNext;
 static unsigned g_rocketsFired;
@@ -1397,6 +1418,7 @@ static int SinnerShoot(int arm, uint32_t target, const float at[3])
     }
     int r = g_shootRocket ? 4 : g_gear;
     RoundSpeed(r);
+    if (r == 4) RocketRow();
     uint32_t round = g_roundBad[r] ? (uint32_t)s_roundFallback : g_round[r];
     if (ProjBudget() < 1) return 0;
     g_projTokens -= 1;
@@ -1411,6 +1433,14 @@ static int SinnerShoot(int arm, uint32_t target, const float at[3])
         float m = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
         for (int j = 0; j < 3; j++) dir[j] /= m;
         hf->spawn_projectile(self, round, from, dir);
+    }
+    if (!res && r == 4)
+    {
+        /* (0.1.16: no fallback bullet for the rockets: no rockets, said once) */
+        static int told;
+        if (!told++) Log("the Sinner's rocket (projectile %u) cannot be spawned here: no rockets this session (%s)", round, hf->last_log ? hf->last_log(self) : "");
+        g_round[4] = 0;
+        return 0;
     }
     if (!res && round != (uint32_t)s_roundFallback)
     {
