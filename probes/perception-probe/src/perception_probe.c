@@ -31,7 +31,7 @@
 #include "hellforge_mod.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 #define BUILD "25480438"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
@@ -203,6 +203,7 @@ static uint64_t NoiseHook(void* rcx, uint64_t type, uint64_t src, const float* p
     if (me && (s == me || in == me))
     {
         uint8_t t = (uint8_t)type;
+        if (!(loud > 0)) return g_noiseOrig(rcx, type, src, pos, mode, loud, inst);   /* 0.1.1: silent calls (a standing step) */
         int m = atomic_load(&g_noiseMode);
         float sent = loud;
         if (m == 1) sent = 0;
@@ -217,6 +218,8 @@ static uint64_t NoiseHook(void* rcx, uint64_t type, uint64_t src, const float* p
 }
 /* 0.5 s after a noise of hers: who gained a heard-only entry (flags 4) for her */
 static double g_heardCheckAt = -1;
+static unsigned g_steps;
+static float g_stepMax;
 static uint32_t g_heardBefore[64];
 static int g_nHeardBefore;
 static int HeardOnly(uint32_t e, uint32_t me)
@@ -404,7 +407,9 @@ static void Tick(HfMod* mod, float dt, void* user)
         NoiseCall c = g_ring[g_ringTail % NRING];
         static unsigned told;
         float r = c.type < 30 ? g_noiseRadius[c.type] : 0;
-        if (told++ < 300)
+        /* 0.1.1: footsteps (type 5) are summed into the 2 s line; every other noise is logged and checked */
+        if (c.type == 5) { g_steps++; if (c.sent * r > g_stepMax) g_stepMax = c.sent * r; continue; }
+        if (told++ < 400)
             Log("noise: type %u (table %.0f m) %s %s, mode %u, loudness %.2f -> %.2f (radius %.1f -> %.1f m), %s", c.type, (double)r,
                 c.src == me ? "from her" : "", c.inst == me ? "instigated by her" : "", c.mode, (double)c.loud, (double)c.sent, (double)(c.loud * r),
                 (double)(c.sent * r), c.how == 1 ? "muted" : c.how == 2 ? "15 m mode" : "observed");
@@ -440,7 +445,7 @@ static void Tick(HfMod* mod, float dt, void* user)
                 size_t len = strlen(buf);
                 if (len < sizeof buf - 24) snprintf(buf + len, sizeof buf - len, " %u@%.0fm", list[i].e, (double)list[i].d);
             }
-            Log("  0.5 s after: %d enemies newly heard her (heard-only entry)%s", gained, buf);
+            Log("  0.5 s after: %d enemies newly heard her (heard-only entry)%s", gained, buf);   /* (non-footstep noises only) */
         }
     }
     /* every 2 s */
@@ -448,6 +453,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     {
         g_nextLog = g_now + 2;
         LogMe("her");
+        if (g_steps) { Log("  footsteps: %u in 2 s, loudest %.1f m", g_steps, (double)g_stepMax); g_steps = 0; g_stepMax = 0; }
         Dump(6, 50, 0);
     }
 }

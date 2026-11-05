@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.perception-probe",
   "name": "Perception Probe (research)",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Research for Ascalon's hidden kit: logs your visibility record and what nearby enemies know of you every 2 s. F6 hidden mode (visibility base 0), Ctrl+F6 noise mode (observe / mute / 15 m), Shift+F6 full dump. Host or solo. Turn off when done.",
   "gameplay": false,
   "code": {
