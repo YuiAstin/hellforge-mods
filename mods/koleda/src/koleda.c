@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.12"
+#define VERSION "0.1.13"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -59,7 +59,10 @@ static float s_upDecay = 10, s_upDamage = 0.06f, s_upEvery = 3;
 static int s_sinOn = 1, s_callMode = 1;
 static float s_sharePct = 50, s_shareRange = 60;
 /* the leash */
-static float s_leashStart = 10, s_leashStop = 6, s_guardStart = 6, s_leashWarp = 40, s_stuckSeconds = 1.5f, s_slideSpeed = 6;
+/* 0.1.13: it keeps follow_distance m from her (beside and behind), never closer than personal_space m (it walked into
+ * her and crushed her); leash_start / leash_stop / guard_start: how far from that point it starts and stops moving */
+static float s_followDist = 10, s_personal = 6;
+static float s_leashStart = 4, s_leashStop = 2, s_guardStart = 4, s_leashWarp = 40, s_stuckSeconds = 1.5f, s_slideSpeed = 6;
 static float s_pushStep = 1.5f;
 static int s_pushSteps = 10;
 static float s_plusDistance = 8, s_plusLeash = 25;
@@ -112,7 +115,7 @@ static const KbSetting kSettings[] = {
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("kr_seconds", s_krSeconds, 0, 120), KB_F("kr_mult", s_krMult, 1, 5), KB_F("kr_heal", s_krHeal, 0, 1000),
     KB_F("kr_sinner_heal", s_krSinnerHeal, 0, 1),
     KB_F("s3_cooldown", s_s3Cd, 0, 3600), KB_I("cleanse", s_cleanse, 0, 2),
-    KB_I("drive", s_drive, 0, 1), KB_I("turn", s_turnOn, 0, 1), KB_F("max_rounds", s_maxRounds, 1, 200), KB_F("round_speed", s_roundSpeed, 0, 3000), KB_I("drive_test", s_driveTest, 0, 1), KB_I("loco_manager", s_locoManager, -1, 100000000),
+    KB_I("drive", s_drive, 0, 1), KB_I("turn", s_turnOn, 0, 1), KB_F("follow_distance", s_followDist, 3, 40), KB_F("personal_space", s_personal, 0, 20), KB_F("max_rounds", s_maxRounds, 1, 200), KB_F("round_speed", s_roundSpeed, 0, 3000), KB_I("drive_test", s_driveTest, 0, 1), KB_I("loco_manager", s_locoManager, -1, 100000000),
     KB_I("loco_map", s_locoMap, -1, 65536), KB_I("loco_records", s_locoRecords, -1, 65536), KB_I("loco_stride", s_locoStride, 16, 4096),
     KB_I("stick_offset_fwd", s_stickFwd, -1, 4096), KB_I("stick_offset_side", s_stickSide, -1, 4096), KB_I("stick_offset_turn", s_stickTurn, -1, 4096),
     KB_I("line_of_sight", s_sight, 0, 1), KB_F("first_person", s_fpDistance, 0.1, 2),
@@ -172,7 +175,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; turn 1: it turns toward what it fires at, else the way it slides (its turn record, 0.1.4).\n"
                "; round_speed: m/s of its minigun rounds (her copies; 0: the Patriot's own): slower, its tracers start at its arm.\n"
                "; max_rounds: the most projectiles it spawns a second, in all (spawned rounds by the thousand crashed the renderer).\n"
-               "max_rounds = %g\nround_speed = %g\nturn = %d\ndrive = %d\ndrive_test = %d\nloco_manager = %d\nloco_map = %d\nloco_records = %d\nloco_stride = %d\n"
+               "; follow_distance: m it keeps from her (beside and behind); personal_space: closer than this it steps away.\n"
+               "follow_distance = %g\npersonal_space = %g\nmax_rounds = %g\nround_speed = %g\nturn = %d\ndrive = %d\ndrive_test = %d\nloco_manager = %d\nloco_map = %d\nloco_records = %d\nloco_stride = %d\n"
                "stick_offset_fwd = %d\nstick_offset_side = %d\nstick_offset_turn = %d\n"
                "; Aiming: line_of_sight 1, Eye of the Snow Wolf's target must be in sight. first_person: the camera this close to\n"
                "; her head (m) counts as first person.\nline_of_sight = %d\nfirst_person = %g\n"
@@ -187,7 +191,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_fireRange, s_pullOn, (double)s_pullEvery, (double)s_pullRadius, s_pullExplosion,
             (double)s_s1Cd, s_s1Rounds, (double)s_s1Every, (double)s_s1Cone, (double)s_s1Range, s_s1Round,
             (double)s_s2Cd, (double)s_krSeconds, (double)s_krMult, (double)s_krHeal, (double)s_krSinnerHeal, (double)s_s3Cd, s_cleanse,
-            (double)s_maxRounds, (double)s_roundSpeed, s_turnOn, s_drive, s_driveTest, s_locoManager, s_locoMap, s_locoRecords, s_locoStride, s_stickFwd, s_stickSide, s_stickTurn,
+            (double)s_followDist, (double)s_personal, (double)s_maxRounds, (double)s_roundSpeed, s_turnOn, s_drive, s_driveTest, s_locoManager, s_locoMap, s_locoRecords, s_locoStride, s_stickFwd, s_stickSide, s_stickTurn,
             s_sight, (double)s_fpDistance);
 }
 
@@ -1111,14 +1115,23 @@ static void MoveFrame(double dt)
     float to[3], start = g_gear == GEAR_N ? s_guardStart : s_leashStart, stop = s_leashStop < start ? s_leashStop : start * 0.6f, tp[3];
     float h = sqrtf(aim[0] * aim[0] + aim[1] * aim[1]);
     float f[2] = {h > 0.05f ? aim[0] / h : 1, h > 0.05f ? aim[1] / h : 0};
-    to[0] = me[0] + f[1] * 3.0f - f[0] * 2.0f; to[1] = me[1] - f[0] * 3.0f - f[1] * 2.0f; to[2] = me[2];
-    if (g_gear == GEAR_N) stop = stop < 3 ? stop : 3;
+    to[0] = me[0] + f[1] * s_followDist * 0.6f - f[0] * s_followDist * 0.8f;
+    to[1] = me[1] - f[0] * s_followDist * 0.6f - f[1] * s_followDist * 0.8f;
+    to[2] = me[2];
     if (g_gear == GEAR_PLUS && PlusTarget(tp))
     {
         float v[2] = {tp[0] - me[0], tp[1] - me[1]}, len = sqrtf(v[0] * v[0] + v[1] * v[1]);
         float reach = len - s_plusDistance;
         if (reach > s_plusLeash) reach = s_plusLeash;
         if (reach > 0 && len > 0.5f) { to[0] = me[0] + v[0] / len * reach; to[1] = me[1] + v[1] / len * reach; to[2] = me[2]; start = 4; stop = 2; }
+    }
+    /* too close to her: away from her first, out to follow_distance */
+    if (dHer < s_personal)
+    {
+        float a[2] = {p[0] - me[0], p[1] - me[1]};
+        if (dHer < 0.3f) { a[0] = -f[0]; a[1] = -f[1]; dHer = 1; }
+        to[0] = me[0] + a[0] / dHer * s_followDist; to[1] = me[1] + a[1] / dHer * s_followDist; to[2] = me[2];
+        start = 0.5f; stop = 1.5f;
     }
     float dTo = Flat(p, to);
     if (!g_moving && dTo > start) { g_moving = 1; memcpy(g_sample, p, 12); g_sampleAt = g_now; g_slowFor = 0; g_pushing = 0; }

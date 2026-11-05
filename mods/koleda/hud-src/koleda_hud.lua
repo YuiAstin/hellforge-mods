@@ -887,7 +887,7 @@ local function walk_tick(dt)
     if want and not WK.walking then
         if anim_count(s_, WK.unit) ~= #WALK_STATE then return end
         set_state(s_, WK.unit, WALK_STATE)
-        WK.walking, WK.cmd, WK.last, WK.next_sample = true, wrap(-wrap(bearing - y)), p, WK.t + SAMPLE
+        WK.walking, WK.bias, WK.last, WK.next_sample = true, 0, p, WK.t + SAMPLE
     elseif not want and WK.walking then
         stop_walking(s_)
     end
@@ -899,8 +899,8 @@ local function walk_tick(dt)
         if moved > 0.2 then
             local march = math.deg(math.atan2(dy, dx))
             local err = wrap(bearing - march)
-            WK.cmd = wrap(WK.cmd - K_GAIN * err)
-            if math.abs(err) > 120 then WK.cmd = wrap(-wrap(bearing - y)) end
+            WK.bias = clampv(WK.bias - K_GAIN * err, -60, 60)
+            if math.abs(err) > 120 then WK.bias = 0 end
             if not WK.answers then WK.answers = true; wk_log('it walks on its own legs') end
             WK.still = 0
         else
@@ -912,7 +912,29 @@ local function walk_tick(dt)
         end
         WK.last = p
     end
-    -- the torso toward what it fires at (else ahead), at most 90 degrees, 180 degrees a second
+    -- 0.1.13: its body turned (Unit.teleport_local_rotation on its root, 120 degrees a second): toward what it fires at,
+    -- else the way it walks; the walk's angle is against its facing, so it is worked out again every frame (the
+    -- steering's correction kept as a bias)
+    local face = nil
+    if b[8] > 0.5 then face = math.deg(math.atan2(b[10], b[9])) elseif WK.walking then face = bearing end
+    if face and not WK.no_turn then
+        local diff = wrap(face - y)
+        if math.abs(diff) > 4 then
+            local ny = y + clampv(diff, -120 * dt, 120 * dt)
+            local okq, q = pcall(function() return s_.Quaternion.axis_angle(s_.Vector3(0, 0, 1), math.rad(ny - 90)) end)
+            if not okq or not q then okq, q = pcall(function() return s_.Quaternion(s_.Vector3(0, 0, 1), math.rad(ny - 90)) end) end
+            local okt = okq and q and pcall(s_.Unit.teleport_local_rotation, WK.unit, RI, q)
+            if not okt then WK.no_turn = true; wk_log('turning its body is not possible here (it walks as it faces)') end
+            if okt then
+                local y2 = uyaw(s_, WK.unit)
+                WK.turn_checks = (WK.turn_checks or 0) + 1
+                if WK.turn_checks == 30 then wk_log(('turning: asked %.0f, facing now %.0f (wanted %.0f)'):format(ny, y2 or -1, face)) end
+                y = y2 or ny
+            end
+        end
+    end
+    if WK.walking then WK.cmd = wrap(-wrap(bearing - y) + (WK.bias or 0)) end
+    -- the torso toward what it fires at, against its body (at most 90 degrees, 180 a second)
     local tw = 0
     if b[8] > 0.5 then tw = clampv(wrap(math.deg(math.atan2(b[10], b[9])) - y), -90, 90) end
     WK.torso = WK.torso + clampv(tw - WK.torso, -180 * dt, 180 * dt)
@@ -932,7 +954,7 @@ overlay:draw(function(d, dt)
     end
     if not find(dt) then return end
     if state.in_mission == 0 then return end
-    if not WK.failed and WK.walking then pcall(write_vars, rawget(_G, 'stingray')) end   -- (again in render: the game rewrites them)
+    if not WK.failed and WK.unit then pcall(write_vars, rawget(_G, 'stingray')) end   -- (again in render: the game rewrites them)
     if not SND.failed then
         local okS, errS = pcall(sound_step, dt)
         if not okS then SND.failed = true; log('[Koleda HUD] sounds failed, off for this session: ' .. tostring(errS)) end
