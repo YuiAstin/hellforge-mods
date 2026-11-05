@@ -15,7 +15,7 @@ perception research (docs/research/perception.md, when written) come first.
   her (the trait), and Mortal Interrogation adds the DoT and slow.
 - S2 **Endowment** (35 s): ATK +130%, enemies in range -60% speed, kills spread a Talent 1 stack.
 - S3 **Descent** (45 s): ATK +50%, wider range, faster attacks, enemies in range -50% hit rate, taunts, heals 8% max
-  HP on each miss or dodge.
+  HP on each miss or dodge. (Ported as immunity instead: a 50% dodge on a melee-only kit is a slow death.)
 
 ## Hidden (core)
 - **Always hidden** while she makes no noise: enemies lose track of her (Lost Contact's break contact, applied to every
@@ -46,9 +46,12 @@ perception research (docs/research/perception.md, when written) come first.
 - **Z, free** (Pursuit needs no key; Z is spare for a later idea).
 - **X, Endowment (35 s):** her damage +130% and every enemy within 8 m slowed 60% (the slow status, refreshed); kills
   spread a Mortal Interrogation stack to enemies within 5 m.
-- **C, Descent (45 s):** she steps out of hiding on purpose: damage +50%, her melee hits everything within 3 m in
-  front of her (a cleave: extra hits on the others, like Exusiai's shots), enemies within 15 m are taunted onto her and
-  miss half their attacks, each miss or dodge heals 8% of her health. Ends hidden again.
+- **C, Descent:** she steps out of hiding on purpose and goes all in: **5 s of total damage immunity** (every hit on her
+  nulled in the kit base's hit hook: no damage, knockdown, stagger or push), damage +50%, and her melee hits everything
+  within 3 m in front of her (the Ambusher trait's hit-everyone, as a cleave). **Each kill extends it** (`descent_mode`:
+  1 adds `descent_per_kill` 2 s on top of what is left, up to `descent_cap` 15 s; 0 resets it to 5 s): to be tuned in
+  playtest. Enemies within 15 m are drawn to her while it lasts. Ends with her hidden again (2 s grace). The point:
+  her usual game is hiding; Descent rewards diving in and chaining kills instead.
 - Body: Arknights rules (no T-Doll Hellbomb); health x1.0, stamina x1.2.
 
 ## Open questions (for the research and the probes)
