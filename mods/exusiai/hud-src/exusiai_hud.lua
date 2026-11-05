@@ -550,7 +550,23 @@ local function gm_spawn(w, i, pos, rot)
     if not can(DOG) then once('dog', 'the Guard Dog body is not loaded yet (its package): no models'); return end
     local model
     for _, path in ipairs(GUN_MODELS) do if can(path) then model = path; break end end
-    if not model then once('gun', 'no Guard Dog gun model is loaded yet: no models'); return end
+    if not model then
+        -- 0.2.10: ask HD2Runtime for the Guard Dog's call-in package too (through its sound's asset: the stratagem
+        -- package that holds the dog and its gun), and say so again every 10 s
+        if not GM.asked_dog then
+            GM.asked_dog = true
+            local okA, errA = pcall(hd2.require_assets, {id = 'exu-guard-dog', targets = {hd2.sounds.asset('backpack/guard_dog')}})
+            log('[Exusiai HUD] guns: no gun model yet: the Guard Dog package asked for through HD2Runtime ' .. (okA and '' or ('(refused: ' .. tostring(errA) .. ')')))
+        end
+        GM.miss_f = (GM.miss_f or 0) + 1
+        if (GM.miss_n or 0) < 6 and GM.miss_f % 600 == 1 then
+            GM.miss_n = (GM.miss_n or 0) + 1
+            local have = {}
+            for _, path in ipairs(GUN_MODELS) do have[#have + 1] = path:match('[^/]+$') .. (can(path) and ' yes' or ' no') end
+            log('[Exusiai HUD] guns: still no gun model (' .. table.concat(have, ', ') .. '; the dog body ' .. (can(DOG) and 'yes' or 'no') .. ')')
+        end
+        return
+    end
     local okd, dog = ecall('World', 'spawn_unit', w, DOG, pos, rot)
     if not (okd and dog) then once('spawn', 'the carrier could not be spawned'); return end
     if not ecall('Unit', 'set_unit_visibility', dog, false) then once('hide', 'the carrier could not be hidden') end
@@ -626,7 +642,7 @@ local function sound_step(dt)
     SND.t = (SND.t or 0) + dt
     SND.use = SND.use or {}
     SND.bad = SND.bad or {}
-    SND.FALLBACKS = SND.FALLBACKS or {'support/m1000', 'support/ac8', 'vehicle/patriot/rockets'}
+    SND.FALLBACKS = SND.FALLBACKS or {'backpack/guard_dog', 'support/m1000', 'support/ac8', 'vehicle/patriot/rockets'}
     SND.loops = SND.loops or {}
     local n = SND.fn(1, SND.seq, SND.buf, 16)
     for i = 0, n - 1 do
@@ -692,6 +708,12 @@ local function sound_step(dt)
     end
     for _, L in pairs(SND.loops) do
         if L.h and SND.t - L.last > 0.25 then pcall(function() L.h:stop() end); L.h = nil end
+    end
+    if not SND.probe then
+        -- 0.2.10: one loadout-screen click at her first shots, to tell whether any sound of HD2Runtime's is heard at all
+        SND.probe = true
+        local okU, hU, whyU = pcall(hd2.sounds.play, 'ui/generic_select')
+        snd_log('test click (ui/generic_select): ' .. ((okU and hU) and 'posted' or ('not played: ' .. tostring(okU and whyU or hU))))
     end
     SND.skip = false
 end

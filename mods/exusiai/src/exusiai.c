@@ -38,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.9"
+#define VERSION "0.2.10"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -515,6 +515,40 @@ static int ClearShot(const float from[3], const float q[3], uint32_t target)
     float w = FirstWall(id, from, d, n, UnitOf(atomic_load(&g_avatar)), UnitOf(target), 0, &hit);
     return hit || w > n - 1.0f;
 }
+/* the camera (Alva's View: her unit's world, its camera matrix at +0x230920; Apache - Rise Above's read) and where its
+ * ray first meets a wall, within 300 m (else 300 m out) */
+static int CamView(float pos[3], float fwd[3])
+{
+    uint8_t d[24];
+    if (!Descriptor(atomic_load(&g_avatar), d)) return 0;
+    uint32_t unit = Word(d + 12), slot = unit & 0x3FFFFF, id = 0;
+    uintptr_t registry = Pointer(exe + 0x1A100F0), objects, object, w;
+    float m[16];
+    if (!registry || !(objects = Pointer(registry + 0x88)) || !(object = Pointer(objects + 8u * slot)) || !ReadAt(object + 8, &id, 4) || id != unit ||
+        !(w = Pointer(object + 0x18)) || !ReadAt(w + 0x230920, m, 64)) return 0;
+    for (int k = 0; k < 16; k++) if (!isfinite(m[k])) return 0;
+    if (fabsf(m[15] - 1) > 1e-3f) return 0;
+    memcpy(fwd, m + 4, 12);
+    memcpy(pos, m + 12, 12);
+    float n = sqrtf(fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]);
+    if (!(n > 0.5f)) return 0;
+    for (int k = 0; k < 3; k++) fwd[k] /= n;
+    return 1;
+}
+static int ReticlePoint(float out[3])
+{
+    float cam[3], fwd[3];
+    if (!CamView(cam, fwd)) return 0;
+    float len = 300;
+    uint32_t id;
+    if (WorldId(&id) && QueryIdle())
+    {
+        float w = FirstWall(id, cam, fwd, 300, UnitOf(atomic_load(&g_avatar)), 0, 0, NULL);
+        if (w < len) len = w;
+    }
+    for (int k = 0; k < 3; k++) out[k] = cam[k] + fwd[k] * len;
+    return 1;
+}
 static uint32_t Pick(int i, float at[3])
 {
     float me[3], q[3], from[3];
@@ -710,12 +744,19 @@ static void BurstFrame(void)
     }
     else g_lastRounds = rounds;   /* a reload, a new magazine */
     if (g_groupShots > 0 && g_now - g_groupLast > s_chGap) CloseBurst();
-    /* the free rounds: along her aim from in front of her, a little spread */
+    /* the free rounds: from in front of her toward where her reticle points (0.2.10: the camera's ray, as Alva's aim;
+     * her head's facing lagged behind the reticle), a little spread */
     while (g_freeLeft > 0 && g_now >= g_freeNext)
     {
         float pos[3], aim[3];
         if (!PlayerPose(pos, aim)) { g_freeLeft = 0; break; }
-        float from[3] = {pos[0] + aim[0] * 0.9f, pos[1] + aim[1] * 0.9f, pos[2] + 1.45f + aim[2] * 0.9f}, dir[3];
+        float from[3] = {pos[0] + aim[0] * 0.9f, pos[1] + aim[1] * 0.9f, pos[2] + 1.45f + aim[2] * 0.9f}, dir[3], tgt[3];
+        if (ReticlePoint(tgt))
+        {
+            float v[3] = {tgt[0] - from[0], tgt[1] - from[1], tgt[2] - from[2]};
+            float vn = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            if (vn > 1.0f) for (int k = 0; k < 3; k++) aim[k] = v[k] / vn;
+        }
         float sp = s_chSpread * 0.0174533f;
         for (int k = 0; k < 3; k++) dir[k] = aim[k] + sp * ((float)rand() / RAND_MAX - 0.5f);
         float n = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
