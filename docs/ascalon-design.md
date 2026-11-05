@@ -1,12 +1,14 @@
 # Ascalon: the always-hidden kit (design, 2026-11-05)
 
-Arknights' Ascalon is an Ambusher Specialist: she hits everything in her range, dodges half of all attacks and is
-rarely targeted. In Helldivers terms she is **always hidden until she makes noise**: melee is silent, a suppressor is
-heard only close by, a loud gun gives her away. Nothing here is built; the Cloak Probe (probes/cloak-probe) and the
+Arknights' Ascalon is an Ambusher Specialist who is invisible until she attacks (the dodge and "rarely targeted" are
+the Ambusher class trait, shared by the branch). In Helldivers terms she is **always hidden until she makes noise**:
+melee is silent, a suppressor is heard only close by, a loud gun gives her away. Nothing here is built; the Cloak Probe (probes/cloak-probe) and the
 perception research (docs/research/perception.md, when written) come first.
 
 ## Source kit (Arknights, E2 max, M3)
-- Trait: damage to all targets in range; 50% dodge of Physical and Arts attacks; less likely to be targeted.
+- Trait (the Ambusher branch's): damage to all targets in range; 50% dodge of Physical and Arts attacks; less likely to
+  be targeted.
+- Her own: invisible until she attacks.
 - Talent **Mortal Interrogation**: hits slow 18% and deal 10% of her ATK as Arts damage a second for 25 s (3 stacks).
 - Talent **Penumbral Image**: +8 ASPD (+6 more with high ground adjacent).
 - S1 **Pursuit** (auto, 3 charges): the next attack at 210% ATK, twice.
@@ -28,7 +30,7 @@ perception research (docs/research/perception.md, when written) come first.
 | throws a grenade, an explosive goes off near her | everyone near the blast | 5 s |
 | wears a backpack or holds a support weapon | no functional hiding at all (the user's rule); the cloak still shows | - |
 
-- **Ambusher feel:** while hidden, enemies that do attack her (blind fire, area attacks) miss half the time (a 50%
+- **Ambusher trait (class flavour):** while hidden, enemies that do attack her (blind fire, area attacks) miss half the time (a 50%
   dodge: the hit cancelled in the kit base's hit hook).
 
 ## Her kit in Helldivers terms
