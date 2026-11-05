@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.4"
+#define VERSION "0.1.5"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -46,6 +46,7 @@
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
 #include "kitbase/kb_roster.h"
+#include "weapon_sounds.h"
 
 /* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
 KB_ROSTER_EXPORTS(koleda)
@@ -1295,6 +1296,12 @@ static int SinnerShoot(int arm, uint32_t target, const float at[3])
         return 0;
     }
     if (!Act("a Sinner shot", res)) return 0;
+    /* 0.1.5: its gun's firing sound (the HUD side plays it: koleda_sounds) */
+    {
+        uint32_t base = r == 4 ? (uint32_t)s_roundRocket : (uint32_t)(r == 0 ? s_roundN : r == 1 ? s_roundS : s_roundPlus);
+        for (unsigned i = 0; i < sizeof kRoundGun / sizeof kRoundGun[0]; i++)
+            if (kRoundGun[i].round == base) { ShotSound(kRoundGun[i].gun, from); break; }
+    }
     unsigned slot = g_shotAimNext++ % 16;
     memcpy(g_shotAim[slot], at, 12);
     g_shotAimAt[slot] = g_now;
@@ -1727,6 +1734,16 @@ typedef struct KoledaHud
 } KoledaHud;
 static KoledaHud g_hud = {1};
 /* the Sinner, 5 floats (x, y, z over it, health 0..1, gear): 1 while it stands, else 0 */
+/* 0.1.5: the Sinner's shots since `after` for their sounds: 5 floats each (x, y, z, the sound, sequence); its name */
+HF_MOD_EXPORT int koleda_sounds(unsigned version, unsigned after, float* out, int max)
+{
+    if (version != 1 || !out || max <= 0) return 0;
+    return ShotSounds(after, out, max);
+}
+HF_MOD_EXPORT const char* koleda_sound_name(int i)
+{
+    return i >= 0 && i < (int)(sizeof kWeaponSound / sizeof kWeaponSound[0]) ? kWeaponSound[i].name : NULL;
+}
 HF_MOD_EXPORT int koleda_marks(unsigned version, float* out, int max)
 {
     if (version != 1 || !out || max <= 0 || !g_inMission || !kb_kit_on || !g_markOk) return 0;
