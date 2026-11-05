@@ -63,3 +63,12 @@ behind the attacker and fires a counter round with a stun. F10 cycles the window
 Ctrl+F10 lets any weapon arm it. What to read from it: how early real presses land before hits (sets the window),
 whether the nulled hit leaves anything (status, sound, ragdoll), whether the attacker's facing is right (she lands
 behind it, not beside), and how far behind a melee bug's swing the hit lands.
+
+## Reading her attacks (visuals)
+The game has no sword-slash effect. Plan (2026-11-05):
+- **Slashes (counter, melee procs):** a fan of harmless laser bolts across the target, copies of the LAS-99 Quasar
+  Cannon's (Talon bolts are pistol-sized), no damage, no explosion. Parry Probe 0.1.1 tests three looks (F11).
+- **Sword rain (S3), Drizzle ticks (S1):** drawn by her HUD, since no game object fits: blades streaking down onto
+  each target, projected to the screen as Alva's and Lemuen's markers are (world-to-screen, Chef Shared Loader's way,
+  with permission). The damage stays the game's (spawned rounds); the HUD only shows it.
+- **Later:** a custom sword-trail particle (HfProjectile spawn_effect) if a particle pipeline appears.
