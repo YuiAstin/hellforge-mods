@@ -703,6 +703,10 @@ static const Hd2ModOptionsApi* g_optsApi;   /* the menu the rows went to */
 static uint8_t g_rowOk[OPT_ROWS];
 static int g_optTries;
 static double g_optNextTry, g_optCheck;
+#define OPT_READDS 3         /* rows added again for one menu address, at most */
+static const Hd2ModOptionsApi* g_checkFor;  /* the menu address the two below are for */
+static int g_noCheck;        /* 1: the 10 s check is off for that menu (its get() did not find a row just added, or the cap) */
+static int g_readds;         /* rows added again for that menu */
 static int g_shownStatus[2] = {-1, -1};
 static int ModeIndex(int m) { return m == 1 ? 1 : m == 2 ? 2 : 0; }
 static int StatusOf(int mode, int bit)
@@ -820,6 +824,15 @@ static void NoMenuYet(void)
         "lost-contact.ini, or %s in a mission",
         g_menuRefused ? "no usable menu (one was refused, see above)" : "no menu", HD2_MOD_OPTIONS_ENV, PublicPack(), KeysText());
 }
+/* right after the rows are added: a get() that does not find the first row (a stub, or rows keyed otherwise) would make
+ * the 10 s check re-add them for ever, so that menu address gets no check */
+static void CheckGet(const Hd2ModOptionsApi* api)
+{
+    int32_t v;
+    if (g_noCheck || api->get(OPT_MOD, "break", &v)) return;
+    g_noCheck = 1;
+    Log("MODS tab: the menu's get() does not find a row it just added; its rows are not checked again for this menu");
+}
 static void Options(void)
 {
     const Hd2ModOptionsApi* api = MenuApi();
@@ -828,27 +841,37 @@ static void Options(void)
     {
         /* a menu for the first time, or one set up again (a reload): every row is asked for */
         g_optsApi = api;
+        if (api != g_checkFor) { g_checkFor = api; g_noCheck = 0; g_readds = 0; }
         g_optsDone = 0; g_optTries = 0; g_optNextTry = 0;
         memset(g_rowOk, 0, sizeof g_rowOk);
         g_shownStatus[0] = g_shownStatus[1] = -1;
     }
-    else if (g_optsDone && g_rowOk[0] && g_now >= g_optCheck)
+    else if (g_optsDone && g_rowOk[0] && !g_noCheck && g_now >= g_optCheck)
     {
-        /* every 10 s once registered: a menu reloaded in place (HellForge's live mods) has lost the rows. Its table is
-         * checked again first: a menu taken out without clearing HD2_MOD_OPTIONS_v1 leaves functions in no module */
+        /* every 10 s once registered: get() of the first row tells a menu set up again in place (HellForge's live mods:
+         * a taken-out mod's DLL is never freed, so its table stays readable and only its rows are gone). Only for a menu
+         * whose get() found that row right after it was added (CheckGet), and at most OPT_READDS re-adds per address.
+         * The table is checked first only as a guard against calling into a module that really was unloaded. */
         Hd2ModOptionsApi copy;
         int32_t v;
         g_optCheck = g_now + OPT_RETRY;
         if (!RD((uintptr_t)api, &copy, sizeof copy) || !InModule((const void*)copy.get) || !InModule((const void*)copy.register_option) ||
             !InModule((const void*)copy.set))
         {
-            Log("MODS tab: the menu's table is gone (taken out?); looking for a menu again");
+            Log("MODS tab: the menu's table or functions are no longer in a loaded module; looking for a menu again");
             g_menuAccepted = NULL; g_menuChecked[0] = 0; g_optsApi = NULL;
             return;
         }
         if (!api->get(OPT_MOD, "break", &v))
         {
-            Log("MODS tab: the menu no longer has Lost Contact's rows (set up again?); adding them again");
+            if (g_readds >= OPT_READDS)
+            {
+                g_noCheck = 1;
+                Log("MODS tab: the menu has lost Lost Contact's rows %d times; not checking or adding them again for this menu", g_readds + 1);
+                return;
+            }
+            g_readds++;
+            Log("MODS tab: the menu no longer has Lost Contact's rows (set up again?); adding them again (%d of %d)", g_readds, OPT_READDS);
             g_optsDone = 0; g_optTries = 0; g_optNextTry = 0;
             memset(g_rowOk, 0, sizeof g_rowOk);
             g_shownStatus[0] = g_shownStatus[1] = -1;
@@ -879,7 +902,12 @@ static void Options(void)
         g_optTries++;
         g_optNextTry = g_now + OPT_RETRY;
         if (fresh) g_shownStatus[0] = g_shownStatus[1] = -1;   /* a Now row added now shows its status */
-        if (added == OPT_ROWS) { g_optsDone = 1; g_optCheck = g_now + OPT_RETRY; Log("MODS tab: %d of %d rows added (menu: %s, version %u)", added, OPT_ROWS, HD2_MOD_OPTIONS_ENV, api->version); }
+        if (added == OPT_ROWS)
+        {
+            g_optsDone = 1; g_optCheck = g_now + OPT_RETRY;
+            Log("MODS tab: %d of %d rows added (menu: %s, version %u)", added, OPT_ROWS, HD2_MOD_OPTIONS_ENV, api->version);
+            CheckGet(api);
+        }
         else if (g_optTries < OPT_TRIES)
             Log("MODS tab: %d of %d rows added (menu: %s, version %u); refused: %s; asking again in %.0f s (try %d of %d)", added, OPT_ROWS,
                 HD2_MOD_OPTIONS_ENV, api->version, refused, OPT_RETRY, g_optTries, OPT_TRIES);
@@ -887,6 +915,7 @@ static void Options(void)
         {
             g_optsDone = 1;
             g_optCheck = g_now + OPT_RETRY;
+            if (g_rowOk[0]) CheckGet(api);
             Log("MODS tab: %d of %d rows added after %d tries (menu: %s, version %u); refused: %s (the menu may be full: 8 mods, 31 rows each). "
                 "Those settings stay in lost-contact.ini and on %s", added, OPT_ROWS, g_optTries, HD2_MOD_OPTIONS_ENV, api->version, refused,
                 KeysText());
