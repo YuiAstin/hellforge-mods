@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.3"
+#define VERSION "0.1.4"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her chill bursts come often */
@@ -156,6 +156,8 @@ static double g_cd[3];
 static double g_s1Until;
 static int g_conf, g_prep;
 static double g_confAt = -100, g_pulseAt;
+static unsigned g_shatters;
+static double g_shatterBonus;
 static unsigned g_casts[3], g_grants, g_intercepts, g_bursts, g_rounds, g_freezes, g_refunds;
 
 /* ---- reads: health, positions, her view -------------------------------------------------------------------------- */
@@ -865,7 +867,15 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     (void)e; (void)me;
     if (d->amount <= 0 || !MineHit(d) || FoeIndex(d->target) < 0) return;
-    if (Frozen(d->target)) ScaleDamage(d, s_shatterMult);   /* shatter */
+    if (Frozen(d->target))   /* shatter */
+    {
+        int before = d->amount;
+        ScaleDamage(d, s_shatterMult);
+        g_shatters++;
+        g_shatterBonus += d->amount - before;
+        static unsigned told;
+        if (told++ < 20) Log("shatter: entity %u frozen, her hit (kind %u) %d -> %d", d->target, d->kind, before, d->amount);
+    }
     if (IsShot(d))
     {
         NoteTarget(d);
@@ -922,6 +932,9 @@ static void Reset(const char* why)
             "%u bursts, %u heavy rounds, %u freezes, %u Battle Prep refunds, %u chill bursts (%u held back), attackers %u named / %u nearest, "
             "statuses refused %u on allies / %u on her (%u learned)",
             why, g_casts[0], g_casts[1], g_casts[2], g_grants, g_allyHits, g_allyAbsorbed, g_allyBroke, g_intercepts, g_bursts, g_rounds, g_freezes, g_refunds, g_fx, g_fxSkipped, g_threatNamed, g_threatNear, g_refusedAlly, g_refusedHer, g_learned);
+    if (g_shatters) Log("%s: %u shatter hits (+%.0f damage in all, x%.2f)", why, g_shatters, g_shatterBonus, (double)s_shatterMult);
+    g_shatters = 0;
+    g_shatterBonus = 0;
     Body(start);
     if (start && s_hellbomb && s_hellbombRow == 125 && !hf->load_package(self, UINT64_C(0x346D785D6CA13FF4))) Log("the Hellbomb's package could not be loaded ahead");
     if (!start) AllyClear();   /* (allies spawn before the mission's first frame: kept at its start) */
