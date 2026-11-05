@@ -38,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.7"
+#define VERSION "0.2.8"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -71,6 +71,7 @@ static float s_pairHold = 0.6f;
 static int s_pairRate = 1;
 static int s_pellets = 6, s_pairPrimary = 1;
 static float s_pelletSpread = 5;
+static float s_maxRounds = 30, s_roundSpeed = 300;
 
 /* Every setting: its .ini / Mod Options Menu name, variable and range (kitbase/kb_settings.h) */
 static const KbSetting kSettings[] = {
@@ -82,7 +83,7 @@ static const KbSetting kSettings[] = {
     KB_I("round_pair", s_rBase[0], 1, 350), KB_I("round_nearest", s_rBase[1], 1, 350), KB_I("round_armoured", s_rBase[2], 1, 350),
     KB_I("round_attacker", s_rBase[3], 1, 350), KB_I("round_weakest", s_rBase[4], 1, 350),
     KB_F("every_nearest", s_rEvery[0], 0, 10), KB_F("every_armoured", s_rEvery[1], 0, 10), KB_F("every_attacker", s_rEvery[2], 0, 10),
-    KB_F("every_weakest", s_rEvery[3], 0, 10), KB_I("pellets", s_pellets, 1, 16), KB_I("pair_primary", s_pairPrimary, 0, 1), KB_F("pellet_spread", s_pelletSpread, 0, 30),
+    KB_F("every_weakest", s_rEvery[3], 0, 10), KB_I("pellets", s_pellets, 1, 16), KB_I("pair_primary", s_pairPrimary, 0, 1), KB_F("pellet_spread", s_pelletSpread, 0, 30), KB_F("max_rounds", s_maxRounds, 1, 300), KB_F("round_speed", s_roundSpeed, 0, 3000),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
 };
@@ -115,6 +116,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; quick rounds to finish it (276: the AR-23 Liberator's).\n"
                "round_pair = %d\nround_nearest = %d\nround_armoured = %d\nround_attacker = %d\nround_weakest = %d\n"
                "every_nearest = %g\nevery_armoured = %g\nevery_attacker = %g\nevery_weakest = %g\npellets = %d\npellet_spread = %g\n"
+               "; max_rounds: the most projectiles her guns spawn a second, in all; round_speed: m/s of her guns' own rounds (her\n"
+               "; copies; 0: the base's): slower, a round is seen from its gun.\nmax_rounds = %g\nround_speed = %g\n"
                "; pair_primary 1: the summoned pair fire her primary's own round (round_pair when it fires none or it cannot be\n"
                "; spawned).\npair_primary = %d\n"
                "; gun_round: the round used when one of hers cannot be spawned (7: the AX/AR-23 Guard Dog's). no_friendly_fire 1:\n"
@@ -126,7 +129,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_fireRate, (double)s_blessMult, s_chEvery, s_chFree,
             (double)s_chGap, (double)s_chSpread, (double)s_s2Cd, (double)s_s2Seconds, (double)s_gunEvery, s_pairRate, (double)s_pairHold, (double)s_s3Cd,
             (double)s_s3Seconds, (double)s_s3Every, (double)s_s3Range, s_rBase[0], s_rBase[1], s_rBase[2], s_rBase[3], s_rBase[4],
-            (double)s_rEvery[0], (double)s_rEvery[1], (double)s_rEvery[2], (double)s_rEvery[3], s_pellets, (double)s_pelletSpread, s_pairPrimary, s_gunRound, s_noFriendlyFire);
+            (double)s_rEvery[0], (double)s_rEvery[1], (double)s_rEvery[2], (double)s_rEvery[3], s_pellets, (double)s_pelletSpread, (double)s_maxRounds, (double)s_roundSpeed, s_pairPrimary, s_gunRound, s_noFriendlyFire);
 }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
@@ -221,6 +224,32 @@ static int GunPos(int i, float out[3])
 /* her rounds by role (0: the pair, 1-4: Overloading Mode's guns): her copy, else the vanilla round, else gun_round */
 static const char* const kRole[5] = {"pair", "nearest", "armoured", "attacker", "weakest"};
 static uint32_t g_round[5], g_roundBad[5];
+/* 0.2.8: at most max_rounds projectiles a second in all (two game crashes in rendering came in fights with the guns at
+ * the real fire rates and a shotgun's whole shot: thousands of spawned rounds a mission); her rounds' speed (her copies
+ * only, round_speed m/s, 0: the base's): at 800-1000 m/s a round is first seen metres out from its gun */
+static double g_projTokens = 30, g_projAt;
+static int ProjBudget(void)
+{
+    double el = g_now - g_projAt;
+    g_projAt = g_now;
+    if (el > 0) g_projTokens += el * s_maxRounds;
+    if (g_projTokens > s_maxRounds) g_projTokens = s_maxRounds;
+    return (int)g_projTokens;
+}
+static uint8_t g_speedSet[5];
+static void RoundSpeed(int r)
+{
+    if (r < 0 || r > 4 || g_speedSet[r] || s_roundSpeed <= 0 || !g_round[r] || g_round[r] == (uint32_t)s_rBase[r] || !hf->set_live) return;
+    g_speedSet[r] = 1;
+    HfField f = HF_FIELD(ProjectileSettings, velocity);
+    HfValue v = HF_F32(s_roundSpeed);
+    HfLiveValue was;
+    memset(&was, 0, sizeof was);
+    if (hf->get_live) hf->get_live(self, (HfRef)g_round[r], &f, &was);
+    if (was.base.number > 0 && was.base.number <= s_roundSpeed) return;   /* a round already this slow stays as it is */
+    int ok = hf->set_live(self, (HfRef)g_round[r], &f, &v, 0);
+    Log("her round %u (projectile %u): %.0f m/s -> %.0f (%s)", r, g_round[r], was.base.number, (double)s_roundSpeed, ok ? "set" : "refused");
+}
 static void RoundsAdd(void)
 {
     static char names[5][48];
@@ -305,6 +334,13 @@ static int Fire(int i, const float at[3])
     }
     for (int k = 0; k < 3; k++) from[k] += d[k] * 0.4f;   /* from its muzzle */
     int r = 0;
+    RoundSpeed(role);
+    {
+        int budget = ProjBudget();
+        if (budget < 1) return 0;
+        if (pellets > budget) pellets = budget;
+        g_projTokens -= pellets;
+    }
     for (int p = 0; p < pellets; p++)
     {
         float dir[3];
