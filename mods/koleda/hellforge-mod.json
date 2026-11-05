@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.koleda",
   "name": "Koleda",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "icon": "icon.png",
   "description": "Koleda's kit from Girls' Frontline 2 for your Helldiver (AK-12, a Vanguard). Hallucination calls the Sinner, an exosuit of her own that follows her, shoots by its gear and takes half the damage aimed at her; pressed again while it stands, Winner! restores it. Eye of the Snow Wolf fires heavy rounds at her target and sends the Sinner on the offensive (S+); Tactical Playbook gives Kinetic Recovery and sets it to balanced (S). Sinner actions build Upshift, more damage per stack. TEST BUILD: untested in game. Solo or host. Keys in koleda.ini; numbers on the MODS tab (Mod Options Menu). HUD needs Bingus Shared Loader and HD2Runtime. Installs beside the author's other character kits (pick one on the MODS tab). No character model included.",
   "gameplay": true,

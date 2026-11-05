@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.7"
+#define VERSION "0.1.8"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -82,7 +82,10 @@ static float s_s3Cd = 90;
 static int s_cleanse = 1;
 /* driving (sinner_drive.h): the probe's numbers; -1 not known */
 static int s_drive = 1, s_driveTest = 0;
-static int s_turnOn = 0;   /* 0.1.7: off (the HUD side walks and turns it through its animation, Exo Autopilot's way) */
+static int s_turnOn = 0;
+/* 0.1.8: its minigun rounds' speed (her copies only): at the base's ~1000 m/s a round's tracer is first drawn a frame
+ * along its path, metres out from the arm (it looked spawned far from the Sinner); 0 keeps the base's */
+static float s_roundSpeed = 250;   /* 0.1.7: off (the HUD side walks and turns it through its animation, Exo Autopilot's way) */
 static float g_walkGoal[3];
 static int g_walkWant;
 static double g_walkAckAt = -100;
@@ -108,7 +111,7 @@ static const KbSetting kSettings[] = {
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("kr_seconds", s_krSeconds, 0, 120), KB_F("kr_mult", s_krMult, 1, 5), KB_F("kr_heal", s_krHeal, 0, 1000),
     KB_F("kr_sinner_heal", s_krSinnerHeal, 0, 1),
     KB_F("s3_cooldown", s_s3Cd, 0, 3600), KB_I("cleanse", s_cleanse, 0, 2),
-    KB_I("drive", s_drive, 0, 1), KB_I("turn", s_turnOn, 0, 1), KB_I("drive_test", s_driveTest, 0, 1), KB_I("loco_manager", s_locoManager, -1, 100000000),
+    KB_I("drive", s_drive, 0, 1), KB_I("turn", s_turnOn, 0, 1), KB_F("round_speed", s_roundSpeed, 0, 3000), KB_I("drive_test", s_driveTest, 0, 1), KB_I("loco_manager", s_locoManager, -1, 100000000),
     KB_I("loco_map", s_locoMap, -1, 65536), KB_I("loco_records", s_locoRecords, -1, 65536), KB_I("loco_stride", s_locoStride, 16, 4096),
     KB_I("stick_offset_fwd", s_stickFwd, -1, 4096), KB_I("stick_offset_side", s_stickSide, -1, 4096), KB_I("stick_offset_turn", s_stickTurn, -1, 4096),
     KB_I("line_of_sight", s_sight, 0, 1), KB_F("first_person", s_fpDistance, 0.1, 2),
@@ -166,7 +169,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Driving with the game's own locomotion (the probe's numbers; -1 unknown: the Sinner slides instead).\n"
                "; drive_test 1 writes the stick without the engine and mover calls.\n"
                "; turn 1: it turns toward what it fires at, else the way it slides (its turn record, 0.1.4).\n"
-               "turn = %d\ndrive = %d\ndrive_test = %d\nloco_manager = %d\nloco_map = %d\nloco_records = %d\nloco_stride = %d\n"
+               "; round_speed: m/s of its minigun rounds (her copies; 0: the Patriot's own): slower, its tracers start at its arm.\n"
+               "round_speed = %g\nturn = %d\ndrive = %d\ndrive_test = %d\nloco_manager = %d\nloco_map = %d\nloco_records = %d\nloco_stride = %d\n"
                "stick_offset_fwd = %d\nstick_offset_side = %d\nstick_offset_turn = %d\n"
                "; Aiming: line_of_sight 1, Eye of the Snow Wolf's target must be in sight. first_person: the camera this close to\n"
                "; her head (m) counts as first person.\nline_of_sight = %d\nfirst_person = %g\n"
@@ -181,7 +185,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_fireRange, s_pullOn, (double)s_pullEvery, (double)s_pullRadius, s_pullExplosion,
             (double)s_s1Cd, s_s1Rounds, (double)s_s1Every, (double)s_s1Cone, (double)s_s1Range, s_s1Round,
             (double)s_s2Cd, (double)s_krSeconds, (double)s_krMult, (double)s_krHeal, (double)s_krSinnerHeal, (double)s_s3Cd, s_cleanse,
-            s_turnOn, s_drive, s_driveTest, s_locoManager, s_locoMap, s_locoRecords, s_locoStride, s_stickFwd, s_stickSide, s_stickTurn,
+            (double)s_roundSpeed, s_turnOn, s_drive, s_driveTest, s_locoManager, s_locoMap, s_locoRecords, s_locoStride, s_stickFwd, s_stickSide, s_stickTurn,
             s_sight, (double)s_fpDistance);
 }
 
@@ -1285,6 +1289,19 @@ static void TurnFrame(void)
         Log("turning: its facing against where it should face: %.0f degrees off (%.1f s of turning)", acos(dot > 1 ? 1 : dot < -1 ? -1 : dot) * 57.2958, g_now - g_turnSince);
     }
 }
+static uint8_t g_speedSet[5];
+static void RoundSpeed(int r)
+{
+    if (r < 0 || r > 2 || g_speedSet[r] || s_roundSpeed <= 0 || !g_round[r] || !hf->set_live) return;
+    g_speedSet[r] = 1;
+    HfField f = HF_FIELD(ProjectileSettings, velocity);
+    HfValue v = HF_F32(s_roundSpeed);
+    HfLiveValue was;
+    memset(&was, 0, sizeof was);
+    if (hf->get_live) hf->get_live(self, (HfRef)g_round[r], &f, &was);
+    int ok = hf->set_live(self, (HfRef)g_round[r], &f, &v, 0);
+    Log("the Sinner's %s rounds (projectile %u): %.0f m/s -> %.0f (%s)", kGear[r], g_round[r], was.base.number, (double)s_roundSpeed, ok ? "set" : "refused");
+}
 static int g_shootRocket;   /* 0.1.3: this shot is the left arm's rocket */
 static double g_rocketNext;
 static int SinnerShoot(int arm, uint32_t target, const float at[3])
@@ -1318,6 +1335,7 @@ static int SinnerShoot(int arm, uint32_t target, const float at[3])
         if (!hit && w <= n - 1.8f - 1.5f) return 0;   /* a wall between */
     }
     int r = g_shootRocket ? 4 : g_gear;
+    RoundSpeed(r);
     uint32_t round = g_roundBad[r] ? (uint32_t)s_roundFallback : g_round[r];
     int res = hf->spawn_projectile(self, round, from, d);
     if (res == HF_ACT_WAITING) return 0;
