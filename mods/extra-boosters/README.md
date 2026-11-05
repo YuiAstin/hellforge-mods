@@ -16,6 +16,15 @@ booster number and stores what it receives without checking it, so a player with
 reads past the end of their own table. HellForge's mod sync offers the mod to the other players; don't play with
 someone who declines it.
 
+## Known limits
+
+- **Other mods that write booster values** (HellForge's `set_live` on boosters, so Stat Tuner's Boosters page, and
+  Personal Ship Support's ranked boosters) still write to the game's original table, which the game no longer reads
+  once this mod has moved it. Their booster tuning has no effect while Extra Boosters is on. Mods that only read the
+  table (Diver Kit) still see the 21 vanilla boosters, but not the new one.
+- **Saved loadout:** if you log in without the mod after equipping the new booster, the game resets your booster to
+  none.
+
 ## Settings (`extra-boosters.ini`)
 
 Written with the defaults on first launch.
