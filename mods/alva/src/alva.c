@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.1"
+#define VERSION "0.2.2"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her chill bursts come often */
@@ -59,7 +59,7 @@ static int s_shieldOnCast = 1;
 static int s_confMax = 10, s_prepMax = 3;
 static float s_confEvery = 0.3f;
 static float s_chillHit = 10, s_chillBurst = 25, s_chillS3 = 20, s_chillShot = 15;
-static float s_fieldFreeze = 3, s_burstFieldRadius = 4, s_burstFieldSeconds = 6;
+static float s_fieldFreeze = 3, s_burstFieldRadius = 10, s_burstFieldSeconds = 6;   /* 0.2.2: 10 m, an EMS field's */
 static float s_frozenSeconds = 4, s_shatterMult = 8, s_stunBuildup = 200, s_slowBuildup = 60;
 static float s_s1Cd = 25, s_s1Seconds = 12, s_s1Range = 30, s_s1Reach = 150, s_s1Every = 0.4f;
 static int s_s1Round = 305;
@@ -719,7 +719,7 @@ static void EchoFrame(void)
         for (int j = 0; j < FOES; j++)
         {
             float q[3];
-            if (g_foe[j] && TargetPos(g_foe[j], g_foeRes[j], q) && Dist2(q, p) <= (s_s2Spread + 4) * (s_s2Spread + 4)) Chill(g_foe[j], s_chillBurst, "an EMS burst");
+            if (g_foe[j] && TargetPos(g_foe[j], g_foeRes[j], q) && Dist2(q, p) <= s_burstFieldRadius * s_burstFieldRadius) Chill(g_foe[j], s_chillBurst, "an EMS burst");
         }
     }
 }
@@ -1244,7 +1244,8 @@ static void Tick(HfMod* mod, float dt, void* user)
 /* ---- Mod Options Menu ------------------------------------------------------------------------------------------- */
 static const KbOption kOptions[] = {
     {"shield_amount", &s_shieldAmount, NULL}, {"shield_range", &s_shieldRange, NULL}, {"shield_every", &s_shieldEvery, NULL},
-    {"conf_max", NULL, &s_confMax}, {"shatter_mult", &s_shatterMult, NULL}, {"frozen_seconds", &s_frozenSeconds, NULL},
+    {"conf_max", NULL, &s_confMax}, {"shatter_mult", &s_shatterMult, NULL}, {"field_freeze_seconds", &s_fieldFreeze, NULL},
+    {"burst_field_radius", &s_burstFieldRadius, NULL}, {"burst_field_seconds", &s_burstFieldSeconds, NULL}, {"frozen_seconds", &s_frozenSeconds, NULL},
     {"s1_cooldown", &s_s1Cd, NULL}, {"s1_seconds", &s_s1Seconds, NULL}, {"s2_cooldown", &s_s2Cd, NULL}, {"s2_field_seconds", &s_s2FieldSeconds, NULL},
     {"s3_cooldown", &s_s3Cd, NULL}, {"s3_freeze_at", NULL, &s_s3FreezeAt}, {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
 };
