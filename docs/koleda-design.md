@@ -41,21 +41,33 @@ game code and turns itself off with a log line.
   its code as any stratagem; the Pelican drops it. `call_mode 0`: the call is granted once at the drop, unlimited, with
   the stratagem's own 90 s cooldown (the Sinbreaker's way, proven in Voymastina 0.4.x), and C only sets off Winner!.
   The call's package is held for the session (`load_package`, as the Sinbreaker's).
-- **Which exosuit is hers:** the first spawn of the Sinner's resource after she was granted a call. It counts as landed
+- **Which exosuit is hers:** a spawn of the Sinner's resource that this machine simulates, while a call she was granted
+  is pending or no Sinner of hers stands (co-op with two Koledas on one host is not handled). It counts as landed
   once it has stood still (under 0.3 m in 1.5 s) on the ground (a ray finds ground within 2.5 m under it) at least
   5 s after it spawned.
 - **Driving (behind `sinner_drive.h`; stubbed until the probe):** as Exo Companion drives a suit (research on branch
   `koleda`, docs/research/exo-companion.md): the stick input written into its VehicleLocomotion record, engine and
-  physics mover on, its own arm weapons through the game's trigger. All of it sits behind five calls in
-  `mods/koleda/src/sinner_drive.h`: `SinnerDriveReady`, `SinnerDriveStart`, `SinnerDriveStick`, `SinnerDriveFire`,
-  `SinnerDriveStop`. The stick write is written and reads its record layout from the ini (`loco_manager`, `loco_map`,
+  physics mover on. Movement only: its firing is always the kit's own spawned rounds (below), never the game's weapon
+  trigger (Yui). All of it sits behind four calls in `mods/koleda/src/sinner_drive.h`: `SinnerDriveReady`,
+  `SinnerDriveStart`, `SinnerDriveStick`, `SinnerDriveStop`. The stick write is written and reads its record layout from the ini (`loco_manager`, `loco_map`,
   `loco_records`, `loco_stride`, `stick_offset_fwd`, `stick_offset_side`, `stick_offset_turn`; -1 unknown, so off).
-  Engine, mover and trigger return 0 until the probe gives their signatures. `drive_test 1` lets the stick writes run
+  Engine and mover return 0 until the probe gives their signatures. `drive_test 1` lets the stick writes run
   without the engine and mover calls (to see whether the stick alone moves it).
 - **The fallback while driving is unavailable (untested):** the Sinner is moved with Voymastina's warp setter
   (game.dll+0x5A2BB0) toward its follow point a little each frame (a slide: no leg animation), following the ground and
-  stopping at walls, and it fires spawned projectiles from its shoulders (Exusiai's summoned guns' approach): copies of
-  the AR-23 Liberator's round (`add_projectile`, `sinner_round` 276).
+  stopping at walls.
+- **Its fire (driving or not; untested):** rounds of hers spawned from its shoulders and credited to her (Exusiai's
+  summoned guns' approach), copies made with `add_projectile`, one round per gear: `round_n` 241 (the R-63CS Diligence
+  Counter Sniper's, medium penetration, at whatever attacks her), `round_s` 276 (the AR-23 Liberator's), `round_plus`
+  177 (the JAR-5 Dominator's, heavier, fired faster); a round that cannot be spawned falls back to `round_fallback` 7
+  (the Guard Dog's).
+- **Navmesh pathing (`nav_path 1`; untested):** an upgrade over Exo Companion's straight line. If the Sinner has an
+  active navigation record of its own (`[game+0x3326418]`: map +0x30, records +0x50, 0xA8 each; +0x10 active, +0x54
+  its position, +0x60 destination, +0x6C next waypoint, +0x78 path goal; docs/research/ai-modding.md on branch
+  `ai-probe`), it is sent to its follow point with the game's set_destination (`game+0x5B36C0(NULL, entity, &pos)`, as
+  Lost Contact's patrols call it, guarded by the same function-start check) once a second, and it steers at +0x6C, the
+  path's next waypoint (when that is within 30 m), instead of straight at its point. Without one: the straight line.
+  Whether an exosuit has a navigation record is what the Drive Probe checks.
   - **The warp setter's guard:** it crashed on entities without a movement record (a strider's rider, a dead enemy).
     With `warp_needs_walks 1` (the default) the Sinner is moved only if `Walks()` finds an active navigation record
     for it, it is this machine's (descriptor authority bit) and numbered under 0x400000. An empty exosuit may well have
@@ -63,8 +75,12 @@ game code and turns itself off with a log line.
     the warp setter is safe on an empty exosuit is a question for the probe (`warp_needs_walks 0` skips the check, at
     the risk of that crash).
 - **Leash (untested):** it walks toward her when more than `leash_start` (10) m away and stops within `leash_stop` (6).
-  More than `leash_warp` (40) m away, or stuck (moving but under 0.5 m in `stuck_seconds`, 4), it is warped beside her
-  (3 m to her side, on the ground, same guard).
+  **Stuck** (walking, but its own speed under 0.5 m/s for `stuck_seconds`, 1.5): it is pushed through the obstacle, a
+  step of `push_step` (1.5) m at a time along its way (toward the next waypoint, or her) with the warp setter, each step
+  put on the ground found by the game's raycast straight down there (from 2 m above, 6 m down; skipped with no ground,
+  or a drop or climb over 2.5 m), until it moves on its own again, at most `push_steps` (10) steps (Voymastina's early
+  mech dash went through walls this way). **The last resort:** more than `leash_warp` (40) m away, it is warped beside
+  her (3 m to her side, on the ground, same guard).
 - **Piloting:** if she gets in it herself (the seat read, as Voymastina's), its own driving, firing and the damage share
   pause.
 
@@ -140,7 +156,8 @@ pins; `cleanse 2` calls them unpinned (the build check by module size still hold
 | game+0x4A7550 | the velocity setter (after a leash warp) | Voymastina | pinned as Voymastina |
 | exe+0x79F860 / exe+0x7F4590 | world id and raycast (sight, ground, walls) | Lemuen / Alva (Helldiver Survival Rework) | pinned |
 | game+0x3326688 | the health manager: read, and the Sinner's health write (+20) | HD2Runtime research, every kit | record checks, read back |
-| game+0x3326418 | navigation records (`Walks()`) | Voymastina 0.4.1 (Lost Contact's layout) | read only |
+| game+0x3326418 | navigation records (`Walks()`, the pathing's destination and next waypoint) | Voymastina 0.4.1, Lost Contact, Nav Probe | read only |
+| game+0x5B36C0 | set_destination (the Sinner's pathing) | Lost Contact (Nav Probe) | function-start check (Lost Contact's `Boundary()`), as Lost Contact |
 | game+0x3326E68 | the command bus, seat read (is she piloting it) | Voymastina (Khi's reading) | read only |
 | game+0x347CE50 / +0x347CEF0 / +0x3326348 | her stratagem record, peer, clock (the call grant) | Voymastina (HD2Runtime research) | Voymastina's GrantPins |
 | game+0x3326620 | the status manager (Winner!'s cleanse) | static research (branch `alva`) | read only |
@@ -151,10 +168,11 @@ pins; `cleanse 2` calls them unpinned (the build check by module size still hold
 
 1. VehicleLocomotion: which manager holds it (`[game+?]`), where its entity map and records sit in it, the record
    stride (0xA4?) and the stick offsets (`in_x`, `in_y`, `in_z`: forward, side, turn).
-2. The engine setter (`eng_set` 0xFD9D40), the physics mover (`mover` 0x6FE480) and the weapon trigger (`wtrig` near
-   0x11B602A): their entries, signatures and pins.
+2. The engine setter (`eng_set` 0xFD9D40) and the physics mover (`mover` 0x6FE480): their entries, signatures and
+   pins. (The weapon trigger is not needed: the Sinner's fire stays spawned rounds.)
 3. Does the warp setter work on an empty exosuit (one nobody piloted)? Does an empty exosuit have a navigation record
-   (`Walks()`), or a movement record of another kind to check instead?
+   (`Walks()`; it also decides the pathing), or a movement record of another kind to check instead? Does
+   set_destination on it fill +0x6C with waypoints?
 4. Do enemies attack an empty exosuit; do hits on it come through the damage event with it as the target?
 5. Does refilling the call's entry (uses 1, cooldown 0) bring the stratagem back in her list, or does a used-up entry
    need a fresh append?

@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "Koleda HUD",
+  "resource": "mods/yui/koleda_hud",
+  "guid": "0f4a54f2-a53b-5380-b95e-c9d1ce00aece",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.30.0",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}
