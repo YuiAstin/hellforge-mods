@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "name": "Cloak Probe HUD",
+  "resource": "mods/yui/cloak_probe_hud",
+  "guid": "9e162aa3-b820-5377-9754-3f1fc4f3f123",
+  "requires": {
+    "bingus": {"min_release": 15, "api": 1},
+    "hd2runtime": {"min_version": "0.30.0", "api": 1, "module": "mods/skyeshade/hd2runtime"}
+  }
+}
