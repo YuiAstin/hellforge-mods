@@ -12,6 +12,14 @@
  *                   reward ammo rack, cache_reward 0, else Resupply uses). A base: the spawner structures within
  *                   base_radius m of each other (bug holes, bot fabricators, Illuminate spawners), noted as they spawn;
  *                   cleared: the last one closed (HF_ON_BUGHOLE), destroyed (HF_ON_KILL) or gone / at 0 health.
+ *   poi_extra       0.3.0: the loot caches at points of interest that hold stims or grenades come up poi_extra times as
+ *                   often. The caches' tables are HellForge's own research (native/mod-loader/forge_credits.c, 0.4.0:
+ *                   the loot roll game+0xF3A800, its context +0x18 -> +0x2D0 -> +0x68: tables at +0x90, 0x28 each, count
+ *                   +0x98; a table: +4 weight, +8 minimum difficulty, its items at +0x18 (0x30 each, +0 the entity),
+ *                   count +0x20). The roll is hooked in front of HellForge's own hook (mods' hooks run first): the weight
+ *                   is raised for the roll and put back after it, so HellForge's Forge Credits chance, which saves a
+ *                   table again whenever it holds something else, never builds on a raised one. Every player rolls the
+ *                   caches from the mission's seed: everyone needs the same setting (joined players' games apply it too).
  *
  * Commando is told by the record (the Mission Probe, 2026-11-04): only a Commando mission puts Call In Destroyer (type
  * 123) on the player's stratagem record. The record is read 8 s after the mission starts (when the probe read it), then
@@ -37,7 +45,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.0"
+#define VERSION "0.3.0"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -73,6 +81,7 @@ static int Lookup(uintptr_t at, uint32_t key, uint32_t limit, uint32_t* index)
 
 /* ---- settings ------------------------------------------------------------------------------------------------------- */
 static int s_noTimer = 1, s_resupplyCalls = 1, s_extraCalls = 1, s_everyMission = 0;
+static int s_poiExtra = 2;
 static int s_caches = 1, s_cacheSmall = 1, s_cacheLarge = 2, s_cacheReward = 0, s_baseRadius = 40;
 static int ReadSettings(const char* path)
 {
@@ -100,6 +109,7 @@ static int ReadSettings(const char* path)
         else if (!strcmp(k, "cache_calls_large")) { if (x >= 0 && x <= 5) s_cacheLarge = x; }
         else if (!strcmp(k, "cache_reward")) s_cacheReward = x ? 1 : 0;
         else if (!strcmp(k, "base_radius")) { if (x >= 10 && x <= 200) s_baseRadius = x; }
+        else if (!strcmp(k, "poi_extra")) { if (x >= 1 && x <= 10) s_poiExtra = x; }
     }
     fclose(f);
     return 1;
@@ -111,6 +121,7 @@ static void LoadSettings(void)
     if (!ReadSettings(path)) Log("settings: no commando-plus.ini, the defaults");
     Log("settings: no_timer %d, resupply_calls %d, extra_calls %d, every_mission %d (%s)", s_noTimer, s_resupplyCalls, s_extraCalls,
         s_everyMission, s_everyMission ? "every mission" : "Commando missions only");
+    Log("settings: poi_extra %d (stim and grenade caches %s)", s_poiExtra, s_poiExtra > 1 ? "more often" : "as the game has them");
     Log("settings: outpost_caches %d (small base %d, large base %d calls of %s), base_radius %d m", s_caches, s_cacheSmall, s_cacheLarge,
         s_cacheReward ? "Resupply" : "the reward ammo rack", s_baseRadius);
 }
@@ -443,6 +454,98 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 static void OnKill(HfMod* mod, const HfEventInfo* info, void* user) { Push(((const HfKillEvent*)info)->victim, 1000); }
 static void OnBughole(HfMod* mod, const HfEventInfo* info, void* user) { Push(((const HfBugholeEvent*)info)->entity, 1001); }
 
+
+/* ---- 0.3.0: more stims and grenades at points of interest (the loot caches' roll) ------------------------------------ */
+#define LOOT_ROLL 0xF3A800u
+#define STIMS_WORLD 0xB4CA4C5B922F7965ull    /* pickup/v1/health-pack-world (HD2Runtime's pickup catalogue) */
+#define GRENADE_BOX 0x97AF34FBF093409Cull    /* pickup/v1/grenade-box */
+typedef uintptr_t (*LootRollFn)(uintptr_t params, uintptr_t unused, uintptr_t context, uintptr_t r9);
+static LootRollFn g_lootOriginal;
+static atomic_int g_lootCommando = -1;   /* -1 not known yet this mission, 0 no, 1 yes */
+static atomic_uint g_lootRolls, g_lootBoosts;
+static int LootTables(uintptr_t context, uintptr_t* tables, uint32_t* count)
+{
+    uintptr_t lg, settings, gen;
+    if (!context || !(lg = Pointer(context + 0x18)) || !(settings = Pointer(lg + 0x2D0)) || !(gen = Pointer(settings + 0x68)) ||
+        !(*tables = Pointer(gen + 0x90)) || !ReadAt(gen + 0x98, count, 4) || !*count || *count > 32) return 0;
+    return 1;
+}
+/* what a table can drop: 1 stims, 2 grenades (or both) */
+static int LootHolds(uintptr_t table, char* list, size_t n)
+{
+    uintptr_t items = Pointer(table + 0x18);
+    uint32_t count = 0;
+    int what = 0;
+    size_t at = 0;
+    if (list && n) list[0] = 0;
+    if (!items || !ReadAt(table + 0x20, &count, 4) || count > 256) return 0;
+    for (uint32_t i = 0; i < count; i++)
+    {
+        uint64_t e = 0;
+        if (!ReadAt(items + 0x30ull * i, &e, 8)) break;
+        if (e == STIMS_WORLD) what |= 1;
+        if (e == GRENADE_BOX) what |= 2;
+        if (list && at + 20 < n && i < 12) at += (size_t)snprintf(list + at, n - at, " %016llx", (unsigned long long)e);
+    }
+    return what;
+}
+static int LootApplies(void)
+{
+    if (s_everyMission) return 1;
+    int c = atomic_load(&g_lootCommando);
+    if (c >= 0) return c;
+    uintptr_t st;
+    uint32_t count = 0;
+    if (!List(&st, &count) || !count) return 0;   /* not known yet: this roll as the game has it */
+    c = Find(st, count, CALL_IN) >= 0;
+    atomic_store(&g_lootCommando, c);
+    return c;
+}
+static uintptr_t LootRoll(uintptr_t params, uintptr_t unused, uintptr_t context, uintptr_t r9)
+{
+    uintptr_t tables = 0;
+    uint32_t count = 0;
+    struct { uintptr_t at; int32_t was; } saved[32];
+    int ns = 0;
+    unsigned roll = atomic_fetch_add(&g_lootRolls, 1);
+    if (LootTables(context, &tables, &count))
+    {
+        int applies = s_poiExtra > 1 && LootApplies();
+        for (uint32_t i = 0; i < count; i++)
+        {
+            uintptr_t t = tables + 0x28ull * i;
+            int32_t w = 0, m = 0;
+            uint32_t id = 0;
+            char list[260];
+            int holds = LootHolds(t, list, sizeof list);
+            if (!ReadAt(t, &id, 4) || !ReadAt(t + 4, &w, 4) || !ReadAt(t + 8, &m, 4)) continue;
+            if (roll < 2) Log("loot roll %u: table %u (%08x) weight %d, minimum difficulty %d,%s%s items:%s", roll, i, id, w, m,
+                              holds & 1 ? " STIMS" : "", holds & 2 ? " GRENADES" : "", list);
+            if (!applies || !holds || w <= 0) continue;
+            int64_t up = (int64_t)w * s_poiExtra;
+            int32_t want = up > 0x7FFFFFFF ? 0x7FFFFFFF : (int32_t)up;
+            if (hf->write(t + 4, &want, 4)) continue;
+            saved[ns].at = t + 4;
+            saved[ns].was = w;
+            ns++;
+        }
+        if (roll < 2) Log("loot roll %u: %u tables; %s", roll, count, applies ? "stim / grenade caches raised" : s_poiExtra > 1 ? "not raised (not Commando, or not known yet)" : "poi_extra 1");
+        if (ns) atomic_fetch_add(&g_lootBoosts, 1);
+    }
+    else if (roll < 2) Log("loot roll %u: its tables do not read (context %p)", roll, (void*)context);
+    uintptr_t r = g_lootOriginal(params, unused, context, r9);
+    for (int k = 0; k < ns; k++) hf->write(saved[k].at, &saved[k].was, 4);   /* as they were: HellForge never sees a raised one */
+    return r;
+}
+static void LootInstall(void)
+{
+    if (s_poiExtra <= 1) { Log("poi_extra 1: the loot roll is not hooked"); return; }
+    if (!hf->code_matches(game + LOOT_ROLL, "4c 8b dc 53 56 57 41 54 41 57 48 81 ec 30 01 00 00"))
+    { Log("poi_extra off: game.dll+0x%X is not the loot roll HellForge researched", LOOT_ROLL); return; }
+    if (hf->hook(self, game + LOOT_ROLL, (void*)LootRoll, (void**)&g_lootOriginal)) { Log("poi_extra off: the loot roll could not be hooked (the log above says why)"); return; }
+    Log("poi_extra: the loot roll hooked (stim and grenade caches x%d in Commando%s)", s_poiExtra, s_everyMission ? " and every mission" : "");
+}
+
 /* ---- the mission ---------------------------------------------------------------------------------------------------- */
 static int g_inMission, g_checkTries, g_timerTries;
 static double g_checkAt, g_timerAt, g_recheckAt;
@@ -512,6 +615,8 @@ static void Check(void)
     LogList("after landing", st, count);
     int slot = Find(st, count, CALL_IN);
     g_commando = slot >= 0;
+    if (atomic_load(&g_lootRolls) && atomic_load(&g_lootCommando) < 0) Log("poi_extra: %u loot rolls came before this check (as the game had them)", atomic_load(&g_lootRolls));
+    atomic_store(&g_lootCommando, g_commando);
     Log("Commando %s (Call In Destroyer, type %u, %s the record)%s", g_commando ? "DETECTED" : "not detected", CALL_IN,
         g_commando ? "on" : "not on", g_commando ? "" : s_everyMission ? ": every_mission 1, the options apply anyway" : ": nothing applied (every_mission 0)");
     if (!g_commando && !s_everyMission) return;
@@ -547,7 +652,16 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (m != g_inMission)
     {
         g_inMission = m;
-        if (!m) { CachesSummary("mission end"); CachesReset(); g_ringTail = atomic_load(&g_ringHead); }   /* (not at the start: the base's spawners spawn while it loads) */
+        if (!m)
+        {
+            CachesSummary("mission end");
+            CachesReset();
+            g_ringTail = atomic_load(&g_ringHead);
+            if (atomic_load(&g_lootRolls)) Log("mission end: %u loot rolls, %u with stim / grenade caches raised", atomic_load(&g_lootRolls), atomic_load(&g_lootBoosts));
+            atomic_store(&g_lootCommando, -1);
+            atomic_store(&g_lootRolls, 0);
+            atomic_store(&g_lootBoosts, 0);
+        }   /* (not at the start: the base's spawners spawn while it loads) */
         g_checkTries = g_applied = g_commando = g_timerTries = 0;
         g_timerAt = g_recheckAt = 0;
         g_checkAt = m ? g_now + 8 : 0;
@@ -568,6 +682,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     if (!game || !exe || gs != 74727424u || xs != 60719104u) { g_ready = -1; Log("REFUSED: not build " BUILD "'s modules: nothing applied"); return; }
     g_ready = 1;
     Log("ready: game.dll and helldivers2.exe are build " BUILD "'s");
+    LootInstall();
 }
 
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
