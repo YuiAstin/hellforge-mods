@@ -523,6 +523,171 @@ local function ammo_step()
     if not A.told then A.told = true; log(('[Executor HUD] ammo: %s (%s), %d rounds: reported each frame'):format(tostring(a.name), tostring(a.feed), a.rounds)) end
 end
 
+-- ---- his damage numbers (0.2.4, as Lemuen's 0.1.3-0.1.6c): a number over each hit his skills raised to numbers_at
+-- times or more (executor.dll's executor_hits: x, y, z, damage, raised). The view camera: the engine camera standing
+-- where his view is (executor_view). Parts adapted from Chef Shared Loader by Th3chef (github.com/Th3chef/Chef-Shared-
+-- Loader, src/loader.lua): finding the view camera (a living unit with Unit.num_cameras > 0, its Unit.camera(u, 1)),
+-- projecting a world point with Camera.world_to_screen (bottom-left origin) and the behind-the-camera check, with
+-- Th3chef's permission (as Lemuen's HUD).
+pcall(ffi.cdef, [[ typedef int (*exehits1)(unsigned int version, float *out, int max, uint32_t *seq);
+typedef int (*exeview1)(unsigned int version, float *out); ]])
+local MK = {told = false}
+local CAM = {unit = nil, list = nil, i = 0, retry = 0}
+local function S() return rawget(_G, 'stingray') end
+-- The camera standing where his view is (executor.dll's executor_view), checked every second (Lemuen 0.1.6b took the
+-- first unit with a camera, one 6 km under the map, and every number was "behind" it).
+local VW = {fn = nil, buf = ffi.new('float[6]'), look = 0, checked = 0, told = 0}
+local function his_view(t)
+    if not VW.fn then
+        if t < VW.look then return nil end
+        VW.look = t + 2
+        local module = k32.exehud1_GetModuleHandleA('executor.dll')
+        local proc = module ~= nil and k32.exehud1_GetProcAddress(module, 'executor_view') or nil
+        if proc == nil then return nil end
+        VW.fn = ffi.cast('exeview1', proc)
+    end
+    if VW.fn(1, VW.buf) ~= 1 then return nil end
+    return VW.buf[0], VW.buf[1], VW.buf[2]
+end
+local function cam_gap(s, u, hx, hy, hz)
+    local okc, c = pcall(s.Unit.camera, u, 1)
+    if not (okc and c) then return nil end
+    local okp, p = pcall(s.Camera.world_position, c)
+    if not (okp and p) then return nil end
+    local x, y, z = s.Vector3.to_elements(p)
+    if type(x) ~= 'number' then return nil end
+    return math.sqrt((x - hx) ^ 2 + (y - hy) ^ 2 + (z - hz) ^ 2), x, y, z
+end
+local function cam_unit(s, t)
+    local hx, hy, hz = his_view(t)
+    if CAM.unit then
+        local ok, alive = pcall(s.Unit.alive, CAM.unit)
+        if ok and alive == true then
+            if not hx or t < VW.checked then return CAM.unit end
+            VW.checked = t + 1
+            local gap = cam_gap(s, CAM.unit, hx, hy, hz)
+            if gap and gap < 4 then return CAM.unit end
+        end
+        CAM.unit = nil
+    end
+    if not CAM.list then
+        if t < CAM.retry then return nil end
+        local okw, w = pcall(s.Application.main_world)
+        if not (okw and w) then CAM.retry = t + 2; return nil end
+        local oku, units = pcall(s.World.units, w)
+        if not (oku and type(units) == 'table') then CAM.retry = t + 2; return nil end
+        CAM.list, CAM.i, CAM.best, CAM.gap, CAM.seen = units, 0, nil, nil, 0
+    end
+    local last = math.min(#CAM.list, CAM.i + 500)
+    for i = CAM.i + 1, last do
+        local u = CAM.list[i]
+        local oka, alive = pcall(s.Unit.alive, u)
+        if oka and alive == true then
+            local okn, n = pcall(s.Unit.num_cameras, u)
+            if okn and type(n) == 'number' and n > 0 then
+                CAM.seen = CAM.seen + 1
+                if not hx then CAM.unit, CAM.list = u, nil; return u end
+                local gap = cam_gap(s, u, hx, hy, hz)
+                if gap and (not CAM.gap or gap < CAM.gap) then CAM.best, CAM.gap = u, gap end
+            end
+        end
+    end
+    CAM.i = last
+    if last >= #CAM.list then
+        local found = CAM.best and CAM.gap and CAM.gap < 4
+        if VW.told < 6 then
+            VW.told = VW.told + 1
+            log(('[Executor HUD] camera: %d cameras in the world, nearest to his view %s'):format(CAM.seen,
+                CAM.gap and ('%.1f m away%s'):format(CAM.gap, found and ' (taken)' or ' (too far: none taken)') or 'none'))
+        end
+        CAM.list = nil
+        if found then CAM.unit = CAM.best; VW.checked = t + 1; return CAM.unit end
+        CAM.retry = t + 2
+    end
+    return nil
+end
+local mk_t = 0
+-- (0.1.3: her damage numbers, below, share this frame's view)
+local HN = {fn = nil, buf = ffi.new('float[320]'), seq = ffi.new('uint32_t[1]'), live = {}, primed = false}
+local function view(d)
+    local s = S()
+    if type(s) ~= 'table' or not (s.Unit and s.Camera and s.Vector3 and s.Quaternion and s.World and s.Application) then return nil end
+    local u = cam_unit(s, mk_t)
+    if not u then return nil end
+    local c = s.Unit.camera(u, 1)
+    if not c then return nil end
+    local cx, cy, cz = s.Vector3.to_elements(s.Camera.world_position(c))
+    local fx, fy, fz = s.Vector3.to_elements(s.Quaternion.forward(s.Camera.world_rotation(c)))
+    local W, H = d.width, d.height or (d.width * 9 / 16)
+    -- the engine's screen pixels against the overlay's (the same at most resolutions; scaled if not)
+    local bw, bh = W, H
+    if s.Application.back_buffer_size then
+        local okb, a, b = pcall(s.Application.back_buffer_size)
+        if okb and type(a) == 'number' and a > 0 then bw, bh = a, b end
+    end
+    local kx, ky = W / bw, H / bh
+    if not MK.told then MK.told = true; log(('[Executor HUD] view: overlay %dx%d, screen %dx%d'):format(W, H, bw, bh)) end
+    return {s = s, c = c, cx = cx, cy = cy, cz = cz, fx = fx, fy = fy, fz = fz, W = W, H = H, kx = kx, ky = ky}
+end
+-- a world point on the overlay, or nil when behind the camera or off screen
+local function project(v, x, y, z)
+    local ax, ay, az = x - v.cx, y - v.cy, z - v.cz
+    if ax * v.fx + ay * v.fy + az * v.fz <= 0.5 then return nil end
+    local sx, sy = v.s.Vector3.to_elements(v.s.Camera.world_to_screen(v.c, v.s.Vector3(x, y, z)))
+    if type(sx) ~= 'number' then return nil end
+    sx, sy = sx * v.kx, v.H - sy * v.ky                    -- the overlay's origin is its top-left
+    if sx <= 0 or sx >= v.W or sy <= 0 or sy >= v.H then return nil end
+    return sx, sy, math.sqrt(ax * ax + ay * ay + az * az)
+end
+
+local HN_LIFE, HN_RISE, HN_MAX = 2.2, 46, 48
+local DG = {next = 5, told = 0, view_nil = 0, view_ok = 0, quiet = 0, seq = 0}
+local function numbers_draw(d, dt, v)
+    if not HN.fn then
+        local module = k32.exehud1_GetModuleHandleA('executor.dll')
+        local proc = module ~= nil and k32.exehud1_GetProcAddress(module, 'executor_hits') or nil
+        if proc == nil then return end
+        HN.fn = ffi.cast('exehits1', proc)
+    end
+    local n = HN.fn(1, HN.buf, 64, HN.seq)
+    if not HN.primed then HN.primed = true; n = 0 end    -- (not the hits from before the HUD looked)
+    for i = 0, n - 1 do
+        if (DG.hits or 0) < 8 then
+            DG.hits = (DG.hits or 0) + 1
+            local hx, hy, hz = HN.buf[i * 5], HN.buf[i * 5 + 1], HN.buf[i * 5 + 2] + 0.6
+            local sx, sy = nil, nil
+            if v then sx, sy = project(v, hx, hy, hz) end
+            log(('[Executor HUD] number %d: %.0f at %.1f %.1f %.1f, %s'):format(DG.hits, HN.buf[i * 5 + 3], hx, hy, hz,
+                not v and 'no view this frame' or sx and ('drawn at %.0f %.0f'):format(sx, sy) or 'nowhere (behind or off screen)'))
+        end
+        if #HN.live >= HN_MAX then table.remove(HN.live, 1) end
+        HN.live[#HN.live + 1] = {x = HN.buf[i * 5], y = HN.buf[i * 5 + 1], z = HN.buf[i * 5 + 2] + 0.6, amount = HN.buf[i * 5 + 3],
+                                 boosted = HN.buf[i * 5 + 4] > 0.5, t = 0, jx = (math.random() - 0.5) * 18}
+    end
+    local sc = d.scale or 1
+    for i = #HN.live, 1, -1 do
+        local h = HN.live[i]
+        h.t = h.t + dt
+        if h.t >= HN_LIFE then table.remove(HN.live, i)
+        elseif v then
+            local sx, sy = project(v, h.x, h.y, h.z)
+            if sx then
+                local rise = HN_RISE * (1 - math.exp(-h.t * 7))  -- fast, then slowing to a stop
+                local pop = h.t < 0.12 and (1.35 - h.t / 0.12 * 0.35) or 1
+                local a = h.t > HN_LIFE - 0.45 and (HN_LIFE - h.t) / 0.45 or 1
+                local size = (h.boosted and 24 or 18) * sc * pop
+                local col = h.boosted and {255, 120, 40} or {255, 95, 60}
+                local str = tostring(math.floor(h.amount + 0.5))
+                local px, py = sx + h.jx * sc, sy - (rise + 6) * sc
+                d:text(str, px + 2 * sc, py + 2 * sc, {size = size, colour = {20, 10, 5, math.floor(200 * a)}, z = 7, align = 'center'})
+                d:text(str, px, py, {size = size, colour = {col[1], col[2], col[3], math.floor(255 * a)}, z = 8, align = 'center'})
+            end
+        end
+    end
+end
+
+-- 0.1.6: why nothing was drawn. 0.1.5's test drew no marker and no number with marks standing and boosted hits, and
+
 local overlay = hd2.ui.overlay({id = 'kit', owner = OWNER})
 overlay:draw(function(d, dt)
     dt = tonumber(dt) or 0
@@ -534,6 +699,16 @@ overlay:draw(function(d, dt)
     end
     if not find(dt) then return end
     if state.in_mission == 0 then return end
+    mk_t = mk_t + dt
+    local okV, v = pcall(view, d)
+    if not okV then
+        if not HN.view_err then HN.view_err = true; log('[Executor HUD] view failed: ' .. tostring(v)) end
+        v = nil
+    end
+    if not HN.failed then
+        local okN, errN = pcall(numbers_draw, d, dt, v)
+        if not okN then HN.failed = true; log('[Executor HUD] damage numbers failed, off for this session: ' .. tostring(errN)) end
+    end
     local okA, errA = pcall(ammo_step)
     if not okA then A.failed = true; log('[Executor HUD] ammo failed: ' .. tostring(errA)) end
     status_bar(d)

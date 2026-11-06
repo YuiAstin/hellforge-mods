@@ -56,7 +56,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.3"
+#define VERSION "0.2.4"
 #define BUILD "25480438"
 
 /* S3 sets off a blast on every enemy it hit, 0.1 s apart: room for 12 of his own blasts within the guard's 1.2 s */
@@ -82,6 +82,7 @@ static float s_healPct = 50, s_shotGap = 0.12f;
 static int s_healCap = 3, s_healLimbs = 1, s_healShotgunsOnly = 0, s_stimUndo = 0;
 static float s_chosenPct = 20, s_chosenStep = 5, s_chosenDelay = 0.08f, s_chosenSpread = 3;
 static int s_freeFallback = 7, s_empathy = 1, s_noProjRound = 179;
+static float s_numbersAt = 1.5f;   /* 0.2.4: damage numbers (as Lemuen's) for hits raised this many times or more; 0 every hit */
 static float s_maxRounds = 30;
 static float s_s1Cd = 20, s_s1Mult = 1.5f, s_s1Ap = 2;
 static int s_s1Rounds = 8;
@@ -98,7 +99,7 @@ static const KbSetting kSettings[] = {
     KB_F("chosen_pct", s_chosenPct, 0, 100), KB_F("chosen_step", s_chosenStep, 0, 100), KB_F("chosen_delay", s_chosenDelay, 0, 1),
     KB_F("chosen_spread", s_chosenSpread, 0, 30), KB_I("free_round_fallback", s_freeFallback, 0, 100000), KB_F("max_rounds", s_maxRounds, 1, 200),
     KB_I("no_projectile_round", s_noProjRound, 0, 100000),
-    KB_I("empathy", s_empathy, 0, 1),
+    KB_I("empathy", s_empathy, 0, 1), KB_F("numbers_at", s_numbersAt, 0, 20),
     KB_I("area_rounds", s_areaRounds, 0, 1), KB_F("area_size", s_areaSize, 1, 100), KB_F("area_size_s3", s_areaSizeS3, 1, 100),
     KB_I("area_max", s_areaMax, 0, 32), KB_I("area_pellets", s_areaPellets, 0, 32),
     KB_F("s1_cooldown", s_s1Cd, 0, 600), KB_I("s1_rounds", s_s1Rounds, 1, 200), KB_F("s1_mult", s_s1Mult, 1, 20), KB_F("s1_ap", s_s1Ap, 0, 10),
@@ -133,6 +134,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "no_projectile_round = %d\n"
                "; Empathy by Shotgun: empathy 1, +1 round to each skill for every other Laterano kit installed (Exusiai, Lemuen,\n"
                "; Exusiai the New Covenant).\nempathy = %d\n"
+               "; Damage numbers (his HUD, as Lemuen's): a number over each hit his skills raised to numbers_at times its damage or\n"
+               "; more (1.5: Testament Exacted, Close Combat, Damnatus Ex Foedere and its blasts); 0: every hit of his.\n"
+               "numbers_at = %g\n"
                "; Area rounds: area_rounds 1, each of his shots also fires one round of his gun (at most area_pellets of its pellets;\n"
                "; 0: all) at each living enemy\n"
                "; in a square in front of him: area_size m along his aim by area_size m across it, from where he stands\n"
@@ -156,7 +160,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "hp_mult = 1\nstamina_mult = 1\nhellbomb_on_exhaustion = 0\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_healPct, s_healCap, (double)s_shotGap, s_healLimbs,
             s_healShotgunsOnly, s_stimUndo, (double)s_chosenPct, (double)s_chosenStep, (double)s_chosenDelay, (double)s_chosenSpread,
-            s_freeFallback, (double)s_maxRounds, s_noProjRound, s_empathy, s_areaRounds, (double)s_areaSize, (double)s_areaSizeS3, s_areaMax, s_areaPellets, (double)s_s1Cd, s_s1Rounds, (double)s_s1Mult, (double)s_s1Ap, (double)s_s2Cd,
+            s_freeFallback, (double)s_maxRounds, s_noProjRound, s_empathy, (double)s_numbersAt, s_areaRounds, (double)s_areaSize, (double)s_areaSizeS3, s_areaMax, s_areaPellets, (double)s_s1Cd, s_s1Rounds, (double)s_s1Mult, (double)s_s1Ap, (double)s_s2Cd,
             s_s2Rounds, (double)s_s2Mult, (double)s_s2Reduce, (double)s_s2Dodge, s_s2DodgeDot, (double)s_s3Cd, s_s3Rounds, (double)s_s3Mult,
             (double)s_s3Step, s_s3Stacks, (double)s_s3HealMult, s_s3Row, (double)s_s3BlastMult, (double)s_s3Every);
 }
@@ -927,6 +931,55 @@ static double SkillMult(void)
     return s_s3Mult + s_s3Step * stacks;
 }
 static int Shotgun(void) { const GunInfo* gi = InfoOf(g_heldRes); return gi && gi->pellets > 1; }
+/* 0.2.4: his hits for the HUD's damage numbers (executor_hits; Lemuen 0.1.3's ring): the damage event writes, the HUD
+ * reads by sequence number */
+#define HITRING 64
+typedef struct { float x, y, z, amount; uint32_t boosted, seq; } HitNote;
+static HitNote g_ring[HITRING];
+static volatile uint32_t g_ringSeq;
+static void NoteHit(const HfDamageEvent* d, double mult)
+{
+    if (!kb_kit_on || !g_inMission || mult < s_numbersAt - 0.0001) return;
+    uint32_t s = g_ringSeq + 1;
+    HitNote* h = &g_ring[s % HITRING];
+    h->x = d->position[0]; h->y = d->position[1]; h->z = d->position[2];
+    h->amount = (float)d->amount; h->boosted = mult > 1.0001;
+    h->seq = s;
+    g_ringSeq = s;
+}
+HF_MOD_EXPORT int executor_hits(unsigned version, float* out, int max, uint32_t* seq)
+{
+    if (version != 1 || !out || !seq || max <= 0) return 0;
+    uint32_t now = g_ringSeq, from = *seq;
+    if (now - from > HITRING) from = now - HITRING;
+    int n = 0;
+    for (uint32_t s = from + 1; s - 1 != now && n < max; s++)
+    {
+        HitNote h = g_ring[s % HITRING];
+        if (h.seq != s) continue;
+        out[n * 5] = h.x; out[n * 5 + 1] = h.y; out[n * 5 + 2] = h.z; out[n * 5 + 3] = h.amount; out[n * 5 + 4] = (float)h.boosted;
+        n++;
+    }
+    *seq = now;
+    return n;
+}
+/* his view for the HUD (executor_view, Lemuen 0.1.6c's): the camera's position and forward, refreshed on the game
+ * thread; the HUD picks the engine camera standing there */
+static float g_viewOut[6];
+static volatile int g_viewOk;
+static void ViewFrame(void)
+{
+    float c[3], f[3];
+    if (!CamView(c, f)) { g_viewOk = 0; return; }
+    memcpy(g_viewOut, c, 12); memcpy(g_viewOut + 3, f, 12);
+    g_viewOk = 1;
+}
+HF_MOD_EXPORT int executor_view(unsigned version, float* out)
+{
+    if (version != 1 || !out || !g_viewOk || !g_inMission) return 0;
+    memcpy(out, g_viewOut, 24);
+    return 1;
+}
 static unsigned g_hitLog;
 static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
@@ -934,7 +987,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     if (d->amount <= 0) return;
     if (S3BlastHit(d))
     {
-        if (s_s3BlastMult != 1 && Enemy(d->target)) ScaleDamage(d, s_s3BlastMult);   /* (a teammate in it takes the blast's own) */
+        if (s_s3BlastMult != 1 && Enemy(d->target)) { ScaleDamage(d, s_s3BlastMult); NoteHit(d, s_s3BlastMult); }   /* (a teammate in it takes the blast's own) */
         return;
     }
     if (!IsShot(d)) return;
@@ -943,6 +996,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     int32_t base = d->amount;
     double mult = SkillMult();
     if (mult != 1) ScaleDamage(d, mult);
+    if (enemy) NoteHit(d, mult);
     if (g_skill && g_hitLog < 16) { g_hitLog++; Log("his hit on entity %u: %d -> %d damage (%s x%.2f)", d->target, base, d->amount, kSkill[g_skill - 1], mult); }
     if (!enemy) return;
     if (g_skill == 3)
@@ -1191,6 +1245,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
     if (!g_inMission || !kb_kit_on) return;   /* (standing by: another kit is picked) */
+    ViewFrame();
     MyItems();
     static int prev[3];
     int focused = Focused();
