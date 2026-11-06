@@ -56,7 +56,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.4"
+#define VERSION "0.2.5"
 #define BUILD "25480438"
 
 /* S3 sets off a blast on every enemy it hit, 0.1 s apart: room for 12 of his own blasts within the guard's 1.2 s */
@@ -831,7 +831,16 @@ static void OnStat(HfMod* mod, const HfEventInfo* info, void* user)
     {
         uint64_t res = s->sources[i].resource;
         if (!res || res != g_heldRes || s->sources[i].added <= 0) continue;   /* the gun in hand only (not his free rounds, grenades, stratagems) */
-        const GunInfo* gi = InfoOf(res);
+        GunInfo* gi = (GunInfo*)InfoOf(res);
+        /* 0.2.5: the stat counts this gun's shots, not its pellets, when it adds a count that is not a whole number of
+         * pellets (the SG-97 Sweeper, loaded shell by shell, added +1 a shot: 0.2.4 counted 1 shot in 12) */
+        if (gi && gi->stat_per > 1 && s->sources[i].added % (int)gi->stat_per != 0)
+        {
+            Log("weapon %016llx: the shots stat added %d (not a whole %u pellets): it counts shots, each one a shot from now", (unsigned long long)res,
+                s->sources[i].added, gi->stat_per);
+            gi->stat_per = 1;
+            carry = 0;
+        }
         int pellets = gi && gi->stat_per ? (int)gi->stat_per : 1;
         if (carryRes != res) { carryRes = res; carry = 0; }
         carry += s->sources[i].added;
