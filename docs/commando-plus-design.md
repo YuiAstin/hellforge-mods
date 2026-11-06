@@ -26,7 +26,7 @@ so each player picks how much help they want. Host or solo.
 
 ## Not in scope
 
-Options 1-3 are buildable (2026-11-06); POI loot (#4) still waits for a probe.
+Options 1-4 and 7 are built (0.3.0, untested); 5 is Lost Contact, 6 later.
 
 ## Mission Probe findings (2026-11-04, a normal mission then a Commando mission)
 
