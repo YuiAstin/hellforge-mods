@@ -26,7 +26,7 @@ end
 
 local ffi = require('ffi')
 pcall(ffi.cdef, [[
-typedef struct alvhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t s1_on; float s1_left; uint32_t conf, conf_max, prep, prep_max, shielded; float shield_total, own_shield, field_left; uint32_t keys[3]; char key_label[3][24]; } alvhud1_state;
+typedef struct alvhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t s1_on; float s1_left; uint32_t conf, conf_max, prep, prep_max, shielded; float shield_total, own_shield, field_left; uint32_t keys[3]; char key_label[3][24]; float stamina; uint32_t hellbomb; } alvhud1_state;
 void *alvhud1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
 void *alvhud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
 ]])
@@ -423,6 +423,24 @@ local function status_bar(d)
     if sh > 0 then bits[#bits + 1] = ('SHIELDED %d (%.0f)'):format(sh, tonumber(state.shield_total)) end
     if tonumber(state.own_shield) >= 1 then bits[#bits + 1] = ('BARRIER %.0f'):format(tonumber(state.own_shield)) end
     heavy(d, table.concat(bits, '   '), cx, y - 6 * s, 20 * s, 'title', rgba(ICE, 1), 'center')
+    -- 0.2.4: running dry sets off the Hellbomb: a flashing red warning above it all while her stamina runs low
+    if state.hellbomb ~= 0 then
+        local st = tonumber(state.stamina)
+        if st and st >= 0 and st < WARN_AT then
+            WARN.t = WARN.t + (WARN.dt or 0)
+            local urgency = 1 - st / WARN_AT                       -- 0 at the threshold, 1 empty
+            local rate = 2 + 6 * urgency                           -- flashes faster as it empties
+            local pulse = 0.5 + 0.5 * math.sin(WARN.t * rate * math.pi * 2)
+            local a = 0.35 + 0.65 * pulse
+            local wy = y - 6 * s - 70 * s
+            heavy(d, 'T-DOLL CATASTROPHIC FAILURE IMMINENT', cx, wy, 24 * s, 'title', rgba(RED, a), 'center')
+            local bw, bh = 300 * s, 6 * s
+            d:rect(cx - bw / 2, wy + 32 * s, bw, bh, rgba(INK, 0.7), 1)
+            d:rect(cx - bw / 2, wy + 32 * s, bw * math.max(0, st), bh, rgba(RED, a), 2)
+        else
+            WARN.t = 0
+        end
+    end
 end
 
 ------------------------------------------------------------------------- settings in the Mod Options Menu --
