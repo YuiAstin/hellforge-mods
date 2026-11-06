@@ -56,7 +56,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.2"
+#define VERSION "0.2.3"
 #define BUILD "25480438"
 
 /* S3 sets off a blast on every enemy it hit, 0.1 s apart: room for 12 of his own blasts within the guard's 1.2 s */
@@ -366,7 +366,7 @@ static int ReticlePoint(float out[3])
 /* ---- the gun in hand: its round and pellets a shot ------------------------------------------------------------------ */
 static uint32_t g_heldEntity;
 static uint64_t g_heldRes;
-typedef struct GunInfo { uint64_t res; uint32_t projectile, pellets, stat_per; } GunInfo;   /* stat_per: the shots stat's count a shot */
+typedef struct GunInfo { uint64_t res; uint32_t projectile, pellets, stat_per, spawn; } GunInfo;   /* spawn: the type spawned for it (0: projectile) */   /* stat_per: the shots stat's count a shot */
 static GunInfo g_gunInfo[24];
 static int g_ngunInfo;
 /* a projectile's pellets a shot (its settings row, Exusiai 0.2.3's read); 1 when unknown */
@@ -378,6 +378,24 @@ static uint32_t PelletsOf(uint32_t type)
     memset(&v, 0, sizeof v);
     if (hf->get_live(self, (HfRef)type, &f, &v) && v.base.number >= 1 && v.base.number <= 32) return (uint32_t)v.base.number;
     return 1;
+}
+/* 0.2.3: the DBS-2 Double Freedom's shell (projectile 317) is not one HellForge can spawn (0.2.2 fell back to one
+ * round of projectile 7): his copy of the SG-225 Breaker's buckshot (179, spawnable), the shell's look (visual_from)
+ * and, once in a mission, the shell's own damage (set_live), every pellet of the shell */
+#define DBS2_SHELL 317u
+static uint32_t g_shellCopy;
+static int g_shellDamageDone;
+static void ShellDamage(void)
+{
+    if (g_shellDamageDone || !g_shellCopy || !hf->get_live || !hf->set_live) return;
+    g_shellDamageDone = 1;
+    HfField f = HF_FIELD(ProjectileSettings, damage);
+    HfLiveValue v;
+    memset(&v, 0, sizeof v);
+    if (!hf->get_live(self, (HfRef)DBS2_SHELL, &f, &v) || v.base.number <= 0) { Log("the DBS-2 shell copy: the shell's damage could not be read (the Breaker's stays)"); return; }
+    HfValue d = HF_U32(v.base.number);
+    int r = hf->set_live(self, (HfRef)g_shellCopy, &f, &d, 0);
+    Log("the DBS-2 shell copy (projectile %u): the shell's damage id %.0f %s", g_shellCopy, v.base.number, r ? "set" : "refused (the Breaker's stays)");
 }
 /* a weapon's round (Exusiai's InfoOf: ProjectileWeapon.projectile; none when it fires an entity a shot) */
 static const GunInfo* InfoOf(uint64_t res)
@@ -407,6 +425,7 @@ static const GunInfo* InfoOf(uint64_t res)
         else if (s_noProjRound > 0) { g->projectile = (uint32_t)s_noProjRound; how = " (none of its own: no_projectile_round stands in)"; }
         g->pellets = PelletsOf(g->projectile);
         g->stat_per = 1;
+        if (g->projectile == DBS2_SHELL && g_shellCopy) { g->spawn = g_shellCopy; ShellDamage(); how = " (its shells, spawned as his copy of them)"; }
     }
     Log("weapon %016llx fires projectile %u, %u pellet%s a shot%s", (unsigned long long)res, g->projectile, g->pellets, g->pellets == 1 ? "" : "s",
         g->projectile ? how : " (no projectile: no free rounds from it)");
@@ -519,8 +538,10 @@ static void FreeFrame(void)
     if (g_freeOwed <= 0 || g_now < g_freeAt) return;
     const GunInfo* gi = InfoOf(g_heldRes);
     if (!gi || !gi->projectile) { g_freeOwed = 0; return; }
-    uint32_t round = NoSpawn(gi->projectile) ? (uint32_t)s_freeFallback : gi->projectile;
-    int pellets = round == gi->projectile ? (int)gi->pellets : 1;
+    if (gi->spawn) ShellDamage();
+    uint32_t own = gi->spawn ? gi->spawn : gi->projectile;
+    uint32_t round = NoSpawn(own) ? (uint32_t)s_freeFallback : own;
+    int pellets = round == own ? (int)gi->pellets : 1;
     float pos[3], aim[3], tgt[3];
     if (!round || !PlayerPose(pos, aim)) { g_freeOwed = 0; return; }
     float from[3] = {pos[0] + aim[0] * 0.9f, pos[1] + aim[1] * 0.9f, pos[2] + 1.45f + aim[2] * 0.9f};
@@ -635,8 +656,10 @@ static void AreaFrame(void)
     if (!s_areaRounds || s_areaMax < 1) return;
     const GunInfo* gi = InfoOf(g_heldRes);
     if (!gi || !gi->projectile) return;
-    uint32_t round = NoSpawn(gi->projectile) ? (uint32_t)s_freeFallback : gi->projectile;
-    int pellets = round == gi->projectile ? (int)gi->pellets : 1;
+    if (gi->spawn) ShellDamage();
+    uint32_t own = gi->spawn ? gi->spawn : gi->projectile;
+    uint32_t round = NoSpawn(own) ? (uint32_t)s_freeFallback : own;
+    int pellets = round == own ? (int)gi->pellets : 1;
     float pos[3], aim[3], tgt[3];
     if (!round || !PlayerPose(pos, aim)) return;
     float fx = aim[0], fy = aim[1];
@@ -1054,6 +1077,7 @@ static void OnWeaponExe(HfMod* mod, const HfEventInfo* info, void* user)
 }
 static void Reset(const char* why)
 {
+    g_shellDamageDone = 0;   /* 0.2.3: the shell copy's damage set again in each mission */
     int start = !strcmp(why, "mission start");
     if (g_shots || g_casts[0] || g_casts[1] || g_casts[2])
         Log("%s: %u shots, casts %u / %u / %u, %u free rounds, %u area rounds in %u volleys (%u enemies hit), %u heals (%u enemy hits), "
@@ -1242,6 +1266,17 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
+    if (api->add_projectile)
+    {
+        HfProjectile p;
+        memset(&p, 0, sizeof p);
+        p.size = sizeof p;
+        p.base = HF_PROJECTILE_SG225_BREAKER;
+        p.visual_from = DBS2_SHELL;
+        p.name = "yui/executor/dbs2_shell";
+        g_shellCopy = api->add_projectile(mod, &p);
+        if (!g_shellCopy) api->log(mod, "the DBS-2 shell copy could not be added: its spawned rounds fall back");
+    }
     api->log(mod, "Executor %s (TEST BUILD: untested in game): keys %s / %s / %s (Testament Exacted, Close Combat, Damnatus Ex Foedere); "
              "heal %.0f%% a hit, up to %d a shot; The Chosen One %.0f%%; area rounds %s (%g m, %g m in S3, up to %d); stim_undo %d", VERSION, s_keys[0].label,
              s_keys[1].label, s_keys[2].label, (double)s_healPct, s_healCap, (double)s_chosenPct, s_areaRounds ? "on" : "off", (double)s_areaSize,
