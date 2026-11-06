@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.1"
+#define VERSION "0.2.2"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -103,6 +103,7 @@ static float s_fpDistance = 0.45f;
 static int s_frvOn = 1, s_releaseRow = 248;   /* 0.2.1: the recoilless rocket's blast (0.2.0's 266 went off unseen) */
 static float s_frvDmgN = 1.0f, s_frvDmgS = 1.25f, s_frvDmgPlus = 1.6f, s_frvGuardN = 0.7f, s_frvParked = 0.8f, s_frvRepair = 0.02f;
 static float s_releaseEvery = 4, s_releaseRadius = 4, s_rideRange = 60;
+static float s_sprintSeconds = 6, s_sprintCd = 20, s_sprintRam = 3, s_sprintRamS = 1.5f, s_sprintRamPlus = 2;
 
 static const KbSetting kSettings[] = {
     KB_I("upshift_max", s_upMax, 1, 20), KB_F("upshift_decay", s_upDecay, 1, 600), KB_F("upshift_damage", s_upDamage, 0, 1), KB_F("upshift_every", s_upEvery, 0, 60),
@@ -126,7 +127,8 @@ static const KbSetting kSettings[] = {
     KB_I("frv_sinner", s_frvOn, 0, 1), KB_F("frv_damage_n", s_frvDmgN, 0, 10), KB_F("frv_damage_s", s_frvDmgS, 0, 10), KB_F("frv_damage_plus", s_frvDmgPlus, 0, 10),
     KB_F("frv_taken_n", s_frvGuardN, 0, 1), KB_F("frv_taken_parked", s_frvParked, 0, 1), KB_F("frv_repair", s_frvRepair, 0, 1),
     KB_I("release_explosion", s_releaseRow, 0, 100000), KB_F("release_every", s_releaseEvery, 0.5, 60), KB_F("release_radius", s_releaseRadius, 1, 20),
-    KB_F("ride_range", s_rideRange, 1, 1000),
+    KB_F("ride_range", s_rideRange, 1, 1000), KB_F("sprint_seconds", s_sprintSeconds, 0.5, 60), KB_F("sprint_cooldown", s_sprintCd, 0, 600),
+    KB_F("sprint_ram", s_sprintRam, 0, 100), KB_F("sprint_ram_s", s_sprintRamS, 0, 100), KB_F("sprint_ram_plus", s_sprintRamPlus, 0, 100),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
 };
@@ -198,6 +200,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; goes off 3 (S) or 6 (S+) times release_radius m around it. In S+ it pulls enemies to it (Let's Drift!).\n"
                "frv_sinner = %d\nfrv_damage_n = %g\nfrv_damage_s = %g\nfrv_damage_plus = %g\nfrv_taken_n = %g\nfrv_taken_parked = %g\nfrv_repair = %g\n"
                "release_explosion = %d\nrelease_every = %g\nrelease_radius = %g\nride_range = %g\n"
+               "; Full Speed Sprint!: Eye of the Snow Wolf's key while she drives the FRV Sinner: for sprint_seconds it and she\n"
+               "; take no damage and its ramming hits deal sprint_ram times (and sprint_ram_s more in S, sprint_ram_plus in S+).\n"
+               "sprint_seconds = %g\nsprint_cooldown = %g\nsprint_ram = %g\nsprint_ram_s = %g\nsprint_ram_plus = %g\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint. hellbomb_on_exhaustion 1 sets off a\n"
                "; Hellbomb on her if she runs her stamina dry (a T-Doll's price).\n"
                "hp_mult = 1.5\nstamina_mult = 2\nhellbomb_on_exhaustion = 1\n",
@@ -211,7 +216,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_s2Cd, (double)s_krSeconds, (double)s_krMult, (double)s_krHeal, (double)s_krSinnerHeal, (double)s_s3Cd, s_cleanse,
             (double)s_followDist, (double)s_personal, (double)s_maxRounds, (double)s_roundSpeed, s_turnOn, s_drive, s_driveTest, s_locoManager, s_locoMap, s_locoRecords, s_locoStride, s_stickFwd, s_stickSide, s_stickTurn,
             s_sight, (double)s_fpDistance, s_frvOn, (double)s_frvDmgN, (double)s_frvDmgS, (double)s_frvDmgPlus, (double)s_frvGuardN, (double)s_frvParked,
-            (double)s_frvRepair, s_releaseRow, (double)s_releaseEvery, (double)s_releaseRadius, (double)s_rideRange);
+            (double)s_frvRepair, s_releaseRow, (double)s_releaseEvery, (double)s_releaseRadius, (double)s_rideRange,
+            (double)s_sprintSeconds, (double)s_sprintCd, (double)s_sprintRam, (double)s_sprintRamS, (double)s_sprintRamPlus);
 }
 
 #include "sinner_drive.h"
@@ -615,6 +621,12 @@ static uint32_t g_frvNet, g_turretNet, g_turretCandNet, g_turretCand, g_turretEn
 static atomic_uint g_turretSeenTarget;
 static _Atomic unsigned long long g_turretSeenMs;
 static int g_rideWanted;
+/* 0.2.2: Full Speed Sprint! (its hits on enemies: dealer the FRV, its network id learned as the turret's) */
+static double g_sprintUntil, g_sprintCdUntil;
+static atomic_uint g_frvSeenTarget;
+static _Atomic unsigned long long g_frvSeenMs;
+static unsigned g_rams, g_sprints, g_sprintSaved;
+static int Sprinting(void) { return g_frv && g_sinner && g_now < g_sprintUntil; }
 static double g_turretCandAt = -100;
 static int g_frvParked;
 static atomic_int g_repairPending;
@@ -1725,6 +1737,15 @@ static int SeatTaken(uint32_t vehicle, uint32_t seat)
     }
     return 0;
 }
+/* is she in its driver seat (her seat entry: +0 the vehicle, +8 the role: 1 the driver's; Seat Probe) */
+static int SeatIsDriver(void)
+{
+    uint32_t me = atomic_load(&g_avatar), idx = 0;
+    uintptr_t S = Pointer(game + 0x3326D78), entries;
+    uint8_t e[12];
+    if (!me || !S || !Lookup(S + 0x20, me, 1048576, &idx) || idx >= 65536 || !(entries = Pointer(S + 0x48)) || !ReadAt(entries + 64ull * idx, e, sizeof e)) return 0;
+    return Word(e) == g_sinner && Word(e + 8) == 1;
+}
 static void Ride(void)
 {
     uint32_t me = atomic_load(&g_avatar), idx = 0;
@@ -1756,12 +1777,12 @@ static void Ride(void)
  * network id from */
 static void TurretSeen(KbHitCall* c)
 {
-    uint32_t t = g_turretEnt;
-    if (!g_frv || !t || g_turretNet || c->kind != KB_HIT_CALC) return;
+    uint32_t t = g_turretEnt, car = g_sinner;
+    if (!g_frv || (g_turretNet && g_frvNet) || c->kind != KB_HIT_CALC) return;
     uint32_t w[2];
-    if (!ReadAt((uintptr_t)c->hit + 0x80, &w[0], 4) || w[0] != t || !ReadAt((uintptr_t)c->hit + 0x20, &w[1], 4)) return;
-    atomic_store(&g_turretSeenTarget, w[1]);
-    atomic_store(&g_turretSeenMs, GetTickCount64());
+    if (!ReadAt((uintptr_t)c->hit + 0x80, &w[0], 4) || !w[0] || !ReadAt((uintptr_t)c->hit + 0x20, &w[1], 4)) return;
+    if (w[0] == t && !g_turretNet) { atomic_store(&g_turretSeenTarget, w[1]); atomic_store(&g_turretSeenMs, GetTickCount64()); }
+    if (w[0] == car && !g_frvNet) { atomic_store(&g_frvSeenTarget, w[1]); atomic_store(&g_frvSeenMs, GetTickCount64()); }
 }
 /* ---- its turret's fight, Kinetic Release, its repair, whether it is parked ----------------------------------------- */
 static double g_frvFightAt = -100, g_frvLookNext, g_releaseNext, g_repairNext, g_parkAt;
@@ -1817,8 +1838,21 @@ static int Shoot(uint32_t round, const float to[3], const char* what)
 static uint32_t g_eyeTarget;
 static int g_eyeLeft;
 static double g_eyeNext;
+static void FullSpeedSprint(void)
+{
+    if (g_now < g_sprintCdUntil) { static unsigned told; if (told++ < 5) Log("Full Speed Sprint!: %.0f s left on its cooldown", g_sprintCdUntil - g_now); return; }
+    g_sprintUntil = g_now + s_sprintSeconds;
+    g_sprintCdUntil = g_now + s_sprintCd;
+    g_sprints++;
+    Upshift(1, "Full Speed Sprint!");
+    SinnerAction("Full Speed Sprint!");
+    Log("Full Speed Sprint!: %.0f s: the FRV and she take no damage, its rams x%.1f (%s)%s", (double)s_sprintSeconds, (double)s_sprintRam, kGear[g_gear],
+        g_frvNet ? "" : " (its ram hits are known from its first one)");
+}
 static void EyeOfTheSnowWolf(void)
 {
+    /* 0.2.2: while she drives the FRV Sinner, its key is Full Speed Sprint! */
+    if (g_frv && g_sinner && g_piloting && SeatIsDriver()) { FullSpeedSprint(); return; }
     if (g_now < g_cd[0]) return;
     float at[3];
     uint32_t target;
@@ -1913,6 +1947,7 @@ static void Hallucination(void)
 static void DamageTaken(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     (void)me;
+    if (d->amount > 0 && g_piloting && Sprinting()) { e->cancel = 1; g_sprintSaved++; return; }
     if (d->amount <= 0 || d->kind == 8 || d->kind == 9 || s_sharePct <= 0 || !atomic_load(&g_shareOk)) return;
     int32_t room = atomic_load(&g_sinHpNow) - 1 - atomic_load(&g_sharePending);
     if (room <= 0) return;
@@ -1937,6 +1972,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     {
         /* 0.2.0: hits on the FRV Sinner: less in N and while it is parked, never fatal (No Time to Die), each one a
          * repair (Gear Shift). Its turret's hits: hers, by gear, Upshift and Kinetic Recovery */
+        if (d->target == fsin && Sprinting()) { e->cancel = 1; g_sprintSaved++; return; }
         if (d->target == fsin)
         {
             double m = (g_gear == GEAR_N ? s_frvGuardN : 1.0) * (g_frvParked ? s_frvParked : 1.0);
@@ -1951,7 +1987,25 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
             g_turretNet = d->dealer;
             Log("its turret's hits: dealer network %u (owner %u), learned from the game's hit code", d->dealer, d->owner);
         }
-        if ((g_turretNet && d->dealer == g_turretNet) || (g_frvNet && d->dealer == g_frvNet))
+        if (!g_frvNet && NetOk(d->dealer) && d->dealer != g_turretNet && d->target == atomic_load(&g_frvSeenTarget) && GetTickCount64() - atomic_load(&g_frvSeenMs) <= 300)
+        {
+            g_frvNet = d->dealer;
+            Log("the FRV's own hits (ramming): dealer network %u (owner %u, kind %u), learned from the game's hit code", d->dealer, d->owner, d->kind);
+        }
+        if (g_frvNet && d->dealer == g_frvNet && d->target != atomic_load(&g_avatar))
+        {
+            /* its ramming: more in a sprint */
+            if (Sprinting())
+            {
+                double m = s_sprintRam * (g_gear == GEAR_PLUS ? s_sprintRamPlus : g_gear == GEAR_S ? s_sprintRamS : 1.0) * (1 + g_up * (double)s_upDamage);
+                ScaleDamage(d, m);
+                static atomic_uint told;
+                if (atomic_fetch_add(&told, 1) < 6) Log("Full Speed Sprint!: a ram on entity %u (kind %u) x%.2f -> %d", d->target, d->kind, m, d->amount);
+            }
+            g_rams++;
+            return;
+        }
+        if (g_turretNet && d->dealer == g_turretNet)
         {
             double m = (g_gear == GEAR_PLUS ? s_frvDmgPlus : g_gear == GEAR_S ? s_frvDmgS : s_frvDmgN) * (1 + g_up * (double)s_upDamage);
             if (g_now < g_krUntil) m *= s_krMult;
@@ -1973,6 +2027,8 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     }
     double mult = 1 + g_up * (double)s_upDamage;
     if (g_now < g_krUntil) mult *= s_krMult;
+    /* 0.2.2: a ram credited to her as the driver (an impact while she drives in a sprint) */
+    if (Sprinting() && g_piloting && d->kind == 5) mult *= s_sprintRam * (g_gear == GEAR_PLUS ? s_sprintRamPlus : g_gear == GEAR_S ? s_sprintRamS : 1.0);
     if (mult != 1) ScaleDamage(d, mult);
     if (IsShot(d) && !SinnerShotNear(d->position)) NoteTarget(d);
     if (SinnerShotNear(d->position) && (d->kind == 0 || d->kind == 1))
@@ -2086,7 +2142,10 @@ static void Reset(const char* why)
     if (g_sinner) Log("the Sinner (entity %u) is gone with the mission", g_sinner);
     if (g_turretHits || g_rides || g_releases || g_noDeath)
         Log("%s: the FRV Sinner: %u turret hits, %u rides, %u Kinetic Releases, %u fatal hits survived", why, g_turretHits, g_rides, g_releases, g_noDeath);
+    if (g_sprints) Log("%s: %u sprints, %u rams, %u hits stopped in sprints", why, g_sprints, g_rams, g_sprintSaved);
     g_turretHits = g_rides = g_releases = g_noDeath = 0;
+    g_sprints = g_rams = g_sprintSaved = 0;
+    g_sprintUntil = g_sprintCdUntil = 0;
     g_frv = 0;
     g_frvNet = g_turretNet = g_turretEnt = 0;
     g_frvParked = 0;
