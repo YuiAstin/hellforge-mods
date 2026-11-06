@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-06: Lost Contact 0.3.0
+- The MODS tab now works with the Vanilla Plus Megapack's Mod Options Menu: ESC > OPTIONS > MODS > Lost Contact has Break contact and Patrols rerouted (on, off or observe), Character kits can limit, what runs now and why, and the six numbers of lost-contact.ini (Lose After, Range, Seek Radius, Keep Away, Patrol Range, Resend). The rows need HD2Runtime and Bingus Shared Loader (Lost Contact's own data registers them), unless giblett's Vanilla Plus Megapack build is installed, which offers the tab without them.
+- The tab's choices are saved in %LOCALAPPDATA%\HellForgeMods\lost-contact.ini and kept across restarts; the rows follow Ctrl+F9 / Ctrl+F10 and a kit limiting them. Without the menu, lost-contact.ini and the keys work as before.
+
 ## 2026-11-06: Alva 0.2.3 (first release)
 - Alva's kit from Girls' Frontline 2: a support who shields every ally around her and freezes enemies.
 - Brumal Barrier: every skill (and every 20 s) gives every ally in range (Helldivers, sentries, emplacements, dogs, exosuits, SEAF, the FRV, the Pelican) a 500 shield that stacks with no cap.

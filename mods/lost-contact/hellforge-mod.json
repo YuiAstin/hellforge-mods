@@ -2,9 +2,9 @@
   "format": 1,
   "id": "yui.lost-contact",
   "name": "Lost Contact",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "icon": "icon.png",
-  "description": "Enemies that lose sight of you for a few seconds stop knowing where you are: they search where they last saw you instead of tracking you across the map. Patrols walk between their own outposts instead of being sent straight at you; one that finds you fights as usual. Each on, observe (counts in the log only) or off: lost-contact.ini, or Ctrl+F9 / Ctrl+F10 in a mission. A character kit can limit them while it acts (Lemuen: patrols only). Host or solo.",
+  "description": "Enemies that lose sight of you for a few seconds stop knowing where you are: they search where they last saw you instead of tracking you across the map. Patrols walk between their own outposts instead of being sent straight at you; one that finds you fights as usual. Each on, observe (counts in the log only) or off: lost-contact.ini, Ctrl+F9 / Ctrl+F10 in a mission, or the MODS tab (Mod Options Menu), which needs HD2Runtime and Bingus Shared Loader unless giblett's Vanilla Plus Megapack build is installed. A character kit can limit them while it acts (Lemuen: patrols only). Host or solo.",
   "gameplay": true,
   "code": {
     "dll": "lost_contact.dll",

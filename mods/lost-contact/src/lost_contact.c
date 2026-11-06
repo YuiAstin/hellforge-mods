@@ -13,8 +13,8 @@
  * has a target or senses you, it is left alone. With no outpost known yet it is sent away from you.
  *
  * Each runs on, observe (counts only, touches nothing) or off: the ini, or the keys (Ctrl+F9 / Ctrl+F10) in a
- * mission. Both on by default; the debug HUD is not shipped (its source stays in git). LC_BREAK_CONTACT=0 builds it
- * without break contact.
+ * mission, or the MODS tab (from C, or from Lua: hud-src/lost_contact_hud.lua, rows only). Both on by default; the
+ * debug HUD is not shipped (its source stays in git). LC_BREAK_CONTACT=0 builds it without break contact.
  *
  * Character kits: a kit that exports lost_contact_rules(1) (its answer: -1 when it is not the active kit, else a mask,
  * bit 0 break contact, bit 1 patrols) limits what runs while it acts. Lemuen allows patrols only (Yui: a sniper's
@@ -39,7 +39,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.1"
+#define VERSION "0.3.0"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -159,7 +159,10 @@ static int ParseKey(const char* v, Key* k)
     *k = n;
     return 1;
 }
-static int ReadSettings(const char* path)
+/* 0.3.0: the numbers the MODS tab (Mod Options Menu, from Lua) changed: bit per number, kept in the saved choices */
+enum { SV_LOSE = 1, SV_RANGE = 2, SV_SEEK = 4, SV_KEEP = 8, SV_PRANGE = 16, SV_RESEND = 32 };
+static unsigned g_savedNums;
+static int ReadSettings(const char* path, int saved)
 {
     char line[256];
     FILE* f = fopen(path, "r");
@@ -177,6 +180,9 @@ static int ReadSettings(const char* path)
         while (*v == ' ' || *v == '\t') v++;
         for (char* e = v + strlen(v) - 1; e >= v && (*e == '\r' || *e == '\n' || *e == ' ' || *e == '\t'); e--) *e = 0;
         double x = atof(v);
+        if (saved)
+            g_savedNums |= !strcmp(k, "lose_after") ? SV_LOSE : !strcmp(k, "break_range") ? SV_RANGE : !strcmp(k, "seek_radius") ? SV_SEEK :
+                           !strcmp(k, "keep_away") ? SV_KEEP : !strcmp(k, "patrol_range") ? SV_PRANGE : !strcmp(k, "resend") ? SV_RESEND : 0u;
         if (LC_BREAK_CONTACT && !strcmp(k, "break_mode")) s_breakMode = (int)x >= 0 && (int)x <= 2 ? (int)x : s_breakMode;
         else if (!strcmp(k, "lose_after")) s_loseAfter = x >= 0.5 && x <= 60 ? (float)x : s_loseAfter;
         else if (!strcmp(k, "break_range")) s_breakRange = x >= 10 && x <= 500 ? (float)x : s_breakRange;
@@ -199,12 +205,12 @@ static void LoadSettings(void)
 {
     char path[MAX_PATH * 2], local[MAX_PATH];
     snprintf(path, sizeof path, "%s\\lost-contact.ini", hf->mod_folder(self));
-    if (!ReadSettings(path)) Log("settings: no lost-contact.ini, the defaults");
+    if (!ReadSettings(path, 0)) Log("settings: no lost-contact.ini, the defaults");
     DWORD n = GetEnvironmentVariableA("LOCALAPPDATA", local, sizeof local);
     if (n && n < sizeof local)
     {
         snprintf(g_savePath, sizeof g_savePath, "%s\\HellForgeMods\\lost-contact.ini", local);
-        if (ReadSettings(g_savePath)) Log("settings: the MODS tab's choices from %s", g_savePath);
+        if (ReadSettings(g_savePath, 1)) Log("settings: the MODS tab's choices from %s", g_savePath);
     }
 }
 static void SaveChoices(void)
@@ -218,6 +224,13 @@ static void SaveChoices(void)
     if (!f) { Log("settings: the MODS tab's choices could not be saved to %s", g_savePath); return; }
     fprintf(f, "; Lost Contact: the MODS tab's choices (read after the mod's lost-contact.ini). Delete this file to go back to the ini.\n"
                "break_mode = %d\npatrol_mode = %d\nkit_rules = %d\n", s_breakMode, s_patrolMode, s_kitRules);
+    /* 0.3.0: a number only once the tab changed it (else the mod's lost-contact.ini keeps it) */
+    if (g_savedNums & SV_LOSE) fprintf(f, "lose_after = %g\n", (double)s_loseAfter);
+    if (g_savedNums & SV_RANGE) fprintf(f, "break_range = %g\n", (double)s_breakRange);
+    if (g_savedNums & SV_SEEK) fprintf(f, "seek_radius = %g\n", (double)s_seekRadius);
+    if (g_savedNums & SV_KEEP) fprintf(f, "keep_away = %g\n", (double)s_keepAway);
+    if (g_savedNums & SV_PRANGE) fprintf(f, "patrol_range = %g\n", (double)s_patrolRange);
+    if (g_savedNums & SV_RESEND) fprintf(f, "resend = %g\n", (double)s_resend);
     fclose(f);
 }
 /* ---- what the active character kit allows ---------------------------------------------------------------------- */
@@ -691,7 +704,8 @@ static void MissionStart(void)
  * build): the modes, whether a kit may limit them, and what runs now and why, so a player knows what is off and where
  * to turn it back on. 0.2.1: the public Vanilla Plus Megapack (0.2.0) does not publish it; its own menu API
  * (vpm_mom_api, include/vpm_mom.h) has no public header yet, so it is only named in the log, never called. Without a
- * menu the log says so once, after 30 s; rows the menu refuses are named and asked for again a few times. ---------- */
+ * menu the log says so once, after 30 s; rows the menu refuses are named and asked for again a few times. 0.3.0: with
+ * the public pack the rows come from Lua instead (lost_contact_menu and below); only one of the two registers. ------ */
 #define OPT_MOD "Lost Contact"
 #define OPT_ROWS 5
 #define OPT_TRIES 4          /* registrations of refused rows, the first included */
@@ -708,6 +722,10 @@ static const Hd2ModOptionsApi* g_checkFor;  /* the menu address the two below ar
 static int g_noCheck;        /* 1: the 10 s check is off for that menu (its get() did not find a row just added, or the cap) */
 static int g_readds;         /* rows added again for that menu */
 static int g_shownStatus[2] = {-1, -1};
+/* 0.3.0: which menu has the rows: 0 none yet, 1 this file's (HD2_MOD_OPTIONS_v1), 2 the Lua Mod Options Menu (the HUD
+ * addon, through lost_contact_menu). Only one registers. g_optLooked: Options() has looked for the C menu once, so the
+ * Lua side waits for that before it claims the rows. */
+static atomic_int g_menuOwner, g_optLooked;
 static int ModeIndex(int m) { return m == 1 ? 1 : m == 2 ? 2 : 0; }
 static int StatusOf(int mode, int bit)
 {
@@ -818,10 +836,10 @@ static const char* KeysText(void)
 static void NoMenuYet(void)
 {
     static int told;
-    if (told || g_optsApi || g_now < 30) return;
+    if (told || g_optsApi || g_now < 30 || atomic_load(&g_menuOwner) == 2) return;
     told = 1;
     Log("MODS tab: %s after 30 s: looked for %s (published by giblett's Vanilla Plus Megapack build); %s. Without it: "
-        "lost-contact.ini, or %s in a mission",
+        "lost-contact.ini, or %s in a mission (or Mod Options Menu, from Lua: needs HD2Runtime and Bingus Shared Loader)",
         g_menuRefused ? "no usable menu (one was refused, see above)" : "no menu", HD2_MOD_OPTIONS_ENV, PublicPack(), KeysText());
 }
 /* right after the rows are added: a get() that does not find the first row (a stub, or rows keyed otherwise) would make
@@ -836,7 +854,16 @@ static void CheckGet(const Hd2ModOptionsApi* api)
 static void Options(void)
 {
     const Hd2ModOptionsApi* api = MenuApi();
-    if (!api) { g_optsApi = NULL; NoMenuYet(); return; }   /* gone: a menu published again, even at the same address, gets the rows */
+    atomic_store(&g_optLooked, 1);
+    if (atomic_load(&g_menuOwner) == 2)
+    {
+        static int told;
+        if (!told++) Log("MODS tab: the rows are on Mod Options Menu (Lua, through Lost Contact's HUD addon)%s", api ? "; " HD2_MOD_OPTIONS_ENV " is not used" : "");
+        return;
+    }
+    if (!api) { g_optsApi = NULL; NoMenuYet(); return; }
+    int none = 0;
+    if (!atomic_compare_exchange_strong(&g_menuOwner, &none, 1) && none != 1) return;   /* gone: a menu published again, even at the same address, gets the rows */
     if (api != g_optsApi)
     {
         /* a menu for the first time, or one set up again (a reload): every row is asked for */
@@ -916,6 +943,7 @@ static void Options(void)
             g_optsDone = 1;
             g_optCheck = g_now + OPT_RETRY;
             if (g_rowOk[0]) CheckGet(api);
+            if (!added) { atomic_store(&g_menuOwner, 0); g_optsApi = NULL; }   /* none on it: the Lua menu may take them */
             Log("MODS tab: %d of %d rows added after %d tries (menu: %s, version %u); refused: %s (the menu may be full: 8 mods, 31 rows each). "
                 "Those settings stay in lost-contact.ini and on %s", added, OPT_ROWS, g_optTries, HD2_MOD_OPTIONS_ENV, api->version, refused,
                 KeysText());
@@ -1016,6 +1044,79 @@ HF_MOD_EXPORT int lost_contact_hud(unsigned version, int* out, int n)
     out[5] = g_bc.lost; out[6] = g_bc.blind; out[7] = s_patrolMode; out[8] = g_realPosts; out[9] = g_pt.seeking;
     out[10] = g_pt.routed; out[11] = g_pt.reaimed; out[12] = g_ready == 1 && g_inMission;
     return 13;
+}
+/* ---- 0.3.0: the MODS tab from Lua (hud-src/lost_contact_hud.lua: Mod Options Menu through HD2Runtime and Bingus
+ * Shared Loader, the menu the public Vanilla Plus Megapack has). The addon claims the rows (lost_contact_menu), reads
+ * each value (lost_contact_option_get) and pushes the player's changes (lost_contact_option), which are saved as the C
+ * menu's are: %LOCALAPPDATA%\\HellForgeMods\\lost-contact.ini. Keys: break, patrols (0 off, 1 on, 2 observe), kits
+ * (0 / 1), the six numbers by their ini names, and break_now / patrols_now (read only: 0 running, 1 off by your
+ * setting, 2 off by the active kit, 3 observing). ----------------------------------------------------------------- */
+/* claim 1: the Lua side asks for the rows. 1: they are its own (register them); 0: not now (the C menu has them, or
+ * it has not been looked for yet: ask again); -1: an unknown version. claim 0 only answers. */
+HF_MOD_EXPORT int lost_contact_menu(unsigned version, int claim)
+{
+    if (version != 1) return -1;
+    int owner = atomic_load(&g_menuOwner);
+    if (owner == 2) return 1;
+    if (!claim || owner == 1 || !atomic_load(&g_optLooked)) return 0;
+    int none = 0;
+    if (atomic_compare_exchange_strong(&g_menuOwner, &none, 2)) return 1;
+    return none == 2;
+}
+typedef struct { const char* key; float* at; float lo, hi; unsigned bit; } NumOpt;
+static const NumOpt kNums[] = {
+    {"lose_after", &s_loseAfter, 0.5f, 60, SV_LOSE}, {"break_range", &s_breakRange, 10, 500, SV_RANGE},
+    {"seek_radius", &s_seekRadius, 10, 300, SV_SEEK}, {"keep_away", &s_keepAway, 20, 600, SV_KEEP},
+    {"patrol_range", &s_patrolRange, 50, 1000, SV_PRANGE}, {"resend", &s_resend, 0.5f, 30, SV_RESEND},
+};
+HF_MOD_EXPORT int lost_contact_option_get(unsigned version, const char* key, double* out)
+{
+    if (version != 1 || !key || !out) return 0;
+    if (!strcmp(key, "break")) *out = s_breakMode;
+    else if (!strcmp(key, "patrols")) *out = s_patrolMode;
+    else if (!strcmp(key, "kits")) *out = s_kitRules;
+    else if (!strcmp(key, "break_now")) *out = StatusOf(LC_BREAK_CONTACT ? s_breakMode : 0, 1);
+    else if (!strcmp(key, "patrols_now")) *out = StatusOf(s_patrolMode, 2);
+    else
+    {
+        for (unsigned i = 0; i < sizeof kNums / sizeof kNums[0]; i++)
+            if (!strcmp(key, kNums[i].key)) { *out = *kNums[i].at; return 1; }
+        return 0;
+    }
+    return 1;
+}
+/* 1 applied (and saved), 0 refused: an unknown or read-only key, or a value out of range */
+HF_MOD_EXPORT int lost_contact_option(unsigned version, const char* key, double value)
+{
+    if (version != 1 || !key || !isfinite(value)) return 0;
+    int m = (int)value;
+    if (!strcmp(key, "break") || !strcmp(key, "patrols"))
+    {
+        if (m < 0 || m > 2 || m != value || (!LC_BREAK_CONTACT && key[0] == 'b')) return 0;
+        int* at = key[0] == 'b' ? &s_breakMode : &s_patrolMode;
+        if (*at != m)
+        {
+            *at = m;
+            if (key[0] == 'b') { g_bc.lost = g_bc.blind = 0; for (int j = 0; j < g_nfoes; j++) g_foes[j].unseen = 0; }
+            else { g_pt.sent = g_pt.reaimed = 0; for (int j = 0; j < g_nfoes; j++) g_foes[j].routed = 0; }
+            Log("MODS tab: %s %s", key[0] == 'b' ? "break contact" : "patrols", ModeName(m));
+        }
+    }
+    else if (!strcmp(key, "kits"))
+    {
+        if (value != 0 && value != 1) return 0;
+        if (s_kitRules != m) { s_kitRules = m; Log("MODS tab: character kits %s limit them", m ? "may" : "may not"); KitRules(); }
+    }
+    else
+    {
+        unsigned i;
+        for (i = 0; i < sizeof kNums / sizeof kNums[0] && strcmp(key, kNums[i].key); i++) {}
+        if (i == sizeof kNums / sizeof kNums[0] || value < kNums[i].lo || value > kNums[i].hi) return 0;
+        if (*kNums[i].at != (float)value) { *kNums[i].at = (float)value; Log("MODS tab: %s %g", key, value); }
+        g_savedNums |= kNums[i].bit;
+    }
+    SaveChoices();
+    return 1;
 }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {

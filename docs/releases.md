@@ -10,7 +10,7 @@ The released versions are the ones on Yui's PC (the same as on hf-mod.com), as o
 | Mod | Released | Next upload | Source of the next | Status |
 |---|---|---|---|---|
 | Alva | 0.2.2 | 0.2.3 | merged into main (2026-11-06) | **ready: played and approved 2026-11-06** |
-| Lost Contact | 0.2.0 (MODS tab options missing) | 0.2.1 | merged into main (2026-11-06) | upload once the tab is confirmed |
+| Lost Contact | 0.2.0 (MODS tab options missing) | 0.3.0 | `lost-contact-lua` | MODS tab from Lua (Vanilla Plus Megapack's Mod Options Menu); upload once the tab is confirmed in game |
 | Lenna | 0.2.11 | 0.2.11 (as is) | `wip/gfl2-kits-hud-keys` (68cb8f2) | re-host as released; `texas` holds an unreleased 0.3.0 |
 | Leva | 0.5.6 | 0.5.6 (as is) | `wip/gfl2-kits-hud-keys` (77ab9e3) | re-host as released; `texas` holds an unreleased 0.6.0 |
 | Faelynn | 0.3.6 | 0.3.6 (as is) | `wip/gfl2-kits-hud-keys` (68cb8f2) | re-host as released; `texas` holds an unreleased 0.4.0 |
