@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.7"
+#define VERSION "0.2.8"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -723,8 +723,21 @@ static void FrvAdd(const HfApi* api, HfMod* mod)
     g_frvType = api->add_stratagem(mod, &st);
     api->log(mod, "the FRV Sinner: stratagem %u (RRLLU, a copy of the M-103 Supply FRV's)", g_frvType);
 }
-/* the call Hallucination grants: the picked Sinner's */
-static uint32_t CallType(void) { return s_frvOn && g_frvType ? g_frvType : g_sinType; }
+/* 0.2.8: the FRV's package (its call-in package, 149f685717737cae) is not one HellForge's load_package knows, and an FRV
+ * called without it crashed the game as it landed (game.dll+0x6f94c1, twice). HD2Runtime's catalogue knows it: Koleda's
+ * HUD loads it (hd2.require_assets of the M-103 Supply FRV) and reports here (koleda_frv_package: 1 resident, -1
+ * refused). Until it is resident, Hallucination brings the Patriot instead (the M-103 in her loadout has it loaded) */
+static atomic_int g_frvPkg;
+HF_MOD_EXPORT int koleda_frv_package(unsigned version, int state)
+{
+    if (version != 1) return 0;
+    int was = atomic_exchange(&g_frvPkg, state);
+    if (was != state) Log("the FRV Sinner's package: %s (HD2Runtime, through her HUD)", state == 1 ? "resident" : state < 0 ? "refused" : "loading");
+    return 1;
+}
+static int FrvReady(void) { return atomic_load(&g_frvPkg) == 1; }
+/* the call Hallucination grants: the picked Sinner's (the FRV's only with its package resident) */
+static uint32_t CallType(void) { return s_frvOn && g_frvType && FrvReady() ? g_frvType : g_sinType; }
 
 /* her rounds: the Sinner's by gear and Eye of the Snow Wolf's (copies, add_projectile; the vanilla round without one) */
 static uint32_t g_round[5];
@@ -901,7 +914,6 @@ static void SinPackage(void)
     if (g_now < next) return;
     next = g_now + 2;
     SinPackageOf(0, g_sinType);
-    SinPackageOf(1, g_frvType);
 }
 
 /* ---- is she piloting it (the seat: Khi's reading of the command bus game+0x3326E68, entry 117, as Voymastina) ----- */
@@ -2203,6 +2215,8 @@ static void Hallucination(void)
         Log("Hallucination: her M-103 Supply FRV is ready to call (its cooldown cleared); the one she calls becomes the Sinner");
         return;
     }
+    if (s_frvOn && g_frvType && !FrvReady())
+    { static unsigned told; if (told++ < 5) Log("Hallucination: the FRV Sinner's package is not loaded (%s): the Patriot comes instead", atomic_load(&g_frvPkg) < 0 ? "HD2Runtime refused it" : "her HUD is loading it, or is not running"); }
     if (!s_sinOn || !CallType()) { static unsigned told; if (told++ < 3) Log("Hallucination: there is no Sinner in this session (sinner 0, or it could not be added)"); return; }
     if (!s_callMode) { static unsigned told; if (told++ < 5) Log("Hallucination: call the Sinner with its stratagem (%s; call_mode 0 grants it at the drop)", CallType() == g_frvType ? "RRLLU" : "RRLLD"); return; }
     int r = GrantCall(CallType(), 1);
@@ -2549,6 +2563,7 @@ typedef struct KoledaHud
     uint32_t ems_immune;               /* 1 no EMS stun on her (and the FRV Sinner) */
     uint32_t release_on;               /* 1 Kinetic Release runs (the FRV Sinner's turret in S / S+) */
     float sprint_ram;                  /* its rams, times this, while sprinting */
+    int32_t frv_pkg;                   /* 0.2.8: the FRV's package: 1 resident, 0 loading, -1 refused */
 } KoledaHud;
 static KoledaHud g_hud = {1};
 /* the Sinner, 5 floats (x, y, z over it, health 0..1, gear): 1 while it stands, else 0 */
@@ -2616,6 +2631,7 @@ HF_MOD_EXPORT KoledaHud* koleda_hud_state(void)
     g_hud.piloted = (uint32_t)g_piloting;
     g_hud.kr_left = (float)fmax(0, g_krUntil - g_now);
     g_hud.sinner_kind = (uint32_t)(s_frvOn != 0);
+    g_hud.frv_pkg = atomic_load(&g_frvPkg);
     g_hud.frv = (uint32_t)(g_frv && g_sinner);
     g_hud.sprint_left = Sprinting() ? (float)(g_sprintUntil - g_now) : 0;
     g_hud.sprint_cd = (float)fmax(0, g_sprintCdUntil - g_now);

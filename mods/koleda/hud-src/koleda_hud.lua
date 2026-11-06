@@ -27,7 +27,7 @@ end
 
 local ffi = require('ffi')
 pcall(ffi.cdef, [[
-typedef struct kolhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t upshift, upshift_max, gear, sinner; float sinner_hp, sinner_max; uint32_t leash, drive, winner, piloted; float kr_left; uint32_t keys[3]; char key_label[3][24]; uint32_t sinner_kind, frv; float sprint_left, sprint_cd, upshift_pct, kr_mult, share_pct; uint32_t share_on, ems_immune, release_on; float sprint_ram; } kolhud1_state;
+typedef struct kolhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t upshift, upshift_max, gear, sinner; float sinner_hp, sinner_max; uint32_t leash, drive, winner, piloted; float kr_left; uint32_t keys[3]; char key_label[3][24]; uint32_t sinner_kind, frv; float sprint_left, sprint_cd, upshift_pct, kr_mult, share_pct; uint32_t share_on, ems_immune, release_on; float sprint_ram; int32_t frv_pkg; } kolhud1_state;
 void *kolhud1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
 void *kolhud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
 ]])
@@ -462,7 +462,10 @@ local function status_bar(d)
         if state.piloted ~= 0 then bits[#bits + 1] = 'PILOTED'
         elseif leash and leash ~= '' then bits[#bits + 1] = leash end
     elseif sin == 1 then bits[#bits + 1] = 'SINNER INBOUND'
-    elseif state.sinner_kind then bits[#bits + 1] = state.sinner_kind ~= 0 and 'SINNER: FRV' or 'SINNER: PATRIOT' end
+    elseif state.sinner_kind ~= 0 then
+        local p = tonumber(state.frv_pkg)
+        bits[#bits + 1] = p == 1 and 'SINNER: FRV' or p < 0 and 'SINNER: FRV UNAVAILABLE (PATRIOT)' or 'SINNER: FRV LOADING (PATRIOT)'
+    else bits[#bits + 1] = 'SINNER: PATRIOT' end
     heavy(d, table.concat(bits, '   '), cx, y - 6 * s, 20 * s, 'title', rgba(ELECTRIC, 1), 'center')
     buff_row(d, cx, y - 40 * s)
     -- the Sinner's health bar
@@ -997,6 +1000,40 @@ local function walk_tick(dt)
 end
 pcall(function() hd2.on_frame(function(dt) local ok, err = pcall(walk_tick, tonumber(dt) or 0); if not ok then WK.failed = true; log('[Koleda HUD] walk failed, off for this session: ' .. tostring(err)) end end, {owner = OWNER}) end)
 
+------------------------------------------------- 0.2.8: the FRV Sinner's package, loaded through HD2Runtime --
+-- HellForge's load_package does not know the M-103 Supply FRV's call-in package, and an FRV called without it crashed
+-- the game as it landed. HD2Runtime's catalogue does: hd2.require_assets of the M-103 (it loads the assets, it grants
+-- nothing). The state goes to koleda.dll (koleda_frv_package); until it is resident she calls the Patriot.
+pcall(ffi.cdef, [[ typedef int (*kolfrvpkg1)(unsigned int version, int state); ]])
+local FP = {fn = nil, watch = nil, sent = nil, failed = false, wait = 0}
+local function frv_package_step(dt)
+    if FP.failed or state.sinner_kind == 0 then return end
+    FP.wait = FP.wait - dt
+    if FP.wait > 0 then return end
+    FP.wait = 1
+    if not FP.fn then
+        local module = k32.kolhud1_GetModuleHandleA('koleda.dll')
+        local proc = module ~= nil and k32.kolhud1_GetProcAddress(module, 'koleda_frv_package') or nil
+        if proc == nil then FP.failed = true; log('[Koleda HUD] FRV package: koleda.dll has no koleda_frv_package (update Koleda)') return end
+        FP.fn = ffi.cast('kolfrvpkg1', proc)
+    end
+    if not FP.watch then
+        local okH, handle = pcall(hd2.stratagem, 'M-103 Supply FRV')
+        if not okH or not handle then FP.failed = true; FP.fn(1, -1); log('[Koleda HUD] FRV package: no M-103 Supply FRV handle: ' .. tostring(handle)) return end
+        local okW, watch = pcall(hd2.require_assets, {id = 'koleda-frv-sinner', targets = {handle}})
+        if not okW or type(watch) ~= 'table' then FP.failed = true; FP.fn(1, -1); log('[Koleda HUD] FRV package: require_assets failed: ' .. tostring(watch)) return end
+        FP.watch = watch
+        log('[Koleda HUD] FRV package: requested (M-103 Supply FRV, through HD2Runtime)')
+    end
+    local st = FP.watch.status
+    local v = st == 'complete' and 1 or (st == 'rejected' or st == 'cancelled' or st == 'disabled') and -1 or 0
+    if v ~= FP.sent then
+        FP.sent = v
+        FP.fn(1, v)
+        log('[Koleda HUD] FRV package: ' .. tostring(st) .. (FP.watch.error and (' (' .. tostring(FP.watch.error) .. ')') or ''))
+    end
+end
+
 local overlay = hd2.ui.overlay({id = 'kit', owner = OWNER})
 overlay:draw(function(d, dt)
     dt = tonumber(dt) or 0
@@ -1007,6 +1044,10 @@ overlay:draw(function(d, dt)
         if not okO then O.failed = true; log('[Koleda HUD] options failed: ' .. tostring(errO)) end
     end
     if not find(dt) then return end
+    if not FP.failed then
+        local okP, errP = pcall(frv_package_step, dt)
+        if not okP then FP.failed = true; log('[Koleda HUD] FRV package failed: ' .. tostring(errP)) end
+    end
     if state.in_mission == 0 then return end
     if not WK.failed and WK.unit and WK.fn and WK.fn(1, WK.buf) == 1 and WK.buf[0] > 0.5 then local st = rawget(_G, 'stingray'); local oka, al = pcall(st.Unit.alive, WK.unit); if oka and al == true then pcall(write_vars, st) end end   -- (again in render: the game rewrites them)
     if not SND.failed then
