@@ -14,7 +14,7 @@ so each player picks how much help they want. Host or solo.
 | 4 | More grenades and stims at Commando POIs | `poi_extra = 1` | Depends on whether POI loot comes from editable tables | Probe first |
 | 5 | Patrols keep to their outposts | (separate mod) | Lost Contact's patrol mode | In test |
 | 6 | Sabotage sub-objectives, captured SEAF sites | (later) | New objectives: much larger; only if HellForge's mission tools reach that far | Later |
-| 7 | **Outpost caches:** a resupply for every enemy base cleared (Yui, 2026-11-06: in Commando bases are skipped; this gives a reason to clear them) | `outpost_caches = 1`, `cache_calls_small = 1`, `cache_calls_large = 2` | Below | Planned |
+| 7 | **Outpost caches:** a resupply for every enemy base cleared (Yui, 2026-11-06: in Commando bases are skipped; this gives a reason to clear them) | `outpost_caches = 1`, `cache_calls_small = 1`, `cache_calls_large = 2` | Below | Built in 0.2.0 (untested) |
 
 ## Open questions (one probe)
 
@@ -40,7 +40,7 @@ Options 1-3 are buildable (2026-11-06); POI loot (#4) still waits for a probe.
 - The hive mind was not logged in either mission (Mission Probe 0.1.0 cleared its list as the mission started; fixed in 0.1.1).
 
 
-## Outpost caches (planned, Yui 2026-11-06)
+## Outpost caches (built in 0.2.0, untested; Yui 2026-11-06)
 
 Spawning enemies or placing a supply pod in a base is not possible yet (no generic entity spawn: HellForge has none,
 HD2Runtime lists it as blocked). So a cleared base pays out as a free call instead, which the player throws into it:
@@ -52,4 +52,5 @@ HD2Runtime lists it as blocked). So a cleared base pays out as a free call inste
   ammo rack (HF_STRATAGEM_AMMO_RACK_PRESIDENT_REWARD, 109) if it grants and lands, else +1 Resupply use. A small
   outpost gives `cache_calls_small`, a large base (several spawners, a large nest or a large fabricator site)
   `cache_calls_large`. Logged per base.
-- Open: the Illuminate's spawner resources; whether 109 can be granted outside a mission that offers it (its package).
+- The spawner resources are HD2Runtime's enemy catalogue (kind "structure"), the Illuminate's included (warp gateway, staff
+  spawner, spawner ship). Open: whether 109 can be granted outside a mission that offers it (its package).

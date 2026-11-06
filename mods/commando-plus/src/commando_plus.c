@@ -8,6 +8,10 @@
  *   extra_calls     0 to 3 more uses on Commando's Call In Destroyer (the Super Destroyer call-in: stratagem type 123,
  *                   uses 1 on the record)
  *   every_mission   1: the options apply to every mission, not only Commando
+ *   outpost_caches  0.2.0: every enemy base cleared pays out free resupply calls (cache_calls_small / _large; the game's
+ *                   reward ammo rack, cache_reward 0, else Resupply uses). A base: the spawner structures within
+ *                   base_radius m of each other (bug holes, bot fabricators, Illuminate spawners), noted as they spawn;
+ *                   cleared: the last one closed (HF_ON_BUGHOLE), destroyed (HF_ON_KILL) or gone / at 0 health.
  *
  * Commando is told by the record (the Mission Probe, 2026-11-04): only a Commando mission puts Call In Destroyer (type
  * 123) on the player's stratagem record. The record is read 8 s after the mission starts (when the probe read it), then
@@ -22,6 +26,8 @@
  *
  * Not included: more grenades and stims at POIs (needs a probe), patrols keeping to their outposts (Lost Contact),
  * sabotage objectives (later). */
+#include <math.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,14 +37,14 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.0"
+#define VERSION "0.2.0"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
 
 static const HfApi* hf;
 static HfMod* self;
-static uintptr_t game;
+static uintptr_t game, exe;
 static int g_ready;
 static double g_now;
 #define Log(...) hf->log(self, __VA_ARGS__)
@@ -48,9 +54,26 @@ static uint64_t Quad(const uint8_t* p) { uint64_t v; memcpy(&v, p, 8); return v;
 static int AddressOk(uintptr_t a, size_t n) { return n && a >= 0x10000 && a < UINT64_C(0x7FFFFFFF0000) && n <= UINT64_C(0x7FFFFFFF0000) - a; }
 static int ReadAt(uintptr_t a, void* out, size_t n) { return AddressOk(a, n) && hf->read(a, out, n) == 0; }
 static uintptr_t Pointer(uintptr_t a) { uintptr_t v = 0; return ReadAt(a, &v, 8) && AddressOk(v, 1) ? v : 0; }
+/* the game's hash maps (the kit base's Lookup: Helldiver Survival Rework, MIT) */
+static int Lookup(uintptr_t at, uint32_t key, uint32_t limit, uint32_t* index)
+{
+    uint8_t h[20], row[8];
+    if (!ReadAt(at, h, sizeof h)) return 0;
+    uintptr_t entries = (uintptr_t)Quad(h);
+    uint32_t n = Word(h + 8), empty = Word(h + 12), mult = Word(h + 16);
+    if (!AddressOk(entries, 8) || !n || n > limit || (n & (n - 1)) || key == empty) return 0;
+    for (unsigned i = 0; i < n && i < 128; i++)
+    {
+        if (!ReadAt(entries + 8u * ((key * mult + i) & (n - 1)), row, 8)) return 0;
+        if (Word(row) == key) { *index = Word(row + 4); return *index != UINT32_MAX; }
+        if (Word(row) == empty) return 0;
+    }
+    return 0;
+}
 
 /* ---- settings ------------------------------------------------------------------------------------------------------- */
 static int s_noTimer = 1, s_resupplyCalls = 1, s_extraCalls = 1, s_everyMission = 0;
+static int s_caches = 1, s_cacheSmall = 1, s_cacheLarge = 2, s_cacheReward = 0, s_baseRadius = 40;
 static int ReadSettings(const char* path)
 {
     char line[256];
@@ -72,6 +95,11 @@ static int ReadSettings(const char* path)
         else if (!strcmp(k, "resupply_calls")) { if (x >= 0 && x <= 2) s_resupplyCalls = x; else Log("settings: resupply_calls %d is not 0 to 2, kept %d", x, s_resupplyCalls); }
         else if (!strcmp(k, "extra_calls")) { if (x >= 0 && x <= 3) s_extraCalls = x; else Log("settings: extra_calls %d is not 0 to 3, kept %d", x, s_extraCalls); }
         else if (!strcmp(k, "every_mission")) s_everyMission = x ? 1 : 0;
+        else if (!strcmp(k, "outpost_caches")) s_caches = x ? 1 : 0;
+        else if (!strcmp(k, "cache_calls_small")) { if (x >= 0 && x <= 5) s_cacheSmall = x; }
+        else if (!strcmp(k, "cache_calls_large")) { if (x >= 0 && x <= 5) s_cacheLarge = x; }
+        else if (!strcmp(k, "cache_reward")) s_cacheReward = x ? 1 : 0;
+        else if (!strcmp(k, "base_radius")) { if (x >= 10 && x <= 200) s_baseRadius = x; }
     }
     fclose(f);
     return 1;
@@ -83,6 +111,8 @@ static void LoadSettings(void)
     if (!ReadSettings(path)) Log("settings: no commando-plus.ini, the defaults");
     Log("settings: no_timer %d, resupply_calls %d, extra_calls %d, every_mission %d (%s)", s_noTimer, s_resupplyCalls, s_extraCalls,
         s_everyMission, s_everyMission ? "every mission" : "Commando missions only");
+    Log("settings: outpost_caches %d (small base %d, large base %d calls of %s), base_radius %d m", s_caches, s_cacheSmall, s_cacheLarge,
+        s_cacheReward ? "Resupply" : "the reward ammo rack", s_baseRadius);
 }
 
 /* ---- the local player's stratagem record ---------------------------------------------------------------------------- */
@@ -204,24 +234,217 @@ static int Append(uintptr_t st, uint32_t count, uint32_t type, uint32_t uses, co
 
 /* ---- the Resupply's package, held for the session ------------------------------------------------------------------- */
 static int g_pkgState;   /* 0 not asked, 1 loading, 2 resident, 3 none / failed */
-static void ResupplyPackage(void)
+static int g_rackPkg;    /* the reward ammo rack's, the same states */
+static void HoldPackage(uint32_t type, const char* name, int* state, double* next)
 {
-    if (g_pkgState >= 2 || !s_resupplyCalls) return;
-    static double next;
-    if (g_now < next) return;
-    next = g_now + 2;
-    uintptr_t row = hf->stratagem_row ? hf->stratagem_row(RESUPPLY) : 0;
+    if (*state >= 2 || g_now < *next) return;
+    *next = g_now + 2;
+    uintptr_t row = hf->stratagem_row ? hf->stratagem_row(type) : 0;
     uint64_t pkg = 0;
     if (!row) return;   /* the stratagem table is not loaded yet */
-    if (!ReadAt(row + 0xA8, &pkg, 8) || !pkg || pkg == ~0ull) { g_pkgState = 3; Log("Resupply: its stratagem names no package (a call may land as a question mark)"); return; }
+    if (!ReadAt(row + 0xA8, &pkg, 8) || !pkg || pkg == ~0ull) { *state = 3; Log("%s: its stratagem names no package (a call may land as a question mark)", name); return; }
     int r = hf->load_package(self, pkg);
-    if (r == HF_PACKAGE_RESIDENT) { g_pkgState = 2; Log("Resupply: its package %016llx is loaded", (unsigned long long)pkg); }
-    else if (!r) { g_pkgState = 3; Log("Resupply: its package %016llx could not be held: a granted call may land as a purple question mark", (unsigned long long)pkg); }
-    else g_pkgState = 1;
+    if (r == HF_PACKAGE_RESIDENT) { *state = 2; Log("%s: its package %016llx is loaded", name, (unsigned long long)pkg); }
+    else if (!r) { *state = 3; Log("%s: its package %016llx could not be held: a granted call may land as a purple question mark", name, (unsigned long long)pkg); }
+    else *state = 1;
+}
+static void ResupplyPackage(void)
+{
+    static double a, b;
+    if (s_resupplyCalls || (s_caches && s_cacheReward)) HoldPackage(RESUPPLY, "Resupply", &g_pkgState, &a);
+    if (s_caches && !s_cacheReward) HoldPackage(HF_STRATAGEM_AMMO_RACK_PRESIDENT_REWARD, "the reward ammo rack", &g_rackPkg, &b);
 }
 
+
+/* ---- 0.2.0: outpost caches ------------------------------------------------------------------------------------------ */
+/* the spawner structures (HD2Runtime's enemy catalogue, kind "structure"); large: a base of its own size */
+static const struct { uint64_t res; int large; const char* name; } kSpawners[] = {
+    {0x0DF874E208040D2Full, 0, "bug hole"}, {0x8C31B749759CBD61ull, 0, "bug hole (warriors)"}, {0xBC2AF8548C6D5E06ull, 0, "bug hole (hunters)"},
+    {0x9B58C95349D051F9ull, 0, "bug hole (spitters)"}, {0x97DD3178E9F0AB70ull, 0, "bug hole (prowlers)"}, {0x8901F188DB366B4Bull, 0, "bug hole (scavengers)"},
+    {0xF78BF0FF5C62140Dull, 0, "bug hole (boomers)"}, {0x36CC8EAD2BB18D78ull, 0, "bug hole (hive guards)"}, {0xB6A181ADCF547AEBull, 0, "bug hole (ceiling)"},
+    {0x4776A1CF3F19A13Bull, 1, "stalker lair hole"}, {0x3A2CEF12ED32A088ull, 1, "bile titan hole"}, {0x095686275A113614ull, 1, "shrieker hole"},
+    {0xA36F5938D78A0349ull, 1, "shrieker nest"}, {0xAFC719AF96F10DC3ull, 1, "mega shrieker nest"},
+    {0xF0B98FB953B13960ull, 0, "fabricator"}, {0x4FB8EB356AC8553Eull, 0, "fabricator (standard)"}, {0x22CC0ED4CEB9CB68ull, 0, "fabricator (assault)"},
+    {0x5158E582FBEB26BDull, 0, "fabricator (jump pack)"}, {0xA1A7B76B29088843ull, 0, "fabricator (phalanx)"}, {0x4232EE48E2CFD24Eull, 1, "bulk fabricator"},
+    {0xA8AE6952B375EF6Cull, 1, "gunship fabricator"}, {0x5336583C1F8BA745ull, 1, "command bunker"},
+    {0x7DF314C744F0D935ull, 0, "warp gateway"}, {0xA8B999A49716BF41ull, 0, "Illuminate spawner (staff)"}, {0xB3C9CDB79DC17937ull, 1, "Illuminate spawner ship"},
+};
+static int SpawnerKind(uint64_t res)
+{
+    for (unsigned i = 0; i < sizeof kSpawners / sizeof kSpawners[0]; i++) if (kSpawners[i].res == res) return (int)i;
+    return -1;
+}
+/* spawns and deaths, from the event threads to the game thread */
+#define RING 256
+static uint32_t g_ringEnt[RING], g_ringKind[RING];
+static atomic_uint g_ringHead;
+static unsigned g_ringTail;
+static void Push(uint32_t entity, uint32_t kind)
+{
+    unsigned h = atomic_fetch_add(&g_ringHead, 1);
+    g_ringEnt[h % RING] = entity;
+    g_ringKind[h % RING] = kind;
+}
+#define SPAWNERS 256
+#define BASES 96
+typedef struct { uint32_t entity; int kind, base, dead, placed; float pos[3]; } Spawner;
+typedef struct { int members, alive, large, paid; float pos[3]; } Base;
+static Spawner g_sp[SPAWNERS];
+static Base g_base[BASES];
+static int g_nsp, g_nbase;
+static unsigned g_basesPaid, g_callsPaid;
+static void CachesReset(void) { g_nsp = g_nbase = 0; g_basesPaid = g_callsPaid = 0; }
+static uint32_t UnitOf(uint32_t entity)
+{
+    uintptr_t root = Pointer(game + 0x346BF98);
+    uint32_t index;
+    uint8_t d[24];
+    if (!root || !entity || entity == 0x7FFF || !Lookup(root + 0xF1AEB0, entity, 1048576, &index) || index >= 262144 ||
+        !ReadAt(root + 0xF32F18 + 24u * index, d, 24) || Word(d + 8) != entity) return 0;
+    return Word(d + 12);
+}
+static int Position(uint32_t entity, float out[3])
+{
+    uint32_t unit = UnitOf(entity);
+    uintptr_t registry = Pointer(exe + 0x1A100F0), objects, object, nodes;
+    uint32_t count, id, slot = unit & 0x3FFFFF;
+    if (!unit || !registry || !ReadAt(registry + 0x98, &count, 4) || slot >= count || !(objects = Pointer(registry + 0x88)) ||
+        !(object = Pointer(objects + 8u * slot)) || !ReadAt(object + 8, &id, 4) || id != unit || !ReadAt(object + 0x70, &count, 4) || !count ||
+        count > 4096 || !(nodes = Pointer(object + 0x88)) || !ReadAt(nodes + 48, out, 12))
+        return 0;
+    for (int i = 0; i < 3; i++) if (!isfinite(out[i]) || fabsf(out[i]) > 100000) return 0;
+    return 1;
+}
+static int Health(uint32_t entity, int32_t* hp)
+{
+    uintptr_t m = Pointer(game + 53634696u);
+    uint8_t h[88];
+    if (!entity || !m || !ReadAt(m + 4112, h, sizeof h)) return 0;
+    uint32_t live = Word(h + 16), cap = Word(h + 40), empty = Word(h + 44), mult = Word(h + 48);
+    uintptr_t buckets = (uintptr_t)Quad(h + 32), records = (uintptr_t)Quad(h + 72);
+    if (!buckets || !records || !cap || cap > 65536 || (cap & (cap - 1)) || live > 4096) return 0;
+    for (uint32_t k = 0; k < cap; k++)
+    {
+        uint8_t b[8];
+        if (!ReadAt(buckets + 8u * ((entity * mult + k) & (cap - 1)), b, 8)) return 0;
+        if (Word(b) == empty) return 0;
+        if (Word(b) != entity) continue;
+        if (Word(b + 4) >= live) return 0;
+        return ReadAt(records + 416u * Word(b + 4) + 20, hp, 4);
+    }
+    return 0;
+}
+static int Find(uintptr_t st, uint32_t count, uint32_t type);
+static int SetUses(uintptr_t st, int slot, uint32_t uses, const char* what);
+static int Append(uintptr_t st, uint32_t count, uint32_t type, uint32_t uses, const char* what);
+static int List(uintptr_t* st, uint32_t* count);
+static int GrantPins(void);
+static int g_applied;
+/* n free calls: the reward ammo rack (or Resupply), added to a limited slot or appended */
+static int PayOut(int n, const char* why)
+{
+    uintptr_t st;
+    uint32_t count = 0, uses = 0;
+    if (n <= 0) return 1;
+    if (!GrantPins() || !List(&st, &count)) { Log("outpost cache (%s): the stratagem record is unreadable: not paid", why); return 0; }
+    uint32_t type = s_cacheReward || g_rackPkg == 3 ? RESUPPLY : HF_STRATAGEM_AMMO_RACK_PRESIDENT_REWARD;
+    const char* name = type == RESUPPLY ? "Resupply" : "the reward ammo rack";
+    int slot = Find(st, count, type);
+    char what[96];
+    snprintf(what, sizeof what, "outpost cache (%s): %s", why, name);
+    if (slot >= 0 && ReadAt(st + 0x188 + (uint32_t)slot * 0x30u + 4, &uses, 4))
+    {
+        if (uses == UNLIMITED)
+        {
+            if (type != RESUPPLY) { Log("%s is unlimited already: Resupply instead", what); s_cacheReward = 1; return PayOut(n, why); }
+            Log("%s is unlimited on this mission: nothing to add", what);
+            return 1;
+        }
+        return SetUses(st, slot, uses + (uint32_t)n, what);
+    }
+    if (slot == -2) return 0;
+    return Append(st, count, type, (uint32_t)n, what);
+}
+static void CachesFrame(void)
+{
+    /* the new spawns and deaths */
+    while (g_ringTail != atomic_load(&g_ringHead))
+    {
+        unsigned i = g_ringTail++ % RING;
+        uint32_t e = g_ringEnt[i], k = g_ringKind[i];
+        if (k < 1000)
+        {
+            if (g_nsp >= SPAWNERS) continue;
+            Spawner* sp = &g_sp[g_nsp++];
+            memset(sp, 0, sizeof *sp);
+            sp->entity = e; sp->kind = (int)k; sp->base = -1;
+        }
+        else
+            for (int j = 0; j < g_nsp; j++) if (g_sp[j].entity == e && !g_sp[j].dead) { g_sp[j].dead = k == 1001 ? 2 : 1; }
+    }
+    static double next;
+    if (g_now < next) return;
+    next = g_now + 1;
+    /* placed into bases once their position reads; dead when gone or at 0 health */
+    for (int j = 0; j < g_nsp; j++)
+    {
+        Spawner* sp = &g_sp[j];
+        if (!sp->placed && !sp->dead && Position(sp->entity, sp->pos))
+        {
+            float r2 = (float)s_baseRadius * (float)s_baseRadius;
+            int b = -1;
+            for (int q = 0; q < g_nsp && b < 0; q++)
+            {
+                const Spawner* o = &g_sp[q];
+                float dx = o->pos[0] - sp->pos[0], dy = o->pos[1] - sp->pos[1], dz = o->pos[2] - sp->pos[2];
+                if (q != j && o->placed && o->base >= 0 && dx * dx + dy * dy + dz * dz <= r2 && !g_base[o->base].paid) b = o->base;
+            }
+            if (b < 0 && g_nbase < BASES) { b = g_nbase++; memset(&g_base[b], 0, sizeof g_base[b]); memcpy(g_base[b].pos, sp->pos, 12); }
+            if (b < 0) continue;
+            sp->placed = 1; sp->base = b;
+            g_base[b].members++;
+            if (kSpawners[sp->kind].large) g_base[b].large = 1;
+        }
+        if (sp->placed && !sp->dead)
+        {
+            int32_t hp = 1;
+            if (!UnitOf(sp->entity)) sp->dead = 3;
+            else if (Health(sp->entity, &hp) && hp <= 0) sp->dead = 4;
+        }
+    }
+    /* a base whose spawners are all down pays out (once, when the options apply) */
+    for (int b = 0; b < g_nbase; b++)
+    {
+        Base* base = &g_base[b];
+        int alive = 0;
+        for (int j = 0; j < g_nsp; j++) if (g_sp[j].base == b && !g_sp[j].dead) alive++;
+        base->alive = alive;
+        if (base->paid || alive || !base->members) continue;
+        base->paid = 1;
+        int large = base->large || base->members >= 3, n = large ? s_cacheLarge : s_cacheSmall;
+        char why[64];
+        snprintf(why, sizeof why, "a %s base of %d spawner%s cleared", large ? "large" : "small", base->members, base->members == 1 ? "" : "s");
+        if (!s_caches || !g_applied) { Log("%s at %.0f %.0f: no cache (%s)", why, base->pos[0], base->pos[1], !s_caches ? "outpost_caches 0" : "the options do not apply this mission"); continue; }
+        if (PayOut(n, why)) { g_basesPaid++; g_callsPaid += (unsigned)n; Log("%s at %.0f %.0f: %d free call%s", why, base->pos[0], base->pos[1], n, n == 1 ? "" : "s"); }
+    }
+}
+static void CachesSummary(const char* why)
+{
+    int alive = 0;
+    for (int b = 0; b < g_nbase; b++) if (!g_base[b].paid) alive++;
+    Log("%s: %d spawners in %d bases (%d not cleared); %u bases paid out, %u free calls", why, g_nsp, g_nbase, alive, g_basesPaid, g_callsPaid);
+}
+static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
+{
+    const HfSpawnEvent* s = (const HfSpawnEvent*)info;
+    int k = SpawnerKind(s->resource);
+    if (k >= 0) Push(s->entity, (uint32_t)k);
+}
+static void OnKill(HfMod* mod, const HfEventInfo* info, void* user) { Push(((const HfKillEvent*)info)->victim, 1000); }
+static void OnBughole(HfMod* mod, const HfEventInfo* info, void* user) { Push(((const HfBugholeEvent*)info)->entity, 1001); }
+
 /* ---- the mission ---------------------------------------------------------------------------------------------------- */
-static int g_inMission, g_checkTries, g_applied, g_timerTries;
+static int g_inMission, g_checkTries, g_timerTries;
 static double g_checkAt, g_timerAt, g_recheckAt;
 static int g_commando;
 static void FreezeTimer(void)
@@ -297,6 +520,7 @@ static void Check(void)
     if (s.role == HF_SESSION_JOINER) { Log("joined another player's game: nothing applied (host or solo only)"); return; }
     g_applied = 1;
     Apply(st, count);
+    if (s_caches) Log("outpost caches: %d spawners in %d bases so far (more are noted as they spawn)", g_nsp, g_nbase);
     g_recheckAt = g_now + 10;
 }
 /* 10 s later: the record again, to see the game kept what was written */
@@ -323,6 +547,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (m != g_inMission)
     {
         g_inMission = m;
+        if (!m) { CachesSummary("mission end"); CachesReset(); g_ringTail = atomic_load(&g_ringHead); }   /* (not at the start: the base's spawners spawn while it loads) */
         g_checkTries = g_applied = g_commando = g_timerTries = 0;
         g_timerAt = g_recheckAt = 0;
         g_checkAt = m ? g_now + 8 : 0;
@@ -332,13 +557,14 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (g_checkAt > 0 && g_now >= g_checkAt) Check();
     if (g_timerAt > 0 && g_now >= g_timerAt) FreezeTimer();
     if (g_recheckAt > 0 && g_now >= g_recheckAt) Recheck();
+    CachesFrame();
 }
 
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {
     size_t gs = 0, xs = 0;
     game = hf->module_base("game.dll", &gs);
-    uintptr_t exe = hf->module_base("helldivers2.exe", &xs);
+    exe = hf->module_base("helldivers2.exe", &xs);
     if (!game || !exe || gs != 74727424u || xs != 60719104u) { g_ready = -1; Log("REFUSED: not build " BUILD "'s modules: nothing applied"); return; }
     g_ready = 1;
     Log("ready: game.dll and helldivers2.exe are build " BUILD "'s");
@@ -354,5 +580,8 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     LoadSettings();
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) { Log("REFUSED: the game-loaded event"); return 1; }
     if (!api->on_game_thread(mod, Tick, NULL)) Log("the game thread could not be hooked: the mod stays off");
+    if (!api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) || !api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) ||
+        !api->subscribe(mod, HF_ON_BUGHOLE, OnBughole, NULL, 0))
+        Log("outpost caches: the spawn / kill / bug hole events are unavailable: no caches");
     return 0;
 }
