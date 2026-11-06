@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.3"
+#define VERSION "0.2.4"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -102,7 +102,8 @@ static float s_fpDistance = 0.45f;
 /* 0.2.0: the FRV Sinner (her M-103 Supply FRV) */
 static int s_frvOn = 1, s_releaseRow = 248;   /* 0.2.1: the recoilless rocket's blast (0.2.0's 266 went off unseen) */
 static float s_frvDmgN = 1.0f, s_frvDmgS = 1.25f, s_frvDmgPlus = 1.6f, s_frvGuardN = 0.7f, s_frvParked = 0.8f, s_frvRepair = 0.02f;
-static float s_releaseEvery = 4, s_releaseRadius = 4, s_rideRange = 60;
+static float s_releaseEvery = 4, s_releaseRadius = 7,   /* 0.2.4: 7 m (4 m blasts flipped the FRV) */
+    s_rideRange = 60;
 static int s_grip = 1;
 static float s_gripGravity = 12, s_gripCancel = 0.5f, s_gripMargin = 0.35f, s_gripMass = 3000;
 static float s_sprintSeconds = 6, s_sprintCd = 20, s_sprintRam = 3, s_sprintRamS = 1.5f, s_sprintRamPlus = 2;
@@ -1793,6 +1794,17 @@ static void TurretSeen(KbHitCall* c)
     if (w[0] == t && !g_turretNet) { atomic_store(&g_turretSeenTarget, w[1]); atomic_store(&g_turretSeenMs, GetTickCount64()); }
     if (w[0] == car && !g_frvNet) { atomic_store(&g_frvSeenTarget, w[1]); atomic_store(&g_frvSeenMs, GetTickCount64()); }
 }
+/* 0.2.4: her own blasts (Kinetic Release) do nothing to the FRV Sinner: their hit result on it is emptied, as the kit
+ * base empties it on her */
+static unsigned g_carSpared;
+static void CarSpared(KbHitCall* c)
+{
+    uint32_t car = g_sinner;
+    uint8_t h[HIT_SIZE];
+    if (!g_frv || !car || !c->hit || !c->out || !ReadAt((uintptr_t)c->hit, h, sizeof h) || Word(h + 0x20) != car || !OwnBlast(h, NULL)) return;
+    memset(c->out, 0, RESULT_SIZE);
+    g_carSpared++;
+}
 /* ---- its turret's fight, Kinetic Release, its repair, whether it is parked ----------------------------------------- */
 static double g_frvFightAt = -100, g_frvLookNext, g_releaseNext, g_repairNext, g_parkAt;
 static float g_parkFrom[3];
@@ -2289,6 +2301,8 @@ static void Reset(const char* why)
     if (g_turretHits || g_rides || g_releases || g_noDeath)
         Log("%s: the FRV Sinner: %u turret hits, %u rides, %u Kinetic Releases, %u fatal hits survived", why, g_turretHits, g_rides, g_releases, g_noDeath);
     if (g_sprints) Log("%s: %u sprints, %u rams, %u hits stopped in sprints", why, g_sprints, g_rams, g_sprintSaved);
+    if (g_carSpared) Log("%s: her own blasts on the FRV Sinner emptied %u times", why, g_carSpared);
+    g_carSpared = 0;
     if (g_gripCatches) Log("%s: Grip pushed the FRV Sinner down in %u frames", why, g_gripCatches);
     g_gripCatches = 0; g_gripActor = g_gripUnit = 0; g_gripRestN = 0;
     g_turretHits = g_rides = g_releases = g_noDeath = 0;
@@ -2562,6 +2576,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     kb_damage_taken = DamageTaken;
     kb_damage_dealt = DamageDealt;
     kb_hit_before = TurretSeen;
+    kb_hit_after = CarSpared;
     kb_hit_taken = HitTaken;
     /* her body: the T-Doll package (the kit base's defaults: hp_mult 1.5, stamina_mult 2, the stamina Hellbomb) */
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
