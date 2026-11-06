@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.4"
+#define VERSION "0.2.5"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -100,7 +100,9 @@ static int s_stickFwd = -1, s_stickSide = -1, s_stickTurn = -1;
 static int s_sight = 1;
 static float s_fpDistance = 0.45f;
 /* 0.2.0: the FRV Sinner (her M-103 Supply FRV) */
-static int s_frvOn = 1, s_releaseRow = 248;   /* 0.2.1: the recoilless rocket's blast (0.2.0's 266 went off unseen) */
+static int s_frvOn = 1, s_releaseRow = 150;   /* 0.2.5: an EMS burst on each enemy near it (0.2.1-0.2.4: blasts in a ring, which missed) */
+static int s_releaseShell = 154, s_releaseDamage = 1000, s_releaseTargetsS = 3, s_releaseTargetsPlus = 6, s_emsImmune = 1;
+static float s_releaseAp = 6, s_releaseReach = 12;
 static float s_frvDmgN = 1.0f, s_frvDmgS = 1.25f, s_frvDmgPlus = 1.6f, s_frvGuardN = 0.7f, s_frvParked = 0.8f, s_frvRepair = 0.02f;
 static float s_releaseEvery = 4, s_releaseRadius = 7,   /* 0.2.4: 7 m (4 m blasts flipped the FRV) */
     s_rideRange = 60;
@@ -129,7 +131,9 @@ static const KbSetting kSettings[] = {
     KB_I("line_of_sight", s_sight, 0, 1), KB_F("first_person", s_fpDistance, 0.1, 2),
     KB_I("frv_sinner", s_frvOn, 0, 1), KB_F("frv_damage_n", s_frvDmgN, 0, 10), KB_F("frv_damage_s", s_frvDmgS, 0, 10), KB_F("frv_damage_plus", s_frvDmgPlus, 0, 10),
     KB_F("frv_taken_n", s_frvGuardN, 0, 1), KB_F("frv_taken_parked", s_frvParked, 0, 1), KB_F("frv_repair", s_frvRepair, 0, 1),
-    KB_I("release_explosion", s_releaseRow, 0, 100000), KB_F("release_every", s_releaseEvery, 0.5, 60), KB_F("release_radius", s_releaseRadius, 1, 20),
+    KB_I("release_explosion", s_releaseRow, 0, 100000), KB_I("release_shell", s_releaseShell, 0, 100000), KB_I("release_damage", s_releaseDamage, 0, 100000),
+    KB_F("release_ap", s_releaseAp, 0, 10), KB_F("release_reach", s_releaseReach, 1, 50), KB_I("release_targets_s", s_releaseTargetsS, 1, 20),
+    KB_I("release_targets_plus", s_releaseTargetsPlus, 1, 20), KB_I("ems_immune", s_emsImmune, 0, 1), KB_F("release_every", s_releaseEvery, 0.5, 60), KB_F("release_radius", s_releaseRadius, 1, 20),
     KB_I("grip", s_grip, 0, 1), KB_F("grip_gravity", s_gripGravity, 0, 100), KB_F("grip_cancel", s_gripCancel, 0, 1), KB_F("grip_margin", s_gripMargin, 0.05, 3),
     KB_F("grip_mass", s_gripMass, 100, 100000),
     KB_F("ride_range", s_rideRange, 1, 1000), KB_F("sprint_seconds", s_sprintSeconds, 0.5, 60), KB_F("sprint_cooldown", s_sprintCd, 0, 600),
@@ -201,10 +205,14 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Hallucination while it stands: Let's Go for a Ride! (she is put in its driver seat, else a free passenger\n"
                "; seat, within ride_range m); pressed again inside it: Winner!. It takes frv_taken_n of the damage in N and\n"
                "; frv_taken_parked while it stands still; each hit on it repairs frv_repair of its health (at most once a\n"
-               "; second). Kinetic Release: while its turret fights in S / S+, every release_every s, release_explosion (248)\n"
-               "; goes off 3 (S) or 6 (S+) times release_radius m around it. In S+ it pulls enemies to it (Let's Drift!).\n"
+               "; second). Kinetic Release: while its turret fights in S / S+, every release_every s, the nearest\n"
+               "; release_targets_s (S) or release_targets_plus (S+) enemies within release_reach m of it each take an EMS burst\n"
+               "; (release_shell 154: the EMS mortar's shell from above; else release_explosion 150) dealing release_damage with\n"
+               "; release_ap armour penetration. ems_immune 1: no EMS stun on her or the FRV Sinner, from anyone.\n"
+               "; release_radius: unused since 0.2.5. In S+ it pulls enemies to it (Let's Drift!).\n"
                "frv_sinner = %d\nfrv_damage_n = %g\nfrv_damage_s = %g\nfrv_damage_plus = %g\nfrv_taken_n = %g\nfrv_taken_parked = %g\nfrv_repair = %g\n"
-               "release_explosion = %d\nrelease_every = %g\nrelease_radius = %g\nride_range = %g\n"
+               "release_explosion = %d\nrelease_shell = %d\nrelease_damage = %d\nrelease_ap = %g\nrelease_reach = %g\n"
+               "release_targets_s = %d\nrelease_targets_plus = %d\nems_immune = %d\nrelease_every = %g\nrelease_radius = %g\nride_range = %g\n"
                "; Full Speed Sprint!: Eye of the Snow Wolf's key while she drives the FRV Sinner: for sprint_seconds it and she\n"
                "; take no damage and its ramming hits deal sprint_ram times (and sprint_ram_s more in S, sprint_ram_plus in S+).\n"
                "sprint_seconds = %g\nsprint_cooldown = %g\nsprint_ram = %g\nsprint_ram_s = %g\nsprint_ram_plus = %g\n"
@@ -225,7 +233,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_s2Cd, (double)s_krSeconds, (double)s_krMult, (double)s_krHeal, (double)s_krSinnerHeal, (double)s_s3Cd, s_cleanse,
             (double)s_followDist, (double)s_personal, (double)s_maxRounds, (double)s_roundSpeed, s_turnOn, s_drive, s_driveTest, s_locoManager, s_locoMap, s_locoRecords, s_locoStride, s_stickFwd, s_stickSide, s_stickTurn,
             s_sight, (double)s_fpDistance, s_frvOn, (double)s_frvDmgN, (double)s_frvDmgS, (double)s_frvDmgPlus, (double)s_frvGuardN, (double)s_frvParked,
-            (double)s_frvRepair, s_releaseRow, (double)s_releaseEvery, (double)s_releaseRadius, (double)s_rideRange,
+            (double)s_frvRepair, s_releaseRow, s_releaseShell, s_releaseDamage, (double)s_releaseAp, (double)s_releaseReach, s_releaseTargetsS,
+            s_releaseTargetsPlus, s_emsImmune, (double)s_releaseEvery, (double)s_releaseRadius, (double)s_rideRange,
             (double)s_sprintSeconds, (double)s_sprintCd, (double)s_sprintRam, (double)s_sprintRamS, (double)s_sprintRamPlus,
             s_grip, (double)s_gripGravity, (double)s_gripCancel, (double)s_gripMargin, (double)s_gripMass);
 }
@@ -278,7 +287,7 @@ static int HealthOf(uint32_t entity, int32_t* health, uint32_t* life)
     *life = Word(b + 412);
     return 1;
 }
-static int Alive(uint32_t e) { int32_t hp; uint32_t life; return HealthOf(e, &hp, &life) && hp > 0; }
+static int Alive(uint32_t e) { int32_t hp; uint32_t life = 1; return HealthOf(e, &hp, &life) && hp > 0 && life == 0; }
 /* 0.1.4: the middle of a unit's body: the centre of its scene-graph nodes' box (a Bile Titan's root is on the ground) */
 #define BODIES 64
 static struct { uint32_t unit; double at; float off[3]; } g_body[BODIES];
@@ -637,6 +646,17 @@ static atomic_uint g_frvSeenTarget;
 static _Atomic unsigned long long g_frvSeenMs;
 static unsigned g_rams, g_sprints, g_sprintSaved;
 static int Sprinting(void) { return g_frv && g_sinner && g_now < g_sprintUntil; }
+/* 0.2.5: Kinetic Release's targets (its EMS bursts deal release_damage at release_ap to them, once each) */
+#define REL_TARGETS 24
+static atomic_uint g_relTarget[REL_TARGETS];
+static atomic_int g_relPaid[REL_TARGETS];
+static _Atomic unsigned long long g_relMs;
+static int RelIndex(uint32_t e)
+{
+    if (!e || GetTickCount64() - atomic_load(&g_relMs) > 3000) return -1;
+    for (int i = 0; i < REL_TARGETS; i++) if (atomic_load(&g_relTarget[i]) == e) return i;
+    return -1;
+}
 static double g_turretCandAt = -100;
 static int g_frvParked;
 static atomic_int g_repairPending;
@@ -1787,6 +1807,24 @@ static void Ride(void)
  * network id from */
 static void TurretSeen(KbHitCall* c)
 {
+    /* 0.2.5: Kinetic Release's EMS bursts pierce release_ap armour on its targets */
+    if (c->kind == KB_HIT_CALC && s_releaseAp > 0)
+    {
+        uint8_t h[HIT_SIZE];
+        if (ReadAt((uintptr_t)c->hit, h, sizeof h) && Word(h) == 4 && RelIndex(Word(h + 0x20)) >= 0 && OwnBlast(h, NULL))
+        {
+            memcpy(c->saved, h + 0x9C, 12);
+            int ok = 1;
+            for (int k = 0; k < 3; k++) if (!(c->saved[k] >= 0 && c->saved[k] <= 12)) ok = 0;
+            if (ok)
+            {
+                float up[3];
+                for (int k = 0; k < 3; k++) up[k] = c->saved[k] > s_releaseAp ? c->saved[k] : s_releaseAp;
+                memcpy((uint8_t*)c->hit + 0x9C, up, 12);
+                c->restore = 1;
+            }
+        }
+    }
     uint32_t t = g_turretEnt, car = g_sinner;
     if (!g_frv || (g_turretNet && g_frvNet) || c->kind != KB_HIT_CALC) return;
     uint32_t w[2];
@@ -1804,6 +1842,27 @@ static void CarSpared(KbHitCall* c)
     if (!g_frv || !car || !c->hit || !c->out || !ReadAt((uintptr_t)c->hit, h, sizeof h) || Word(h + 0x20) != car || !OwnBlast(h, NULL)) return;
     memset(c->out, 0, RESULT_SIZE);
     g_carSpared++;
+}
+/* 0.2.5: no EMS stun on her or the FRV Sinner (the status add, game.dll+0x699E40, as Alva's guard: statuses 37-39) */
+typedef void (*AddStatusFn)(void* m, uint32_t e, uint32_t st, uint32_t r9, float buildup, uint32_t from, uint64_t z);
+static AddStatusFn original_add;
+static unsigned g_emsRefused;
+static void AddStatus(void* m, uint32_t e, uint32_t st, uint32_t r9, float buildup, uint32_t from, uint64_t z)
+{
+    if (s_emsImmune && g_inMission && kb_kit_on && (st == 37 || st == 38 || st == 39) && e &&
+        (e == atomic_load(&g_avatar) || (g_frv && e == g_sinner)))
+    {
+        if (g_emsRefused++ < 6) Log("EMS immunity: status %u refused on %s", st, e == g_sinner ? "the FRV Sinner" : "her");
+        return;
+    }
+    original_add(m, e, st, r9, buildup, from, z);
+}
+static void StatusInstall(void)
+{
+    if (!hf->code_matches(game + 0x699E40, "40 55 53 57 41 55 41 57 48 8d 6c 24 d0 48 81 ec 30 01 00 00"))
+    { Log("EMS immunity off: game.dll+0x699E40 is not the reviewed code"); return; }
+    if (hf->hook(self, game + 0x699E40, (void*)AddStatus, (void**)&original_add)) { Log("EMS immunity off: the hook could not be placed"); return; }
+    Log("EMS immunity ready (her and the FRV Sinner: statuses 37-39)");
 }
 /* ---- its turret's fight, Kinetic Release, its repair, whether it is parked ----------------------------------------- */
 static double g_frvFightAt = -100, g_frvLookNext, g_releaseNext, g_repairNext, g_parkAt;
@@ -1824,22 +1883,48 @@ static void FrvFrame(void)
         g_repairNext = g_now + 1;
         SinnerSetHealth(g_sinHp + (int32_t)(g_sinMax * s_frvRepair + 0.5f), "Gear Shift's repair");
     }
-    if (g_gear != GEAR_N && s_releaseRow > 0 && g_now - g_frvFightAt < 1.0 && g_now >= g_releaseNext)
+    if (g_gear != GEAR_N && (s_releaseRow > 0 || s_releaseShell > 0) && g_now - g_frvFightAt < 1.0 && g_now >= g_releaseNext)
     {
-        g_releaseNext = g_now + s_releaseEvery;
-        int n = g_gear == GEAR_PLUS ? 6 : 3, done = 0;
-        for (int i = 0; i < n; i++)
+        /* 0.2.5: the nearest enemies within release_reach m each take an EMS burst on them */
+        int want = g_gear == GEAR_PLUS ? s_releaseTargetsPlus : s_releaseTargetsS, n = 0, done = 0;
+        struct { uint32_t e; float d2; float q[3]; } t[REL_TARGETS];
+        if (want > REL_TARGETS) want = REL_TARGETS;
+        for (int k = 0; k < FOES; k++)
         {
-            float a = (float)i * 6.2831853f / (float)n + (float)g_releases, q[3] = {p[0] + cosf(a) * s_releaseRadius, p[1] + sinf(a) * s_releaseRadius, p[2]}, g[3];
-            if (!Ground(q, g)) memcpy(g, q, 12);
-            unsigned slot = g_ownNext++ % KB_OWN_SLOTS;   /* her own blast: it spares her */
-            memcpy(g_ownPos[slot], g, 12);
-            atomic_store(&g_ownEmp[slot], 0);
-            atomic_store(&g_ownMs[slot], GetTickCount64());
-            if (hf->spawn_explosion(self, (uint32_t)s_releaseRow, g) == HF_ACT_REQUESTED) done++;
+            float q[3], d2;
+            uint32_t e = g_foe[k];
+            if (!e || !TargetPos(e, g_foeRes[k], q) || (d2 = Dist2(q, p)) > s_releaseReach * s_releaseReach || !Alive(e)) continue;
+            int j;
+            if (n == want) { if (d2 >= t[n - 1].d2) continue; j = n - 1; }
+            else j = n++;
+            while (j > 0 && t[j - 1].d2 > d2) { t[j] = t[j - 1]; j--; }
+            t[j].e = e; t[j].d2 = d2; memcpy(t[j].q, q, 12);
         }
-        g_releases++;
-        if (g_releases <= 5) Log("Kinetic Release%s: %d of %d blasts around the FRV", g_gear == GEAR_PLUS ? "+" : "", done, n);
+        if (n)
+        {
+            g_releaseNext = g_now + s_releaseEvery;
+            for (int i = 0; i < REL_TARGETS; i++) { atomic_store(&g_relTarget[i], i < n ? t[i].e : 0); atomic_store(&g_relPaid[i], 0); }
+            atomic_store(&g_relMs, GetTickCount64());
+            for (int i = 0; i < n; i++)
+            {
+                float g[3];
+                if (!Ground(t[i].q, g)) memcpy(g, t[i].q, 12);
+                unsigned slot = g_ownNext++ % KB_OWN_SLOTS;   /* her own blast: it spares her and the FRV */
+                memcpy(g_ownPos[slot], g, 12);
+                atomic_store(&g_ownEmp[slot], 0);
+                atomic_store(&g_ownMs[slot], GetTickCount64());
+                int r = -1;
+                if (s_releaseShell > 0)
+                {
+                    float from[3] = {g[0], g[1], g[2] + 12}, down[3] = {0, 0, -1};
+                    r = hf->spawn_projectile(self, (uint32_t)s_releaseShell, from, down);
+                }
+                if (r != HF_ACT_REQUESTED && s_releaseRow > 0) r = hf->spawn_explosion(self, (uint32_t)s_releaseRow, g);
+                if (r == HF_ACT_REQUESTED) done++;
+            }
+            g_releases++;
+            if (g_releases <= 5) Log("Kinetic Release%s: EMS bursts on %d of %d enemies within %.0f m", g_gear == GEAR_PLUS ? "+" : "", done, n, (double)s_releaseReach);
+        }
     }
 }
 
@@ -2174,6 +2259,18 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
             return;
         }
     }
+    {
+        /* 0.2.5: Kinetic Release's burst on its target: release_damage, once */
+        int ri = d->kind == 4 ? RelIndex(d->target) : -1;
+        if (ri >= 0 && d->target != fsin && !atomic_exchange(&g_relPaid[ri], 1))
+        {
+            int32_t was = d->amount;
+            d->amount = s_releaseDamage;
+            static atomic_uint told;
+            if (atomic_fetch_add(&told, 1) < 8) Log("Kinetic Release: entity %u takes %d (was %d)", d->target, d->amount, was);
+            return;
+        }
+    }
     if (d->amount <= 0 || !MineHit(d)) return;
     uint32_t sin = g_sinner;
     /* her hits (and the Sinner's rounds, which are hers) spare the Sinner, and its rounds spare her allies */
@@ -2353,6 +2450,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     HitsInstall("own-blast guard");
     SeatPins();
     PhysicsPins();
+    StatusInstall();
     if (hf->code_matches(exe + 0x79F860, "33 c0 4c 8d 05 c7 b2 01 02 0f 1f 80 00 00 00 00 49 39 0c c0 74 0c ff c0 83 f8 04 75 f3") &&
         hf->code_matches(exe + 0x7F4590, "48 8b c4 f3 0f 11 58 20 89 48 08 55 53 56 57 41 54 41 55 41 56 41 57 48"))
     {
