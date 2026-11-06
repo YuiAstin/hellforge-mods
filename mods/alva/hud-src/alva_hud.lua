@@ -448,15 +448,6 @@ local OPTIONS = {
     {'hp_mult', 'slider', 'Body: Health', 0.5, 4, 0.05, 'Her health, times a Helldiver\'s.', true},
     {'stamina_mult', 'slider', 'Body: Stamina', 0.5, 6, 0.1, 'How long she sprints before the bar empties, times a Helldiver\'s.'},
 }
--- The MODS tab holds about 128 options for every mod together (Mod Options Menu), and the kits filled it, so each
--- kit puts only these rows there; every other setting stays in its .ini.
-local MODS_TAB_CORE = {shield_amount = true, conf_max = true, shatter_mult = true, frozen_seconds = true, s2_cooldown = true, s3_cooldown = true, hp_mult = true, stamina_mult = true}
-do
-    local kept = {}
-    for _, o in ipairs(OPTIONS) do if MODS_TAB_CORE[o[1]] then kept[#kept + 1] = o end end
-    for n, o in ipairs(kept) do o[8] = n == 1 or nil end
-    OPTIONS = kept
-end
 pcall(ffi.cdef, [[
 typedef int (*alvopt_get)(const char *name, double *out);
 typedef int (*alvopt_set)(const char *name, double value);
