@@ -72,6 +72,16 @@ When she brings the M-102 FRV instead of the Patriot, the Sinner is that car. It
 - **Full Speed Sprint!:** only while she drives it: a boost (an impulse on the car's physics actor, Apache's way) for
   about 1.5 s; enemies it passes through take a hit, more in S / S+.
 
+### Decisions (Yui, 2026-11-06)
+
+- **Which Sinner:** a choice on the Mod Options Menu between the Patriot and the FRV. The FRV Sinner becomes a copy of
+  the M-103 Supply FRV with its own stratagem (as the Patriot copy), not her loadout's vanilla M-103. No M-102 / M-104.
+- **Full Speed Sprint!:** no hover, no footprint damage (0.2.2's sprint stays: no damage taken, harder rams).
+- **Obstacles ahead (planned):** rays ahead at bumper and headlight height, left / centre / right. Lower than the
+  headlights: a hop over it (Grip's impulse). A wall or high ledge (every ray hit): left alone. Narrow and tall (trees):
+  driven through, or better, knocked down as a vanilla exosuit knocks trees over when it walks into them.
+- **Let's Go for a Ride!'s share of her stats:** open.
+
 ## In Helldivers terms
 
 ### The Sinner: an empty exosuit that drives itself (untested)

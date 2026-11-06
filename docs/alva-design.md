@@ -2,7 +2,8 @@
 
 Alva is AN-94 in Girls' Frontline 2 (DEFY, with Koleda / AK-12 and Voymastina / AK-15): a Support whose passive shields
 her allies and whose skills deal freeze damage. She is the second test case for the kit base (docs/kit-base.md, on the
-`kitbase` branches), after AK-12: the first kit that works on allies as well as enemies. Nothing here is built yet.
+`kitbase` branches), after AK-12: the first kit that works on allies as well as enemies. Built (0.2.2 on 2026-11-06: the shatter rework,
+snow fields, EMS mortar bursts); this plan is the original design, and the open questions below still stand.
 
 ## Her kit in Helldivers terms
 

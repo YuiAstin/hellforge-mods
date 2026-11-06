@@ -40,5 +40,8 @@ Helldiver Survival Rework's research).
 
 1. The model probe: her armour in the world, posed as she is, visual only.
 2. The durable edit: the hit record's damage row.
-3. Her stack numbers (durable bonus a stack, 3 or 6 stacks, how long they last).
-4. CI's rates (what fills it, how fast the Simulacrum drains it).
+3. Her stack numbers (Yui, 2026-11-06): **25 a stack, at most 6** (read as +25% durable damage a stack, +150% at 6: to
+   confirm). Open: how long a stack lasts.
+4. The Simulacrum's gauge (Yui, 2026-11-06), replacing CI: **a battery**. It lasts **60 s** out (default, a setting) and
+   recharges while the Simulacrum is not out; its skill **toggles** it out and back. Open: the recharge rate, and whether
+   it can be called with a part-charged battery.

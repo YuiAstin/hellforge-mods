@@ -47,4 +47,4 @@ fitted to Helldivers 2 with Yui's changes. Built on the kit base.
 1. The airborne height threshold (a test).
 2. Whether writing her magazine's rounds back holds on a player's gun.
 3. Where the reinforcement count lives (Mission Probe, tonight).
-4. The beacon's throw: a grenade or a stratagem ball as the trigger.
+4. The beacon's throw: **a stratagem ball** for now (Yui, 2026-11-06).

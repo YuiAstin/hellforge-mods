@@ -23,6 +23,6 @@ gun's fire rate and pump already set the pace (Yui). If he is too strong, the in
 
 ## Open items
 
-1. The heal cap per shot (2 or 3 enemies). The heal: 50% of max health a hit, limbs mended in full (settled).
+1. The heal cap per shot: **3 enemies** (Yui, 2026-11-06). The heal: 50% of max health a hit, limbs mended in full (settled).
 2. No stims: where his stim count lives, or how to refuse the stim action, so a stim is not spent for nothing.
 3. S2's dodge: settled as any hit. Open: whether a negated explosion or a hit over time counts (the damage kind).

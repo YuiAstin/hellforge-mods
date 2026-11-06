@@ -16,7 +16,10 @@ What stands in the way:
 - **Only the host can spawn explosions.** The duo arc works only when Lenna or Leva is the host.
 - **Testing needs two players.** HellForge's session results have a `multiInstance` setting; if it can run two local copies, one PC could test it. Otherwise it needs a friend.
 
-## Wise Support rework
+## Wise Support rework (scrapped, Yui 2026-11-06)
+
+Kept for the record; not to be built.
+
 
 Wise Support (The Fox's Scheme) rarely procs: her skills charge whole groups at once and kill them, so the "newly charged enemy near her" zaps are spent on targets already dying. Options discussed:
 
