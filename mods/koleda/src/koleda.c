@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.9"
+#define VERSION "0.2.10"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -89,6 +89,7 @@ static int s_turnOn = 0;
 /* 0.1.8: its minigun rounds' speed (her copies only): at the base's ~1000 m/s a round's tracer is first drawn a frame
  * along its path, metres out from the arm (it looked spawned far from the Sinner); 0 keeps the base's */
 static float s_roundSpeed = 250;
+static float s_deadAfter = 5;   /* 0.2.10: a target its fire leaves its health alone this long: dead to it for 15 s */
 static float s_maxRounds = 20;   /* 0.1.7: off (the HUD side walks and turns it through its animation, Exo Autopilot's way) */
 static float g_walkGoal[3];
 static int g_walkWant;
@@ -117,7 +118,7 @@ static const KbSetting kSettings[] = {
     KB_F("leash_start", s_leashStart, 2, 100), KB_F("leash_stop", s_leashStop, 1, 100), KB_F("guard_start", s_guardStart, 2, 100),
     KB_F("leash_warp", s_leashWarp, 10, 500), KB_F("stuck_seconds", s_stuckSeconds, 0.5, 60), KB_F("push_step", s_pushStep, 0.5, 5), KB_I("push_steps", s_pushSteps, 0, 50), KB_F("slide_speed", s_slideSpeed, 0.5, 20),
     KB_F("plus_distance", s_plusDistance, 1, 100), KB_F("plus_leash", s_plusLeash, 5, 200), KB_I("warp_needs_walks", s_warpWalks, 0, 1), KB_I("nav_path", s_navPath, 0, 1),
-    KB_I("sinner_fire", s_sinFire, 0, 1), KB_I("sinner_sight", s_sinSight, 0, 1),
+    KB_I("sinner_fire", s_sinFire, 0, 1), KB_F("dead_after", s_deadAfter, 0, 60), KB_I("sinner_sight", s_sinSight, 0, 1),
     KB_I("round_n", s_roundN, 1, 350), KB_I("round_s", s_roundS, 1, 350), KB_I("round_plus", s_roundPlus, 1, 350), KB_I("round_rocket", s_roundRocket, 0, 350), KB_I("round_fallback", s_roundFallback, 1, 100000),
     KB_F("gun_every", s_gunEvery, 0, 10), KB_F("plus_rate", s_plusRate, 0.1, 1), KB_F("guard_range", s_guardRange, 5, 200), KB_F("fire_range", s_fireRange, 5, 300),
     KB_I("pull_on", s_pullOn, 0, 1), KB_I("pull_explosion", s_pullExplosion, 0, 100000), KB_F("pull_every", s_pullEvery, 1, 600), KB_F("pull_radius", s_pullRadius, 1, 30),
@@ -175,8 +176,10 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; of it; S+: her target. Its own arms' rounds (projectile types, copied), at the Patriot's arms' fire rates: the\n"
                "; right arm's minigun by gear, round_n / round_s / round_plus (148: the Patriot's minigun), and in S+ the left arm's\n"
                "; rockets too, round_rocket (128: the Patriot's rockets; 0: none). One that cannot be spawned falls back to\n"
-               "; round_fallback (7: the Guard Dog's). sinner_sight 1: only at what it can see.\n"
-               "sinner_fire = %d\nsinner_sight = %d\nround_n = %d\nround_s = %d\nround_plus = %d\nround_rocket = %d\nround_fallback = %d\n"
+               "; round_fallback (7: the Guard Dog's). sinner_sight 1: only at what it can see (aiming higher up a target's body\n"
+               "; when cover hides its middle). dead_after: a target whose health does not move in this many seconds of its fire\n"
+               "; is left as dead for 15 s (0: never).\n"
+               "sinner_fire = %d\ndead_after = %g\nsinner_sight = %d\nround_n = %d\nround_s = %d\nround_plus = %d\nround_rocket = %d\nround_fallback = %d\n"
                "gun_every = %g\nplus_rate = %g\nguard_range = %g\nfire_range = %g\n"
                "; KANSEI DORIFTO (pull_on 1; untested, so off): in S+, every pull_every s, enemies within pull_radius m of the\n"
                "; Sinner are dragged to it, and pull_explosion (0: none) goes off on it.\n"
@@ -230,7 +233,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             s_sinOn, s_callMode, (double)s_sharePct, (double)s_shareRange,
             (double)s_leashStart, (double)s_leashStop, (double)s_guardStart, (double)s_leashWarp, (double)s_stuckSeconds, (double)s_pushStep, s_pushSteps, (double)s_slideSpeed,
             (double)s_plusDistance, (double)s_plusLeash, s_warpWalks, s_navPath,
-            s_sinFire, s_sinSight, s_roundN, s_roundS, s_roundPlus, s_roundRocket, s_roundFallback, (double)s_gunEvery, (double)s_plusRate, (double)s_guardRange,
+            s_sinFire, (double)s_deadAfter, s_sinSight, s_roundN, s_roundS, s_roundPlus, s_roundRocket, s_roundFallback, (double)s_gunEvery, (double)s_plusRate, (double)s_guardRange,
             (double)s_fireRange, s_pullOn, (double)s_pullEvery, (double)s_pullRadius, s_pullExplosion,
             (double)s_s1Cd, s_s1Rounds, (double)s_s1Every, (double)s_s1Cone, (double)s_s1Range, s_s1Round,
             (double)s_s2Cd, (double)s_krSeconds, (double)s_krMult, (double)s_krHeal, (double)s_krSinnerHeal, (double)s_s3Cd, s_cleanse,
@@ -290,7 +293,37 @@ static int HealthOf(uint32_t entity, int32_t* health, uint32_t* life)
     *life = Word(b + 412);
     return 1;
 }
-static int Alive(uint32_t e) { int32_t hp; uint32_t life = 1; return HealthOf(e, &hp, &life) && hp > 0 && life == 0; }
+/* 0.2.10: who is dead to her and the Sinner (Exusiai 0.2.13's rule, and more): a life state counts as dead once a kill
+ * has shown it; an entity a kill named stays dead for 60 s (whatever its record says); one the Sinner fired at for
+ * dead_after s without its health moving is left for 15 s (a corpse that kept its health and life state 0) */
+static uint32_t g_deadLife[8];
+static int g_ndeadLife;
+static struct { uint32_t e; double until; } g_dead[64];
+static unsigned g_deadNext;
+
+static int DeadLife(uint32_t life) { for (int i = 0; i < g_ndeadLife; i++) if (g_deadLife[i] == life) return 1; return 0; }
+static void DeadAdd(uint32_t e, double seconds)
+{
+    for (int i = 0; i < 64; i++) if (g_dead[i].e == e) { g_dead[i].until = g_now + seconds; return; }
+    unsigned k = g_deadNext++ % 64;
+    g_dead[k].e = e; g_dead[k].until = g_now + seconds;
+}
+static int Dead(uint32_t e) { for (int i = 0; i < 64; i++) if (g_dead[i].e == e && g_now < g_dead[i].until) return 1; return 0; }
+static void LearnDeadLife(uint32_t e)
+{
+    int32_t hp = 0;
+    uint32_t life = 0;
+    if (!HealthOf(e, &hp, &life) || !life || DeadLife(life) || g_ndeadLife >= 8) return;
+    g_deadLife[g_ndeadLife++] = life;
+    Log("a kill showed life state %u (health %d left): an enemy in it is dead to the Sinner", life, hp);
+}
+static int Alive(uint32_t e)
+{
+    int32_t hp;
+    uint32_t life = 0;
+    if (Dead(e) || !HealthOf(e, &hp, &life) || hp <= 0) return 0;
+    return !life || !DeadLife(life);
+}
 /* 0.1.4: the middle of a unit's body: the centre of its scene-graph nodes' box (a Bile Titan's root is on the ground) */
 #define BODIES 64
 static struct { uint32_t unit; double at; float off[3]; } g_body[BODIES];
@@ -1545,9 +1578,44 @@ static void OnBoom(HfMod* mod, const HfEventInfo* info, void* user)
     told++;
     Log("explosion row %u %.1f m from the last rocket's start, %.2f s after it (from entity %u, owner %u)", x->type, d, g_now - g_rocketAt, x->source, x->owner);
 }
-static int SinnerShoot(int arm, uint32_t target, const float at[3])
+/* 0.2.10: where to aim from `from` at a target whose body middle is `at`: the middle, else higher up its body (its
+ * middle above its root by 1.5 and 2 times, its head) until the line from the arm is clear: an enemy up on a ledge
+ * was shot through the ledge's lip below it. Raised for the round's drop (gravity over its flight at round_speed) */
+static void AimPoint(uint32_t target, const float from[3], const float at[3], float out[3])
 {
-    float p[3], m[16], from[3], d[3];
+    memcpy(out, at, 12);
+    uint32_t id;
+    uint8_t dd[24];
+    float root[3];
+    if (s_sinSight && WorldId(&id) && QueryIdle() && Descriptor(target, dd) && UnitNode(Word(dd + 12), 0, root))
+    {
+        float c[4][3];
+        int nc = 0;
+        memcpy(c[nc++], at, 12);
+        for (int k = 0; k < 2; k++) { float f = k ? 2.0f : 1.5f; c[nc][0] = at[0]; c[nc][1] = at[1]; c[nc][2] = root[2] + (at[2] - root[2]) * f; nc++; }
+        if (UnitNode(Word(dd + 12), NODE_HEAD, c[nc]) && fabsf(c[nc][2] - root[2]) < 25) nc++;
+        for (int i = 0; i < nc; i++)
+        {
+            float v[3] = {c[i][0] - from[0], c[i][1] - from[1], c[i][2] - from[2]};
+            float n = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            if (!(n > 1.0f)) break;
+            for (int k = 0; k < 3; k++) v[k] /= n;
+            int hit = 0;
+            float w = FirstWall(id, from, v, n, UnitOf(atomic_load(&g_avatar)), UnitOf(target), g_sinUnit, &hit);
+            if (hit || w > n - 0.3f) { memcpy(out, c[i], 12); if (i) { static unsigned told; if (told++ < 6) Log("the Sinner aims higher on entity %u (point %d: the middle was behind cover)", target, i); } break; }
+        }
+    }
+    if (s_roundSpeed > 50)
+    {
+        float dx = out[0] - from[0], dy = out[1] - from[1], dz = out[2] - from[2];
+        float t = sqrtf(dx * dx + dy * dy + dz * dz) / s_roundSpeed;
+        out[2] += 0.5f * 9.81f * t * t;
+    }
+}
+static int SinnerShoot(int arm, uint32_t target, const float at0[3])
+{
+    float p[3], m[16], from[3], d[3], at[3];
+    memcpy(at, at0, 12);
     if (!SinPos(p)) return 0;
     /* 0.1.4: the arms as if it faced its target (its body turns slowly or not at all while it slides: shots from its
      * own facing crossed its body and caught on it) */
@@ -1563,6 +1631,7 @@ static int SinnerShoot(int arm, uint32_t target, const float at[3])
     from[0] = p[0] + rt[0] * side + fw[0] * 1.2f;
     from[1] = p[1] + rt[1] * side + fw[1] * 1.2f;
     from[2] = p[2] + 2.4f;
+    AimPoint(target, from, at0, at);
     for (int k = 0; k < 3; k++) d[k] = at[k] - from[k];
     float n = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
     if (!(n > 2.5f)) return 0;
@@ -1641,6 +1710,27 @@ static void FireFrame(void)
     if (!SinPos(p)) return;
     uint32_t t = FireTarget(p, at);
     if (!t) { g_fireNext = g_now + 0.25; return; }
+    /* 0.2.10: a target whose health has not moved in dead_after s of its fire: a corpse, left for 15 s */
+    {
+        static uint32_t trk;
+        static int32_t trkHp;
+        static double trkSince;
+        int32_t hp = 0;
+        uint32_t life = 0;
+        if (HealthOf(t, &hp, &life))
+        {
+            if (t != trk || hp != trkHp) { trk = t; trkHp = hp; trkSince = g_now; }
+            else if (s_deadAfter > 0 && g_now - trkSince > s_deadAfter)
+            {
+                DeadAdd(t, 15);
+                static unsigned told;
+                if (told++ < 8) Log("entity %u: its health stayed %d through %.0f s of the Sinner's fire (life state %u): left as dead for 15 s", t, hp, (double)s_deadAfter, life);
+                trk = 0;
+                g_fireNext = g_now + 0.1;
+                return;
+            }
+        }
+    }
     double every = (s_gunEvery > 0 ? s_gunEvery : Profile(g_gear)->every) * (g_gear == GEAR_PLUS ? s_plusRate : 1);
     if (g_now < g_krUntil && s_krMult > 0) every /= s_krMult;
     g_fireNext = g_now + every;
@@ -2408,6 +2498,8 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 static void OnKill(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfKillEvent* k = (const HfKillEvent*)info;
+    LearnDeadLife(k->victim);
+    DeadAdd(k->victim, 60);
     DropFoe(k->victim);
     if (k->victim == g_lastTarget) g_lastTarget = 0;
     if (k->victim == g_plusTarget) g_plusTarget = 0;
