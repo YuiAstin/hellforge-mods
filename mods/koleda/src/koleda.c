@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.8"
+#define VERSION "0.2.9"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -736,6 +736,14 @@ HF_MOD_EXPORT int koleda_frv_package(unsigned version, int state)
     return 1;
 }
 static int FrvReady(void) { return atomic_load(&g_frvPkg) == 1; }
+/* 0.2.9: a line from her HUD, in this log (its own log lines were not found in the session's logs) */
+HF_MOD_EXPORT int koleda_hud_log(unsigned version, const char* text)
+{
+    if (version != 1 || !text) return 0;
+    static unsigned told;
+    if (told++ < 40) Log("[HUD] %.300s", text);
+    return 1;
+}
 /* the call Hallucination grants: the picked Sinner's (the FRV's only with its package resident) */
 static uint32_t CallType(void) { return s_frvOn && g_frvType && FrvReady() ? g_frvType : g_sinType; }
 

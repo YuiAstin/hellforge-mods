@@ -1004,10 +1004,20 @@ pcall(function() hd2.on_frame(function(dt) local ok, err = pcall(walk_tick, tonu
 -- HellForge's load_package does not know the M-103 Supply FRV's call-in package, and an FRV called without it crashed
 -- the game as it landed. HD2Runtime's catalogue does: hd2.require_assets of the M-103 (it loads the assets, it grants
 -- nothing). The state goes to koleda.dll (koleda_frv_package); until it is resident she calls the Patriot.
-pcall(ffi.cdef, [[ typedef int (*kolfrvpkg1)(unsigned int version, int state); ]])
-local FP = {fn = nil, watch = nil, sent = nil, failed = false, wait = 0}
+pcall(ffi.cdef, [[ typedef int (*kolfrvpkg1)(unsigned int version, int state);
+typedef int (*kolhudlog1)(unsigned int version, const char *text); ]])
+-- 0.2.9: asked for in a mission only (0.2.8's ask on the ship was refused), again 15 s after a refusal (4 tries a
+-- mission, a new request id each); every step is written to koleda's own log too (koleda_hud_log)
+local FP = {fn = nil, logfn = nil, watch = nil, sent = nil, failed = false, wait = 0, tries = 0, mission = false}
+local function fp_log(text)
+    log('[Koleda HUD] FRV package: ' .. text)
+    if FP.logfn then pcall(FP.logfn, 1, 'FRV package: ' .. text) end
+end
 local function frv_package_step(dt)
-    if FP.failed or state.sinner_kind == 0 then return end
+    if FP.failed then return end
+    local inm = state.in_mission ~= 0
+    if inm ~= FP.mission then FP.mission = inm; FP.tries = 0; FP.wait = 1; if FP.sent ~= 1 then FP.watch = nil end end
+    if state.sinner_kind == 0 or not inm then return end
     FP.wait = FP.wait - dt
     if FP.wait > 0 then return end
     FP.wait = 1
@@ -1016,22 +1026,29 @@ local function frv_package_step(dt)
         local proc = module ~= nil and k32.kolhud1_GetProcAddress(module, 'koleda_frv_package') or nil
         if proc == nil then FP.failed = true; log('[Koleda HUD] FRV package: koleda.dll has no koleda_frv_package (update Koleda)') return end
         FP.fn = ffi.cast('kolfrvpkg1', proc)
+        local lp = k32.kolhud1_GetProcAddress(module, 'koleda_hud_log')
+        if lp ~= nil then FP.logfn = ffi.cast('kolhudlog1', lp) end
     end
+    if FP.sent == 1 then return end
     if not FP.watch then
+        if FP.tries >= 4 then return end
+        FP.tries = FP.tries + 1
         local okH, handle = pcall(hd2.stratagem, 'M-103 Supply FRV')
-        if not okH or not handle then FP.failed = true; FP.fn(1, -1); log('[Koleda HUD] FRV package: no M-103 Supply FRV handle: ' .. tostring(handle)) return end
-        local okW, watch = pcall(hd2.require_assets, {id = 'koleda-frv-sinner', targets = {handle}})
-        if not okW or type(watch) ~= 'table' then FP.failed = true; FP.fn(1, -1); log('[Koleda HUD] FRV package: require_assets failed: ' .. tostring(watch)) return end
+        if not okH or not handle then FP.fn(1, -1); FP.wait = 15; fp_log('no M-103 Supply FRV handle: ' .. tostring(handle)) return end
+        local okW, watch = pcall(hd2.require_assets, {id = 'koleda-frv-sinner-' .. FP.tries, targets = {handle}})
+        if not okW or type(watch) ~= 'table' then FP.fn(1, -1); FP.wait = 15; fp_log('require_assets failed (try ' .. FP.tries .. '): ' .. tostring(watch)) return end
         FP.watch = watch
-        log('[Koleda HUD] FRV package: requested (M-103 Supply FRV, through HD2Runtime)')
+        fp_log('requested (M-103 Supply FRV through HD2Runtime, try ' .. FP.tries .. ')')
     end
     local st = FP.watch.status
     local v = st == 'complete' and 1 or (st == 'rejected' or st == 'cancelled' or st == 'disabled') and -1 or 0
     if v ~= FP.sent then
         FP.sent = v
         FP.fn(1, v)
-        log('[Koleda HUD] FRV package: ' .. tostring(st) .. (FP.watch.error and (' (' .. tostring(FP.watch.error) .. ')') or ''))
+        local why = FP.watch.error or (FP.watch.result and FP.watch.result.reason)
+        fp_log(tostring(st) .. (why and (' (' .. tostring(why) .. ')') or ''))
     end
+    if v == -1 then FP.watch = nil; FP.wait = 15 end
 end
 
 local overlay = hd2.ui.overlay({id = 'kit', owner = OWNER})
