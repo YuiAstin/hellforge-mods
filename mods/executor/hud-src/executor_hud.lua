@@ -244,6 +244,7 @@ local WARN = {t = 0}
 local SOS_BEACON = 145   -- StratagemType of the SOS Beacon
 local ORANGE, GREY = {255, 138, 36}, {120, 124, 128}
 local ICONS = {}
+local ICON_HUE = {{255, 9, 0, 255}, {255, 156, 0, 255}, {255, 9, 0, 255}}   -- his icons' own colours (red, orange, red)
 for i, id in ipairs({'executor_s1', 'executor_s2', 'executor_s3'}) do
     local okI, handle = pcall(hd2.resources.image, id)
     if okI and handle then ICONS[i] = handle end   -- (without images: the tiles show short names)
@@ -350,10 +351,9 @@ local function ability(d, i, x, y, size, alpha)
     if ICONS[i] then
         local pad = size * 0.08
         d:image(ICONS[i], x + pad, y + pad, size - 2 * pad, size - 2 * pad, {z = 3,
-            -- 0.2.7: his icons are raw (hd2runtime.json): their R, G and B layers drawn as pure red, green and blue give
-            -- the art's own colours; on cooldown, the same layers as greys (its brightness)
-            colours = (ready or on) and {r = {255, 0, 0, 255}, g = {0, 255, 0, 255}, b = {0, 0, 255, 255}}
-                or {r = {60, 60, 60, 255}, g = {118, 118, 118, 255}, b = {22, 22, 22, 255}},
+            -- 0.2.9: HUD images are two masks, never true colour (HD2Runtime). His icons are built as masks from the art:
+            -- R its coloured part, G its white part; R drawn in that icon's own hue (sampled from the art), G white
+            colours = (ready or on) and {r = ICON_HUE[i], g = {255, 255, 255, 255}} or {r = rgba(GREY, 1), g = {150, 154, 158, 255}},
             colour = {255, 255, 255, math.floor(255 * a + 0.5)}})
     else
         heavy(d, SHORT[i], x + size / 2, y + size * 0.3, math.max(17 * s, size * 0.34), 'title', (ready or on) and rgba(TEXT, a) or rgba(MUTED, a), 'center')

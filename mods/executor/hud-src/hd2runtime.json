@@ -13,10 +13,5 @@
       "api": 1,
       "module": "mods/skyeshade/hd2runtime"
     }
-  },
-  "images": {
-    "executor_s1": "raw",
-    "executor_s2": "raw",
-    "executor_s3": "raw"
   }
 }
