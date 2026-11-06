@@ -38,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.11"
+#define VERSION "0.2.12"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -384,8 +384,9 @@ static int GunsHit(const float p[3])
 }
 static int Living(uint32_t e, int32_t* hp)
 {
-    uint32_t life;
-    return HealthOf(e, hp, &life) && *hp > 0;
+    /* 0.2.12: and its life state 0 (a dead Illuminate keeps health on its record: the guns kept shooting the corpse) */
+    uint32_t life = 1;
+    return HealthOf(e, hp, &life) && *hp > 0 && life == 0;
 }
 /* 0.2.4: the middle of a unit's body: the centre of its scene-graph nodes' box (a Bile Titan's root is on the ground
  * between its legs, its body 6 m up), kept a second per enemy */
@@ -598,6 +599,10 @@ static void GunsFrame(void)
     int s2 = g_now < g_s2Until, s3 = g_now < g_s3Until;
     /* the summoned pair: at what she hit */
     g_nassist = 0;
+    {
+        int32_t php;
+        if (g_pairTarget && !Living(g_pairTarget, &php)) { g_pairTarget = 0; g_pairAt = -100; }   /* 0.2.12: it died: they stop */
+    }
     if (s2 && g_now - g_pairAt <= s_pairHold)
     {
         const GunInfo* gi = s_pairRate && g_primaryRes ? InfoOf(g_primaryRes) : NULL;
@@ -862,7 +867,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     if (mult != 1) ScaleDamage(d, mult);
     if (gun) return;
     NoteTarget(d);
-    if (g_now < g_s2Until) { g_pairTarget = d->target; memcpy(g_pairPos, d->position, 12); g_pairAt = g_now; }
+    { int32_t thp; if (g_now < g_s2Until && Living(d->target, &thp)) { g_pairTarget = d->target; memcpy(g_pairPos, d->position, 12); g_pairAt = g_now; } }
     if (g_now < g_s2Until && g_nassist < 8)
     {
         memcpy(g_assist[g_nassist].p, d->position, sizeof d->position);
