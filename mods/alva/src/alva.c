@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.2"
+#define VERSION "0.2.3"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her chill bursts come often */
@@ -1117,8 +1117,26 @@ typedef struct AlvaHud
 static AlvaHud g_hud = {1};
 static double g_ownPool, g_total;
 static int g_shielded;
+/* 0.2.3: the frozen enemies (ready to shatter), for the HUD's marker over each: x, y, z of its root, seconds left */
+static float g_frozenOut[32][4];
+static volatile int g_nfrozen;
+static void FrozenFrame(void)
+{
+    int n = 0;
+    for (int i = 0; i < COLD && n < 32; i++)
+    {
+        Cold* c = &g_cold[i];
+        float p[3];
+        if (!c->e || c->frozenUntil <= g_now || !TargetPos(c->e, 0, p)) continue;
+        g_frozenOut[n][0] = p[0]; g_frozenOut[n][1] = p[1]; g_frozenOut[n][2] = p[2];
+        g_frozenOut[n][3] = (float)(c->frozenUntil - g_now);
+        n++;
+    }
+    g_nfrozen = n;
+}
 static void HudFrame(void)
 {
+    FrozenFrame();
     g_shielded = AllyShielded(&g_total);
     KbAlly* a = AllyOf(atomic_load(&g_avatar));
     g_ownPool = a ? a->pool : 0;
@@ -1134,6 +1152,15 @@ HF_MOD_EXPORT int alva_marks(unsigned version, float* out, int max)
         out[i * 5] = g_spots[i].x; out[i * 5 + 1] = g_spots[i].y; out[i * 5 + 2] = g_spots[i].z;
         out[i * 5 + 3] = g_spots[i].pool; out[i * 5 + 4] = g_spots[i].who;
     }
+    return n;
+}
+/* 0.2.3: the frozen enemies, 4 floats each (x, y, z of its root, seconds of freeze left): how many */
+HF_MOD_EXPORT int alva_frozen(unsigned version, float* out, int max)
+{
+    if (version != 1 || !out || max <= 0 || !g_inMission || !kb_kit_on) return 0;
+    int n = g_nfrozen;
+    if (n > max) n = max;
+    memcpy(out, g_frozenOut, (size_t)n * 16);
     return n;
 }
 /* 0.1.5: the shatter hits since `after` (a sequence number), 5 floats each (x, y, z, damage, sequence); how many */

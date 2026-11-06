@@ -697,6 +697,38 @@ local function shatter_draw(d, dt, v)
     SH.live = keep
 end
 
+-- 0.2.3: the passive's icon over every frozen enemy (ready to shatter: an explosion now deals the shatter damage),
+-- from alva.dll's alva_frozen; it fades in its last second
+pcall(ffi.cdef, [[ typedef int (*alvfroz1)(unsigned int version, float *out, int max); ]])
+local FZ = {fn = nil, buf = ffi.new('float[128]'), look = 0}
+local okF, FROZEN_ICON = pcall(hd2.resources.image, 'alva_frozen')
+if not okF then FROZEN_ICON = nil end
+local function frozen_draw(d, dt, v)
+    if not FROZEN_ICON then return end
+    if not FZ.fn then
+        if mk_t < FZ.look then return end
+        FZ.look = mk_t + 2
+        local module = k32.alvhud1_GetModuleHandleA('alva.dll')
+        local proc = module ~= nil and k32.alvhud1_GetProcAddress(module, 'alva_frozen') or nil
+        if proc == nil then return end
+        FZ.fn = ffi.cast('alvfroz1', proc)
+    end
+    local n = FZ.fn(1, FZ.buf, 32)
+    if n <= 0 then return end
+    local sc = d.scale or 1
+    local pulse = 0.85 + 0.15 * math.sin(mk_t * 6)
+    for i = 0, n - 1 do
+        local x, y, z, left = FZ.buf[i * 4], FZ.buf[i * 4 + 1], FZ.buf[i * 4 + 2], FZ.buf[i * 4 + 3]
+        local sx, sy, dist = project(v, x, y, z + 2.4)
+        if sx and dist < 120 then
+            local size = math.max(18, 34 - dist * 0.12) * sc * pulse
+            local a = left < 1 and math.floor(255 * math.max(0, left)) or 255
+            d:image(FROZEN_ICON, sx - size / 2, sy - size / 2, size, size, {z = 6,
+                colours = {r = {255, 138, 36, 255}, g = {150, 225, 255, 255}}, colour = {255, 255, 255, a}})
+        end
+    end
+end
+
 local overlay = hd2.ui.overlay({id = 'kit', owner = OWNER})
 overlay:draw(function(d, dt)
     dt = tonumber(dt) or 0
@@ -720,6 +752,10 @@ overlay:draw(function(d, dt)
         if not SH.failed then
             local okS, errS = pcall(shatter_draw, d, dt, v)
             if not okS then SH.failed = true; log('[Alva HUD] shatter numbers failed, off for this session: ' .. tostring(errS)) end
+            if not FZ.failed then
+                local okZ, errZ = pcall(frozen_draw, d, dt, v)
+                if not okZ then FZ.failed = true; log('[Alva HUD] frozen markers failed, off for this session: ' .. tostring(errZ)) end
+            end
         end
     end
     status_bar(d)
