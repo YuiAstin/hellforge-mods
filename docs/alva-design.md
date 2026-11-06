@@ -14,7 +14,11 @@ her allies and whose skills deal freeze damage. She is the second test case for 
 - **Freeze damage.** The SDK has no freeze or cryo status, so freeze is made of what exists:
   - **chill**: the slow the game uses for flamers (`HF_STATUS_FLAMER_SLOWED`), built up by her freezing hits;
   - **frozen solid**: a stun on top once the chill fills (`HF_STATUS_STUN_*`, as Lenna's);
-  - **shatter** (her payoff): a frozen enemy takes bonus damage from the next heavy hit;
+  - **shatter** (her payoff, 0.2.0): a frozen enemy shrugs off every hit but an explosion's. The first explosion (not
+    her own EMS bursts) deals 8x (`shatter_mult`) and thaws it, with a cyan "!damage!" number on the HUD. So the loop is
+    freeze, then blow it up: her role is setting up big hits for grenades, launchers and stratagems;
+  - **snow fields** (0.2.0): Frosted Echo's nitrogen field and a small field where each of its bursts lands freeze
+    anything standing in them after 3 s (`field_freeze_seconds`), divided by how many fields overlap there;
   - **the look**: her blasts recoloured in ice tones (the same particle-copy route as the planned Railcannon recolour).
 
 ## How the shield works
