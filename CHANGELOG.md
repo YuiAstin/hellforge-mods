@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-06: Alva 0.2.3 (first release)
+- Alva's kit from Girls' Frontline 2: a support who shields every ally around her and freezes enemies.
+- Brumal Barrier: every skill (and every 20 s) gives every ally in range (Helldivers, sentries, emplacements, dogs, exosuits, SEAF, the FRV, the Pelican) a 500 shield that stacks with no cap.
+- Freezing Touch and chill: her hits build Confectance and chill enemies until they freeze. A frozen enemy takes no damage except from explosions (not EMS): that hit shatters it for 8x damage, once, and thaws it. Snow fields (Frosted Echo's nitrogen field, and a 10 m field where each burst lands) freeze anyone standing in them, faster where fields overlap.
+- Snow Wolf's Heart shoots any enemy that hits an ally near her; Frosted Echo drops EMS mortar bursts and a nitrogen field where she aims; Nix Requiem fires heavy rounds at her target and freezes it at 5 Confectance.
+- HUD: her skill icons, cyan !damage! numbers on a shatter, and her passive's icon over every frozen enemy ready to shatter. Keys in alva.ini; numbers on the MODS tab (Mod Options Menu). Needs Bingus Shared Loader and HD2Runtime for the HUD.
+
 ## 2026-11-05: Lost Contact 0.2.1
 - The MODS tab needs a menu that publishes HD2_MOD_OPTIONS_v1 (giblett's Vanilla Plus Megapack build). The public Vanilla Plus Megapack (0.2.0) does not offer it yet, so with it there is no Lost Contact tab: use lost-contact.ini, or Ctrl+F9 / Ctrl+F10 in a mission. The log now says so once, about 30 s after start, naming what it looked for and whether the public pack is installed and loaded.
 - A menu that is found but refused (another version, table size, or functions outside any loaded module) is named in the log instead of being skipped in silence, and the line for added rows names the menu used.
