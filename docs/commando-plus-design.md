@@ -14,6 +14,7 @@ so each player picks how much help they want. Host or solo.
 | 4 | More grenades and stims at Commando POIs | `poi_extra = 1` | Depends on whether POI loot comes from editable tables | Probe first |
 | 5 | Patrols keep to their outposts | (separate mod) | Lost Contact's patrol mode | In test |
 | 6 | Sabotage sub-objectives, captured SEAF sites | (later) | New objectives: much larger; only if HellForge's mission tools reach that far | Later |
+| 7 | **Outpost caches:** a resupply for every enemy base cleared (Yui, 2026-11-06: in Commando bases are skipped; this gives a reason to clear them) | `outpost_caches = 1`, `cache_calls_small = 1`, `cache_calls_large = 2` | Below | Planned |
 
 ## Open questions (one probe)
 
@@ -38,3 +39,17 @@ Options 1-3 are buildable (2026-11-06); POI loot (#4) still waits for a probe.
   counted elsewhere.
 - The hive mind was not logged in either mission (Mission Probe 0.1.0 cleared its list as the mission started; fixed in 0.1.1).
 
+
+## Outpost caches (planned, Yui 2026-11-06)
+
+Spawning enemies or placing a supply pod in a base is not possible yet (no generic entity spawn: HellForge has none,
+HD2Runtime lists it as blocked). So a cleared base pays out as a free call instead, which the player throws into it:
+
+- **A base:** the spawner structures that stand close together (bug holes `bug_spawner_*`, bot fabricators
+  `HF_ENTITY_*FABRICATOR`, the Illuminate's), noted as they spawn (HF_ON_SPAWN) and grouped by distance (within ~40 m).
+- **Cleared:** its last spawner closed (HF_ON_BUGHOLE for bug holes) or destroyed (HF_ON_KILL on a noted spawner).
+- **The reward:** a free call per base, granted on her stratagem record as option 2's Resupply: the game's own reward
+  ammo rack (HF_STRATAGEM_AMMO_RACK_PRESIDENT_REWARD, 109) if it grants and lands, else +1 Resupply use. A small
+  outpost gives `cache_calls_small`, a large base (several spawners, a large nest or a large fabricator site)
+  `cache_calls_large`. Logged per base.
+- Open: the Illuminate's spawner resources; whether 109 can be granted outside a mission that offers it (its package).
