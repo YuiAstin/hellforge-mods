@@ -56,7 +56,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 #define BUILD "25480438"
 
 /* S3 sets off a blast on every enemy it hit, 0.1 s apart: room for 12 of his own blasts within the guard's 1.2 s */
@@ -81,7 +81,7 @@ KB_ROSTER_EXPORTS(executor)
 static float s_healPct = 50, s_shotGap = 0.12f;
 static int s_healCap = 3, s_healLimbs = 1, s_healShotgunsOnly = 0, s_stimUndo = 0;
 static float s_chosenPct = 20, s_chosenStep = 5, s_chosenDelay = 0.08f, s_chosenSpread = 3;
-static int s_freeFallback = 7, s_empathy = 1;
+static int s_freeFallback = 7, s_empathy = 1, s_noProjRound = 179;
 static float s_maxRounds = 30;
 static float s_s1Cd = 20, s_s1Mult = 1.5f, s_s1Ap = 2;
 static int s_s1Rounds = 8;
@@ -97,6 +97,7 @@ static const KbSetting kSettings[] = {
     KB_I("heal_shotguns_only", s_healShotgunsOnly, 0, 1), KB_F("shot_gap", s_shotGap, 0.02, 1), KB_I("stim_undo", s_stimUndo, 0, 1),
     KB_F("chosen_pct", s_chosenPct, 0, 100), KB_F("chosen_step", s_chosenStep, 0, 100), KB_F("chosen_delay", s_chosenDelay, 0, 1),
     KB_F("chosen_spread", s_chosenSpread, 0, 30), KB_I("free_round_fallback", s_freeFallback, 0, 100000), KB_F("max_rounds", s_maxRounds, 1, 200),
+    KB_I("no_projectile_round", s_noProjRound, 0, 100000),
     KB_I("empathy", s_empathy, 0, 1),
     KB_I("area_rounds", s_areaRounds, 0, 1), KB_F("area_size", s_areaSize, 1, 100), KB_F("area_size_s3", s_areaSizeS3, 1, 100),
     KB_I("area_max", s_areaMax, 0, 32),
@@ -125,8 +126,11 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; not his own, but the stim's effect still showed and his own heals could be taken back too.\nstim_undo = %d\n"
                "; The Chosen One: each shot has chosen_pct %% to fire a free extra round chosen_delay s later, plus chosen_step %%\n"
                "; for each round spent while a skill runs; its pellets spread chosen_spread degrees. A gun whose round cannot be\n"
-               "; spawned fires projectile free_round_fallback instead. At most max_rounds spawned rounds a second.\n"
+               "; spawned fires projectile free_round_fallback instead. At most max_rounds spawned rounds a second. A gun with no\n"
+               "; projectile of its own (the DBS-2 Double Freedom loads shells) fires no_projectile_round (179: SG-225 Breaker\n"
+               "; buckshot, its pellets too; 0: such guns fire no spawned rounds).\n"
                "chosen_pct = %g\nchosen_step = %g\nchosen_delay = %g\nchosen_spread = %g\nfree_round_fallback = %d\nmax_rounds = %g\n"
+               "no_projectile_round = %d\n"
                "; Empathy by Shotgun: empathy 1, +1 round to each skill for every other Laterano kit installed (Exusiai, Lemuen,\n"
                "; Exusiai the New Covenant).\nempathy = %d\n"
                "; Area rounds: area_rounds 1, each of his shots also fires one round of his gun (every pellet) at each living enemy\n"
@@ -151,7 +155,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "hp_mult = 1\nstamina_mult = 1\nhellbomb_on_exhaustion = 0\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_healPct, s_healCap, (double)s_shotGap, s_healLimbs,
             s_healShotgunsOnly, s_stimUndo, (double)s_chosenPct, (double)s_chosenStep, (double)s_chosenDelay, (double)s_chosenSpread,
-            s_freeFallback, (double)s_maxRounds, s_empathy, s_areaRounds, (double)s_areaSize, (double)s_areaSizeS3, s_areaMax, (double)s_s1Cd, s_s1Rounds, (double)s_s1Mult, (double)s_s1Ap, (double)s_s2Cd,
+            s_freeFallback, (double)s_maxRounds, s_noProjRound, s_empathy, s_areaRounds, (double)s_areaSize, (double)s_areaSizeS3, s_areaMax, (double)s_s1Cd, s_s1Rounds, (double)s_s1Mult, (double)s_s1Ap, (double)s_s2Cd,
             s_s2Rounds, (double)s_s2Mult, (double)s_s2Reduce, (double)s_s2Dodge, s_s2DodgeDot, (double)s_s3Cd, s_s3Rounds, (double)s_s3Mult,
             (double)s_s3Step, s_s3Stacks, (double)s_s3HealMult, s_s3Row, (double)s_s3BlastMult, (double)s_s3Every);
 }
@@ -388,9 +392,11 @@ static const GunInfo* InfoOf(uint64_t res)
     if (hf->get_live(self, res, &proj, &v) && v.base.number > 0) g->projectile = (uint32_t)v.base.number;
     memset(&v, 0, sizeof v);
     if (hf->get_live(self, res, &entity, &v) && v.base.number != 0) g->projectile = 0;
+    int stand_in = !g->projectile && s_noProjRound > 0;
+    if (stand_in) g->projectile = (uint32_t)s_noProjRound;
     g->pellets = PelletsOf(g->projectile);
     Log("weapon %016llx fires projectile %u, %u pellet%s a shot%s", (unsigned long long)res, g->projectile, g->pellets, g->pellets == 1 ? "" : "s",
-        g->projectile ? "" : " (no projectile: no free rounds from it)");
+        stand_in ? " (none of its own: no_projectile_round stands in)" : g->projectile ? "" : " (no projectile: no free rounds from it)");
     return g;
 }
 
