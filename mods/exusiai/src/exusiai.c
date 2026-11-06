@@ -38,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.12"
+#define VERSION "0.2.13"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -382,11 +382,37 @@ static int GunsHit(const float p[3])
     for (int k = 0; k < 16; k++) if (g_gunAimAt[k] > 0 && g_now - g_gunAimAt[k] < 1.5 && Dist2(p, g_gunAim[k]) < 2.5f * 2.5f) return 1;
     return 0;
 }
+/* 0.2.13: the life states seen on enemies as they died (the kill event). 0.2.12 took any state but 0 as dead, and her
+ * Overloading Mode guns then found nothing to shoot: living enemies with another state were left out. Now a state is
+ * dead only once a kill has shown it (a dead Illuminate keeps health on its record, 0.2.12's corpse) */
+static uint32_t g_deadLife[8];
+static int g_ndeadLife;
+static int DeadLife(uint32_t life)
+{
+    for (int i = 0; i < g_ndeadLife; i++) if (g_deadLife[i] == life) return 1;
+    return 0;
+}
+static void LearnDeadLife(uint32_t e)
+{
+    int32_t hp = 0;
+    uint32_t life = 0;
+    if (!HealthOf(e, &hp, &life) || !life || DeadLife(life) || g_ndeadLife >= 8) return;
+    g_deadLife[g_ndeadLife++] = life;
+    Log("a kill showed life state %u (health %d left): an enemy in it is dead to her guns", life, hp);
+}
 static int Living(uint32_t e, int32_t* hp)
 {
-    /* 0.2.12: and its life state 0 (a dead Illuminate keeps health on its record: the guns kept shooting the corpse) */
-    uint32_t life = 1;
-    return HealthOf(e, hp, &life) && *hp > 0 && life == 0;
+    uint32_t life = 0;
+    if (!HealthOf(e, hp, &life) || *hp <= 0) return 0;
+    if (life && !DeadLife(life))
+    {
+        static uint32_t seen[8];
+        static int nseen;
+        int k = 0;
+        while (k < nseen && seen[k] != life) k++;
+        if (k == nseen && nseen < 8) { seen[nseen++] = life; Log("an enemy with health %d has life state %u: counted living (no kill has shown it)", *hp, life); }
+    }
+    return !life || !DeadLife(life);
 }
 /* 0.2.4: the middle of a unit's body: the centre of its scene-graph nodes' box (a Bile Titan's root is on the ground
  * between its legs, its body 6 m up), kept a second per enemy */
@@ -898,6 +924,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 static void OnKill(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfKillEvent* k = (const HfKillEvent*)info;
+    LearnDeadLife(k->victim);
     DropFoe(k->victim);
     if (k->victim == g_lastTarget) g_lastTarget = 0;
 }
