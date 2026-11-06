@@ -80,7 +80,8 @@ When she brings the M-102 FRV instead of the Patriot, the Sinner is that car. It
 - **Obstacles ahead (planned):** rays ahead at bumper and headlight height, left / centre / right. Lower than the
   headlights: a hop over it (Grip's impulse). A wall or high ledge (every ray hit): left alone. Narrow and tall (trees):
   driven through, or better, knocked down as a vanilla exosuit knocks trees over when it walks into them.
-- **Let's Go for a Ride!'s share of her stats:** open.
+- **Let's Go for a Ride!:** while she rides it, the car deals **double damage** (its turret's hits and its rams) and its
+  automatic turret has **infinite ammo** (needs: where the turret's magazine lives, to keep it full).
 
 ## In Helldivers terms
 
