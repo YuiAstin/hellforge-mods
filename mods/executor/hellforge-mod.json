@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.executor",
   "name": "Executor",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "icon": "icon.png",
   "description": "Executor the Ex Foedere's kit from Arknights for your Helldiver: a Laterano Guard with a shotgun. Every enemy his shot hits heals him half his health (up to 3 a shot) and mends his injured limbs; he cannot stim (a stim's heal is taken back). The Chosen One fires free extra rounds; each shot also fires a round of his gun at every enemy in a 7 m square in front of him (15 m during Damnatus Ex Foedere); Empathy by Shotgun adds a round to each skill for every other Laterano kit installed. Skills last a number of shots: Testament Exacted (8 rounds, more damage and armour penetration), Close Combat (12 rounds, more damage, 80% less damage taken, a chance to dodge any hit and get a round back), Damnatus Ex Foedere (16 rounds, rising damage, triple heals, then a blast on every enemy it hit). TEST BUILD: untested in game. Solo or host. Keys in executor.ini; numbers on the MODS tab (Mod Options Menu). HUD needs Bingus Shared Loader and HD2Runtime. Installs beside the author's other character kits (pick one on the MODS tab). No character model included.",
   "gameplay": true,

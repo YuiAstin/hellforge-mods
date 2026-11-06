@@ -56,7 +56,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.7"
+#define VERSION "0.2.8"
 #define BUILD "25480438"
 
 /* S3 sets off a blast on every enemy it hit, 0.1 s apart: room for 12 of his own blasts within the guard's 1.2 s */
@@ -537,6 +537,53 @@ static int g_healHitsOwed;
 static uint32_t g_noSpawn[8];
 static int NoSpawn(uint32_t type) { for (int k = 0; k < 8; k++) if (type && g_noSpawn[k] == type) return 1; return 0; }
 static void NoSpawnAdd(uint32_t type) { if (NoSpawn(type)) return; for (int k = 0; k < 8; k++) if (!g_noSpawn[k]) { g_noSpawn[k] = type; return; } }
+/* 0.2.8: stand-ins for any round HellForge cannot spawn (the SG-8S Slugger's slug, 240: 0.2.7 fired projectile 7, a
+ * small bullet, for it). Four copies of the Breaker's round (spawnable) made at start; the first time a gun's round
+ * cannot be spawned, a free one takes that round's live values: its damage, pellets, speed, mass, drag, drop, lifetime,
+ * penetration slowdown, effects and impact blast (each one HellForge refuses keeps the Breaker's, said in the log).
+ * Taken again in each mission. */
+#define STANDINS 4
+static uint32_t g_standIn[STANDINS], g_standFor[STANDINS];
+static unsigned g_standNext;
+static uint32_t StandIn(uint32_t proj)
+{
+    for (int i = 0; i < STANDINS; i++) if (g_standIn[i] && g_standFor[i] == proj) return g_standIn[i];
+    if (!hf->get_live || !hf->set_live) return 0;
+    int i = -1;
+    for (int k = 0; k < STANDINS && i < 0; k++) if (g_standIn[k] && !g_standFor[k]) i = k;
+    if (i < 0) { for (int k = 0; k < STANDINS; k++) if (g_standIn[(g_standNext + k) % STANDINS]) { i = (int)((g_standNext + k) % STANDINS); break; } }
+    if (i < 0) return 0;
+    g_standNext = (unsigned)i + 1;
+    static const HfField fields[] = {
+        HF_FIELD(ProjectileSettings, damage), HF_FIELD(ProjectileSettings, pellet_count), HF_FIELD(ProjectileSettings, velocity), HF_FIELD(ProjectileSettings, mass),
+        HF_FIELD(ProjectileSettings, drag), HF_FIELD(ProjectileSettings, gravity), HF_FIELD(ProjectileSettings, lifetime),
+        HF_FIELD(ProjectileSettings, penetration_slowdown), HF_FIELD(ProjectileSettings, spawn_effect),
+        HF_FIELD(ProjectileSettings, flight_effect), HF_FIELD(ProjectileSettings, impact_explosion)};
+    static const char* const names[] = {"damage", "pellets", "velocity", "mass", "drag", "gravity", "lifetime", "penetration slowdown", "spawn effect",
+                                        "flight effect", "impact blast"};
+    int set = 0, refused = 0;
+    char why[160] = "";
+    for (unsigned f = 0; f < sizeof fields / sizeof fields[0]; f++)
+    {
+        HfLiveValue v;
+        memset(&v, 0, sizeof v);
+        if (!hf->get_live(self, (HfRef)proj, &fields[f], &v)) { refused++; continue; }
+        HfValue val = v.now;
+        if (hf->set_live(self, (HfRef)g_standIn[i], &fields[f], &val, 0)) set++;
+        else { refused++; if (strlen(why) < 120) { strcat(why, " "); strcat(why, names[f]); } }
+    }
+    g_standFor[i] = proj;
+    Log("projectile %u cannot be spawned here: its stand-in is projectile %u (the Breaker's round with its values: %d set, %d kept%s%s)", proj,
+        g_standIn[i], set, refused, refused ? ": not set:" : "", why);
+    return g_standIn[i];
+}
+/* the round to spawn for a gun's own: its own, else its stand-in, else free_round_fallback */
+static uint32_t SpawnRound(uint32_t own)
+{
+    if (!NoSpawn(own)) return own;
+    uint32_t s = StandIn(own);
+    return s && !NoSpawn(s) ? s : (uint32_t)s_freeFallback;
+}
 static void FreeFrame(void)
 {
     if (g_freeOwed <= 0 || g_now < g_freeAt) return;
@@ -544,8 +591,8 @@ static void FreeFrame(void)
     if (!gi || !gi->projectile) { g_freeOwed = 0; return; }
     if (gi->spawn) ShellDamage();
     uint32_t own = gi->spawn ? gi->spawn : gi->projectile;
-    uint32_t round = NoSpawn(own) ? (uint32_t)s_freeFallback : own;
-    int pellets = round == own ? (int)gi->pellets : 1;
+    uint32_t round = SpawnRound(own);
+    int pellets = round == (uint32_t)s_freeFallback && own != (uint32_t)s_freeFallback ? 1 : (int)gi->pellets;
     float pos[3], aim[3], tgt[3];
     if (!round || !PlayerPose(pos, aim)) { g_freeOwed = 0; return; }
     float from[3] = {pos[0] + aim[0] * 0.9f, pos[1] + aim[1] * 0.9f, pos[2] + 1.45f + aim[2] * 0.9f};
@@ -571,7 +618,7 @@ static void FreeFrame(void)
         if (!r && round != (uint32_t)s_freeFallback)
         {
             NoSpawnAdd(round);
-            Log("The Chosen One: projectile %u cannot be spawned here; free rounds use projectile %d (free_round_fallback) instead", round, s_freeFallback);
+            Log("The Chosen One: projectile %u cannot be spawned here; free rounds use a stand-in (else projectile %d, free_round_fallback)", round, s_freeFallback);
             return;   /* again next frame, with the fallback */
         }
         if (!Act("The Chosen One's round", r)) break;
@@ -662,8 +709,8 @@ static void AreaFrame(void)
     if (!gi || !gi->projectile) return;
     if (gi->spawn) ShellDamage();
     uint32_t own = gi->spawn ? gi->spawn : gi->projectile;
-    uint32_t round = NoSpawn(own) ? (uint32_t)s_freeFallback : own;
-    int pellets = round == own ? (int)gi->pellets : 1;
+    uint32_t round = SpawnRound(own);
+    int pellets = round == (uint32_t)s_freeFallback && own != (uint32_t)s_freeFallback ? 1 : (int)gi->pellets;
     float pos[3], aim[3], tgt[3];
     if (!round || !PlayerPose(pos, aim)) return;
     float fx = aim[0], fy = aim[1];
@@ -723,7 +770,7 @@ static void AreaFrame(void)
             if (!r && round != (uint32_t)s_freeFallback)
             {
                 NoSpawnAdd(round);
-                Log("area rounds: projectile %u cannot be spawned here; spawned rounds use projectile %d (free_round_fallback) instead", round, s_freeFallback);
+                Log("area rounds: projectile %u cannot be spawned here; spawned rounds use a stand-in (else projectile %d, free_round_fallback)", round, s_freeFallback);
                 stop = 1;
                 break;
             }
@@ -1141,6 +1188,7 @@ static void OnWeaponExe(HfMod* mod, const HfEventInfo* info, void* user)
 static void Reset(const char* why)
 {
     g_shellDamageDone = 0;   /* 0.2.3: the shell copy's damage set again in each mission */
+    memset(g_standFor, 0, sizeof g_standFor);   /* 0.2.8: stand-ins taken again in each mission */
     int start = !strcmp(why, "mission start");
     if (g_shots || g_casts[0] || g_casts[1] || g_casts[2])
         Log("%s: %u shots, casts %u / %u / %u, %u free rounds, %u area rounds in %u volleys (%u enemies hit), %u heals (%u enemy hits), "
@@ -1340,6 +1388,16 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         p.name = "yui/executor/dbs2_shell";
         g_shellCopy = api->add_projectile(mod, &p);
         if (!g_shellCopy) api->log(mod, "the DBS-2 shell copy could not be added: its spawned rounds fall back");
+        static char standName[STANDINS][32];
+        for (int i = 0; i < STANDINS; i++)
+        {
+            memset(&p, 0, sizeof p);
+            p.size = sizeof p;
+            p.base = HF_PROJECTILE_SG225_BREAKER;
+            snprintf(standName[i], sizeof standName[i], "yui/executor/stand_in_%d", i + 1);
+            p.name = standName[i];
+            g_standIn[i] = api->add_projectile(mod, &p);
+        }
     }
     api->log(mod, "Executor %s (TEST BUILD: untested in game): keys %s / %s / %s (Testament Exacted, Close Combat, Damnatus Ex Foedere); "
              "heal %.0f%% a hit, up to %d a shot; The Chosen One %.0f%%; area rounds %s (%g m, %g m in S3, up to %d); stim_undo %d", VERSION, s_keys[0].label,
