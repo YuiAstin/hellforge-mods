@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -100,7 +100,7 @@ static int s_stickFwd = -1, s_stickSide = -1, s_stickTurn = -1;
 static int s_sight = 1;
 static float s_fpDistance = 0.45f;
 /* 0.2.0: the FRV Sinner (her M-103 Supply FRV) */
-static int s_frvOn = 1, s_releaseRow = 266;
+static int s_frvOn = 1, s_releaseRow = 248;   /* 0.2.1: the recoilless rocket's blast (0.2.0's 266 went off unseen) */
 static float s_frvDmgN = 1.0f, s_frvDmgS = 1.25f, s_frvDmgPlus = 1.6f, s_frvGuardN = 0.7f, s_frvParked = 0.8f, s_frvRepair = 0.02f;
 static float s_releaseEvery = 4, s_releaseRadius = 4, s_rideRange = 60;
 
@@ -194,7 +194,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Hallucination while it stands: Let's Go for a Ride! (she is put in its driver seat, else a free passenger\n"
                "; seat, within ride_range m); pressed again inside it: Winner!. It takes frv_taken_n of the damage in N and\n"
                "; frv_taken_parked while it stands still; each hit on it repairs frv_repair of its health (at most once a\n"
-               "; second). Kinetic Release: while its turret fights in S / S+, every release_every s, release_explosion (266)\n"
+               "; second). Kinetic Release: while its turret fights in S / S+, every release_every s, release_explosion (248)\n"
                "; goes off 3 (S) or 6 (S+) times release_radius m around it. In S+ it pulls enemies to it (Let's Drift!).\n"
                "frv_sinner = %d\nfrv_damage_n = %g\nfrv_damage_s = %g\nfrv_damage_plus = %g\nfrv_taken_n = %g\nfrv_taken_parked = %g\nfrv_repair = %g\n"
                "release_explosion = %d\nrelease_every = %g\nrelease_radius = %g\nride_range = %g\n"
@@ -611,7 +611,10 @@ static uint32_t g_sinType;
 #define FRV_TURRET UINT64_C(0x4DF41F84668D07FB)
 #define FRV_STRATAGEM HF_STRATAGEM_M103_SUPPLY_FRV
 static int g_frv;                      /* the standing Sinner is the FRV */
-static uint32_t g_frvNet, g_turretNet, g_turretCandNet;
+static uint32_t g_frvNet, g_turretNet, g_turretCandNet, g_turretCand, g_turretEnt;
+static atomic_uint g_turretSeenTarget;
+static _Atomic unsigned long long g_turretSeenMs;
+static int g_rideWanted;
 static double g_turretCandAt = -100;
 static int g_frvParked;
 static atomic_int g_repairPending;
@@ -954,8 +957,9 @@ static void SinnerLost(const char* why)
     g_landed = g_winnerUsed = g_piloting = 0;
     g_driving = g_driveTried = 0;
     g_frv = 0;
-    g_frvNet = g_turretNet = 0;
+    g_frvNet = g_turretNet = g_turretEnt = 0;
     g_frvParked = 0;
+    g_rideWanted = 0;
     g_nparts = 0;
     g_sinPosOk = 0;
     atomic_store(&g_sinHpNow, 0);
@@ -1748,6 +1752,17 @@ static void Ride(void)
     Log("Let's Go for a Ride!: into the FRV's %s seat (seat %u)", e == 3 ? "driver" : "passenger", e);
     Upshift(1, "Let's Go for a Ride!");
 }
+/* every hit calculation: the turret's (dealer entity +0x80), its target (+0x20), for the damage event to learn its
+ * network id from */
+static void TurretSeen(KbHitCall* c)
+{
+    uint32_t t = g_turretEnt;
+    if (!g_frv || !t || g_turretNet || c->kind != KB_HIT_CALC) return;
+    uint32_t w[2];
+    if (!ReadAt((uintptr_t)c->hit + 0x80, &w[0], 4) || w[0] != t || !ReadAt((uintptr_t)c->hit + 0x20, &w[1], 4)) return;
+    atomic_store(&g_turretSeenTarget, w[1]);
+    atomic_store(&g_turretSeenMs, GetTickCount64());
+}
 /* ---- its turret's fight, Kinetic Release, its repair, whether it is parked ----------------------------------------- */
 static double g_frvFightAt = -100, g_frvLookNext, g_releaseNext, g_repairNext, g_parkAt;
 static float g_parkFrom[3];
@@ -1870,7 +1885,9 @@ static void Winner(void)
 }
 static void Hallucination(void)
 {
-    if (g_sinner && g_frv && g_landed && !g_piloting) { Ride(); return; }
+    /* 0.2.1: after the key is let go: the game's own seat change is on C in a vehicle, and 0.2.0's ride (on the press)
+     * was followed by it 0.6 s later (driver -> passenger) */
+    if (g_sinner && g_frv && g_landed && !g_piloting) { g_rideWanted = 1; return; }
     if (g_sinner) { Winner(); return; }
     if (g_now < g_cd[2]) return;
     if (s_frvOn && s_sinOn && HasStratagem(FRV_STRATAGEM) > 0)
@@ -1929,7 +1946,12 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
             atomic_store(&g_repairPending, 1);
             return;
         }
-        if ((g_turretNet && (d->dealer == g_turretNet || d->owner == g_turretNet)) || (g_frvNet && (d->dealer == g_frvNet || d->owner == g_frvNet)))
+        if (!g_turretNet && g_turretEnt && NetOk(d->dealer) && d->target == atomic_load(&g_turretSeenTarget) && GetTickCount64() - atomic_load(&g_turretSeenMs) <= 300)
+        {
+            g_turretNet = d->dealer;
+            Log("its turret's hits: dealer network %u (owner %u), learned from the game's hit code", d->dealer, d->owner);
+        }
+        if ((g_turretNet && d->dealer == g_turretNet) || (g_frvNet && d->dealer == g_frvNet))
         {
             double m = (g_gear == GEAR_PLUS ? s_frvDmgPlus : g_gear == GEAR_S ? s_frvDmgS : s_frvDmgN) * (1 + g_up * (double)s_upDamage);
             if (g_now < g_krUntil) m *= s_krMult;
@@ -1996,7 +2018,12 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
         if (g_callPending || !s_callMode || !g_sinner) Adopt(s->entity);
         return;
     }
-    if (s->resource == FRV_TURRET) { g_turretCandNet = s->network; g_turretCandAt = g_now; if (g_frv && g_sinner && !g_turretNet && g_now - g_sinBorn < 2) g_turretNet = s->network; return; }
+    if (s->resource == FRV_TURRET)
+    {
+        g_turretCandNet = s->network; g_turretCand = s->entity; g_turretCandAt = g_now;
+        if (g_frv && g_sinner && !g_turretEnt && g_now - g_sinBorn < 2) { g_turretEnt = s->entity; if (NetOk(s->network)) g_turretNet = s->network; }
+        return;
+    }
     if (s->resource == FRV_RES)
     {
         /* 0.2.0: her M-103, with it in her loadout and no Sinner standing: the FRV Sinner */
@@ -2004,8 +2031,10 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
         Adopt(s->entity);
         g_frv = 1;
         g_frvNet = s->network;
-        g_turretNet = g_now - g_turretCandAt < 2 ? g_turretCandNet : 0;
-        Log("the FRV Sinner: her M-103 (entity %u, network %u), its turret network %u", s->entity, s->network, g_turretNet);
+        g_turretEnt = g_now - g_turretCandAt < 2 ? g_turretCand : 0;
+        g_turretNet = g_turretEnt && NetOk(g_turretCandNet) ? g_turretCandNet : 0;
+        if (!NetOk(g_frvNet)) g_frvNet = 0;
+        Log("the FRV Sinner: her M-103 (entity %u), its turret entity %u (its network id learned from its first hits)", s->entity, g_turretEnt);
         return;
     }
     if (s->resource != AVATAR) { if (FoeKind(s->resource)) AddFoe(s->entity, s->resource); return; }
@@ -2059,8 +2088,9 @@ static void Reset(const char* why)
         Log("%s: the FRV Sinner: %u turret hits, %u rides, %u Kinetic Releases, %u fatal hits survived", why, g_turretHits, g_rides, g_releases, g_noDeath);
     g_turretHits = g_rides = g_releases = g_noDeath = 0;
     g_frv = 0;
-    g_frvNet = g_turretNet = 0;
+    g_frvNet = g_turretNet = g_turretEnt = 0;
     g_frvParked = 0;
+    g_rideWanted = 0;
     g_sinner = g_sinUnit = 0;   /* (no drive stop: its world is gone) */
     g_nparts = 0;
     g_sinPosOk = 0;
@@ -2276,6 +2306,11 @@ static void Tick(HfMod* mod, float dt, void* user)
         }
         prev[i] = down;
     }
+    {
+        static double upAt;
+        if (prev[2]) upAt = g_now;
+        if (g_rideWanted && !prev[2] && g_now - upAt >= 0.15) { g_rideWanted = 0; if (g_sinner && g_frv && !g_piloting) Ride(); }
+    }
     UpshiftFrame();
     SinnerFrame();
     if (g_alive) EyeFrame();
@@ -2317,6 +2352,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     kb_option_after = OptionAfter;
     kb_damage_taken = DamageTaken;
     kb_damage_dealt = DamageDealt;
+    kb_hit_before = TurretSeen;
     kb_hit_taken = HitTaken;
     /* her body: the T-Doll package (the kit base's defaults: hp_mult 1.5, stamina_mult 2, the stamina Hellbomb) */
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
