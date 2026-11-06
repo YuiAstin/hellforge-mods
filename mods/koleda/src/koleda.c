@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.5"
+#define VERSION "0.2.6"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -100,7 +100,8 @@ static int s_stickFwd = -1, s_stickSide = -1, s_stickTurn = -1;
 static int s_sight = 1;
 static float s_fpDistance = 0.45f;
 /* 0.2.0: the FRV Sinner (her M-103 Supply FRV) */
-static int s_frvOn = 1, s_releaseRow = 150;   /* 0.2.5: an EMS burst on each enemy near it (0.2.1-0.2.4: blasts in a ring, which missed) */
+static int s_frvOn = 0, s_releaseRow = 150;   /* 0.2.6: sinner_kind: 0 the Patriot, 1 the FRV (her own FRV Sinner call) */
+   /* 0.2.5: an EMS burst on each enemy near it (0.2.1-0.2.4: blasts in a ring, which missed) */
 static int s_releaseShell = 154, s_releaseDamage = 1000, s_releaseTargetsS = 3, s_releaseTargetsPlus = 6, s_emsImmune = 1;
 static float s_releaseAp = 6, s_releaseReach = 12;
 static float s_frvDmgN = 1.0f, s_frvDmgS = 1.25f, s_frvDmgPlus = 1.6f, s_frvGuardN = 0.7f, s_frvParked = 0.8f, s_frvRepair = 0.02f;
@@ -129,7 +130,7 @@ static const KbSetting kSettings[] = {
     KB_I("loco_map", s_locoMap, -1, 65536), KB_I("loco_records", s_locoRecords, -1, 65536), KB_I("loco_stride", s_locoStride, 16, 4096),
     KB_I("stick_offset_fwd", s_stickFwd, -1, 4096), KB_I("stick_offset_side", s_stickSide, -1, 4096), KB_I("stick_offset_turn", s_stickTurn, -1, 4096),
     KB_I("line_of_sight", s_sight, 0, 1), KB_F("first_person", s_fpDistance, 0.1, 2),
-    KB_I("frv_sinner", s_frvOn, 0, 1), KB_F("frv_damage_n", s_frvDmgN, 0, 10), KB_F("frv_damage_s", s_frvDmgS, 0, 10), KB_F("frv_damage_plus", s_frvDmgPlus, 0, 10),
+    KB_I("sinner_kind", s_frvOn, 0, 1), KB_F("frv_damage_n", s_frvDmgN, 0, 10), KB_F("frv_damage_s", s_frvDmgS, 0, 10), KB_F("frv_damage_plus", s_frvDmgPlus, 0, 10),
     KB_F("frv_taken_n", s_frvGuardN, 0, 1), KB_F("frv_taken_parked", s_frvParked, 0, 1), KB_F("frv_repair", s_frvRepair, 0, 1),
     KB_I("release_explosion", s_releaseRow, 0, 100000), KB_I("release_shell", s_releaseShell, 0, 100000), KB_I("release_damage", s_releaseDamage, 0, 100000),
     KB_F("release_ap", s_releaseAp, 0, 10), KB_F("release_reach", s_releaseReach, 1, 50), KB_I("release_targets_s", s_releaseTargetsS, 1, 20),
@@ -199,8 +200,10 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "stick_offset_fwd = %d\nstick_offset_side = %d\nstick_offset_turn = %d\n"
                "; Aiming: line_of_sight 1, Eye of the Snow Wolf's target must be in sight. first_person: the camera this close to\n"
                "; her head (m) counts as first person.\nline_of_sight = %d\nfirst_person = %g\n"
-               "; The FRV Sinner (frv_sinner 0: off). With the M-103 Supply FRV in her loadout, Hallucination clears its\n"
-               "; cooldown and the FRV she calls becomes the Sinner: its own turret fights (her damage on it by gear:\n"
+               "; Which Sinner: sinner_kind 0 the Patriot (above), 1 the FRV Sinner (also a choice on the MODS tab; it applies\n"
+               "; to her next Hallucination). The FRV Sinner: Hallucination puts one FRV Sinner call in her list (code RRLLU; with\n"
+               "; call_mode 0 one unlimited call at the drop), or with the M-103 Supply FRV in her loadout it clears that one's\n"
+               "; cooldown; the FRV she calls becomes the Sinner: its own turret fights (her damage on it by gear:\n"
                "; frv_damage_n / _s / _plus, times Upshift and Kinetic Recovery), it takes part of her hits, Winner! repairs it.\n"
                "; Hallucination while it stands: Let's Go for a Ride! (she is put in its driver seat, else a free passenger\n"
                "; seat, within ride_range m); pressed again inside it: Winner!. It takes frv_taken_n of the damage in N and\n"
@@ -210,7 +213,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; (release_shell 154: the EMS mortar's shell from above; else release_explosion 150) dealing release_damage with\n"
                "; release_ap armour penetration. ems_immune 1: no EMS stun on her or the FRV Sinner, from anyone.\n"
                "; release_radius: unused since 0.2.5. In S+ it pulls enemies to it (Let's Drift!).\n"
-               "frv_sinner = %d\nfrv_damage_n = %g\nfrv_damage_s = %g\nfrv_damage_plus = %g\nfrv_taken_n = %g\nfrv_taken_parked = %g\nfrv_repair = %g\n"
+               "sinner_kind = %d\nfrv_damage_n = %g\nfrv_damage_s = %g\nfrv_damage_plus = %g\nfrv_taken_n = %g\nfrv_taken_parked = %g\nfrv_repair = %g\n"
                "release_explosion = %d\nrelease_shell = %d\nrelease_damage = %d\nrelease_ap = %g\nrelease_reach = %g\n"
                "release_targets_s = %d\nrelease_targets_plus = %d\nems_immune = %d\nrelease_every = %g\nrelease_radius = %g\nride_range = %g\n"
                "; Full Speed Sprint!: Eye of the Snow Wolf's key while she drives the FRV Sinner: for sprint_seconds it and she\n"
@@ -636,6 +639,7 @@ static uint32_t g_sinType;
 #define FRV_TURRET UINT64_C(0x4DF41F84668D07FB)
 #define FRV_STRATAGEM HF_STRATAGEM_M103_SUPPLY_FRV
 static int g_frv;                      /* the standing Sinner is the FRV */
+static uint32_t g_frvType;             /* 0.2.6: her FRV Sinner call (a copy of the M-103's stratagem) */
 static uint32_t g_frvNet, g_turretNet, g_turretCandNet, g_turretCand, g_turretEnt;
 static atomic_uint g_turretSeenTarget;
 static _Atomic unsigned long long g_turretSeenMs;
@@ -704,6 +708,23 @@ static void SinnerAdd(const HfApi* api, HfMod* mod)
     g_sinType = api->add_stratagem(mod, &st);
     api->log(mod, "the Sinner: entity %016llx, stratagem %u (RRLLD, call_mode %d)", (unsigned long long)g_sinRes, g_sinType, s_callMode);
 }
+/* 0.2.6: the FRV Sinner's own call: the M-103 Supply FRV's stratagem copied (its FRV, its drop, its package) */
+static void FrvAdd(const HfApi* api, HfMod* mod)
+{
+    if (!s_sinOn || api->size < offsetof(HfApi, add_stratagem) + sizeof api->add_stratagem || !api->add_stratagem) return;
+    HfStratagem st = {sizeof st};
+    st.base = FRV_STRATAGEM;
+    st.name = "yui/koleda/frv_sinner_drop";
+    st.title = "FRV Sinner";
+    st.description = "Koleda's Sinner as her Supply FRV: its turret fights by her gear, it takes part of the damage aimed at her, and she can ride it.";
+    st.code = "RRLLU";
+    st.cooldown = s_s3Cd > 1 ? s_s3Cd : 1;
+    st.uses = s_callMode ? 1 : -1;
+    g_frvType = api->add_stratagem(mod, &st);
+    api->log(mod, "the FRV Sinner: stratagem %u (RRLLU, a copy of the M-103 Supply FRV's)", g_frvType);
+}
+/* the call Hallucination grants: the picked Sinner's */
+static uint32_t CallType(void) { return s_frvOn && g_frvType ? g_frvType : g_sinType; }
 
 /* her rounds: the Sinner's by gear and Eye of the Snow Wolf's (copies, add_projectile; the vanilla round without one) */
 static uint32_t g_round[5];
@@ -772,9 +793,9 @@ static int GrantPins(void)
 }
 /* the Sinner's call in her list with `uses` (-1 unlimited): refilled if there, else appended. 1 done; 0 not (logged),
  * -1 not yet (her record unreadable) */
-static int GrantCall(int uses)
+static int GrantCall(uint32_t type, int uses)
 {
-    if (!g_sinType || !GrantPins()) return 0;
+    if (!type || !GrantPins()) return 0;
     uintptr_t st = LocalStratagems(), clockObj = Pointer(game + 0x3326348u);
     uint32_t count = 0;
     uint64_t now = 0, zero = 0;
@@ -786,7 +807,7 @@ static int GrantCall(int uses)
         uint8_t e[0x30];
         uintptr_t at = st + 0x188 + i * 0x30u;
         if (!ReadAt(at, e, sizeof e)) return -1;
-        if (Word(e) == g_sinType)
+        if (Word(e) == type)
         {
             /* refilled: uses, and the cooldown fields the append zeroes (untested: whether a used-up entry comes back) */
             uint32_t was = Word(e + 4);
@@ -802,7 +823,6 @@ static int GrantCall(int uses)
     if (count >= 16) { Log("Sinner call: her stratagem list is full (16)"); return 0; }
     uint8_t e[0x30] = {0};
     if (tmpl >= 0) ReadAt(st + 0x188 + (uint32_t)tmpl * 0x30u, e, sizeof e);
-    uint32_t type = g_sinType;
     memcpy(e, &type, 4);
     memcpy(e + 4, &u, 4);
     e[9] = 1;
@@ -811,8 +831,8 @@ static int GrantCall(int uses)
     memcpy(e + 0x20, &zero, 8);
     uint32_t next = count + 1;
     if (hf->write(st + 0x188 + count * 0x30u, e, sizeof e) || hf->write(st + 0x788, &next, 4)) { Log("Sinner call: the write failed"); return 0; }
-    Log("Sinner call: granted outside the loadout (slot %u of %u, template slot %d, uses %s): call it with RRLLD", count, next, tmpl,
-        uses < 0 ? "unlimited" : "1");
+    Log("Sinner call: granted outside the loadout (slot %u of %u, template slot %d, uses %s): call it with %s", count, next, tmpl,
+        uses < 0 ? "unlimited" : "1", type == g_frvType ? "RRLLU (the FRV Sinner)" : "RRLLD");
     return 1;
 }
 /* 0.2.0: is a stratagem in her own list (the M-103 in her loadout); its entry's cooldown cleared (Hallucination with
@@ -852,29 +872,36 @@ static int g_grantDone, g_grantTries;
 static double g_grantAt;
 static void GrantFrame(void)
 {
-    if (s_callMode || !g_sinType || g_grantDone || !g_alive) return;
+    if (s_callMode || !CallType() || g_grantDone || !g_alive) return;
     if (g_grantAt <= 0) { g_grantAt = g_now + 3; return; }
     if (g_now < g_grantAt) return;
     g_grantAt = g_now + 1;
     if (++g_grantTries > 20) { g_grantDone = 1; Log("Sinner call: her stratagem record never became readable"); return; }
-    int r = GrantCall(-1);
+    int r = GrantCall(CallType(), -1);
     if (r >= 0) g_grantDone = 1;
 }
 /* the call's package, held for the session (a call outside the loadout lands as a purple question mark without it) */
-static int g_pkgState;
+static int g_pkgStates[2];
+static void SinPackageOf(int k, uint32_t type)
+{
+    int* state = &g_pkgStates[k];
+    const char* who = k ? "the FRV Sinner" : "Sinner";
+    if (*state == 2 || !type || !hf->stratagem_row || hf->size < offsetof(HfApi, load_package) + sizeof hf->load_package) return;
+    uintptr_t row = hf->stratagem_row(type);
+    uint64_t pkg = 0;
+    if (!row || !ReadAt(row + 0xA8, &pkg, 8) || !pkg || pkg == ~0ull) { if (!*state) { *state = 2; Log("%s: its stratagem names no package", who); } return; }
+    int r = hf->load_package(self, pkg);
+    if (r == HF_PACKAGE_RESIDENT) { *state = 2; Log("%s: its package %016llx is loaded", who, (unsigned long long)pkg); }
+    else if (!r) { *state = 2; Log("%s: its package %016llx could not be held: a call without it in the loadout may fail", who, (unsigned long long)pkg); }
+    else *state = 1;
+}
 static void SinPackage(void)
 {
-    if (g_pkgState == 2 || !g_sinType || !hf->stratagem_row || hf->size < offsetof(HfApi, load_package) + sizeof hf->load_package) return;
     static double next;
     if (g_now < next) return;
     next = g_now + 2;
-    uintptr_t row = hf->stratagem_row(g_sinType);
-    uint64_t pkg = 0;
-    if (!row || !ReadAt(row + 0xA8, &pkg, 8) || !pkg || pkg == ~0ull) { if (!g_pkgState) { g_pkgState = 2; Log("Sinner: its stratagem names no package"); } return; }
-    int r = hf->load_package(self, pkg);
-    if (r == HF_PACKAGE_RESIDENT) { g_pkgState = 2; Log("Sinner: its package %016llx is loaded", (unsigned long long)pkg); }
-    else if (!r) { g_pkgState = 2; Log("Sinner: its package %016llx could not be held: a call without it in the loadout may fail", (unsigned long long)pkg); }
-    else g_pkgState = 1;
+    SinPackageOf(0, g_sinType);
+    SinPackageOf(1, g_frvType);
 }
 
 /* ---- is she piloting it (the seat: Khi's reading of the command bus game+0x3326E68, entry 117, as Voymastina) ----- */
@@ -2167,7 +2194,7 @@ static void Hallucination(void)
     if (g_sinner && g_frv && g_landed && !g_piloting) { g_rideWanted = 1; return; }
     if (g_sinner) { Winner(); return; }
     if (g_now < g_cd[2]) return;
-    if (s_frvOn && s_sinOn && HasStratagem(FRV_STRATAGEM) > 0)
+    if (s_frvOn && s_sinOn && HasStratagem(FRV_STRATAGEM) > 0 && HasStratagem(g_frvType) <= 0)
     {
         int r = ClearCooldown(FRV_STRATAGEM);
         if (r <= 0) { if (r < 0) Log("Hallucination: her stratagem record cannot be read yet"); return; }
@@ -2176,14 +2203,14 @@ static void Hallucination(void)
         Log("Hallucination: her M-103 Supply FRV is ready to call (its cooldown cleared); the one she calls becomes the Sinner");
         return;
     }
-    if (!s_sinOn || !g_sinType) { static unsigned told; if (told++ < 3) Log("Hallucination: there is no Sinner in this session (sinner 0, or it could not be added)"); return; }
-    if (!s_callMode) { static unsigned told; if (told++ < 5) Log("Hallucination: call the Sinner with its stratagem (RRLLD; call_mode 0 grants it at the drop)"); return; }
-    int r = GrantCall(1);
+    if (!s_sinOn || !CallType()) { static unsigned told; if (told++ < 3) Log("Hallucination: there is no Sinner in this session (sinner 0, or it could not be added)"); return; }
+    if (!s_callMode) { static unsigned told; if (told++ < 5) Log("Hallucination: call the Sinner with its stratagem (%s; call_mode 0 grants it at the drop)", CallType() == g_frvType ? "RRLLU" : "RRLLD"); return; }
+    int r = GrantCall(CallType(), 1);
     if (r <= 0) { if (r < 0) Log("Hallucination: her stratagem record cannot be read yet"); return; }
     g_cd[2] = g_now + s_s3Cd;
     g_callPending = 1;
     g_casts[2]++;
-    Log("Hallucination: one Sinner call in her stratagems (RRLLD)");
+    Log("Hallucination: one %s call in her stratagems (%s)", CallType() == g_frvType ? "FRV Sinner" : "Sinner", CallType() == g_frvType ? "RRLLU" : "RRLLD");
 }
 
 /* ---- the damage event ----------------------------------------------------------------------------------------- */
@@ -2338,7 +2365,8 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     if (s->resource == FRV_RES)
     {
         /* 0.2.0: her M-103, with it in her loadout and no Sinner standing: the FRV Sinner */
-        if (!g_inMission || !kb_kit_on || !s->authority || !s_frvOn || !s_sinOn || g_sinner || HasStratagem(FRV_STRATAGEM) <= 0) return;
+        if (!g_inMission || !kb_kit_on || !s->authority || !s_frvOn || !s_sinOn || g_sinner) return;
+        if (!g_callPending && HasStratagem(FRV_STRATAGEM) <= 0 && HasStratagem(g_frvType) <= 0) return;
         Adopt(s->entity);
         g_frv = 1;
         g_frvNet = s->network;
@@ -2510,6 +2538,17 @@ typedef struct KoledaHud
     float kr_left;                     /* Kinetic Recovery, seconds left */
     uint32_t keys[3];
     char key_label[3][24];
+    /* 0.2.6: her buffs, for the HUD's buff row */
+    uint32_t sinner_kind;              /* the picked Sinner: 0 the Patriot, 1 the FRV */
+    uint32_t frv;                      /* 1 the standing Sinner is the FRV */
+    float sprint_left, sprint_cd;      /* Full Speed Sprint!: seconds left, seconds until it can be used again */
+    float upshift_pct;                 /* her damage bonus from Upshift, % */
+    float kr_mult;                     /* Kinetic Recovery's multiplier */
+    float share_pct;                   /* % of each hit on her the Sinner takes (while it may) */
+    uint32_t share_on;                 /* 1 the share runs now */
+    uint32_t ems_immune;               /* 1 no EMS stun on her (and the FRV Sinner) */
+    uint32_t release_on;               /* 1 Kinetic Release runs (the FRV Sinner's turret in S / S+) */
+    float sprint_ram;                  /* its rams, times this, while sprinting */
 } KoledaHud;
 static KoledaHud g_hud = {1};
 /* the Sinner, 5 floats (x, y, z over it, health 0..1, gear): 1 while it stands, else 0 */
@@ -2576,6 +2615,17 @@ HF_MOD_EXPORT KoledaHud* koleda_hud_state(void)
     g_hud.winner = (uint32_t)(g_sinner && g_landed && !g_winnerUsed);
     g_hud.piloted = (uint32_t)g_piloting;
     g_hud.kr_left = (float)fmax(0, g_krUntil - g_now);
+    g_hud.sinner_kind = (uint32_t)(s_frvOn != 0);
+    g_hud.frv = (uint32_t)(g_frv && g_sinner);
+    g_hud.sprint_left = Sprinting() ? (float)(g_sprintUntil - g_now) : 0;
+    g_hud.sprint_cd = (float)fmax(0, g_sprintCdUntil - g_now);
+    g_hud.upshift_pct = (float)(g_up * s_upDamage * 100.0);
+    g_hud.kr_mult = s_krMult;
+    g_hud.share_pct = s_sharePct;
+    g_hud.share_on = (uint32_t)(atomic_load(&g_shareOk) != 0 && s_sharePct > 0);
+    g_hud.ems_immune = (uint32_t)(s_emsImmune != 0);
+    g_hud.release_on = (uint32_t)(g_frv && g_sinner && g_landed && g_gear != GEAR_N && s_releaseShell + s_releaseRow > 0);
+    g_hud.sprint_ram = (float)(s_sprintRam * (g_gear == GEAR_PLUS ? s_sprintRamPlus : g_gear == GEAR_S ? s_sprintRamS : 1.0));
     for (int i = 0; i < 3; i++)
     {
         g_hud.keys[i] = (uint32_t)s_keys[i].vk;
@@ -2682,6 +2732,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     LoadSettings();
     RoundsAdd();
     SinnerAdd(api, mod);
+    FrvAdd(api, mod);
     api->log(mod, "Koleda %s: keys %s / %s / %s (Eye of the Snow Wolf, Tactical Playbook, Hallucination); the Sinner takes %.0f%% of her hits",
              VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_sharePct);
     if (s_badKey) api->log(mod, "koleda.ini: a key could not be read (bits %d: s1, s2, s3); its default stays", s_badKey);

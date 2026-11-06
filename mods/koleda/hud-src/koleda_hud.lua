@@ -27,7 +27,7 @@ end
 
 local ffi = require('ffi')
 pcall(ffi.cdef, [[
-typedef struct kolhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t upshift, upshift_max, gear, sinner; float sinner_hp, sinner_max; uint32_t leash, drive, winner, piloted; float kr_left; uint32_t keys[3]; char key_label[3][24]; } kolhud1_state;
+typedef struct kolhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t upshift, upshift_max, gear, sinner; float sinner_hp, sinner_max; uint32_t leash, drive, winner, piloted; float kr_left; uint32_t keys[3]; char key_label[3][24]; uint32_t sinner_kind, frv; float sprint_left, sprint_cd, upshift_pct, kr_mult, share_pct; uint32_t share_on, ems_immune, release_on; float sprint_ram; } kolhud1_state;
 void *kolhud1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
 void *kolhud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
 ]])
@@ -407,6 +407,40 @@ end
 local GEARS = {[0] = 'N', [1] = 'S', [2] = 'S+'}
 local LEASH = {[0] = '', [1] = 'FOLLOWING', [2] = 'WARPED', [3] = 'CANNOT MOVE', [4] = 'PUSHING THROUGH'}
 local GREEN = {120, 230, 140}
+-- 0.2.6: her active buffs as chips over the Upshift line (koleda_hud_state's 0.2.6 fields; an older koleda.dll: none)
+local function buff_row(d, cx, y)
+    if state.sinner_kind == nil then return end
+    local s = d.scale
+    local chips = {}
+    local function add(text, colour) chips[#chips + 1] = {text, colour} end
+    local up = tonumber(state.upshift)
+    if up > 0 then add(('UPSHIFT +%.0f%% DMG'):format(tonumber(state.upshift_pct)), up >= tonumber(state.upshift_max) and YELLOW or ELECTRIC) end
+    local kr = tonumber(state.kr_left)
+    if kr > 0.05 then add(('KINETIC RECOVERY x%.2g  %ds'):format(tonumber(state.kr_mult), math.ceil(kr)), YELLOW) end
+    local sp = tonumber(state.sprint_left)
+    if sp > 0.05 then add(('FULL SPEED SPRINT  INVINCIBLE  RAMS x%.2g  %ds'):format(tonumber(state.sprint_ram), math.ceil(sp)), YELLOW)
+    elseif state.frv ~= 0 and state.piloted ~= 0 then
+        local cd = tonumber(state.sprint_cd)
+        if cd > 0.05 then add(('SPRINT IN %ds'):format(math.ceil(cd)), MUTED) else add('SPRINT READY', GREEN) end
+    end
+    if state.release_on ~= 0 then add('KINETIC RELEASE', ELECTRIC) end
+    if state.share_on ~= 0 then add(('SINNER GUARD %.0f%%'):format(tonumber(state.share_pct)), GREEN) end
+    if state.ems_immune ~= 0 then add('EMS IMMUNE', MUTED) end
+    if #chips == 0 then return end
+    local size, padx, h, gap = 17 * s, 8 * s, 24 * s, 6 * s
+    local widths, total = {}, 0
+    for i, c in ipairs(chips) do
+        widths[i] = (d:text_width(c[1], size, 'title') or size * #c[1] * 0.6) + padx * 2
+        total = total + widths[i] + (i > 1 and gap or 0)
+    end
+    local x = cx - total / 2
+    for i, c in ipairs(chips) do
+        d:rect(x, y, widths[i], h, rgba(INK, 0.72), 1)
+        d:rect(x, y + h - 2 * s, widths[i], 2 * s, rgba(c[2], 1), 2)
+        heavy(d, c[1], x + widths[i] / 2, y + 3 * s, size, 'title', rgba(c[2], 1), 'center')
+        x = x + widths[i] + gap
+    end
+end
 local function status_bar(d)
     local s = d.scale
     local H = d.height or (d.width * 9 / 16)
@@ -427,8 +461,10 @@ local function status_bar(d)
         local leash = LEASH[tonumber(state.leash)]
         if state.piloted ~= 0 then bits[#bits + 1] = 'PILOTED'
         elseif leash and leash ~= '' then bits[#bits + 1] = leash end
-    elseif sin == 1 then bits[#bits + 1] = 'SINNER INBOUND' end
+    elseif sin == 1 then bits[#bits + 1] = 'SINNER INBOUND'
+    elseif state.sinner_kind then bits[#bits + 1] = state.sinner_kind ~= 0 and 'SINNER: FRV' or 'SINNER: PATRIOT' end
     heavy(d, table.concat(bits, '   '), cx, y - 6 * s, 20 * s, 'title', rgba(ELECTRIC, 1), 'center')
+    buff_row(d, cx, y - 40 * s)
     -- the Sinner's health bar
     if sin == 2 then
         local hp, top = tonumber(state.sinner_hp), math.max(1, tonumber(state.sinner_max))
@@ -445,6 +481,7 @@ end
 -- from and written to koleda.dll (koleda_option_get / koleda_option_set, the koleda.ini names). The menu keeps what
 -- the player applies; until then a row starts from koleda.ini. Keys stay in koleda.ini.
 local OPTIONS = {
+    {'sinner_kind', 'choice', 'Sinner: Patriot or FRV', {'Patriot (EXO-45)', 'FRV (M-103 Supply FRV)'}, nil, nil, 'Which Sinner Hallucination calls: the Patriot exosuit (RRLLD) or her FRV (RRLLU), which she can ride. From her next Hallucination.', true},
     {'s1_cooldown', 'slider', 'Eye of the Snow Wolf: Cooldown', 0, 120, 1, 'Seconds before Eye of the Snow Wolf can be used again.', true},
     {'s1_rounds', 'slider', 'Eye of the Snow Wolf: Rounds', 1, 10, 1, 'Heavy rounds fired at her target.'},
     {'s2_cooldown', 'slider', 'Tactical Playbook: Cooldown', 0, 120, 1, 'Seconds before Tactical Playbook can be used again.', true},
@@ -468,6 +505,15 @@ local OPTIONS = {
     {'hp_mult', 'slider', 'Body: Health', 0.5, 4, 0.05, "Her health, times a Helldiver's.", true},
     {'stamina_mult', 'slider', 'Body: Stamina', 0.5, 6, 0.1, "How long she sprints before the bar empties, times a Helldiver's."},
 }
+-- The MODS tab holds about 128 options for every mod together (Mod Options Menu), and the kits filled it, so each
+-- kit puts only these rows there; every other setting stays in its .ini.
+local MODS_TAB_CORE = {sinner_kind = true, s1_cooldown = true, s2_cooldown = true, s3_cooldown = true, share_pct = true, sinner_fire = true, hp_mult = true, stamina_mult = true}
+do
+    local kept = {}
+    for _, o in ipairs(OPTIONS) do if MODS_TAB_CORE[o[1]] then kept[#kept + 1] = o end end
+    for n, o in ipairs(kept) do o[8] = n == 1 or nil end
+    OPTIONS = kept
+end
 pcall(ffi.cdef, [[
 typedef int (*kolopt_get)(const char *name, double *out);
 typedef int (*kolopt_set)(const char *name, double value);
@@ -495,6 +541,7 @@ local function options_step(dt)
             local id = 'yui.koleda.' .. key
             local spec = {type = kind, label = o[3], mod = 'Koleda', mod_id = 'yui.koleda', description = o[7], gap = o[8] or nil}
             if kind == 'toggle' then spec.default = current ~= 0
+            elseif kind == 'choice' then spec.choices = o[4]; spec.default = math.max(1, math.min(#o[4], math.floor(current + 1.5)))
             else
                 spec.min, spec.max, spec.step = o[4], o[5], o[6]
                 spec.default = math.max(o[4], math.min(o[5], current))
@@ -504,6 +551,7 @@ local function options_step(dt)
                 count = count + 1
                 local function push(value)
                     if type(value) == 'boolean' then value = value and 1 or 0 end
+                    if kind == 'choice' and type(value) == 'number' then value = value - 1 end
                     if type(value) == 'number' then set(key, value) end
                 end
                 local saved = menu.get(id)
