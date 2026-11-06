@@ -5,15 +5,15 @@ hf-mod.com closes: uploads are already shut; downloads end **19 November 2026**;
 stripped of Arrowhead's bytes (HellForge's *Prepare for sharing* / `package-mod`, on the PC), one changelog entry
 since the last public version, and the manifest's `url` set to the new page.
 
-The released versions are the ones on Yui's PC (the same as on hf-mod.com), as of 2026-11-06.
+The released versions are the ones on Yui's PC (the same as on hf-mod.com), as of 2026-11-06. 2026-11-07: Lenna, Leva and Faelynn on the PC carried their pre-release numbers (0.2.11, 0.5.6, 0.3.6) for the released code (0.3.0, 0.6.0, 0.4.0, identical apart from the version line); the PC's copies were renumbered to match. Compare code, not version labels, when the two disagree.
 
 | Mod | Released | Next upload | Source of the next | Status |
 |---|---|---|---|---|
 | Alva | 0.2.2 | 0.2.3 | merged into main (2026-11-06) | **ready: played and approved 2026-11-06** |
 | Lost Contact | 0.2.0 (MODS tab options missing) | 0.2.1 | merged into main (2026-11-06) | upload once the tab is confirmed |
-| Lenna | 0.2.11 | 0.2.11 (as is) | `wip/gfl2-kits-hud-keys` (68cb8f2) | re-host as released; `texas` holds an unreleased 0.3.0 |
-| Leva | 0.5.6 | 0.5.6 (as is) | `wip/gfl2-kits-hud-keys` (77ab9e3) | re-host as released; `texas` holds an unreleased 0.6.0 |
-| Faelynn | 0.3.6 | 0.3.6 (as is) | `wip/gfl2-kits-hud-keys` (68cb8f2) | re-host as released; `texas` holds an unreleased 0.4.0 |
+| Lenna | 0.3.0 | 0.3.0 (as is) | main | Nexus draft 18600 (2026-11-07) |
+| Leva | 0.6.0 | 0.6.0 (as is) | main | Nexus draft 18602 (2026-11-07) |
+| Faelynn | 0.4.0 | 0.4.0 (as is) | main | Nexus draft 18603 (2026-11-07) |
 | Koleda | (in test) | 0.2.3 | `koleda-kit` (b04ac39) | not ready: FRV Sinner untested |
 | Exusiai | (in test) | 0.2.11 | `exusiai-guns` (7d2bbee) | not ready: gun models, sounds |
 | Executor | (new) | 0.1.0 | `executor` (0d4c661) | not played yet |
