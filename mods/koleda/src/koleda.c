@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.6"
+#define VERSION "0.2.7"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -100,7 +100,7 @@ static int s_stickFwd = -1, s_stickSide = -1, s_stickTurn = -1;
 static int s_sight = 1;
 static float s_fpDistance = 0.45f;
 /* 0.2.0: the FRV Sinner (her M-103 Supply FRV) */
-static int s_frvOn = 0, s_releaseRow = 150;   /* 0.2.6: sinner_kind: 0 the Patriot, 1 the FRV (her own FRV Sinner call) */
+static int s_frvOn = 1, s_releaseRow = 150;   /* 0.2.6: sinner_kind: 0 the Patriot, 1 the FRV (her own FRV Sinner call; the default) */
    /* 0.2.5: an EMS burst on each enemy near it (0.2.1-0.2.4: blasts in a ring, which missed) */
 static int s_releaseShell = 154, s_releaseDamage = 1000, s_releaseTargetsS = 3, s_releaseTargetsPlus = 6, s_emsImmune = 1;
 static float s_releaseAp = 6, s_releaseReach = 12;
@@ -200,7 +200,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "stick_offset_fwd = %d\nstick_offset_side = %d\nstick_offset_turn = %d\n"
                "; Aiming: line_of_sight 1, Eye of the Snow Wolf's target must be in sight. first_person: the camera this close to\n"
                "; her head (m) counts as first person.\nline_of_sight = %d\nfirst_person = %g\n"
-               "; Which Sinner: sinner_kind 0 the Patriot (above), 1 the FRV Sinner (also a choice on the MODS tab; it applies\n"
+               "; Which Sinner: sinner_kind 1 the FRV Sinner (the default), 0 the Patriot (above) (also a choice on the MODS tab; it applies\n"
                "; to her next Hallucination). The FRV Sinner: Hallucination puts one FRV Sinner call in her list (code RRLLU; with\n"
                "; call_mode 0 one unlimited call at the drop), or with the M-103 Supply FRV in her loadout it clears that one's\n"
                "; cooldown; the FRV she calls becomes the Sinner: its own turret fights (her damage on it by gear:\n"
@@ -2698,6 +2698,7 @@ static void Tick(HfMod* mod, float dt, void* user)
 
 /* ---- Mod Options Menu ------------------------------------------------------------------------------------------- */
 static const KbOption kOptions[] = {
+    {"sinner_kind", NULL, &s_frvOn},
     {"s1_cooldown", &s_s1Cd, NULL}, {"s1_rounds", NULL, &s_s1Rounds}, {"s2_cooldown", &s_s2Cd, NULL}, {"kr_seconds", &s_krSeconds, NULL},
     {"kr_mult", &s_krMult, NULL}, {"s3_cooldown", &s_s3Cd, NULL}, {"share_pct", &s_sharePct, NULL}, {"upshift_max", NULL, &s_upMax},
     {"upshift_damage", &s_upDamage, NULL}, {"upshift_decay", &s_upDecay, NULL}, {"leash_start", &s_leashStart, NULL}, {"leash_stop", &s_leashStop, NULL},
