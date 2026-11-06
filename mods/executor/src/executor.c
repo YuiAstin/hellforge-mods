@@ -15,6 +15,10 @@
  *   Damnatus Ex Foedere (key_s3, C): s3_rounds shots (16) deal s3_mult (x2.8) plus s3_step (+6%) a round spent (at most
  *     s3_stacks, 30), heals x s3_heal_mult (3); when it ends, an s3_explosion blast on every enemy it hit, its damage
  *     x s3_blast_mult (2.5).
+ *   Area rounds (0.2.0, Yui: "spawn additional round matching his gun to every enemies in a 7 meter square in front of
+ *     him, expands to 15 meters when using S3"): each of his shots also fires one round of his gun's own projectile (every
+ *     pellet) at each living enemy in a square in front of him, area_size m deep by area_size m wide (area_size_s3 while
+ *     Damnatus Ex Foedere runs), at most area_max enemies, nearest first. See "Area rounds" below.
  * One skill runs at a time; a skill's cooldown starts when it ends (Arknights' SP charges after the skill).
  *
  * Rounds are his shots, as Lemuen's "until she reloads": no magazine writes, no fire-rate changes. A shot is seen in the
@@ -52,7 +56,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.1"
+#define VERSION "0.2.0"
 #define BUILD "25480438"
 
 /* S3 sets off a blast on every enemy it hit, 0.1 s apart: room for 12 of his own blasts within the guard's 1.2 s */
@@ -85,6 +89,8 @@ static float s_s2Cd = 30, s_s2Mult = 1.8f, s_s2Reduce = 0.8f, s_s2Dodge = 40;
 static int s_s2Rounds = 12, s_s2DodgeDot = 0;
 static float s_s3Cd = 60, s_s3Mult = 2.8f, s_s3Step = 0.06f, s_s3HealMult = 3, s_s3BlastMult = 2.5f, s_s3Every = 0.1f;
 static int s_s3Rounds = 16, s_s3Stacks = 30, s_s3Row = 404;
+static int s_areaRounds = 1, s_areaMax = 12;
+static float s_areaSize = 7, s_areaSizeS3 = 15;
 
 static const KbSetting kSettings[] = {
     KB_F("heal_pct", s_healPct, 0, 100), KB_I("heal_cap", s_healCap, 0, 32), KB_I("heal_limbs", s_healLimbs, 0, 1),
@@ -92,6 +98,8 @@ static const KbSetting kSettings[] = {
     KB_F("chosen_pct", s_chosenPct, 0, 100), KB_F("chosen_step", s_chosenStep, 0, 100), KB_F("chosen_delay", s_chosenDelay, 0, 1),
     KB_F("chosen_spread", s_chosenSpread, 0, 30), KB_I("free_round_fallback", s_freeFallback, 0, 100000), KB_F("max_rounds", s_maxRounds, 1, 200),
     KB_I("empathy", s_empathy, 0, 1),
+    KB_I("area_rounds", s_areaRounds, 0, 1), KB_F("area_size", s_areaSize, 1, 100), KB_F("area_size_s3", s_areaSizeS3, 1, 100),
+    KB_I("area_max", s_areaMax, 0, 32),
     KB_F("s1_cooldown", s_s1Cd, 0, 600), KB_I("s1_rounds", s_s1Rounds, 1, 200), KB_F("s1_mult", s_s1Mult, 1, 20), KB_F("s1_ap", s_s1Ap, 0, 10),
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_I("s2_rounds", s_s2Rounds, 1, 200), KB_F("s2_mult", s_s2Mult, 1, 20), KB_F("s2_reduce", s_s2Reduce, 0, 1),
     KB_F("s2_dodge", s_s2Dodge, 0, 100), KB_I("s2_dodge_dot", s_s2DodgeDot, 0, 1),
@@ -121,6 +129,12 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "chosen_pct = %g\nchosen_step = %g\nchosen_delay = %g\nchosen_spread = %g\nfree_round_fallback = %d\nmax_rounds = %g\n"
                "; Empathy by Shotgun: empathy 1, +1 round to each skill for every other Laterano kit installed (Exusiai, Lemuen,\n"
                "; Exusiai the New Covenant).\nempathy = %d\n"
+               "; Area rounds: area_rounds 1, each of his shots also fires one round of his gun (every pellet) at each living enemy\n"
+               "; in a square in front of him: area_size m along his aim by area_size m across it, from where he stands\n"
+               "; (area_size_s3 while Damnatus Ex Foedere runs); at most area_max enemies a shot, the nearest first, each in his\n"
+               "; line of fire. They heal as his shot's hits (the same heal_cap), spend no skill round, roll no Chosen One, and\n"
+               "; share max_rounds (pellets a second) with The Chosen One.\n"
+               "area_rounds = %d\narea_size = %g\narea_size_s3 = %g\narea_max = %d\n"
                "; Skills run for their rounds (his shots), one at a time; the cooldown starts when one ends.\n"
                "; Testament Exacted: s1_rounds shots deal s1_mult times their damage and pierce s1_ap more armour.\n"
                "s1_cooldown = %g\ns1_rounds = %d\ns1_mult = %g\ns1_ap = %g\n"
@@ -137,7 +151,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "hp_mult = 1\nstamina_mult = 1\nhellbomb_on_exhaustion = 0\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_healPct, s_healCap, (double)s_shotGap, s_healLimbs,
             s_healShotgunsOnly, s_stimUndo, (double)s_chosenPct, (double)s_chosenStep, (double)s_chosenDelay, (double)s_chosenSpread,
-            s_freeFallback, (double)s_maxRounds, s_empathy, (double)s_s1Cd, s_s1Rounds, (double)s_s1Mult, (double)s_s1Ap, (double)s_s2Cd,
+            s_freeFallback, (double)s_maxRounds, s_empathy, s_areaRounds, (double)s_areaSize, (double)s_areaSizeS3, s_areaMax, (double)s_s1Cd, s_s1Rounds, (double)s_s1Mult, (double)s_s1Ap, (double)s_s2Cd,
             s_s2Rounds, (double)s_s2Mult, (double)s_s2Reduce, (double)s_s2Dodge, s_s2DodgeDot, (double)s_s3Cd, s_s3Rounds, (double)s_s3Mult,
             (double)s_s3Step, s_s3Stacks, (double)s_s3HealMult, s_s3Row, (double)s_s3BlastMult, (double)s_s3Every);
 }
@@ -153,6 +167,7 @@ static atomic_int g_apOn;              /* S1's armour penetration, for the hit h
 static int g_bonus;                    /* Empathy by Shotgun: other Laterano kits installed */
 static char g_bonusNames[96];
 static unsigned g_casts[3], g_shots, g_freeShots, g_heals, g_healHits, g_limbsMended, g_dodges, g_undone, g_blasts;
+static unsigned g_areaVolleys, g_areaRoundsFired, g_areaHits;
 static atomic_uint g_pierced;
 static int g_shotSource;               /* 1: the HUD's magazine; 2: the shots stat (the log says which, once) */
 
@@ -475,6 +490,8 @@ static int ProjBudget(void)
     if (g_projTokens > s_maxRounds) g_projTokens = s_maxRounds;
     return (int)g_projTokens;
 }
+static double g_healOwed;              /* fractions of his maximum health owed (his heals, below) */
+static int g_healHitsOwed;
 static uint32_t g_noSpawn[8];
 static int NoSpawn(uint32_t type) { for (int k = 0; k < 8; k++) if (type && g_noSpawn[k] == type) return 1; return 0; }
 static void NoSpawnAdd(uint32_t type) { if (NoSpawn(type)) return; for (int k = 0; k < 8; k++) if (!g_noSpawn[k]) { g_noSpawn[k] = type; return; } }
@@ -523,6 +540,189 @@ static void FreeFrame(void)
     if (fired && told++ < 10) Log("The Chosen One: a free round (projectile %u, %d pellet%s)", round, fired, fired == 1 ? "" : "s");
 }
 
+/* ---- Area rounds (0.2.0) --------------------------------------------------------------------------------------------
+ * Yui: "spawn additional round matching his gun to every enemies in a 7 meter square in front of him, expands to 15
+ * meters when using S3". Built as: each of his shots (Shot(): the magazine or the shots stat, the same count that
+ * spends skill rounds and rolls The Chosen One) queues one volley, fired on the game thread the next frame. The square:
+ * from his position (his unit's root), area_size m along his aim's horizontal direction (toward the reticle's point,
+ * else his head's facing) and area_size m across it, centred on the aim line (area_size_s3 while Damnatus Ex Foedere
+ * runs); an enemy counts when its root is inside it and within area_size m above or below him. The enemies: the kit
+ * base's foe list (spawn events, his hits), living (health > 0 and the health record's life state 0: a dead Illuminate
+ * keeps health, Exusiai 0.2.12), nearest first, at most area_max, each with a clear line from his muzzle (Exusiai's
+ * ClearShot). Each gets one round of his gun's own projectile, every pellet (The Chosen One's spawn path and fallback),
+ * from near his muzzle toward the middle of its body (Exusiai 0.2.4's node median). The pellets draw on max_rounds.
+ * No chaining: spawned rounds are not the gun in hand's shots (neither the magazine nor the shots stat counts them), so
+ * they spend no skill round, roll no Chosen One and queue no volley. Healing: see AreaHit. */
+#define AREA_HARD 32
+static struct { double at; uint32_t tgt[AREA_HARD]; uint8_t hit[AREA_HARD]; int n, heals; } g_vol;   /* the last volley */
+static int g_areaOwed;
+static double g_lastShotAt = -100;     /* his last shot (a volley older than it is done with) */
+/* the shot under way: its first hit, the enemies it hit, the heals it gave (the damage event's; AreaHit shares them) */
+static double g_groupAt = -100;
+static uint32_t g_groupHit[32];
+static int g_ngroup, g_groupHeals;
+static int Living(uint32_t e)
+{
+    int32_t hp = 0;
+    uint32_t life = 1;
+    return HealthOf(e, &hp, &life) && hp > 0 && life == 0;
+}
+/* the middle of a unit's body (Exusiai 0.2.4's: the median of its scene-graph nodes, kept a second per unit) */
+#define BODIES 64
+static struct { uint32_t unit; double at; float off[3]; } g_body[BODIES];
+static int CmpF(const void* x, const void* y) { float a = *(const float*)x, b = *(const float*)y; return a < b ? -1 : a > b; }
+static int BodyOffset(uint32_t unit, const float root[3], float off[3])
+{
+    unsigned h = (unit * 2654435761u) % BODIES;
+    if (g_body[h].unit == unit && g_now - g_body[h].at < 1.0) { memcpy(off, g_body[h].off, 12); return 1; }
+    uintptr_t registry = Pointer(exe + 0x1A100F0), objects, object, nodes;
+    uint32_t count = 0, id, slot = unit & 0x3FFFFF;
+    static float m[256 * 16];
+    if (!registry || !(objects = Pointer(registry + 0x88)) || !(object = Pointer(objects + 8u * slot)) || !ReadAt(object + 8, &id, 4) || id != unit ||
+        !ReadAt(object + 0x70, &count, 4) || !count || count > 4096 || !(nodes = Pointer(object + 0x88)))
+        return 0;
+    if (count > 256) count = 256;
+    if (!ReadAt(nodes, m, (size_t)count * 64)) return 0;
+    static float v[3][256];
+    int used = 0;
+    for (uint32_t i = 0; i < count; i++)
+    {
+        const float* t = m + 16 * i + 12;
+        if (!isfinite(t[0]) || !isfinite(t[1]) || !isfinite(t[2]) || fabsf(t[0] - root[0]) > 20 || fabsf(t[1] - root[1]) > 20 || t[2] < root[2] - 2 || t[2] > root[2] + 20) continue;
+        for (int k = 0; k < 3; k++) v[k][used] = t[k] - root[k];
+        used++;
+    }
+    if (used < 2) return 0;
+    for (int k = 0; k < 3; k++) { qsort(v[k], used, sizeof(float), CmpF); off[k] = v[k][used / 2]; }
+    if (off[2] < 0.3f) off[2] = 0.3f;
+    g_body[h].unit = unit; g_body[h].at = g_now; memcpy(g_body[h].off, off, 12);
+    return 1;
+}
+/* a clear line from his muzzle to a point (no wall between; bodies and leaves do not count: FirstWall skips them) */
+static int ClearShot(const float from[3], const float q[3])
+{
+    uint32_t id;
+    if (!WorldId(&id) || !QueryIdle()) return 1;
+    float d[3] = {q[0] - from[0], q[1] - from[1], q[2] - from[2]};
+    float n = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (!(n > 1.5f)) return 1;
+    for (int k = 0; k < 3; k++) d[k] /= n;
+    return FirstWall(id, from, d, n, UnitOf(atomic_load(&g_avatar))) > n - 1.0f;
+}
+static void AreaFrame(void)
+{
+    if (g_areaOwed <= 0) return;
+    g_areaOwed--;   /* one volley a frame */
+    if (!s_areaRounds || s_areaMax < 1) return;
+    const GunInfo* gi = InfoOf(g_heldRes);
+    if (!gi || !gi->projectile) return;
+    uint32_t round = NoSpawn(gi->projectile) ? (uint32_t)s_freeFallback : gi->projectile;
+    int pellets = round == gi->projectile ? (int)gi->pellets : 1;
+    float pos[3], aim[3], tgt[3];
+    if (!round || !PlayerPose(pos, aim)) return;
+    float fx = aim[0], fy = aim[1];
+    if (ReticlePoint(tgt)) { float vx = tgt[0] - pos[0], vy = tgt[1] - pos[1]; if (vx * vx + vy * vy > 1.0f) { fx = vx; fy = vy; } }
+    float fn = sqrtf(fx * fx + fy * fy);
+    if (!(fn > 1e-3f)) return;
+    fx /= fn; fy /= fn;
+    float size = g_skill == 3 ? s_areaSizeS3 : s_areaSize, half = size * 0.5f;
+    float from[3] = {pos[0] + aim[0] * 0.9f, pos[1] + aim[1] * 0.9f, pos[2] + 1.45f + aim[2] * 0.9f};
+    /* the enemies in the square, nearest first */
+    struct { uint32_t e; float d2; float q[3]; } c[AREA_HARD];
+    int nc = 0;
+    for (int k = 0; k < FOES; k++)
+    {
+        uint32_t e = g_foe[k];
+        uint8_t d[24];
+        float r[3];
+        if (!e || !Descriptor(e, d) || Quad(d) != g_foeRes[k] || !UnitNode(Word(d + 12), 0, r)) continue;
+        float dx = r[0] - pos[0], dy = r[1] - pos[1], dz = r[2] - pos[2];
+        float along = dx * fx + dy * fy, across = dy * fx - dx * fy;
+        if (along < 0 || along > size || across < -half || across > half || dz < -size || dz > size) continue;
+        float d2 = dx * dx + dy * dy + dz * dz;
+        if (nc == AREA_HARD && d2 >= c[AREA_HARD - 1].d2) continue;
+        if (!Living(e)) continue;
+        int j = nc < AREA_HARD ? nc++ : AREA_HARD - 1;
+        while (j > 0 && c[j - 1].d2 > d2) { c[j] = c[j - 1]; j--; }
+        c[j].e = e; c[j].d2 = d2;
+        float off[3];
+        if (BodyOffset(Word(d + 12), r, off)) for (int t = 0; t < 3; t++) r[t] += off[t];   /* its body's middle */
+        else r[2] += 1.0f;
+        memcpy(c[j].q, r, 12);
+    }
+    if (!nc) return;
+    memset(&g_vol, 0, sizeof g_vol);
+    g_vol.at = g_now;
+    int fired = 0;
+    for (int j = 0; j < nc && fired < s_areaMax; j++)
+    {
+        if (!ClearShot(from, c[j].q)) continue;
+        int budget = ProjBudget();
+        if (budget < 1) { static unsigned told; if (told++ < 4) Log("area rounds: max_rounds reached (%d of %d enemies this shot)", fired, nc); break; }
+        int n = pellets > budget ? budget : pellets;
+        float v[3] = {c[j].q[0] - from[0], c[j].q[1] - from[1], c[j].q[2] - from[2]};
+        float vn = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        if (!(vn > 0.1f)) continue;
+        for (int k = 0; k < 3; k++) v[k] /= vn;
+        g_vol.tgt[g_vol.n++] = c[j].e;   /* before the spawn: its first pellet may land at once */
+        int out = 0, stop = 0;
+        for (int p = 0; p < n; p++)
+        {
+            float dir[3], sp = (n > 1 ? s_chosenSpread : 0.3f) * 0.0174533f;
+            for (int k = 0; k < 3; k++) dir[k] = v[k] + sp * (Roll() / 100.0f - 0.5f);
+            float dn = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+            for (int k = 0; k < 3; k++) dir[k] /= dn;
+            int r = hf->spawn_projectile(self, round, from, dir);
+            if (r == HF_ACT_WAITING) { stop = 1; break; }
+            if (!r && round != (uint32_t)s_freeFallback)
+            {
+                NoSpawnAdd(round);
+                Log("area rounds: projectile %u cannot be spawned here; spawned rounds use projectile %d (free_round_fallback) instead", round, s_freeFallback);
+                stop = 1;
+                break;
+            }
+            if (!Act("an area round", r)) { stop = 1; break; }
+            out++;
+        }
+        g_projTokens -= out;
+        if (out) { fired++; g_areaRoundsFired++; }
+        else g_vol.n--;
+        if (stop) break;
+    }
+    if (fired)
+    {
+        g_areaVolleys++;
+        static unsigned told;
+        if (told++ < 10) Log("area rounds: %d enem%s in the %.0f m square (of %d there), projectile %u, %d pellet%s each", fired, fired == 1 ? "y" : "ies",
+                             (double)size, nc, round, pellets, pellets == 1 ? "" : "s");
+    }
+}
+/* the heal cap a shot */
+static int HealCap(void) { return s_healCap + (g_skill == 2 ? 1 : 0); }
+/* the volley and the shot's own hits are one shot when the shot's first hit is near the volley's time */
+static int VolleyLinked(void) { return g_vol.n && fabs(g_groupAt - g_vol.at) <= s_shotGap + 0.25; }
+/* An area round's hit on an enemy (one of the last volley's targets, the volley under 0.6 s old and no newer shot since):
+ * it heals as one of his shot's hits: once per enemy of the volley, not for an enemy the shot itself already healed for,
+ * and the volley's heals and the shot's together stay within the heal cap. 1: it was the volley's (handled). */
+static int AreaHit(uint32_t target)
+{
+    if (!g_vol.n || g_vol.at < g_lastShotAt || g_now - g_vol.at > 0.6) return 0;
+    int i = 0;
+    while (i < g_vol.n && g_vol.tgt[i] != target) i++;
+    if (i == g_vol.n) return 0;
+    if (g_vol.hit[i]) return 1;
+    g_vol.hit[i] = 1;
+    g_areaHits++;
+    int linked = VolleyLinked();
+    if (linked) for (int k = 0; k < g_ngroup; k++) if (g_groupHit[k] == target) return 1;
+    if (g_vol.heals + (linked ? g_groupHeals : 0) >= HealCap()) return 1;
+    g_vol.heals++;
+    g_healHits++;
+    g_healOwed += s_healPct / 100.0 * (g_skill == 3 ? s_s3HealMult : 1);
+    g_healHitsOwed++;
+    return 1;
+}
+
 /* ---- his shots: each one spends a skill round and rolls The Chosen One ------------------------------------------------ */
 static void Shot(void)
 {
@@ -536,6 +736,8 @@ static void Shot(void)
         static unsigned told;
         if (told++ < 24) Log("%s: a round spent, %d left (The Chosen One %.0f%%)", kSkill[g_skill - 1], g_rounds, (double)(chance > 100 ? 100 : chance));
     }
+    g_lastShotAt = g_now;
+    if (s_areaRounds && g_areaOwed < 4) g_areaOwed++;   /* (only his gun's own shots come here: no chaining) */
     if (Roll() < chance && g_freeOwed < 4)
     {
         if (!g_freeOwed) g_freeAt = g_now + s_chosenDelay;
@@ -595,9 +797,7 @@ static void OnStat(HfMod* mod, const HfEventInfo* info, void* user)
     }
 }
 
-/* ---- his heals: queued by the damage event, given once a frame ------------------------------------------------------ */
-static double g_healOwed;              /* fractions of his maximum health owed */
-static int g_healHitsOwed;
+/* ---- his heals: queued by the damage event (and AreaHit), given once a frame --------------------------------------- */
 /* the heals he gives himself, so the stim undo leaves them: health expected, until when */
 static double g_credit, g_creditUntil, g_limbGraceUntil;
 static void HealFrame(void)
@@ -677,9 +877,6 @@ static void OnHeal(HfMod* mod, const HfEventInfo* info, void* user)
 }
 
 /* ---- the damage event: his shots, and hits on him --------------------------------------------------------------- */
-static double g_groupAt = -100;        /* the shot under way: its first hit, the enemies it hit, the heals it gave */
-static uint32_t g_groupHit[32];
-static int g_ngroup, g_groupHeals;
 static double SkillMult(void)
 {
     if (!g_skill) return 1;
@@ -715,11 +912,11 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     }
     /* his trait: each enemy of this shot heals him, up to the cap */
     if (s_healPct <= 0 || (s_healShotgunsOnly && !Shotgun())) return;
+    if (AreaHit(d->target)) return;   /* an area round's: healed (or not) as the volley's */
     if (g_now - g_groupAt > s_shotGap) { g_groupAt = g_now; g_ngroup = 0; g_groupHeals = 0; }
     for (int k = 0; k < g_ngroup; k++) if (g_groupHit[k] == d->target) return;
     if (g_ngroup < 32) g_groupHit[g_ngroup++] = d->target;
-    int cap = s_healCap + (g_skill == 2 ? 1 : 0);
-    if (g_groupHeals >= cap) return;
+    if (g_groupHeals + (VolleyLinked() ? g_vol.heals : 0) >= HealCap()) return;
     g_groupHeals++;
     g_healHits++;
     g_healOwed += s_healPct / 100.0 * (g_skill == 3 ? s_s3HealMult : 1);
@@ -825,6 +1022,7 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
         g_alive = 0;
         End("he is down");
         g_freeOwed = 0;
+        g_areaOwed = 0;
         g_healOwed = 0;
     }
 }
@@ -840,9 +1038,9 @@ static void Reset(const char* why)
 {
     int start = !strcmp(why, "mission start");
     if (g_shots || g_casts[0] || g_casts[1] || g_casts[2])
-        Log("%s: %u shots, casts %u / %u / %u, %u free rounds, %u heals (%u enemy hits), %u limbs mended, %u dodges, %u heals taken back, %u blasts, "
-            "%u hits pierced", why, g_shots, g_casts[0], g_casts[1], g_casts[2], g_freeShots, g_heals, g_healHits, g_limbsMended, g_dodges, g_undone,
-            g_blasts, atomic_load(&g_pierced));
+        Log("%s: %u shots, casts %u / %u / %u, %u free rounds, %u area rounds in %u volleys (%u enemies hit), %u heals (%u enemy hits), "
+            "%u limbs mended, %u dodges, %u heals taken back, %u blasts, %u hits pierced", why, g_shots, g_casts[0], g_casts[1], g_casts[2], g_freeShots,
+            g_areaRoundsFired, g_areaVolleys, g_areaHits, g_heals, g_healHits, g_limbsMended, g_dodges, g_undone, g_blasts, atomic_load(&g_pierced));
     if (start) { KitDecide(); if (kb_kit_on) Empathy(); }   /* with several kits installed: is this one picked? */
     Body(start);
     if (start && kb_kit_on && s_s3Row == 404 && !hf->load_package(self, UINT64_C(0x6AD7CC21015A5F85)))
@@ -858,6 +1056,10 @@ static void Reset(const char* why)
     atomic_store(&g_apOn, 0);
     g_ns3Hit = g_nblast = 0;
     g_freeOwed = 0;
+    g_areaOwed = 0;
+    memset(&g_vol, 0, sizeof g_vol);
+    g_lastShotAt = -100;
+    g_areaVolleys = g_areaRoundsFired = g_areaHits = 0;
     g_healOwed = 0;
     g_healHitsOwed = 0;
     g_credit = 0;
@@ -967,6 +1169,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         AmmoFrame();
         HealFrame();
         FreeFrame();
+        AreaFrame();
     }
     if (g_skill && g_rounds <= 0 && g_endAt > 0 && g_now >= g_endAt) End("its rounds are spent");
     BlastFrame();
@@ -979,6 +1182,7 @@ static void Tick(HfMod* mod, float dt, void* user)
 static const KbOption kOptions[] = {
     {"heal_pct", &s_healPct, NULL}, {"heal_cap", NULL, &s_healCap}, {"heal_shotguns_only", NULL, &s_healShotgunsOnly}, {"stim_undo", NULL, &s_stimUndo},
     {"chosen_pct", &s_chosenPct, NULL}, {"chosen_step", &s_chosenStep, NULL}, {"empathy", NULL, &s_empathy},
+    {"area_rounds", NULL, &s_areaRounds}, {"area_size", &s_areaSize, NULL}, {"area_size_s3", &s_areaSizeS3, NULL}, {"area_max", NULL, &s_areaMax},
     {"s1_cooldown", &s_s1Cd, NULL}, {"s1_rounds", NULL, &s_s1Rounds}, {"s1_mult", &s_s1Mult, NULL}, {"s1_ap", &s_s1Ap, NULL},
     {"s2_cooldown", &s_s2Cd, NULL}, {"s2_rounds", NULL, &s_s2Rounds}, {"s2_mult", &s_s2Mult, NULL}, {"s2_reduce", &s_s2Reduce, NULL}, {"s2_dodge", &s_s2Dodge, NULL},
     {"s3_cooldown", &s_s3Cd, NULL}, {"s3_rounds", NULL, &s_s3Rounds}, {"s3_mult", &s_s3Mult, NULL}, {"s3_heal_mult", &s_s3HealMult, NULL},
@@ -1021,8 +1225,9 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
     api->log(mod, "Executor %s (TEST BUILD: untested in game): keys %s / %s / %s (Testament Exacted, Close Combat, Damnatus Ex Foedere); "
-             "heal %.0f%% a hit, up to %d a shot; The Chosen One %.0f%%; stim_undo %d", VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label,
-             (double)s_healPct, s_healCap, (double)s_chosenPct, s_stimUndo);
+             "heal %.0f%% a hit, up to %d a shot; The Chosen One %.0f%%; area rounds %s (%g m, %g m in S3, up to %d); stim_undo %d", VERSION, s_keys[0].label,
+             s_keys[1].label, s_keys[2].label, (double)s_healPct, s_healCap, (double)s_chosenPct, s_areaRounds ? "on" : "off", (double)s_areaSize,
+             (double)s_areaSizeS3, s_areaMax, s_stimUndo);
     if (s_badKey) api->log(mod, "executor.ini: a key could not be read (bits %d: s1, s2, s3); its default stays", s_badKey);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&

@@ -43,3 +43,24 @@ gun's fire rate and pump already set the pace (Yui). If he is too strong, the in
   as Voymastina's support fire), x2.5 on enemies.
 - **Empathy by Shotgun** counts roster ids `exusiai*`, `lemuen` and any id with `covenant` (Exusiai the New Covenant's id
   is not chosen yet).
+
+## Built: Executor 0.2.0 (test build, 2026-11-06, untested in game)
+
+- **0.1.1:** stims heal him as anyone (`stim_undo 0`, the default): the undo showed the stim's effect and took back his
+  own late heals.
+- **Area rounds** (Yui: "spawn additional round matching his gun to every enemies in a 7 meter square in front of him,
+  expands to 15 meters when using S3"). Each of his shots (the same count that spends skill rounds) fires one round of
+  his gun's own projectile, every pellet (The Chosen One's spawn path), at each living enemy in a square in front of
+  him: from where he stands, `area_size` (7) m along his aim's horizontal direction and 7 m across it, centred on the
+  aim line; `area_size_s3` (15) while Damnatus Ex Foedere runs; within the square's size above or below him. At most
+  `area_max` (12) enemies a shot, nearest first, each with a clear line from his muzzle; rounds fly from near his muzzle
+  toward the middle of the enemy's body (Exusiai's node median). The enemies: the kit base's foe list, living = health
+  above 0 and the health record's life state 0 (a dead Illuminate keeps health, Exusiai 0.2.12). `area_rounds 0` turns
+  it off.
+- **Their limits:** the pellets share `max_rounds` (pellets a second, 30) with The Chosen One, so a shotgun of 8 pellets
+  reaches about 3-4 enemies a shot at the default; raise `max_rounds` for more.
+- **No chaining:** spawned rounds are not the gun in hand's shots (the magazine and the shots stat do not count them):
+  they spend no skill round, roll no Chosen One and fire no volley of their own.
+- **Healing:** an area round's hit heals as one of the shot's hits: once per enemy, not again for an enemy the shot
+  itself healed for, and the shot's heals and its volley's together stay within the heal cap (3, 4 in S2). They take
+  the skills' damage multipliers and count among S3's enemies hit, as his shots' hits do.
