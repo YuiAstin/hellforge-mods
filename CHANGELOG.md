@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-07: Alva 0.2.4
+- Her HUD now shows the low-stamina warning: below 25% stamina, "T-DOLL CATASTROPHIC FAILURE IMMINENT" flashes red above her status bar, faster as it empties, with a stamina bar under it.
+- The exhaustion Hellbomb now kills her even behind Brumal Barrier: her own shield gives way when it goes off. Allies' shields still hold.
+
 ## 2026-11-06: Alva 0.2.3 (first release)
 - Alva's kit from Girls' Frontline 2: a support who shields every ally around her and freezes enemies.
 - Brumal Barrier: every skill (and every 20 s) gives every ally in range (Helldivers, sentries, emplacements, dogs, exosuits, SEAF, the FRV, the Pelican) a 500 shield that stacks with no cap.

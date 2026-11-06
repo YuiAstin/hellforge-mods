@@ -9,7 +9,7 @@ The released versions are the ones on Yui's PC (the same as on hf-mod.com), as o
 
 | Mod | Released | Next upload | Source of the next | Status |
 |---|---|---|---|---|
-| Alva | 0.2.2 | 0.2.3 | merged into main (2026-11-06) | **ready: played and approved 2026-11-06** |
+| Alva | 0.2.4 | – | main (merged 2026-11-07) | Nexus 18599 and AyakaMods updated to 0.2.4 (2026-11-07): stamina warning, Hellbomb through her Barrier; played and approved |
 | Lost Contact | 0.2.0 (MODS tab options missing) | 0.2.1 | merged into main (2026-11-06) | upload once the tab is confirmed |
 | Lenna | 0.3.0 | 0.3.0 (as is) | main | Nexus draft 18600 (2026-11-07) |
 | Leva | 0.6.0 | 0.6.0 (as is) | main | Nexus draft 18602 (2026-11-07) |
