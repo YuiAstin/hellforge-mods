@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.3"
+#define VERSION "0.2.4"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her chill bursts come often */
@@ -926,6 +926,15 @@ static void Shatter(HfDamageEvent* d, Cold* c)
     c->shatterAt = g_now;
     c->shatterOwner = d->owner;
 }
+/* 0.2.4: where her exhaustion Hellbomb went off: her own Barrier is emptied, and for 2 s her hits skip it */
+static double g_boomAt;
+static void HellbombFired(const float pos[3])
+{
+    (void)pos;
+    g_boomAt = g_now;
+    KbAlly* a = AllyOf(atomic_load(&g_avatar));
+    if (a && a->pool >= 1) { Log("out of stamina: her Barrier (%.0f) gives way to the Hellbomb", a->pool); a->pool = 0; }
+}
 static void DamageSeen(HfDamagePreEvent* e, HfDamageEvent* d)
 {
     /* her EMS bursts spare her allies */
@@ -966,7 +975,8 @@ static void DamageSeen(HfDamagePreEvent* e, HfDamageEvent* d)
         }
     }
     Threat(d);
-    AllyAbsorb(e, d);
+    /* 0.2.4: her own Barrier does not take the exhaustion Hellbomb: it is a T-Doll's price, not an enemy's hit */
+    if (!(g_boomAt > 0 && g_now - g_boomAt <= 2.0 && d->target == atomic_load(&g_avatar))) AllyAbsorb(e, d);
 }
 static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
@@ -1113,6 +1123,8 @@ typedef struct AlvaHud
     float shield_total, own_shield, field_left;
     uint32_t keys[3];
     char key_label[3][24];
+    float stamina;                     /* 0.2.4: her stamina bar 0-1 (-1: unread), for the low-stamina warning */
+    uint32_t hellbomb;                 /* hellbomb_on_exhaustion */
 } AlvaHud;
 static AlvaHud g_hud = {1};
 static double g_ownPool, g_total;
@@ -1200,6 +1212,8 @@ HF_MOD_EXPORT AlvaHud* alva_hud_state(void)
     g_hud.shield_total = (float)g_total;
     g_hud.own_shield = (float)g_ownPool;
     g_hud.field_left = (float)fmax(0, g_fieldUntil - g_now);
+    g_hud.stamina = g_inMission && g_alive ? StaminaNow() : -1;
+    g_hud.hellbomb = (uint32_t)(s_hellbomb != 0);
     for (int i = 0; i < 3; i++)
     {
         g_hud.keys[i] = (uint32_t)s_keys[i].vk;
@@ -1295,6 +1309,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     kb_damage_seen = DamageSeen;
     kb_damage_dealt = DamageDealt;
     kb_ally_broke = AllyBroke;
+    kb_hellbomb_fired = HellbombFired;
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
