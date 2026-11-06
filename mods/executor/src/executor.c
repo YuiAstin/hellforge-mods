@@ -9,7 +9,7 @@
  *     pellet), plus chosen_step (5%) per round spent while a skill runs.
  *   Empathy by Shotgun (passive): +1 skill round per other Laterano kit installed beside him (Exusiai, Lemuen, Exusiai
  *     the New Covenant), read from the kit roster at mission start.
- *   Testament Exacted (key_s1, Z): s1_rounds shots (8) deal s1_mult (x1.5) and pierce s1_ap more armour.
+ *   Testament Exacted (key_s1, Z): s1_rounds shots (8) deal s1_mult (x1.5) and pierce s1_ap (+1) more armour.
  *   Close Combat (key_s2, X): s2_rounds shots (12) deal s2_mult (x1.8); hits on him deal s2_reduce (80%) less; heal cap
  *     +1; any hit on him has s2_dodge (40%) to be negated and give a round back.
  *   Damnatus Ex Foedere (key_s3, C): s3_rounds shots (16) deal s3_mult (x2.8) plus s3_step (+6%) a round spent (at most
@@ -56,7 +56,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.5"
+#define VERSION "0.2.6"
 #define BUILD "25480438"
 
 /* S3 sets off a blast on every enemy it hit, 0.1 s apart: room for 12 of his own blasts within the guard's 1.2 s */
@@ -84,7 +84,7 @@ static float s_chosenPct = 20, s_chosenStep = 5, s_chosenDelay = 0.08f, s_chosen
 static int s_freeFallback = 7, s_empathy = 1, s_noProjRound = 179;
 static float s_numbersAt = 1.5f;   /* 0.2.4: damage numbers (as Lemuen's) for hits raised this many times or more; 0 every hit */
 static float s_maxRounds = 30;
-static float s_s1Cd = 20, s_s1Mult = 1.5f, s_s1Ap = 2;
+static float s_s1Cd = 20, s_s1Mult = 1.5f, s_s1Ap = 1;   /* 0.2.6: +1 armour penetration (0.1.0-0.2.5: +2) */
 static int s_s1Rounds = 8;
 static float s_s2Cd = 30, s_s2Mult = 1.8f, s_s2Reduce = 0.8f, s_s2Dodge = 40;
 static int s_s2Rounds = 12, s_s2DodgeDot = 0;
@@ -989,7 +989,7 @@ HF_MOD_EXPORT int executor_view(unsigned version, float* out)
     memcpy(out, g_viewOut, 24);
     return 1;
 }
-static unsigned g_hitLog;
+static unsigned g_hitLog[3];   /* 0.2.6: 8 hits logged for each skill a mission (0.1.0: the first 16 of any) */
 static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     (void)e; (void)me;
@@ -1006,7 +1006,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     double mult = SkillMult();
     if (mult != 1) ScaleDamage(d, mult);
     if (enemy) NoteHit(d, mult);
-    if (g_skill && g_hitLog < 16) { g_hitLog++; Log("his hit on entity %u: %d -> %d damage (%s x%.2f)", d->target, base, d->amount, kSkill[g_skill - 1], mult); }
+    if (g_skill && g_hitLog[g_skill - 1] < 8) { g_hitLog[g_skill - 1]++; Log("his hit on entity %u: %d -> %d damage (%s x%.2f)", d->target, base, d->amount, kSkill[g_skill - 1], mult); }
     if (!enemy) return;
     if (g_skill == 3)
     {
@@ -1173,7 +1173,7 @@ static void Reset(const char* why)
     g_maxHp = 0;
     g_shots = g_freeShots = g_heals = g_healHits = g_limbsMended = g_dodges = g_undone = g_blasts = 0;
     atomic_store(&g_pierced, 0);
-    g_hitLog = 0;
+    memset(g_hitLog, 0, sizeof g_hitLog);
     g_lastTarget = 0;
 }
 static void Loaded(HfMod* mod, HfEvent event, void* user)
