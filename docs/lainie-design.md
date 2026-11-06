@@ -41,8 +41,8 @@ Helldiver Survival Rework's research).
 1. The model probe: her armour in the world, posed as she is, visual only.
 2. The durable edit: the hit record's damage row.
 3. Her stack numbers (Yui, 2026-11-06): **+25 flat durable damage a stack, at most 6** (+150 at 6). A stack lasts
-   **40 s**; each new stack refreshes the whole pile's timer. When it runs out the stacks taper off **one at a time**
-   rather than all at once (the gap between drops: open, 5 s suggested).
+   **40 s**; each new stack refreshes the whole pile's timer. When it runs out, **one** stack falls off and the 40 s
+   timer starts again for the rest: a full pile of 6 takes 6 x 40 s = 4 minutes to empty with no new stacks.
 4. The Simulacrum's gauge (Yui, 2026-11-06), replacing CI: **a battery**. It lasts **60 s** out (default, a setting) and
    recharges while the Simulacrum is not out, **1 s of charge per second** (as long as it was out); its skill
    **toggles** it out and back, and a part-charged battery can be used.
