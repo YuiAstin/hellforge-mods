@@ -23,6 +23,23 @@ gun's fire rate and pump already set the pace (Yui). If he is too strong, the in
 
 ## Open items
 
-1. The heal cap per shot (2 or 3 enemies). The heal: 50% of max health a hit, limbs mended in full (settled).
+1. The heal cap per shot: **3 enemies** (Yui, 2026-11-06). The heal: 50% of max health a hit, limbs mended in full (settled).
 2. No stims: where his stim count lives, or how to refuse the stim action, so a stim is not spent for nothing.
 3. S2's dodge: settled as any hit. Open: whether a negated explosion or a hit over time counts (the damage kind).
+
+## Built: Executor 0.1.0 (test build, 2026-11-06, untested in game)
+
+- **No stims: the fallback.** Refusing the stim is not proven (Stim Probe on branch `stim-probe` logs the action
+  pipeline but has not been run; no stim ability id or stim count is pinned). `stim_undo 1` (the default) writes his
+  health back down right after any heal that is not his own (the heal event, minus the heals he gave himself in the last
+  second); the stim is spent. His own stim is not told apart from a teammate's: both are undone.
+- **Shots:** counted from the magazine the HUD reports (`executor_ammo`, as Lemuen's reloads), else from HellForge's
+  shots stat (pellets of the gun in hand / its pellets a shot).
+- **A shot's enemies:** his shot hits within `shot_gap` (0.12 s) of its first hit; each new enemy among them heals, up to
+  the cap (3, 4 in S2).
+- **Open item 3:** a hit over time (damage over time, bleeding, drowning) is not rolled for S2's dodge unless
+  `s2_dodge_dot 1`; explosions are.
+- **Cooldowns** start when a skill ends; one skill runs at a time. S3's end blast is the AC-8 autocannon impact (row 404,
+  as Voymastina's support fire), x2.5 on enemies.
+- **Empathy by Shotgun** counts roster ids `exusiai*`, `lemuen` and any id with `covenant` (Exusiai the New Covenant's id
+  is not chosen yet).

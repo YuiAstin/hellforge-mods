@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "Executor HUD",
+  "resource": "mods/yui/executor_hud",
+  "guid": "8aa97c38-d430-403b-9361-a40ad060673e",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.30.0",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}
