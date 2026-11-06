@@ -17,15 +17,15 @@ so each player picks how much help they want. Host or solo.
 
 ## Open questions (one probe)
 
-- **Is this a Commando mission?** The SDK names mission kinds (Blitz is kind 6) but has no call for the current one.
-  Needs: where the running mission's kind (or its mission row) is read, and Commando's value. Until then, the options
-  could apply to every mission, as a fallback the player turns on.
-- **How Commando limits stratagems:** what the Super Destroyer call-in is (a stratagem with uses, or a mission rule).
+- ~~Is this a Commando mission?~~ Answered by the Mission Probe (findings below): only Commando grants Call In
+  Destroyer (stratagem type 123) on the player's stratagem record, so its slot there marks a Commando mission (the
+  hive mind / mode read stays a cross-check if Mission Probe 0.1.1 is ever run).
+- ~~How Commando limits stratagems~~: the call-in is that slot, with `uses 1` (below).
 - **POI loot:** where a POI's contents come from.
 
 ## Not in scope
 
-The timer and the free Resupply are small. The rest waits for the probe.
+Options 1-3 are buildable (2026-11-06); POI loot (#4) still waits for a probe.
 
 ## Mission Probe findings (2026-11-04, a normal mission then a Commando mission)
 
