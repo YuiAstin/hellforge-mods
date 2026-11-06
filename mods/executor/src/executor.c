@@ -32,7 +32,8 @@
  * No stims: the research (scratchpad stim-research.md and probes/stim-probe on branch stim-probe, Stim Probe 0.2.0) found
  * no pinned stim action, ability id or stim count; the probe that would find them has not been run. So refusing the
  * stim is not proven, and this build has the design's fallback: a stim's heal is undone right after it lands (his
- * health written back down), the stim wasted. stim_undo 0 leaves stims as they are.
+ * health written back down), the stim wasted. stim_undo 0 leaves stims as they are: the default since 0.1.1 (in game the
+ * stim's effect still showed, and his own heals, arriving as heal events a few seconds late, were taken back too).
  *
  * Research credit: the kit base's (Helldiver Survival Rework by enochlophobianumerophobia, MIT; HD2Runtime by
  * SkyeShade); the camera pose as Apache - Rise Above (RSNLRiggs, after Khi) reads it. See THIRD_PARTY_NOTICES.md.
@@ -51,7 +52,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 #define BUILD "25480438"
 
 /* S3 sets off a blast on every enemy it hit, 0.1 s apart: room for 12 of his own blasts within the guard's 1.2 s */
@@ -74,7 +75,7 @@ KB_ROSTER_EXPORTS(executor)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static float s_healPct = 50, s_shotGap = 0.12f;
-static int s_healCap = 3, s_healLimbs = 1, s_healShotgunsOnly = 0, s_stimUndo = 1;
+static int s_healCap = 3, s_healLimbs = 1, s_healShotgunsOnly = 0, s_stimUndo = 0;
 static float s_chosenPct = 20, s_chosenStep = 5, s_chosenDelay = 0.08f, s_chosenSpread = 3;
 static int s_freeFallback = 7, s_empathy = 1;
 static float s_maxRounds = 30;
@@ -112,8 +113,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; a shot (hits within shot_gap s of the shot's first are that shot's). heal_limbs 1: each heal also mends every\n"
                "; injured limb in full. heal_shotguns_only 1: only a gun firing several pellets a shot heals.\n"
                "heal_pct = %g\nheal_cap = %d\nshot_gap = %g\nheal_limbs = %d\nheal_shotguns_only = %d\n"
-               "; He cannot stim: stim_undo 1 takes back at once any heal that is not his own (a stim's; the stim is wasted).\n"
-               "; 0: stims heal him as anyone.\nstim_undo = %d\n"
+               "; Stims heal him as anyone (stim_undo 0, the default since 0.1.1). stim_undo 1 (experimental) took back any heal\n"
+               "; not his own, but the stim's effect still showed and his own heals could be taken back too.\nstim_undo = %d\n"
                "; The Chosen One: each shot has chosen_pct %% to fire a free extra round chosen_delay s later, plus chosen_step %%\n"
                "; for each round spent while a skill runs; its pellets spread chosen_spread degrees. A gun whose round cannot be\n"
                "; spawned fires projectile free_round_fallback instead. At most max_rounds spawned rounds a second.\n"
