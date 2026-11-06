@@ -432,8 +432,8 @@ local OPTIONS = {
     {'chosen_step', 'slider', 'The Chosen One: Rise', 0, 20, 1, '% more chance for each round spent while a skill runs.'},
     {'empathy', 'toggle', 'Empathy by Shotgun', nil, nil, nil, '+1 skill round for every other Laterano kit installed.'},
     {'area_rounds', 'toggle', 'Area Rounds', nil, nil, nil, 'Each shot also fires a round of his gun at every enemy in a square in front of him.', true},
-    {'area_size', 'slider', 'Area Rounds: Square', 1, 30, 1, 'The square\'s size in metres: this deep along his aim, this wide across it.'},
-    {'area_size_s3', 'slider', 'Area Rounds: Square in S3', 1, 40, 1, 'The square\'s size while Damnatus Ex Foedere runs.'},
+    {'area_size', 'slider', 'Area Rounds: Square', 1, 40, 1, 'The square\'s size in metres: this deep along his aim, this wide across it.'},
+    {'area_size_s3', 'slider', 'Area Rounds: Square in S3', 1, 60, 1, 'The square\'s size while Damnatus Ex Foedere runs.'},
     {'area_max', 'slider', 'Area Rounds: Enemies a Shot', 0, 32, 1, 'At most this many enemies get a round each shot (the nearest first).'},
     {'s1_cooldown', 'slider', 'Testament Exacted: Cooldown', 0, 120, 1, 'Seconds before it can be used again, from its end.', true},
     {'s1_rounds', 'slider', 'Testament Exacted: Rounds', 1, 40, 1, 'Shots it lasts.'},
@@ -452,15 +452,6 @@ local OPTIONS = {
     {'hp_mult', 'slider', 'Body: Health', 0.5, 4, 0.05, 'His health, times a Helldiver\'s.', true},
     {'stamina_mult', 'slider', 'Body: Stamina', 0.5, 6, 0.1, 'How long he sprints before the bar empties, times a Helldiver\'s.'},
 }
--- The MODS tab holds about 128 options for every mod together (Mod Options Menu), and the kits filled it, so each
--- kit puts only these rows there; every other setting stays in its .ini.
-local MODS_TAB_CORE = {heal_cap = true, chosen_pct = true, area_rounds = true, area_size = true, s1_cooldown = true, s2_cooldown = true, s3_cooldown = true, hp_mult = true}
-do
-    local kept = {}
-    for _, o in ipairs(OPTIONS) do if MODS_TAB_CORE[o[1]] then kept[#kept + 1] = o end end
-    for n, o in ipairs(kept) do o[8] = n == 1 or nil end
-    OPTIONS = kept
-end
 pcall(ffi.cdef, [[
 typedef int (*exeopt_get)(const char *name, double *out);
 typedef int (*exeopt_set)(const char *name, double value);

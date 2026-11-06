@@ -56,7 +56,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.1"
+#define VERSION "0.2.2"
 #define BUILD "25480438"
 
 /* S3 sets off a blast on every enemy it hit, 0.1 s apart: room for 12 of his own blasts within the guard's 1.2 s */
@@ -89,8 +89,8 @@ static float s_s2Cd = 30, s_s2Mult = 1.8f, s_s2Reduce = 0.8f, s_s2Dodge = 40;
 static int s_s2Rounds = 12, s_s2DodgeDot = 0;
 static float s_s3Cd = 60, s_s3Mult = 2.8f, s_s3Step = 0.06f, s_s3HealMult = 3, s_s3BlastMult = 2.5f, s_s3Every = 0.1f;
 static int s_s3Rounds = 16, s_s3Stacks = 30, s_s3Row = 404;
-static int s_areaRounds = 1, s_areaMax = 12;
-static float s_areaSize = 7, s_areaSizeS3 = 15;
+static int s_areaRounds = 1, s_areaMax = 12, s_areaPellets = 3;
+static float s_areaSize = 15, s_areaSizeS3 = 25;   /* 0.2.2: 15 m, 25 m in S3 (0.2.0: 7 / 15) */
 
 static const KbSetting kSettings[] = {
     KB_F("heal_pct", s_healPct, 0, 100), KB_I("heal_cap", s_healCap, 0, 32), KB_I("heal_limbs", s_healLimbs, 0, 1),
@@ -100,7 +100,7 @@ static const KbSetting kSettings[] = {
     KB_I("no_projectile_round", s_noProjRound, 0, 100000),
     KB_I("empathy", s_empathy, 0, 1),
     KB_I("area_rounds", s_areaRounds, 0, 1), KB_F("area_size", s_areaSize, 1, 100), KB_F("area_size_s3", s_areaSizeS3, 1, 100),
-    KB_I("area_max", s_areaMax, 0, 32),
+    KB_I("area_max", s_areaMax, 0, 32), KB_I("area_pellets", s_areaPellets, 0, 32),
     KB_F("s1_cooldown", s_s1Cd, 0, 600), KB_I("s1_rounds", s_s1Rounds, 1, 200), KB_F("s1_mult", s_s1Mult, 1, 20), KB_F("s1_ap", s_s1Ap, 0, 10),
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_I("s2_rounds", s_s2Rounds, 1, 200), KB_F("s2_mult", s_s2Mult, 1, 20), KB_F("s2_reduce", s_s2Reduce, 0, 1),
     KB_F("s2_dodge", s_s2Dodge, 0, 100), KB_I("s2_dodge_dot", s_s2DodgeDot, 0, 1),
@@ -127,18 +127,19 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; The Chosen One: each shot has chosen_pct %% to fire a free extra round chosen_delay s later, plus chosen_step %%\n"
                "; for each round spent while a skill runs; its pellets spread chosen_spread degrees. A gun whose round cannot be\n"
                "; spawned fires projectile free_round_fallback instead. At most max_rounds spawned rounds a second. A gun with no\n"
-               "; projectile of its own (the DBS-2 Double Freedom loads shells) fires no_projectile_round (179: SG-225 Breaker\n"
-               "; buckshot, its pellets too; 0: such guns fire no spawned rounds).\n"
+               "; ProjectileWeapon (the DBS-2 Double Freedom loads shells) fires its shells' own projectile, else\n"
+               "; no_projectile_round (179: SG-225 Breaker buckshot; 0: such guns fire no spawned rounds).\n"
                "chosen_pct = %g\nchosen_step = %g\nchosen_delay = %g\nchosen_spread = %g\nfree_round_fallback = %d\nmax_rounds = %g\n"
                "no_projectile_round = %d\n"
                "; Empathy by Shotgun: empathy 1, +1 round to each skill for every other Laterano kit installed (Exusiai, Lemuen,\n"
                "; Exusiai the New Covenant).\nempathy = %d\n"
-               "; Area rounds: area_rounds 1, each of his shots also fires one round of his gun (every pellet) at each living enemy\n"
+               "; Area rounds: area_rounds 1, each of his shots also fires one round of his gun (at most area_pellets of its pellets;\n"
+               "; 0: all) at each living enemy\n"
                "; in a square in front of him: area_size m along his aim by area_size m across it, from where he stands\n"
                "; (area_size_s3 while Damnatus Ex Foedere runs); at most area_max enemies a shot, the nearest first, each in his\n"
                "; line of fire. They heal as his shot's hits (the same heal_cap), spend no skill round, roll no Chosen One, and\n"
-               "; share max_rounds (pellets a second) with The Chosen One.\n"
-               "area_rounds = %d\narea_size = %g\narea_size_s3 = %g\narea_max = %d\n"
+               "; are not held back by max_rounds.\n"
+               "area_rounds = %d\narea_size = %g\narea_size_s3 = %g\narea_max = %d\narea_pellets = %d\n"
                "; Skills run for their rounds (his shots), one at a time; the cooldown starts when one ends.\n"
                "; Testament Exacted: s1_rounds shots deal s1_mult times their damage and pierce s1_ap more armour.\n"
                "s1_cooldown = %g\ns1_rounds = %d\ns1_mult = %g\ns1_ap = %g\n"
@@ -155,7 +156,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "hp_mult = 1\nstamina_mult = 1\nhellbomb_on_exhaustion = 0\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_healPct, s_healCap, (double)s_shotGap, s_healLimbs,
             s_healShotgunsOnly, s_stimUndo, (double)s_chosenPct, (double)s_chosenStep, (double)s_chosenDelay, (double)s_chosenSpread,
-            s_freeFallback, (double)s_maxRounds, s_noProjRound, s_empathy, s_areaRounds, (double)s_areaSize, (double)s_areaSizeS3, s_areaMax, (double)s_s1Cd, s_s1Rounds, (double)s_s1Mult, (double)s_s1Ap, (double)s_s2Cd,
+            s_freeFallback, (double)s_maxRounds, s_noProjRound, s_empathy, s_areaRounds, (double)s_areaSize, (double)s_areaSizeS3, s_areaMax, s_areaPellets, (double)s_s1Cd, s_s1Rounds, (double)s_s1Mult, (double)s_s1Ap, (double)s_s2Cd,
             s_s2Rounds, (double)s_s2Mult, (double)s_s2Reduce, (double)s_s2Dodge, s_s2DodgeDot, (double)s_s3Cd, s_s3Rounds, (double)s_s3Mult,
             (double)s_s3Step, s_s3Stacks, (double)s_s3HealMult, s_s3Row, (double)s_s3BlastMult, (double)s_s3Every);
 }
@@ -365,7 +366,7 @@ static int ReticlePoint(float out[3])
 /* ---- the gun in hand: its round and pellets a shot ------------------------------------------------------------------ */
 static uint32_t g_heldEntity;
 static uint64_t g_heldRes;
-typedef struct GunInfo { uint64_t res; uint32_t projectile, pellets; } GunInfo;
+typedef struct GunInfo { uint64_t res; uint32_t projectile, pellets, stat_per; } GunInfo;   /* stat_per: the shots stat's count a shot */
 static GunInfo g_gunInfo[24];
 static int g_ngunInfo;
 /* a projectile's pellets a shot (its settings row, Exusiai 0.2.3's read); 1 when unknown */
@@ -392,11 +393,23 @@ static const GunInfo* InfoOf(uint64_t res)
     if (hf->get_live(self, res, &proj, &v) && v.base.number > 0) g->projectile = (uint32_t)v.base.number;
     memset(&v, 0, sizeof v);
     if (hf->get_live(self, res, &entity, &v) && v.base.number != 0) g->projectile = 0;
-    int stand_in = !g->projectile && s_noProjRound > 0;
-    if (stand_in) g->projectile = (uint32_t)s_noProjRound;
     g->pellets = PelletsOf(g->projectile);
+    g->stat_per = g->pellets;   /* a ProjectileWeapon: the stat counts each pellet */
+    /* 0.2.2: a gun loaded round by round (the DBS-2 Double Freedom: WeaponRounds, no ProjectileWeapon) fires its rounds'
+     * own projectile, and the shots stat counts one a shell (0.2.1 divided it by the stand-in's 11 pellets: 1 shot in 11) */
+    const char* how = "";
+    if (!g->projectile)
+    {
+        HfField rp = HF_FIELD(WeaponRounds, primary_projectile);
+        memset(&v, 0, sizeof v);
+        if (hf->get_live(self, res, &rp, &v) && v.base.number > 0 && v.base.number < 100000)
+        { g->projectile = (uint32_t)v.base.number; how = " (its shells' own projectile)"; }
+        else if (s_noProjRound > 0) { g->projectile = (uint32_t)s_noProjRound; how = " (none of its own: no_projectile_round stands in)"; }
+        g->pellets = PelletsOf(g->projectile);
+        g->stat_per = 1;
+    }
     Log("weapon %016llx fires projectile %u, %u pellet%s a shot%s", (unsigned long long)res, g->projectile, g->pellets, g->pellets == 1 ? "" : "s",
-        stand_in ? " (none of its own: no_projectile_round stands in)" : g->projectile ? "" : " (no projectile: no free rounds from it)");
+        g->projectile ? how : " (no projectile: no free rounds from it)");
     return g;
 }
 
@@ -663,9 +676,9 @@ static void AreaFrame(void)
     for (int j = 0; j < nc && fired < s_areaMax; j++)
     {
         if (!ClearShot(from, c[j].q)) continue;
-        int budget = ProjBudget();
-        if (budget < 1) { static unsigned told; if (told++ < 4) Log("area rounds: max_rounds reached (%d of %d enemies this shot)", fired, nc); break; }
-        int n = pellets > budget ? budget : pellets;
+        /* 0.2.2: every enemy in the square, every shot: area rounds have their own cap (area_pellets a target), not
+         * max_rounds (0.2.0-0.2.1 drew on it: an 11-pellet gun reached 3 of 4 enemies) */
+        int n = s_areaPellets > 0 && pellets > s_areaPellets ? s_areaPellets : pellets;
         float v[3] = {c[j].q[0] - from[0], c[j].q[1] - from[1], c[j].q[2] - from[2]};
         float vn = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
         if (!(vn > 0.1f)) continue;
@@ -690,7 +703,6 @@ static void AreaFrame(void)
             if (!Act("an area round", r)) { stop = 1; break; }
             out++;
         }
-        g_projTokens -= out;
         if (out) { fired++; g_areaRoundsFired++; }
         else g_vol.n--;
         if (stop) break;
@@ -793,7 +805,7 @@ static void OnStat(HfMod* mod, const HfEventInfo* info, void* user)
         uint64_t res = s->sources[i].resource;
         if (!res || res != g_heldRes || s->sources[i].added <= 0) continue;   /* the gun in hand only (not his free rounds, grenades, stratagems) */
         const GunInfo* gi = InfoOf(res);
-        int pellets = gi && gi->pellets ? (int)gi->pellets : 1;
+        int pellets = gi && gi->stat_per ? (int)gi->stat_per : 1;
         if (carryRes != res) { carryRes = res; carry = 0; }
         carry += s->sources[i].added;
         if (g_shotSource != 2) { g_shotSource = 2; Log("his shots: counted from the shots stat (no magazine from the HUD), %d pellet%s a shot", pellets, pellets == 1 ? "" : "s"); }
