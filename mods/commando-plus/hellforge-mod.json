@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.commando-plus",
   "name": "Commando Plus",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "TEST BUILD: untested in game. Commando missions made a little more forgiving, each option in commando-plus.ini: no mission timer, free Resupply calls at the drop-in (0 to 2), extra uses of the Super Destroyer call-in, more stims and grenades in point-of-interest caches, and outpost caches: every enemy base cleared pays out free resupply calls (the game's reward ammo rack). every_mission 1 applies them to every mission. Host or solo.",
   "gameplay": true,
   "code": {

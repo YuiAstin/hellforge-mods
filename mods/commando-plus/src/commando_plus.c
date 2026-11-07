@@ -45,7 +45,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.2"
+#define VERSION "0.4.0"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -83,6 +83,8 @@ static int Lookup(uintptr_t at, uint32_t key, uint32_t limit, uint32_t* index)
 static int s_noTimer = 1, s_resupplyCalls = 1, s_extraCalls = 1, s_everyMission = 0;
 static int s_poiExtra = 1;   /* 0.3.1: off by default: the hooked roll is the POI crates' (support weapons, credits), not stims / grenades */
 static int s_caches = 1, s_cacheSmall = 1, s_cacheLarge = 2, s_cacheReward = 0, s_baseRadius = 40;
+static int s_podsResupply = 1;   /* 0.4.0 (test): 1 the Respawn Point Hellpod carries a Resupply, 2 each Infiltration Hellpod does */
+static int s_racksAnytime = 1;   /* 0.4.0 (test): the reward ammo rack thrown outside the Super Destroyer's window */
 static int ReadSettings(const char* path)
 {
     char line[256];
@@ -110,6 +112,8 @@ static int ReadSettings(const char* path)
         else if (!strcmp(k, "cache_reward")) s_cacheReward = x ? 1 : 0;
         else if (!strcmp(k, "base_radius")) { if (x >= 10 && x <= 200) s_baseRadius = x; }
         else if (!strcmp(k, "poi_extra")) { if (x >= 1 && x <= 10) s_poiExtra = x; }
+        else if (!strcmp(k, "pods_resupply")) { if (x >= 0 && x <= 2) s_podsResupply = x; }
+        else if (!strcmp(k, "racks_anytime")) s_racksAnytime = x ? 1 : 0;
     }
     fclose(f);
     return 1;
@@ -517,11 +521,53 @@ static void CachesSummary(const char* why)
         Log("  base %d at %.0f %.0f not cleared: %d of %d destroyed; still up: %s", b, base->pos[0], base->pos[1], base->destroyed, base->members, at ? kinds : "-");
     }
 }
+/* 0.4.0 (test): the Reinforcement Pods (Your Ctrl+Alt+F2 at them, Reinforce Probe 2026-11-07): three Infiltration
+ * Hellpods, the Respawn Point Hellpod and the pods' power switch; a Resupply the pods carry (pods_resupply) */
+#define INFILTRATION_POD 0x6B5D00CD9AB8CB74ull
+#define RESPAWN_POD 0x5FAD42DF0A24C7EDull
+#define PODS_SWITCH 0xE8EF41881DAB0E9Full
+#define RESUPPLY_ENTITY 0x35F50DEC0EC647C6ull   /* HF_ENTITY_RESUPPLY */
+#define WATCHED 32
+static uint32_t g_wEnt[WATCHED];
+static uint64_t g_wRes[WATCHED];
+static atomic_uint g_wHead;
+static unsigned g_wTail;
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
     int k = SpawnerKind(s->resource);
     if (k >= 0) Push(s->entity, (uint32_t)k);
+    if (s->resource == INFILTRATION_POD || s->resource == RESPAWN_POD || s->resource == PODS_SWITCH || s->resource == RESUPPLY_ENTITY)
+    {
+        unsigned i = atomic_fetch_add(&g_wHead, 1) % WATCHED;
+        g_wEnt[i] = s->entity; g_wRes[i] = s->resource;
+    }
+}
+static const char* PodName(uint64_t r)
+{
+    return r == INFILTRATION_POD ? "Infiltration Hellpod" : r == RESPAWN_POD ? "Respawn Point Hellpod" : r == PODS_SWITCH ? "the pods' switch" : "a Resupply";
+}
+/* the pods and any Resupply as they spawn, with where they are (the first 24) */
+static void PodsFrame(void)
+{
+    static unsigned told;
+    while (g_wTail != atomic_load(&g_wHead))
+    {
+        unsigned i = g_wTail % WATCHED;
+        float p[3];
+        if (!Position(g_wEnt[i], p))
+        {
+            static double since;
+            if (since == 0) since = g_now;
+            if (g_now - since < 2) return;   /* its position may come a moment later */
+            since = 0;
+            if (told++ < 24) Log("pods: %s spawned (entity %u), position unread", PodName(g_wRes[i]), g_wEnt[i]);
+            g_wTail++;
+            continue;
+        }
+        g_wTail++;
+        if (told++ < 24) Log("pods: %s spawned (entity %u) at %.0f %.0f %.0f", PodName(g_wRes[i]), g_wEnt[i], p[0], p[1], p[2]);
+    }
 }
 static void OnKill(HfMod* mod, const HfEventInfo* info, void* user) { Push(((const HfKillEvent*)info)->victim, 1000); }
 static void OnWeapon(HfMod* mod, const HfEventInfo* info, void* user)
@@ -720,6 +766,41 @@ static void Recheck(void)
     Log("10 s later (kept?): %u stratagems; Call In Destroyer uses %s; Resupply uses %s", count, a, b);
 }
 
+/* 0.4.0 (test): when each stratagem is usable (+9 granted) through the mission: the Super Destroyer's window shows as
+ * the loadout's entries turning granted and back. racks_anytime: the reward ammo rack kept granted outside it */
+static uint8_t g_wasGranted[16];
+static uint32_t g_wasType[16];
+static unsigned g_grantLogged, g_rackKept;
+static void WindowFrame(void)
+{
+    static double next;
+    if (g_now < next) return;
+    next = g_now + 0.25;
+    uintptr_t st;
+    uint32_t count = 0;
+    if (!List(&st, &count) || !count || count > 16) return;
+    for (uint32_t i = 0; i < count; i++)
+    {
+        uint8_t e[0x30];
+        if (!ReadAt(st + 0x188 + i * 0x30u, e, sizeof e)) return;
+        uint32_t type = Word(e);
+        if (type == g_wasType[i] && e[9] != g_wasGranted[i] && g_grantLogged < 80)
+        {
+            g_grantLogged++;
+            Log("window: slot %u (type %u) %s, %.0f s into the mission", i, type, e[9] ? "usable (granted)" : "not usable (not granted)", g_now - g_missionAt);
+        }
+        g_wasType[i] = type; g_wasGranted[i] = e[9];
+        if (s_racksAnytime && g_applied && type == HF_STRATAGEM_AMMO_RACK_PRESIDENT_REWARD && !e[9])
+        {
+            static const uint8_t one = 1;
+            if (!hf->write(st + 0x188 + i * 0x30u + 9, &one, 1))
+            {
+                g_wasGranted[i] = 1;
+                if (g_rackKept++ < 6) Log("racks_anytime: the reward ammo rack (slot %u) was made not usable: granted again", i);
+            }
+        }
+    }
+}
 static void Tick(HfMod* mod, float dt, void* user)
 {
     g_now += dt > 0 && dt < 1 ? dt : 0;
@@ -742,7 +823,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         g_checkTries = g_applied = g_commando = g_timerTries = 0;
         g_timerAt = g_recheckAt = 0;
         g_checkAt = m ? g_now + 8 : 0;
-        if (m) g_missionAt = g_now;
+        if (m) { g_missionAt = g_now; memset(g_wasType, 0, sizeof g_wasType); g_grantLogged = g_rackKept = 0; }
         Log(m ? "mission start: the stratagem record is read in 8 s" : "mission end");
     }
     if (!m) return;
@@ -750,8 +831,45 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (g_timerAt > 0 && g_now >= g_timerAt) FreezeTimer();
     if (g_recheckAt > 0 && g_now >= g_recheckAt) Recheck();
     CachesFrame();
+    PodsFrame();
+    WindowFrame();
 }
 
+/* pods_resupply: the pods' entity carries a Resupply in its mount's slot 0 (a child made at its spawn) */
+static void PodsEdit(void)
+{
+    if (!s_podsResupply) { Log("pods_resupply: 0 in the ini: the pods carry nothing"); return; }
+    static const HfMountDef mounts[] = {{.slot = 0, .resource = RESUPPLY_ENTITY}, {0}};
+    static HfEditDef edit;
+    edit.size = sizeof edit;
+    edit.entity = s_podsResupply == 2 ? INFILTRATION_POD : RESPAWN_POD;
+    edit.mount = mounts;
+    int r = hf->edit_entity(self, &edit);
+    Log("pods_resupply: the %s's mount slot 0 carries a Resupply: %s", s_podsResupply == 2 ? "Infiltration Hellpods" : "Respawn Point Hellpod", r ? "REFUSED (the log above says why)" : "queued");
+}
+static void EntitiesReady(HfMod* mod, HfEvent event, void* user)
+{
+    static const uint64_t ents[] = {INFILTRATION_POD, RESPAWN_POD, PODS_SWITCH, RESUPPLY_ENTITY};
+    static const char* const comps[] = {"MountComponentData", "HellpodRackComponentData", "HellpodComponentData", "TransportComponentData", "AttachableComponentData"};
+    for (int i = 0; i < 4; i++)
+    {
+        char line[200];
+        int at = 0;
+        for (int c = 0; c < 5; c++)
+        {
+            uint32_t stride = 0;
+            uintptr_t rec = hf->component_record(comps[c], ents[i], &stride);
+            at += snprintf(line + at, sizeof line - at, " %s %s", comps[c], rec ? "yes" : "no");
+            if (rec && c == 0)
+            {
+                uint64_t slot0 = 0;
+                ReadAt(rec, &slot0, 8);
+                at += snprintf(line + at, sizeof line - at, " (slot 0 %016llx)", (unsigned long long)slot0);
+            }
+        }
+        Log("entities ready: %s (%016llx):%s", PodName(ents[i]), (unsigned long long)ents[i], line);
+    }
+}
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {
     size_t gs = 0, xs = 0;
@@ -772,6 +890,8 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     Log("Commando Plus " VERSION " (TEST BUILD; SDK %u, game " BUILD ")", api->version);
     LoadSettings();
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) { Log("REFUSED: the game-loaded event"); return 1; }
+    PodsEdit();
+    api->on(mod, HF_EVENT_ENTITIES_READY, EntitiesReady, NULL);
     if (!api->on_game_thread(mod, Tick, NULL)) Log("the game thread could not be hooked: the mod stays off");
     if (!api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) || !api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) ||
         !api->subscribe(mod, HF_ON_BUGHOLE, OnBughole, NULL, 0) || !api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0))
