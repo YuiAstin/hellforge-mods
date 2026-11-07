@@ -10,8 +10,8 @@
  * Patrols, as they set out (0.4.0): the game's roaming patrol is led by an entity of its own with no body (type
  * f5252be8f520f3d8, Patrol Route Probe 2026-11-08: one every 30 to 40 s, 100 to 120 m from you, its destination set at
  * spawn within 45 m of you; the patrol follows it). When the straight line from it to its destination passes within
- * pass_by m of you, its destination is moved beside you: pass_by m to the side its aim already leaned to, and 40 m past
- * you, so the patrol walks by you instead of onto you (no turning back halfway, as the rerouting below does). The game
+ * pass_by m of you, it is aimed so its straight line passes you at pass_by m (to the side its aim already leaned to) and
+ * goes 40 m on past, so the patrol walks by you instead of onto you (no turning back halfway, as the rerouting below does). The game
  * aims it again later through set_destination (game+0x5B36C0, hooked): each such aim through you is moved the same way.
  * Terrain and the patrol's spread can still bring single enemies closer; enemies that sense you hunt you as usual.
  *
@@ -47,7 +47,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.4.0"
+#define VERSION "0.4.1"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -693,8 +693,10 @@ static float SegDist2D(const float a[3], const float b[3], const float p[3])
     float dx = a[0] + vx * t - p[0], dy = a[1] + vy * t - p[1];
     return sqrtf(dx * dx + dy * dy);
 }
-/* from (the leader) aimed at dest: when that line passes within pass_by of you, a destination beside you (to the side
- * the aim leans to, 40 m past you) whose line keeps pass_by from you; 0 when the aim does not come through you */
+/* from (the leader) aimed at dest: when that line passes within pass_by of you, a destination whose straight line
+ * from the leader passes you at pass_by (0.4.1: aimed off your direction by asin(pass_by / distance), to the side the
+ * aim leans to, and 40 m past the closest point; 0.4.0 put the point beside you and its line crossed too close for a
+ * wide pass_by); 0 when the aim does not come through you */
 static int SidePass(uint32_t id, const float from[3], const float dest[3], const float me[3], float out[3])
 {
     if (s_passBy <= 0 || SegDist2D(from, dest, me) >= s_passBy) return 0;
@@ -703,13 +705,18 @@ static int SidePass(uint32_t id, const float from[3], const float dest[3], const
     ux /= h; uy /= h;
     float nx = -uy, ny = ux, side = (dest[0] - me[0]) * nx + (dest[1] - me[1]) * ny;
     float sgn = side > 0.5f ? 1.f : side < -0.5f ? -1.f : (id & 1) ? 1.f : -1.f;
-    for (int t = 0; t < 8; t++)
+    float r = s_passBy * 1.08f;
+    if (h <= r)
     {
-        float s = (t & 1) ? -sgn : sgn, r = s_passBy * (1.f + 0.3f * (float)(t / 2));
-        float c[3] = {me[0] + nx * s * r + ux * 40, me[1] + ny * s * r + uy * 40, dest[2]};
-        if (SegDist2D(from, c, me) >= s_passBy) { memcpy(out, c, 12); return 1; }
+        /* already within pass_by of you: out to the side, pass_by from you */
+        out[0] = me[0] + nx * sgn * r; out[1] = me[1] + ny * sgn * r; out[2] = dest[2];
+        return 1;
     }
-    return 0;
+    float sn = r / h, cs = sqrtf(1 - sn * sn), along = h * cs + 40;
+    /* the direction: yours turned by the angle, towards the side */
+    float dx = ux * cs + nx * sgn * sn, dy = uy * cs + ny * sgn * sn;
+    out[0] = from[0] + dx * along; out[1] = from[1] + dy * along; out[2] = dest[2];
+    return 1;
 }
 /* set_destination, hooked: the game aiming a patrol's leader through you again */
 typedef void (*SetDestFn2)(void*, uint32_t, const float*);
@@ -779,7 +786,15 @@ static void LeaderFrame(void)
             l->checked = 1;
             g_side.seen++;
             if (!s_patrolMode || !(g_rules & 2) || s_passBy <= 0) continue;
-            if (!SidePass(l->entity, from, dest, me, to)) { g_side.kept++; continue; }
+            if (!SidePass(l->entity, from, dest, me, to))
+            {
+                static unsigned told;
+                g_side.kept++;
+                if (told++ < 10)
+                    Log("patrol leader %u set out %.0f m from you, aimed %.0f m from you (its line %.0f m from you): already passing by", l->entity,
+                        Dist2D(from, me), Dist2D(dest, me), SegDist2D(from, dest, me));
+                continue;
+            }
             g_side.through++;
             static unsigned told;
             if (told++ < 30)
