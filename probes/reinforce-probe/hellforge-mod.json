@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.reinforce-probe",
+  "name": "Reinforce Probe (research)",
+  "version": "0.1.0",
+  "description": "Research only, no gameplay effect: finds where Commando's reinforcements are counted (the Reinforcement Pods objective's +3) and what the pods are in the world, for Commando Plus. Ctrl+Alt+F8 in a mission: a snapshot and what is near you. Turn off when done.",
+  "gameplay": false,
+  "code": {
+    "dll": "reinforce_probe.dll",
+    "sdk": 15
+  }
+}
