@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.8"
+#define VERSION "0.1.9"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -692,6 +692,30 @@ static int64_t Crosshair(const float cam[3], const float fwd[3])
             if (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u)) continue;             /* a body she does not know */
             if (hu && filt && filt != 0xEDC5EBE0u)
             {
+                /* 0.1.9: a part of a big enemy with a unit of its own (a War Strider's legs and armour: filters
+                 * e5727f8e, 19dc4f24, 2026-11-08): the enemy whose body is nearest where the ray met it, within 10 m */
+                float at[3] = {from[0] + fwd[0] * d, from[1] + fwd[1] * d, from[2] + fwd[2] * d}, q[3];
+                uint32_t closest = 0;
+                uint64_t nres = 0;
+                float bd = 10.f * 10.f;
+                for (int k = 0; k < FOES; k++)
+                {
+                    uint32_t f = g_foe[k];
+                    if (!f || !TargetPos(f, g_foeRes[k], q)) continue;
+                    float dx = q[0] - at[0], dy = q[1] - at[1], dz = q[2] - at[2], d2 = dx * dx + dy * dy + dz * dz;
+                    uint32_t life;
+                    int32_t hp = 1;
+                    if (d2 < bd && !(HealthOf(f, &hp, &life) && hp <= 0)) { bd = d2; closest = f; nres = g_foeRes[k]; }
+                }
+                if (closest)
+                {
+                    static uint64_t toldN[16];
+                    static unsigned ntoldN;
+                    int seen = 0;
+                    for (unsigned t = 0; t < ntoldN && t < 16; t++) seen |= toldN[t] == nres;
+                    if (!seen && ntoldN < 16) { toldN[ntoldN++] = nres; Log("Honesta Missio: her crosshair meets unit %08x (filter %08x) %.1f m from entity %u (%016llx): held as part of it", hu, filt, (double)sqrtf(bd), closest, (unsigned long long)nres); }
+                    return closest;
+                }
                 /* 0.1.8: a unit no entity she has seen owns: named in the log (a few), to find what a big enemy is made of */
                 static uint32_t toldU[24];
                 static unsigned ntoldU;
