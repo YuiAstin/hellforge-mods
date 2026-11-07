@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.patrol-route-probe",
+  "name": "Patrol Route Probe (research)",
+  "version": "0.1.0",
+  "description": "Research only, no gameplay effect: which game code aims roaming patrols at you (set_destination's callers, and the first destination of each enemy that spawns mid-mission), for Lost Contact's spawn-time patrol routing. Host or solo. Turn off when done.",
+  "gameplay": false,
+  "code": {
+    "dll": "patrol_route_probe.dll",
+    "sdk": 15
+  }
+}
