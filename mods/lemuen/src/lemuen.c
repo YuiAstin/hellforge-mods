@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.9"
+#define VERSION "0.1.10"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -573,6 +573,7 @@ static double S2Mult(void)
     return s_s2Min + (s_s2Max - s_s2Min) * t;
 }
 static int EnemyTurret(uint64_t res);
+static int AiEnemy(uint64_t res);
 /* 0.1.7: every enemy-side entity seen (not only her foes): a Factory Strider's hull and other big enemies the kit
  * base leaves out of its foes (turrets, seats) are found by their unit when the crosshair ray meets them */
 #define ANY 4096
@@ -670,7 +671,7 @@ static int64_t Crosshair(const float cam[3], const float fwd[3])
                 if (HealthOf(e, &hp, &life) && hp <= 0) continue;                         /* a body: looked past */
                 if (Holdable(e, res))
                 {
-                    if (!FoeKind(res) && !EnemyTurret(res))
+                    if (!FoeKind(res) && !EnemyTurret(res) && !AiEnemy(res))
                     {
                         static uint64_t toldRes[16];
                         static unsigned ntold;
@@ -996,10 +997,33 @@ static int EnemyTurret(uint64_t res)
     }
     return 0;
 }
+/* 0.1.10: an enemy the kit base's test misses: a War Strider (ef570293245a17c2) carries a turret and its behaviour
+ * record is not found by its resource, so it was neither a foe nor an enemy turret, and her marks and Memento Mori only
+ * saw it once Honesta Missio had held it (Yui). Anything with the AI's enemy record and health, and no friend, is one */
+static int AiEnemy(uint64_t res)
+{
+    static uint64_t keys[128];
+    static int8_t vals[128];
+    unsigned h = (unsigned)(res ^ (res >> 27)) & 127;
+    for (unsigned i = 0; i < 128; i++)
+    {
+        unsigned k = (h + i) & 127;
+        if (keys[k] == res) return vals[k];
+        if (keys[k]) continue;
+        uint32_t stride;
+        int t = res != AVATAR && hf->component_record("AiEnemyComponentData", res, &stride) != 0 && hf->component_record("HealthComponentData", res, &stride) != 0 &&
+                !hf->component_record("AvatarComponentData", res, &stride) && !FriendRes(res);
+        vals[k] = (int8_t)t;
+        keys[k] = res;
+        if (t && !FoeKind(res) && !EnemyTurret(res)) { static unsigned told; if (told++ < 8) Log("an enemy kind the kit base misses: %016llx (one of her foes)", (unsigned long long)res); }
+        return t;
+    }
+    return 0;
+}
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
-    if (s->resource != AVATAR) { if (FoeKind(s->resource) || EnemyTurret(s->resource)) AddFoe(s->entity, s->resource); SeeAny(s->entity, s->resource); return; }
+    if (s->resource != AVATAR) { if (FoeKind(s->resource) || EnemyTurret(s->resource) || AiEnemy(s->resource)) AddFoe(s->entity, s->resource); SeeAny(s->entity, s->resource); return; }
     if (!s->authority) return;
     g_spawnEntity[g_spawnNext % 8] = s->entity;
     g_spawnNet[g_spawnNext % 8] = s->network;
