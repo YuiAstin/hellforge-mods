@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.7"
+#define VERSION "0.1.8"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -608,14 +608,18 @@ static uint32_t EntityOfUnit(uint32_t u, uint64_t* res)
     return e;
 }
 /* something to hold in her scope: no friend, no Helldiver, alive, and a fighting thing (her foes, enemy turrets, or
- * anything that runs a behaviour and has health) */
+ * anything with health that runs a behaviour, has a faction or carries seats: 0.1.8, a War Strider's walker is a
+ * vehicle its pilot rides, with no behaviour of its own, and it is what her shots hit) */
 static int Holdable(uint32_t e, uint64_t res)
 {
     uint32_t stride, life;
     int32_t hp = 1;
     if (!e || res == AVATAR || FriendRes(res)) return 0;
     if (HealthOf(e, &hp, &life) && hp <= 0) return 0;
-    return FoeKind(res) || EnemyTurret(res) || (hf->component_record("BehaviorComponentData", res, &stride) && hf->component_record("HealthComponentData", res, &stride));
+    if (FoeKind(res) || EnemyTurret(res)) return 1;
+    if (!hf->component_record("HealthComponentData", res, &stride)) return 0;
+    return hf->component_record("BehaviorComponentData", res, &stride) || hf->component_record("FactionComponentData", res, &stride) ||
+           hf->component_record("SeatCollectionComponentData", res, &stride);
 }
 /* the first thing the ray from the middle of her camera meets (her, leaves and bodies of the dead skipped): the
  * entity when it is one to hold, 0 when it is a wall, the ground or nothing; -1 when the ray cannot be cast */
@@ -676,9 +680,25 @@ static int64_t Crosshair(const float cam[3], const float fwd[3])
                     }
                     return e;
                 }
+                {
+                    static uint64_t toldRes[16];
+                    static unsigned ntold;
+                    int seen = 0;
+                    for (unsigned t = 0; t < ntold && t < 16; t++) seen |= toldRes[t] == res;
+                    if (!seen && ntold < 16) { toldRes[ntold++] = res; Log("Honesta Missio: entity %u (%016llx) in her crosshair at %.0f m: not one to hold (a friend, a Helldiver, a prop)", e, (unsigned long long)res, (double)(steps[st] + d)); }
+                }
                 return 0;                                                                 /* a friend, a Helldiver, a prop */
             }
             if (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u)) continue;             /* a body she does not know */
+            if (hu && filt && filt != 0xEDC5EBE0u)
+            {
+                /* 0.1.8: a unit no entity she has seen owns: named in the log (a few), to find what a big enemy is made of */
+                static uint32_t toldU[24];
+                static unsigned ntoldU;
+                int seen = 0;
+                for (unsigned t = 0; t < ntoldU && t < 24; t++) seen |= toldU[t] == hu;
+                if (!seen && ntoldU < 24) { toldU[ntoldU++] = hu; Log("Honesta Missio: her crosshair meets unit %08x (filter %08x) at %.0f m: no entity she knows", hu, filt, (double)(steps[st] + d)); }
+            }
             return 0;                                                                     /* a wall, the ground */
         }
     }
