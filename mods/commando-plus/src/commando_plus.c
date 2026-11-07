@@ -45,7 +45,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.0"
+#define VERSION "0.3.1"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -81,7 +81,7 @@ static int Lookup(uintptr_t at, uint32_t key, uint32_t limit, uint32_t* index)
 
 /* ---- settings ------------------------------------------------------------------------------------------------------- */
 static int s_noTimer = 1, s_resupplyCalls = 1, s_extraCalls = 1, s_everyMission = 0;
-static int s_poiExtra = 2;
+static int s_poiExtra = 1;   /* 0.3.1: off by default: the hooked roll is the POI crates' (support weapons, credits), not stims / grenades */
 static int s_caches = 1, s_cacheSmall = 1, s_cacheLarge = 2, s_cacheReward = 0, s_baseRadius = 40;
 static int ReadSettings(const char* path)
 {
@@ -299,12 +299,17 @@ static void Push(uint32_t entity, uint32_t kind)
 #define SPAWNERS 256
 #define BASES 96
 typedef struct { uint32_t entity; int kind, base, dead, placed; float pos[3]; } Spawner;
-typedef struct { int members, alive, large, paid; float pos[3]; } Base;
+/* destroyed: members brought down by a kill, a bug hole closed or 0 health (0.3.1: a spawner that is only gone, streamed
+ * out as the mission loads or ends, leaves its base instead; a base pays only when one of its members was destroyed) */
+typedef struct { int members, alive, large, paid, destroyed; float pos[3]; } Base;
 static Spawner g_sp[SPAWNERS];
 static Base g_base[BASES];
 static int g_nsp, g_nbase;
 static unsigned g_basesPaid, g_callsPaid;
-static void CachesReset(void) { g_nsp = g_nbase = 0; g_basesPaid = g_callsPaid = 0; }
+static atomic_uint g_avatar;      /* the local Helldiver (HF_ON_WEAPON) */
+static double g_missionAt;         /* g_now at mission start */
+static unsigned g_spLogged, g_goneLogged;
+static void CachesReset(void) { g_nsp = g_nbase = 0; g_basesPaid = g_callsPaid = 0; g_spLogged = g_goneLogged = 0; }
 static uint32_t UnitOf(uint32_t entity)
 {
     uintptr_t root = Pointer(game + 0x346BF98);
@@ -376,6 +381,50 @@ static int PayOut(int n, const char* why)
     if (slot == -2) return 0;
     return Append(st, count, type, (uint32_t)n, what);
 }
+#define VANISH_NEAR 150.0f   /* 0.3.1: a spawner gone this close to you was destroyed (a wreck may replace it) */
+#define SETTLE_S 20.0         /* 0.3.1: the first seconds of a mission: spawners come and go as the map streams in */
+static const char* kDeath[] = {"alive", "killed", "closed", "gone", "at 0 health", "destroyed (gone near you)"};
+static float Dist(const float a[3], const float b[3]) { float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2]; return sqrtf(dx * dx + dy * dy + dz * dz); }
+static int Me(float out[3]) { uint32_t a = atomic_load(&g_avatar); return a && Position(a, out); }
+/* one spawner down: destroyed (it counts for its base), or only gone (it leaves its base) */
+static int g_burst;   /* this pass: 3 or more spawners gone at once (the map streaming, or the mission ending) */
+static void SpawnerDown(Spawner* sp, int how)
+{
+    float me[3];
+    int found = Me(me), settled = g_now - g_missionAt >= SETTLE_S;
+    float d = found && sp->placed ? Dist(me, sp->pos) : -1;
+    if (how == 3 && (!settled || g_burst || d < 0 || d > VANISH_NEAR))
+    {
+        sp->dead = 3;
+        if (sp->placed && sp->base >= 0)
+        {
+            Base* b = &g_base[sp->base];
+            b->members--;
+            if (g_goneLogged++ < 12)
+                Log("%s (entity %u) of base %d is gone (%s): it leaves the base (%d left in it)", kSpawners[sp->kind].name, sp->entity, sp->base,
+                    !settled ? "the mission is loading" : g_burst ? "with several others at once" : d < 0 ? "you were not found" : "far from you", b->members);
+            sp->base = -1;
+        }
+        return;
+    }
+    sp->dead = how == 3 ? 5 : how;
+    if (!sp->placed || sp->base < 0) return;
+    Base* b = &g_base[sp->base];
+    b->destroyed++;
+    int left = 0;
+    for (int j = 0; j < g_nsp; j++) if (g_sp[j].base == sp->base && !g_sp[j].dead) left++;
+    char at[32] = "";
+    if (d >= 0) snprintf(at, sizeof at, ", %.0f m from you", (double)d);
+    Log("base %d: %s %s%s; %d of %d still up", sp->base, kSpawners[sp->kind].name, kDeath[sp->dead], at, left, b->members);
+    for (int j = 0, n = 0; j < g_nsp && left && n < 4; j++)
+    {
+        const Spawner* o = &g_sp[j];
+        if (o->base != sp->base || o->dead) continue;
+        n++;
+        if (found) Log("  still up: %s (entity %u), %.0f m from you", kSpawners[o->kind].name, o->entity, (double)Dist(me, o->pos));
+        else Log("  still up: %s (entity %u)", kSpawners[o->kind].name, o->entity);
+    }
+}
 static void CachesFrame(void)
 {
     /* the new spawns and deaths */
@@ -391,59 +440,75 @@ static void CachesFrame(void)
             sp->entity = e; sp->kind = (int)k; sp->base = -1;
         }
         else
-            for (int j = 0; j < g_nsp; j++) if (g_sp[j].entity == e && !g_sp[j].dead) { g_sp[j].dead = k == 1001 ? 2 : 1; }
+            for (int j = 0; j < g_nsp; j++) if (g_sp[j].entity == e && !g_sp[j].dead) SpawnerDown(&g_sp[j], k == 1001 ? 2 : 1);
     }
     static double next;
     if (g_now < next) return;
     next = g_now + 1;
-    /* placed into bases once their position reads; dead when gone or at 0 health */
+    /* placed into bases once their position reads; down when gone or at 0 health */
+    int gone = 0;
+    for (int j = 0; j < g_nsp; j++) if (g_sp[j].placed && !g_sp[j].dead && !UnitOf(g_sp[j].entity)) gone++;
+    g_burst = gone >= 3;
     for (int j = 0; j < g_nsp; j++)
     {
         Spawner* sp = &g_sp[j];
         if (!sp->placed && !sp->dead && Position(sp->entity, sp->pos))
         {
-            float r2 = (float)s_baseRadius * (float)s_baseRadius;
             int b = -1;
             for (int q = 0; q < g_nsp && b < 0; q++)
             {
                 const Spawner* o = &g_sp[q];
-                float dx = o->pos[0] - sp->pos[0], dy = o->pos[1] - sp->pos[1], dz = o->pos[2] - sp->pos[2];
-                if (q != j && o->placed && o->base >= 0 && dx * dx + dy * dy + dz * dz <= r2 && !g_base[o->base].paid) b = o->base;
+                if (q != j && o->placed && o->base >= 0 && !o->dead && !g_base[o->base].paid && Dist(o->pos, sp->pos) <= (float)s_baseRadius) b = o->base;
             }
             if (b < 0 && g_nbase < BASES) { b = g_nbase++; memset(&g_base[b], 0, sizeof g_base[b]); memcpy(g_base[b].pos, sp->pos, 12); }
             if (b < 0) continue;
             sp->placed = 1; sp->base = b;
             g_base[b].members++;
             if (kSpawners[sp->kind].large) g_base[b].large = 1;
+            if (g_spLogged++ < 80)
+                Log("spawner: %s (entity %u) at %.0f %.0f %.0f: base %d (%d in it)", kSpawners[sp->kind].name, sp->entity, sp->pos[0], sp->pos[1], sp->pos[2], b, g_base[b].members);
         }
         if (sp->placed && !sp->dead)
         {
             int32_t hp = 1;
-            if (!UnitOf(sp->entity)) sp->dead = 3;
-            else if (Health(sp->entity, &hp) && hp <= 0) sp->dead = 4;
+            if (!UnitOf(sp->entity)) SpawnerDown(sp, 3);
+            else if (Health(sp->entity, &hp) && hp <= 0) SpawnerDown(sp, 4);
         }
     }
-    /* a base whose spawners are all down pays out (once, when the options apply) */
+    if (g_now - g_missionAt < SETTLE_S) return;
+    /* a base whose spawners are all down, one of them destroyed, pays out (once, when the options apply) */
     for (int b = 0; b < g_nbase; b++)
     {
         Base* base = &g_base[b];
         int alive = 0;
         for (int j = 0; j < g_nsp; j++) if (g_sp[j].base == b && !g_sp[j].dead) alive++;
         base->alive = alive;
-        if (base->paid || alive || !base->members) continue;
+        if (base->paid || alive || base->members <= 0 || !base->destroyed) continue;
         base->paid = 1;
         int large = base->large || base->members >= 3, n = large ? s_cacheLarge : s_cacheSmall;
         char why[64];
         snprintf(why, sizeof why, "a %s base of %d spawner%s cleared", large ? "large" : "small", base->members, base->members == 1 ? "" : "s");
-        if (!s_caches || !g_applied) { Log("%s at %.0f %.0f: no cache (%s)", why, base->pos[0], base->pos[1], !s_caches ? "outpost_caches 0" : "the options do not apply this mission"); continue; }
-        if (PayOut(n, why)) { g_basesPaid++; g_callsPaid += (unsigned)n; Log("%s at %.0f %.0f: %d free call%s", why, base->pos[0], base->pos[1], n, n == 1 ? "" : "s"); }
+        if (!s_caches || !g_applied) { Log("base %d, %s at %.0f %.0f: no cache (%s)", b, why, base->pos[0], base->pos[1], !s_caches ? "outpost_caches 0" : "the options do not apply this mission"); continue; }
+        if (PayOut(n, why)) { g_basesPaid++; g_callsPaid += (unsigned)n; Log("base %d, %s at %.0f %.0f: %d free call%s", b, why, base->pos[0], base->pos[1], n, n == 1 ? "" : "s"); }
     }
 }
+
 static void CachesSummary(const char* why)
 {
     int alive = 0;
     for (int b = 0; b < g_nbase; b++) if (!g_base[b].paid) alive++;
     Log("%s: %d spawners in %d bases (%d not cleared); %u bases paid out, %u free calls", why, g_nsp, g_nbase, alive, g_basesPaid, g_callsPaid);
+    for (int b = 0, n = 0; b < g_nbase && n < 16; b++)
+    {
+        const Base* base = &g_base[b];
+        if (base->paid || base->members <= 0) continue;
+        n++;
+        char kinds[200] = "";
+        size_t at = 0;
+        for (int j = 0; j < g_nsp && at + 40 < sizeof kinds; j++)
+            if (g_sp[j].base == b && !g_sp[j].dead) at += (size_t)snprintf(kinds + at, sizeof kinds - at, "%s%s", at ? ", " : "", kSpawners[g_sp[j].kind].name);
+        Log("  base %d at %.0f %.0f not cleared: %d of %d destroyed; still up: %s", b, base->pos[0], base->pos[1], base->destroyed, base->members, at ? kinds : "-");
+    }
 }
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
@@ -452,6 +517,11 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     if (k >= 0) Push(s->entity, (uint32_t)k);
 }
 static void OnKill(HfMod* mod, const HfEventInfo* info, void* user) { Push(((const HfKillEvent*)info)->victim, 1000); }
+static void OnWeapon(HfMod* mod, const HfEventInfo* info, void* user)
+{
+    const HfWeaponEvent* w = (const HfWeaponEvent*)info;
+    if (w->avatar) atomic_store(&g_avatar, w->avatar);
+}
 static void OnBughole(HfMod* mod, const HfEventInfo* info, void* user) { Push(((const HfBugholeEvent*)info)->entity, 1001); }
 
 
@@ -665,6 +735,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         g_checkTries = g_applied = g_commando = g_timerTries = 0;
         g_timerAt = g_recheckAt = 0;
         g_checkAt = m ? g_now + 8 : 0;
+        if (m) g_missionAt = g_now;
         Log(m ? "mission start: the stratagem record is read in 8 s" : "mission end");
     }
     if (!m) return;
@@ -691,12 +762,12 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     self = mod;
     if (!api || api->version < 15 || api->size < offsetof(HfApi, stats_source) + sizeof api->stats_source) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
-    Log("Commando Plus " VERSION " (TEST BUILD, untested in game; SDK %u, game " BUILD ")", api->version);
+    Log("Commando Plus " VERSION " (TEST BUILD; SDK %u, game " BUILD ")", api->version);
     LoadSettings();
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) { Log("REFUSED: the game-loaded event"); return 1; }
     if (!api->on_game_thread(mod, Tick, NULL)) Log("the game thread could not be hooked: the mod stays off");
     if (!api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) || !api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) ||
-        !api->subscribe(mod, HF_ON_BUGHOLE, OnBughole, NULL, 0))
+        !api->subscribe(mod, HF_ON_BUGHOLE, OnBughole, NULL, 0) || !api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0))
         Log("outpost caches: the spawn / kill / bug hole events are unavailable: no caches");
     return 0;
 }

@@ -11,10 +11,10 @@ so each player picks how much help they want. Host or solo.
 | 1 | No mission timer in Commando | `no_timer = 1` | `hf->freeze_mission_timer(mod, 1)` at mission start (SDK: "pauses the mission timer; host; a new mission starts it again") | API exists |
 | 2 | A free Resupply at drop-in | `resupply_calls = 1` (0 to 2) | Granted outside the loadout, as Voymastina's Sinbreaker is (her stratagem record, game+0x347CE50, appended as the game grants Reinforce and Resupply; Veterancy System's research) | Path proven |
 | 3 | One extra Super Destroyer call-in | `extra_calls = 1` | Depends on how Commando limits it: uses on a stratagem record (then the same grant path as #2, or a uses field raised) or a mission rule | Probe first |
-| 4 | More grenades and stims at Commando POIs | `poi_extra = 1` | Depends on whether POI loot comes from editable tables | Built in 0.3.0 (untested): the loot caches' tables, from HellForge 0.4.0's own Forge Credits code |
+| 4 | More grenades and stims at Commando POIs | `poi_extra = 1` | Depends on whether POI loot comes from editable tables | Not working (0.3.0 played 2026-11-06): the hooked roll fills the POI crates (support weapons, credits), none of its tables holds stims or grenades; off by default in 0.3.1, needs a probe |
 | 5 | Patrols keep to their outposts | (separate mod) | Lost Contact's patrol mode | In test |
 | 6 | Sabotage sub-objectives, captured SEAF sites | (later) | New objectives: much larger; only if HellForge's mission tools reach that far | Later |
-| 7 | **Outpost caches:** a resupply for every enemy base cleared (Yui, 2026-11-06: in Commando bases are skipped; this gives a reason to clear them) | `outpost_caches = 1`, `cache_calls_small = 1`, `cache_calls_large = 2` | Below | Built in 0.2.0 (untested) |
+| 7 | **Outpost caches:** a resupply for every enemy base cleared (Yui, 2026-11-06: in Commando bases are skipped; this gives a reason to clear them) | `outpost_caches = 1`, `cache_calls_small = 1`, `cache_calls_large = 2` | Below | Works (played 2026-11-06: the reward ammo rack lands with ammo boxes; thrown only in the Super Destroyer window); 0.3.1 fixes the counting |
 
 ## Open questions (one probe)
 
@@ -54,3 +54,15 @@ HD2Runtime lists it as blocked). So a cleared base pays out as a free call inste
   `cache_calls_large`. Logged per base.
 - The spawner resources are HD2Runtime's enemy catalogue (kind "structure"), the Illuminate's included (warp gateway, staff
   spawner, spawner ship). Open: whether 109 can be granted outside a mission that offers it (its package).
+
+## Played 2026-11-06 (0.3.0), Yui's report
+
+- No timer: works. Extra Destroyer call-in: works (called twice).
+- Free Resupply: Resupply is already on Commando's record, unlimited: nothing to grant.
+- Outpost caches: the reward ammo rack lands and holds ammo boxes; like every stratagem in Commando it can be thrown
+  only while the Super Destroyer is overhead. Most bases did not count. The log: bases "cleared" in bursts as the
+  mission loaded and as it ended (spawners streamed out, read as destroyed), which marked them paid or paid them for
+  nothing. 0.3.1: a spawner that is only gone leaves its base (gone at load, 3+ at once, or more than 150 m from you);
+  a base pays only once one member was destroyed; nothing pays in the first 20 s; every spawner, each one down and why,
+  and the bases left at mission end are logged, to see which outposts still do not count.
+- POI stims / grenades: not working (above).
