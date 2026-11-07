@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.10"
+#define VERSION "0.1.11"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -403,6 +403,8 @@ static void FindMates(Mark* m, const float q[3])
         if (told++ < 16) Log("Persecution: entity %u (%016llx) rides with entity %u (%.1f m across): one mark for the group", best, (unsigned long long)bestRes, m->e, sqrtf(bestD2));
     }
 }
+static int64_t Crosshair(const float cam[3], const float fwd[3]);
+static uint64_t ResOf(uint32_t e);
 static void MarkFrame(void)
 {
     static double next;
@@ -415,7 +417,24 @@ static void MarkFrame(void)
     /* 0.1.6d: in first person, the enemy under her crosshair (within mark_aim degrees, in sight, any enemy) is marked at
      * once (Yui) */
     uint32_t aimed = 0;
-    if (fp)
+    /* 0.1.11: the first thing the crosshair ray meets, as Honesta Missio holds it: a big enemy aimed at anywhere on
+     * its body (a War Strider's hull is metres above the point the cone measured to), and one the spawn test missed
+     * becomes one of her foes here (Yui: a War Strider was marked only after Honesta Missio held it) */
+    int64_t ray = fp ? Crosshair(cam, fwd) : -1;
+    if (ray > 0)
+    {
+        uint32_t e = (uint32_t)ray;
+        uint64_t r = ResOf(e);
+        float d;
+        if (r && TargetPos(e, r, q) && (Off(cam, fwd, q, &d), d <= s_markRange))
+        {
+            int known = 0;
+            for (int k = 0; k < FOES && !known; k++) known = g_foe[k] == e;
+            if (!known) AddFoe(e, r);
+            aimed = e;
+        }
+    }
+    else if (fp && ray < 0)
     {
         float bestOff = s_markAim;
         for (int k = 0; k < FOES; k++)
@@ -1023,6 +1042,20 @@ static int AiEnemy(uint64_t res)
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
+    if (s->resource == 0xEF570293245A17C2ull)
+    {
+        /* 0.1.11: why a War Strider is not one of her foes at its spawn (once) */
+        static int told;
+        if (!told++)
+        {
+            uint32_t st;
+            Log("a War Strider spawned (entity %u): foe %d, enemy turret %d, AI enemy %d; records: Behavior %d, Turret %d, AiEnemy %d, Health %d, Avatar %d, Seat %d",
+                s->entity, FoeKind(s->resource), EnemyTurret(s->resource), AiEnemy(s->resource),
+                hf->component_record("BehaviorComponentData", s->resource, &st) != 0, hf->component_record("TurretComponentData", s->resource, &st) != 0,
+                hf->component_record("AiEnemyComponentData", s->resource, &st) != 0, hf->component_record("HealthComponentData", s->resource, &st) != 0,
+                hf->component_record("AvatarComponentData", s->resource, &st) != 0, hf->component_record("SeatCollectionComponentData", s->resource, &st) != 0);
+        }
+    }
     if (s->resource != AVATAR) { if (FoeKind(s->resource) || EnemyTurret(s->resource) || AiEnemy(s->resource)) AddFoe(s->entity, s->resource); SeeAny(s->entity, s->resource); return; }
     if (!s->authority) return;
     g_spawnEntity[g_spawnNext % 8] = s->entity;
