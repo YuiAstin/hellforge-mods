@@ -29,7 +29,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.1"
+#define VERSION "0.1.2"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -175,7 +175,8 @@ static void Diff(const Snap* a, const Snap* b, int moment)
         for (uint32_t o = 0; o + 4 <= rb->size; o += 4)
         {
             int32_t va = (int32_t)Word(pa + o), vb = (int32_t)Word(pb + o);
-            if (va == vb || va < 0 || vb < 0 || va > 200 || vb > 200 || abs(vb - va) > 20) continue;
+            /* 0.1.2: -1 too (unlimited uses read -1; a count may start or end there) */
+            if (va == vb || va < -1 || vb < -1 || va > 200 || vb > 200 || (va >= 0 && vb >= 0 && abs(vb - va) > 20)) continue;
             total++;
             char k[40];
             KeyName(rb->key, k, sizeof k);
