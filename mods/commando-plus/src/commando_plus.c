@@ -45,7 +45,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.4.0"
+#define VERSION "0.4.1"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -480,9 +480,12 @@ static void CachesFrame(void)
             {
                 /* 0.3.1: a fabricator just spawned reads 0 until its health is set (10 bases "destroyed" 2 s into a
                  * mission, 1100 m from you): 0 health counts only after it was seen above 0 */
+                /* 0.4.1: 0 health counts only once it read above 0, and only near you (within VANISH_NEAR): far off, a
+                 * fabricator's health read 0 as it streamed out (a base 328 m away paid out, 2026-11-08), and Phalanx
+                 * fabricators read 0 before they are up; those wait for their kill */
+                float me[3];
                 if (hp > 0) sp->seenUp = 1;
-                else if (sp->seenUp) SpawnerDown(sp, 4);
-                else if (g_now - g_missionAt >= SETTLE_S) SpawnerDown(sp, 6);   /* still 0, never up: a wreck from the start */
+                else if (sp->seenUp && Me(me) && Dist(me, sp->pos) <= VANISH_NEAR) SpawnerDown(sp, 4);
             }
         }
     }
@@ -768,7 +771,8 @@ static void Recheck(void)
 
 /* 0.4.0 (test): when each stratagem is usable (+9 granted) through the mission: the Super Destroyer's window shows as
  * the loadout's entries turning granted and back. racks_anytime: the reward ammo rack kept granted outside it */
-static uint8_t g_wasGranted[16];
+static uint8_t g_wasGranted[16], g_entry[16][0x30], g_entryKnown[16];
+static uint8_t g_hdrTold[0x200 / 4], g_entTold[16][0x30 / 4];   /* changes logged per dword (at most 6: a clock stays quiet) */
 static uint32_t g_wasType[16];
 static unsigned g_grantLogged, g_rackKept;
 static void WindowFrame(void)
@@ -779,6 +783,25 @@ static void WindowFrame(void)
     uintptr_t st;
     uint32_t count = 0;
     if (!List(&st, &count) || !count || count > 16) return;
+    /* the list's header too (+0 .. +0x188) and what follows the list (+0x788 .. +0x800): a flag for the whole list */
+    {
+        static uint8_t prevH[0x188], prevT[0x78];
+        static int known;
+        uint8_t h[0x188], t[0x78];
+        if (ReadAt(st, h, sizeof h) && ReadAt(st + 0x788, t, sizeof t))
+        {
+            if (known)
+            {
+                for (unsigned o = 0; o < sizeof h; o += 4)
+                    if (Word(h + o) != Word(prevH + o) && g_grantLogged < 160 && g_hdrTold[o / 4]++ < 6) { g_grantLogged++; Log("window: list +0x%X: %08x -> %08x, %.1f s into the mission", o, Word(prevH + o), Word(h + o), g_now - g_missionAt); }
+                for (unsigned o = 0; o < sizeof t; o += 4)
+                    if (Word(t + o) != Word(prevT + o) && g_grantLogged < 160 && g_hdrTold[(0x188 + o) / 4 < 0x80 ? (0x188 + o) / 4 : 0x7F]++ < 6) { g_grantLogged++; Log("window: list +0x%X: %08x -> %08x, %.1f s into the mission", 0x788 + o, Word(prevT + o), Word(t + o), g_now - g_missionAt); }
+            }
+            memcpy(prevH, h, sizeof h); memcpy(prevT, t, sizeof t);
+            known = g_entryKnown[0] || known;
+            if (!known) known = 1;
+        }
+    }
     for (uint32_t i = 0; i < count; i++)
     {
         uint8_t e[0x30];
@@ -789,6 +812,18 @@ static void WindowFrame(void)
             g_grantLogged++;
             Log("window: slot %u (type %u) %s, %.0f s into the mission", i, type, e[9] ? "usable (granted)" : "not usable (not granted)", g_now - g_missionAt);
         }
+        /* 0.4.1: granted is not the window (loadout entries stayed "not granted" through it): every other change of an
+         * entry's bytes, logged, to find what the Super Destroyer's arrival and leaving change */
+        if (type == g_wasType[i] && g_entryKnown[i])
+            for (int o = 4; o < 0x30; o += 4)
+            {
+                uint32_t a = Word(g_entry[i] + o), b = Word(e + o);
+                if (a == b || g_grantLogged >= 160 || g_entTold[i][o / 4]++ >= 6) continue;
+                g_grantLogged++;
+                Log("window: slot %u (type %u) +0x%X: %08x -> %08x, %.1f s into the mission", i, type, o, a, b, g_now - g_missionAt);
+            }
+        memcpy(g_entry[i], e, sizeof e);
+        g_entryKnown[i] = 1;
         g_wasType[i] = type; g_wasGranted[i] = e[9];
         if (s_racksAnytime && g_applied && type == HF_STRATAGEM_AMMO_RACK_PRESIDENT_REWARD && !e[9])
         {
@@ -823,7 +858,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         g_checkTries = g_applied = g_commando = g_timerTries = 0;
         g_timerAt = g_recheckAt = 0;
         g_checkAt = m ? g_now + 8 : 0;
-        if (m) { g_missionAt = g_now; memset(g_wasType, 0, sizeof g_wasType); g_grantLogged = g_rackKept = 0; }
+        if (m) { g_missionAt = g_now; memset(g_wasType, 0, sizeof g_wasType); memset(g_entryKnown, 0, sizeof g_entryKnown); memset(g_hdrTold, 0, sizeof g_hdrTold); memset(g_entTold, 0, sizeof g_entTold); g_grantLogged = g_rackKept = 0; }
         Log(m ? "mission start: the stratagem record is read in 8 s" : "mission end");
     }
     if (!m) return;
