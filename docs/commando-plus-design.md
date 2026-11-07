@@ -66,3 +66,10 @@ HD2Runtime lists it as blocked). So a cleared base pays out as a free call inste
   a base pays only once one member was destroyed; nothing pays in the first 20 s; every spawner, each one down and why,
   and the bases left at mission end are logged, to see which outposts still do not count.
 - POI stims / grenades: not working (above).
+
+## Played 2026-11-07 (0.3.1)
+
+- A base cleared mid-mission paid 1 call, as it should.
+- 10 "bases" paid at once 20 s in: 10 bot fabricators read 0 health 2 s into the mission, as they spawned, 1100 m from
+  Yui (health not set yet). 0.3.2: 0 health counts only after the spawner was seen above 0; one that never reads above
+  0 by 20 s in leaves its base.

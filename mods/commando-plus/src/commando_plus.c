@@ -45,7 +45,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.1"
+#define VERSION "0.3.2"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -298,7 +298,7 @@ static void Push(uint32_t entity, uint32_t kind)
 }
 #define SPAWNERS 256
 #define BASES 96
-typedef struct { uint32_t entity; int kind, base, dead, placed; float pos[3]; } Spawner;
+typedef struct { uint32_t entity; int kind, base, dead, placed, seenUp; float pos[3]; } Spawner;   /* seenUp: its health read above 0 once */
 /* destroyed: members brought down by a kill, a bug hole closed or 0 health (0.3.1: a spawner that is only gone, streamed
  * out as the mission loads or ends, leaves its base instead; a base pays only when one of its members was destroyed) */
 typedef struct { int members, alive, large, paid, destroyed; float pos[3]; } Base;
@@ -393,7 +393,7 @@ static void SpawnerDown(Spawner* sp, int how)
     float me[3];
     int found = Me(me), settled = g_now - g_missionAt >= SETTLE_S;
     float d = found && sp->placed ? Dist(me, sp->pos) : -1;
-    if (how == 3 && (!settled || g_burst || d < 0 || d > VANISH_NEAR))
+    if (how == 6 || (how == 3 && (!settled || g_burst || d < 0 || d > VANISH_NEAR)))
     {
         sp->dead = 3;
         if (sp->placed && sp->base >= 0)
@@ -402,7 +402,7 @@ static void SpawnerDown(Spawner* sp, int how)
             b->members--;
             if (g_goneLogged++ < 12)
                 Log("%s (entity %u) of base %d is gone (%s): it leaves the base (%d left in it)", kSpawners[sp->kind].name, sp->entity, sp->base,
-                    !settled ? "the mission is loading" : g_burst ? "with several others at once" : d < 0 ? "you were not found" : "far from you", b->members);
+                    how == 6 ? "its health never read above 0" : !settled ? "the mission is loading" : g_burst ? "with several others at once" : d < 0 ? "you were not found" : "far from you", b->members);
             sp->base = -1;
         }
         return;
@@ -472,7 +472,14 @@ static void CachesFrame(void)
         {
             int32_t hp = 1;
             if (!UnitOf(sp->entity)) SpawnerDown(sp, 3);
-            else if (Health(sp->entity, &hp) && hp <= 0) SpawnerDown(sp, 4);
+            else if (Health(sp->entity, &hp))
+            {
+                /* 0.3.1: a fabricator just spawned reads 0 until its health is set (10 bases "destroyed" 2 s into a
+                 * mission, 1100 m from you): 0 health counts only after it was seen above 0 */
+                if (hp > 0) sp->seenUp = 1;
+                else if (sp->seenUp) SpawnerDown(sp, 4);
+                else if (g_now - g_missionAt >= SETTLE_S) SpawnerDown(sp, 6);   /* still 0, never up: a wreck from the start */
+            }
         }
     }
     if (g_now - g_missionAt < SETTLE_S) return;
