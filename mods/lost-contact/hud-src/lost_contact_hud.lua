@@ -58,6 +58,8 @@ local ROWS = {
     {'keep_away', 'slider', 'Patrols: Keep Away', {20, 600, 10}, false, 'Metres from you an outpost a patrol is sent to must be, at least.'},
     {'patrol_range', 'slider', 'Patrols: Range', {50, 1000, 25}, false, 'Metres around you within which patrols are looked at.'},
     {'resend', 'slider', 'Patrols: Resend', {0.5, 30, 0.5}, false, 'Seconds between sending a rerouted patrol on again (the game aims them again).'},
+    {'pass_by', 'slider', 'Patrols: Pass By', {0, 150, 5}, true,
+        'Metres from you a patrol setting out walks past, instead of onto you (under 20: off).'},
 }
 local MOD, MOD_ID = 'Lost Contact', 'yui.lost-contact'
 

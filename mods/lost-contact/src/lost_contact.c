@@ -7,6 +7,14 @@
  * you, to search there. Anything that sees you again acquires you as usual. Without it, bots, bugs and Illuminate off
  * sight keep their target and keep coming (bots for 40 s and more in the tests; with it, 0 within 5 to 10 s).
  *
+ * Patrols, as they set out (0.4.0): the game's roaming patrol is led by an entity of its own with no body (type
+ * f5252be8f520f3d8, Patrol Route Probe 2026-11-08: one every 30 to 40 s, 100 to 120 m from you, its destination set at
+ * spawn within 45 m of you; the patrol follows it). When the straight line from it to its destination passes within
+ * pass_by m of you, its destination is moved beside you: pass_by m to the side its aim already leaned to, and 40 m past
+ * you, so the patrol walks by you instead of onto you (no turning back halfway, as the rerouting below does). The game
+ * aims it again later through set_destination (game+0x5B36C0, hooked): each such aim through you is moved the same way.
+ * Terrain and the patrol's spread can still bring single enemies closer; enemies that sense you hunt you as usual.
+ *
  * Patrols: enemies standing at ease (no target, their destination on themselves) mark the map's outposts. A walking
  * enemy with no target whose destination is within seek_radius of you is a patrol sent at you: it is given an outpost
  * at least keep_away from you instead, then the next, again every resend seconds (the game aims them again). Once it
@@ -39,7 +47,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.0"
+#define VERSION "0.4.0"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -133,6 +141,7 @@ static int s_breakMode = LC_BREAK_CONTACT ? 1 : 0, s_patrolMode = 1;   /* 0 off,
 static int s_kitRules = 1;   /* 1: a character kit may turn one off while it acts (Lemuen: patrols only) */
 static float s_loseAfter = 3, s_breakRange = 80;
 static float s_seekRadius = 50, s_keepAway = 100, s_patrolRange = 300, s_resend = 3;
+static float s_passBy = 45;   /* 0.4.0: metres a patrol's leader's straight line keeps from you (0: off) */
 typedef struct { int vk, ctrl, shift, alt; char label[24]; } Key;
 static Key s_keyBreak = {VK_F9, 1, 0, 0, "Ctrl+F9"}, s_keyPatrol = {VK_F10, 1, 0, 0, "Ctrl+F10"};
 static int ParseKey(const char* v, Key* k)
@@ -160,7 +169,7 @@ static int ParseKey(const char* v, Key* k)
     return 1;
 }
 /* 0.3.0: the numbers the MODS tab (Mod Options Menu, from Lua) changed: bit per number, kept in the saved choices */
-enum { SV_LOSE = 1, SV_RANGE = 2, SV_SEEK = 4, SV_KEEP = 8, SV_PRANGE = 16, SV_RESEND = 32 };
+enum { SV_LOSE = 1, SV_RANGE = 2, SV_SEEK = 4, SV_KEEP = 8, SV_PRANGE = 16, SV_RESEND = 32, SV_PASS = 64 };
 static unsigned g_savedNums;
 static int ReadSettings(const char* path, int saved)
 {
@@ -182,7 +191,8 @@ static int ReadSettings(const char* path, int saved)
         double x = atof(v);
         if (saved)
             g_savedNums |= !strcmp(k, "lose_after") ? SV_LOSE : !strcmp(k, "break_range") ? SV_RANGE : !strcmp(k, "seek_radius") ? SV_SEEK :
-                           !strcmp(k, "keep_away") ? SV_KEEP : !strcmp(k, "patrol_range") ? SV_PRANGE : !strcmp(k, "resend") ? SV_RESEND : 0u;
+                           !strcmp(k, "keep_away") ? SV_KEEP : !strcmp(k, "patrol_range") ? SV_PRANGE : !strcmp(k, "resend") ? SV_RESEND :
+                           !strcmp(k, "pass_by") ? SV_PASS : 0u;
         if (LC_BREAK_CONTACT && !strcmp(k, "break_mode")) s_breakMode = (int)x >= 0 && (int)x <= 2 ? (int)x : s_breakMode;
         else if (!strcmp(k, "lose_after")) s_loseAfter = x >= 0.5 && x <= 60 ? (float)x : s_loseAfter;
         else if (!strcmp(k, "break_range")) s_breakRange = x >= 10 && x <= 500 ? (float)x : s_breakRange;
@@ -192,6 +202,7 @@ static int ReadSettings(const char* path, int saved)
         else if (!strcmp(k, "patrol_range")) s_patrolRange = x >= 50 && x <= 1000 ? (float)x : s_patrolRange;
         else if (!strcmp(k, "kit_rules")) s_kitRules = (int)x ? 1 : 0;
         else if (!strcmp(k, "resend")) s_resend = x >= 0.5 && x <= 30 ? (float)x : s_resend;
+        else if (!strcmp(k, "pass_by")) s_passBy = x >= 0 && x <= 150 ? (x < 20 ? 0 : (float)x) : s_passBy;   /* under 20: off */
         else if (!strcmp(k, "key_break")) { if (!ParseKey(v, &s_keyBreak)) Log("settings: key_break \"%s\" is not a key", v); }
         else if (!strcmp(k, "key_patrol")) { if (!ParseKey(v, &s_keyPatrol)) Log("settings: key_patrol \"%s\" is not a key", v); }
     }
@@ -231,6 +242,7 @@ static void SaveChoices(void)
     if (g_savedNums & SV_KEEP) fprintf(f, "keep_away = %g\n", (double)s_keepAway);
     if (g_savedNums & SV_PRANGE) fprintf(f, "patrol_range = %g\n", (double)s_patrolRange);
     if (g_savedNums & SV_RESEND) fprintf(f, "resend = %g\n", (double)s_resend);
+    if (g_savedNums & SV_PASS) fprintf(f, "pass_by = %g\n", (double)s_passBy);
     fclose(f);
 }
 /* ---- what the active character kit allows ---------------------------------------------------------------------- */
@@ -640,6 +652,7 @@ static void PatrolPass(void)
     g_pt.seeking = nSeek; g_pt.routed = nRouted;
     g_ptSum.seeking += nSeek; g_ptSum.routed += nRouted; g_ptSum.passes++;
 }
+static void HookDest(void);
 static int Bind(void)
 {
     if (!hf->code_matches(game + 0xFD9D40, "48 83 ec 08 3b 0d 02 9f 4a 02 0f 84 9b 00 00 00") ||
@@ -654,14 +667,157 @@ static int Bind(void)
     if (bm) RD(bm + 0x20, &bc, 4);
     Log("bound: behaviours [game+0x3326740] = %llx (%u records), perception [game+0x3326548] = %llx", (unsigned long long)bm, bc, (unsigned long long)pm);
     if (Boundary(game + 0x5B36C0)) g_setDest = (SetDestFn)(game + 0x5B36C0);
+    HookDest();
     Log("patrols: navigation records [game+0x3326418] = %llx, set_destination %s", (unsigned long long)P(game + 0x3326418), g_setDest ? "on" : "off (not a function start)");
     return bm && pm;
+}
+/* ---- 0.4.0: patrols as they set out (their leader) ------------------------------------------------------------ */
+#define PATROL_LEADER 0xF5252BE8F520F3D8ull   /* the roaming patrol's bodiless leader (Patrol Route Probe, 2026-11-08) */
+#define LEADERS 64
+typedef struct { uint32_t entity; double at; int checked, moved; float to[3]; double checkAt; } Leader;
+static Leader g_lead[LEADERS];
+static atomic_uint g_leadNext;
+static float g_mePos[3];
+static atomic_int g_meOk;
+static struct { int seen, through, moved, again, kept; } g_side;   /* this mission */
+static Leader* LeaderOf(uint32_t e)
+{
+    for (int i = 0; i < LEADERS; i++) if (g_lead[i].entity == e) return &g_lead[i];
+    return NULL;
+}
+static float SegDist2D(const float a[3], const float b[3], const float p[3])
+{
+    float vx = b[0] - a[0], vy = b[1] - a[1], wx = p[0] - a[0], wy = p[1] - a[1], vv = vx * vx + vy * vy;
+    float t = vv > 1e-6f ? (wx * vx + wy * vy) / vv : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    float dx = a[0] + vx * t - p[0], dy = a[1] + vy * t - p[1];
+    return sqrtf(dx * dx + dy * dy);
+}
+/* from (the leader) aimed at dest: when that line passes within pass_by of you, a destination beside you (to the side
+ * the aim leans to, 40 m past you) whose line keeps pass_by from you; 0 when the aim does not come through you */
+static int SidePass(uint32_t id, const float from[3], const float dest[3], const float me[3], float out[3])
+{
+    if (s_passBy <= 0 || SegDist2D(from, dest, me) >= s_passBy) return 0;
+    float ux = me[0] - from[0], uy = me[1] - from[1], h = sqrtf(ux * ux + uy * uy);
+    if (h < 1) { ux = 1; uy = 0; h = 1; }
+    ux /= h; uy /= h;
+    float nx = -uy, ny = ux, side = (dest[0] - me[0]) * nx + (dest[1] - me[1]) * ny;
+    float sgn = side > 0.5f ? 1.f : side < -0.5f ? -1.f : (id & 1) ? 1.f : -1.f;
+    for (int t = 0; t < 8; t++)
+    {
+        float s = (t & 1) ? -sgn : sgn, r = s_passBy * (1.f + 0.3f * (float)(t / 2));
+        float c[3] = {me[0] + nx * s * r + ux * 40, me[1] + ny * s * r + uy * 40, dest[2]};
+        if (SegDist2D(from, c, me) >= s_passBy) { memcpy(out, c, 12); return 1; }
+    }
+    return 0;
+}
+/* set_destination, hooked: the game aiming a patrol's leader through you again */
+typedef void (*SetDestFn2)(void*, uint32_t, const float*);
+static SetDestFn2 g_destOrig;
+static void DestDetour(void* a, uint32_t entity, const float* pos)
+{
+    Leader* l = pos && s_patrolMode && s_passBy > 0 && (g_rules & 2) && atomic_load(&g_meOk) ? LeaderOf(entity) : NULL;
+    if (l)
+    {
+        uint32_t k;
+        uintptr_t rec = NavIndex(entity, &k) ? NavRecord(k) : 0;
+        float from[3], me[3], to[3];
+        memcpy(me, g_mePos, 12);
+        if (rec && RD(rec + 0x54, from, 12) && SidePass(entity, from, pos, me, to))
+        {
+            g_side.again++;
+            static unsigned told;
+            if (told++ < 20)
+                Log("patrol leader %u aimed through you again (%.0f m from you): %s %.0f m beside you", entity, Dist2D(pos, me),
+                    s_patrolMode == 1 ? "moved" : "would move (observe)", SegDist2D(from, to, me));
+            if (s_patrolMode == 1)
+            {
+                _Alignas(16) float at[4] = {to[0], to[1], to[2], 0};
+                memcpy(l->to, to, 12); l->moved = 1;
+                g_destOrig(a, entity, at);
+                return;
+            }
+        }
+    }
+    g_destOrig(a, entity, pos);
+}
+static void HookDest(void)
+{
+    static int done;
+    if (done || !g_setDest) return;
+    done = 1;
+    if (!hf->code_matches(game + 0x5B36C0, "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 18 57 48 83 ec 50"))
+    { Log("patrols as they set out: off (set_destination is not the reviewed code)"); return; }
+    if (hf->hook_ex(self, game + 0x5B36C0, (void*)DestDetour, (void**)&g_destOrig, 0) || !g_destOrig)
+    { g_destOrig = NULL; Log("patrols as they set out: set_destination could not be hooked (leaders are still moved as they set out)"); g_destOrig = (SetDestFn2)g_setDest; return; }
+    g_setDest = (SetDestFn)g_destOrig;   /* its own sends go past the hook */
+    Log("patrols as they set out: set_destination hooked (pass_by %g m)", (double)s_passBy);
+}
+/* each frame: leaders that spawned, once their destination reads; 15 s later, where they went */
+static void LeaderFrame(void)
+{
+    uint32_t meId;
+    float me[3];
+    if (!Me(&meId, me)) { atomic_store(&g_meOk, 0); return; }
+    memcpy(g_mePos, me, 12);
+    atomic_store(&g_meOk, 1);
+    for (int i = 0; i < LEADERS; i++)
+    {
+        Leader* l = &g_lead[i];
+        if (!l->entity) continue;
+        uint32_t k;
+        uintptr_t rec = NavIndex(l->entity, &k) ? NavRecord(k) : 0;
+        float from[3], dest[3], to[3];
+        if (!rec || !RD(rec + 0x54, from, 12) || !RD(rec + 0x60, dest, 12) || !isfinite(dest[0]))
+        {
+            if (g_now - l->at > 5) l->entity = 0;   /* gone, or never had a navigation record */
+            continue;
+        }
+        if (!l->checked)
+        {
+            if (!dest[0] && !dest[1] && !dest[2] && g_now - l->at < 2) continue;   /* not aimed yet */
+            l->checked = 1;
+            g_side.seen++;
+            if (!s_patrolMode || !(g_rules & 2) || s_passBy <= 0) continue;
+            if (!SidePass(l->entity, from, dest, me, to)) { g_side.kept++; continue; }
+            g_side.through++;
+            static unsigned told;
+            if (told++ < 30)
+                Log("patrol leader %u set out %.0f m from you, aimed %.0f m from you (its line %.0f m from you): %s %.0f m beside you", l->entity,
+                    Dist2D(from, me), Dist2D(dest, me), SegDist2D(from, dest, me), s_patrolMode == 1 ? "moved" : "would move (observe)", SegDist2D(from, to, me));
+            if (s_patrolMode == 1 && g_destOrig)
+            {
+                _Alignas(16) float at[4] = {to[0], to[1], to[2], 0};
+                g_destOrig(NULL, l->entity, at);
+                memcpy(l->to, to, 12); l->moved = 1;
+                g_side.moved++;
+                l->checkAt = g_now + 15;
+            }
+            continue;
+        }
+        if (l->moved && l->checkAt > 0 && g_now >= l->checkAt)
+        {
+            static unsigned told;
+            l->checkAt = 0;
+            if (told++ < 12)
+                Log("patrol leader %u 15 s later: %.0f m from you, %.0f m from where it was sent (destination now %.0f m from that)", l->entity,
+                    Dist2D(from, me), Dist2D(from, l->to), Dist2D(dest, l->to));
+        }
+        if (g_now - l->at > 300) l->entity = 0;
+    }
 }
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* e = (const HfSpawnEvent*)info;
     unsigned i = g_nseen % SEEN;
     g_seenEnt[i] = e->entity; g_seenRes[i] = e->resource; g_nseen++;
+    if (e->resource == PATROL_LEADER)
+    {
+        unsigned k = atomic_fetch_add(&g_leadNext, 1) % LEADERS;
+        g_lead[k].entity = 0;
+        g_lead[k].at = g_now; g_lead[k].checked = 0; g_lead[k].moved = 0; g_lead[k].checkAt = 0;
+        g_lead[k].entity = e->entity;
+    }
 }
 static void OnWeapon(HfMod* mod, const HfEventInfo* info, void* user)
 {
@@ -694,6 +850,7 @@ static int g_inMission;
 static void MissionStart(void)
 {
     g_nfoes = 0;
+    memset(&g_side, 0, sizeof g_side);
     g_nposts = g_realPosts = 0;
     memset(&g_bc, 0, sizeof g_bc); memset(&g_bcSum, 0, sizeof g_bcSum);
     memset(&g_pt, 0, sizeof g_pt); memset(&g_ptSum, 0, sizeof g_ptSum);
@@ -972,6 +1129,9 @@ static void Tick(HfMod* mod, float dt, void* user)
         if (!inMission && (g_bc.lost || g_pt.sent))
             Log("mission end: break contact lost you %d times (%d after you again unsensed); patrols: %d sends, %d re-aimed at you, %d outposts; %d patrols despawned (%d routed), %d killed",
                 g_bc.lost, g_bc.blind, g_pt.sent, g_pt.reaimed, g_realPosts, g_gone.patrolDespawned, g_gone.routedDespawned, g_gone.patrolKilled);
+        if (!inMission && g_side.seen)
+            Log("mission end: %d patrols set out, %d aimed through you (%s), %d aimed through you again later, %d already passing by", g_side.seen,
+                g_side.through, s_patrolMode == 1 ? "moved beside you" : "observed", g_side.again, g_side.kept);
         if (inMission) MissionStart();
     }
     if (!inMission) return;
@@ -1010,6 +1170,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     static double rulesNext;
     if (g_now >= rulesNext) { rulesNext = g_now + 2; KitRules(); }
     if (LC_BREAK_CONTACT && s_breakMode && (g_rules & 1) && g_now >= bcNext) { bcNext = g_now + 0.25; BreakPass(); }
+    if (s_patrolMode && (g_rules & 2)) LeaderFrame();
     if (s_patrolMode && (g_rules & 2) && g_now >= ptNext) { ptNext = g_now + 1.0; PatrolPass(); }
     if (g_now - told >= 5)
     {
@@ -1068,6 +1229,7 @@ static const NumOpt kNums[] = {
     {"lose_after", &s_loseAfter, 0.5f, 60, SV_LOSE}, {"break_range", &s_breakRange, 10, 500, SV_RANGE},
     {"seek_radius", &s_seekRadius, 10, 300, SV_SEEK}, {"keep_away", &s_keepAway, 20, 600, SV_KEEP},
     {"patrol_range", &s_patrolRange, 50, 1000, SV_PRANGE}, {"resend", &s_resend, 0.5f, 30, SV_RESEND},
+    {"pass_by", &s_passBy, 0, 150, SV_PASS},
 };
 HF_MOD_EXPORT int lost_contact_option_get(unsigned version, const char* key, double* out)
 {
@@ -1112,6 +1274,7 @@ HF_MOD_EXPORT int lost_contact_option(unsigned version, const char* key, double 
         unsigned i;
         for (i = 0; i < sizeof kNums / sizeof kNums[0] && strcmp(key, kNums[i].key); i++) {}
         if (i == sizeof kNums / sizeof kNums[0] || value < kNums[i].lo || value > kNums[i].hi) return 0;
+        if (kNums[i].at == &s_passBy && value < 20) value = 0;   /* pass_by under 20: off */
         if (*kNums[i].at != (float)value) { *kNums[i].at = (float)value; Log("MODS tab: %s %g", key, value); }
         g_savedNums |= kNums[i].bit;
     }
