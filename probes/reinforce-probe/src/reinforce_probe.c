@@ -10,13 +10,13 @@
  *             +0xB398, and the first 0x400 bytes of every heap object a global of game.dll's two manager blocks points
  *             to (game+0x3326000..0x3327000 and +0x347C000..0x347E000)
  *   when      15 s after the mission starts (the baseline), 1 s after a player goes down, 1 s after one lands (dropped
- *             in or reinforced), 1 s after any stratagem's beacon, and on Ctrl+Alt+F8 (press it just before and just
+ *             in or reinforced), 1 s after any stratagem's beacon, and on Ctrl+Alt+F2 (press it just before and just
  *             after connecting the pods)
  *   logged    each dword that went from one whole number 0..200 to another, by at most 20; at mission end, the
  *             addresses whose every change came at those moments, with their history (the count should read -1 per
  *             reinforcement and +3 at the pods)
  *
- * Ctrl+Alt+F8 also lists what stands within 30 m of you (entity resources, from the spawns seen this mission): stand
+ * Ctrl+Alt+F2 also lists what stands within 30 m of you (entity resources, from the spawns seen this mission): stand
  * at the pods and press it to name them. Credit: the records' and the entity / unit lookups' layouts are HD2Runtime's
  * research (SkyeShade), as Commando Plus and Lost Contact use them; nothing of its code is copied. */
 #include <math.h>
@@ -29,7 +29,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -306,7 +306,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         g_inMission = m;
         if (m)
         {
-            Log("mission start: the baseline snapshot in 15 s; Ctrl+Alt+F8 for one now (and what is near you)");
+            Log("mission start: the baseline snapshot in 15 s; Ctrl+Alt+F2 for one now (and what is near you)");
             g_cur = -1; g_ntrack = 0; g_baselineAt = g_now + 15;
             g_pendTail = atomic_load(&g_pendHead);
         }
@@ -329,7 +329,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         if (g_cur >= 0 || g_baselineAt == 0) Snapshot(g_pendLabel[i], 1);
     }
     static int was;
-    int key = Down(VK_F8) && Down(VK_CONTROL) && Down(VK_MENU);
+    int key = Down(VK_F2) && Down(VK_CONTROL) && Down(VK_MENU);
     if (key && !was) { Snapshot("key", 1); Nearby(); }
     was = key;
     /* every 20 s a quiet snapshot: what changes there is not the count */
