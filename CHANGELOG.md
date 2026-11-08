@@ -6,7 +6,7 @@
 - Fixed: players with the Exo Experts warbond got the free Sinbreaker (on the EXO-49 Emancipator) instead of the one on the EXO-55 Breakthrough. The 0.4.1 download's voymastina.ini had a test setting (sin_fallback = 2); it is back to 1. If you keep your 0.4.1 ini, set sin_fallback = 1 yourself.
 
 ### Lost Contact 0.4.1
-- Patrols setting out now walk past you instead of onto you: when a patrol's leader is aimed so that its route would pass within pass_by m of you (45 by default), it is aimed to pass you at pass_by m instead, as it sets out and whenever the game aims it again. Patrols already sent at you still walk between their own outposts.
+- Patrols setting out now walk past you instead of onto you: when a patrol's leader is aimed so that its route would pass within pass_by m of you (50 by default), it is aimed to pass you at pass_by m instead, as it sets out and whenever the game aims it again. Patrols already sent at you still walk between their own outposts.
 - New setting pass_by (0 off, or 20 to 150 m): lost-contact.ini, or Pass By on the MODS tab.
 
 ### Executor 0.3.0

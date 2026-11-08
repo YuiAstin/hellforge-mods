@@ -141,7 +141,7 @@ static int s_breakMode = LC_BREAK_CONTACT ? 1 : 0, s_patrolMode = 1;   /* 0 off,
 static int s_kitRules = 1;   /* 1: a character kit may turn one off while it acts (Lemuen: patrols only) */
 static float s_loseAfter = 3, s_breakRange = 80;
 static float s_seekRadius = 50, s_keepAway = 100, s_patrolRange = 300, s_resend = 3;
-static float s_passBy = 45;   /* 0.4.0: metres a patrol's leader's straight line keeps from you (0: off) */
+static float s_passBy = 50;   /* 0.4.1: 50 (0.4.0: 45); metres a patrol's leader's straight line keeps from you (0: off) */
 typedef struct { int vk, ctrl, shift, alt; char label[24]; } Key;
 static Key s_keyBreak = {VK_F9, 1, 0, 0, "Ctrl+F9"}, s_keyPatrol = {VK_F10, 1, 0, 0, "Ctrl+F10"};
 static int ParseKey(const char* v, Key* k)
