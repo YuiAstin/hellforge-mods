@@ -1,9 +1,13 @@
 # Changelog
 
-## 2026-11-08: Voymastina 0.4.2 · Executor 0.3.0 (first release)
+## 2026-11-08: Voymastina 0.4.2 · Executor 0.3.0 (first release) · Lost Contact 0.4.1
 
 ### Voymastina 0.4.2
 - Fixed: players with the Exo Experts warbond got the free Sinbreaker (on the EXO-49 Emancipator) instead of the one on the EXO-55 Breakthrough. The 0.4.1 download's voymastina.ini had a test setting (sin_fallback = 2); it is back to 1. If you keep your 0.4.1 ini, set sin_fallback = 1 yourself.
+
+### Lost Contact 0.4.1
+- Patrols setting out now walk past you instead of onto you: when a patrol's leader is aimed so that its route would pass within pass_by m of you (45 by default), it is aimed to pass you at pass_by m instead, as it sets out and whenever the game aims it again. Patrols already sent at you still walk between their own outposts.
+- New setting pass_by (0 off, or 20 to 150 m): lost-contact.ini, or Pass By on the MODS tab.
 
 ### Executor 0.3.0
 - First release: Executor the Ex Foedere's kit from Arknights, a Laterano Guard with a shotgun.
@@ -22,6 +26,10 @@
 - Freezing Touch and chill: her hits build Confectance and chill enemies until they freeze. A frozen enemy takes no damage except from explosions (not EMS): that hit shatters it for 8x damage, once, and thaws it. Snow fields (Frosted Echo's nitrogen field, and a 10 m field where each burst lands) freeze anyone standing in them, faster where fields overlap.
 - Snow Wolf's Heart shoots any enemy that hits an ally near her; Frosted Echo drops EMS mortar bursts and a nitrogen field where she aims; Nix Requiem fires heavy rounds at her target and freezes it at 5 Confectance.
 - HUD: her skill icons, cyan !damage! numbers on a shatter, and her passive's icon over every frozen enemy ready to shatter. Keys in alva.ini; numbers on the MODS tab (Mod Options Menu). Needs Bingus Shared Loader and HD2Runtime for the HUD.
+
+## 2026-11-06: Lost Contact 0.3.0
+- The MODS tab now works with the Vanilla Plus Megapack's Mod Options Menu: ESC > OPTIONS > MODS > Lost Contact has Break contact and Patrols rerouted (on, off or observe), Character kits can limit, what runs now and why, and the six numbers of lost-contact.ini (Lose After, Range, Seek Radius, Keep Away, Patrol Range, Resend). The rows need HD2Runtime and Bingus Shared Loader (Lost Contact's own data registers them), unless giblett's Vanilla Plus Megapack build is installed, which offers the tab without them.
+- The tab's choices are saved in %LOCALAPPDATA%\HellForgeMods\lost-contact.ini and kept across restarts; the rows follow Ctrl+F9 / Ctrl+F10 and a kit limiting them. Without the menu, lost-contact.ini and the keys work as before.
 
 ## 2026-11-05: Lost Contact 0.2.1
 - The MODS tab needs a menu that publishes HD2_MOD_OPTIONS_v1 (giblett's Vanilla Plus Megapack build). The public Vanilla Plus Megapack (0.2.0) does not offer it yet, so with it there is no Lost Contact tab: use lost-contact.ini, or Ctrl+F9 / Ctrl+F10 in a mission. The log now says so once, about 30 s after start, naming what it looked for and whether the public pack is installed and loaded.
