@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.stratagem-probe",
+  "name": "Stratagem Probe (research)",
+  "version": "0.1.0",
+  "description": "Research for Commando Plus: can a Resupply be delivered somewhere other than where its beacon landed (at the reinforcement pods)? Hooks the game's beacon activation; for the Resupply you throw, Ctrl+Alt+F3 picks: redirect (default: to the nearest pod site in Commando, else 20 m east), copies (one more per pod site), observe. Logs where everything lands. Turn off when done.",
+  "gameplay": true,
+  "code": {
+    "dll": "stratagem_probe.dll",
+    "sdk": 15
+  }
+}
