@@ -40,7 +40,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.1"
+#define VERSION "0.4.2"
 static int HerRide(uint32_t target);
 /* her two kits (p8): the Sinbreaker's GFL2 kit, the AK-15 kit on foot */
 static void AkHit(HfDamageEvent* d);

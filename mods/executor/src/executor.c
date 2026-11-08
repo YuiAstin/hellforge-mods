@@ -40,8 +40,7 @@
  * stim's effect still showed, and his own heals, arriving as heal events a few seconds late, were taken back too).
  *
  * Research credit: the kit base's (Helldiver Survival Rework by enochlophobianumerophobia, MIT; HD2Runtime by
- * SkyeShade); the camera pose as Apache - Rise Above (RSNLRiggs, after Khi) reads it. See THIRD_PARTY_NOTICES.md.
- * TEST BUILD: untested in game. */
+ * SkyeShade); the camera pose as Apache - Rise Above (RSNLRiggs, after Khi) reads it. See THIRD_PARTY_NOTICES.md. */
 #include <errno.h>
 #include <math.h>
 #include <stdarg.h>
@@ -56,7 +55,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.9"
+#define VERSION "0.3.0"
 #define BUILD "25480438"
 
 /* S3 sets off a blast on every enemy it hit, 0.1 s apart: room for 12 of his own blasts within the guard's 1.2 s */
@@ -116,8 +115,8 @@ static const KbSetting kSettings[] = {
  * are written as numbers: the kit base's defaults are the T-Dolls', and his are set in hellforge_mod_init. */
 static __attribute__((unused)) void DefaultIni(FILE* f)
 {
-    fprintf(f, "; Executor %s (TEST BUILD: untested in game). Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with\n"
-               "; Shift+, Ctrl+ or Alt+ in front for a combo (Shift+Q). The game still sees the keys too, so pick ones it leaves alone.\n"
+    fprintf(f, "; Executor %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front\n"
+               "; for a combo (Shift+Q). The game still sees the keys too, so pick ones it leaves alone.\n"
                "key_s1 = %s\nkey_s2 = %s\nkey_s3 = %s\n"
                "; His trait: every enemy one of his shots hits heals him heal_pct %% of his maximum health, up to heal_cap enemies\n"
                "; a shot (hits within shot_gap s of the shot's first are that shot's). heal_limbs 1: each heal also mends every\n"
@@ -1399,7 +1398,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
             g_standIn[i] = api->add_projectile(mod, &p);
         }
     }
-    api->log(mod, "Executor %s (TEST BUILD: untested in game): keys %s / %s / %s (Testament Exacted, Close Combat, Damnatus Ex Foedere); "
+    api->log(mod, "Executor %s: keys %s / %s / %s (Testament Exacted, Close Combat, Damnatus Ex Foedere); "
              "heal %.0f%% a hit, up to %d a shot; The Chosen One %.0f%%; area rounds %s (%g m, %g m in S3, up to %d); stim_undo %d", VERSION, s_keys[0].label,
              s_keys[1].label, s_keys[2].label, (double)s_healPct, s_healCap, (double)s_chosenPct, s_areaRounds ? "on" : "off", (double)s_areaSize,
              (double)s_areaSizeS3, s_areaMax, s_stimUndo);

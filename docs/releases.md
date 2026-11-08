@@ -16,9 +16,10 @@ The released versions are the ones on Yui's PC (the same as on hf-mod.com), as o
 | Faelynn | 0.4.0 | 0.4.0 (as is) | main | Nexus draft 18603 (2026-11-07) |
 | Koleda | (in test) | 0.2.3 | `koleda-kit` (b04ac39) | not ready: FRV Sinner untested |
 | Exusiai | (in test) | 0.2.11 | `exusiai-guns` (7d2bbee) | not ready: gun models, sounds |
-| Executor | (new) | 0.1.0 | `executor` (0d4c661) | not played yet |
+| Executor | 0.3.0 | – | main (merged 2026-11-08 from `executor-area-rounds`) | first release on Nexus and AyakaMods (2026-11-08) |
+| Voymastina | 0.4.2 | – | main | 2026-11-08: the 0.4.1 zip shipped the PC's test ini (sin_fallback = 2: everyone got the free Sinbreaker); 0.4.2 ships the repo's ini. Stage every release with the repo's ini, never the PC's |
 | Commando Plus | (new) | 0.3.0 | `commando-plus` | not played yet |
-| Voymastina, Lemuen, Veterancy System, Stat Tuner, Fire Mission, Primed Sure Footed, Extra Boosters | check on the PC | | | off in the current mod list: their released versions to read from the PC's mods folder |
+| Lemuen, Veterancy System, Stat Tuner, Fire Mission, Primed Sure Footed, Extra Boosters | check on the PC | | | off in the current mod list: their released versions to read from the PC's mods folder |
 | Smooth GC (Lua) | check | | not in this repo | save a copy before 3 December if hf-mod.com is its only home |
 
 Not for upload: the probes, Maxigun Test, Rocket Test, Voymastina AK-15.

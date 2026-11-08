@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-08: Voymastina 0.4.2 · Executor 0.3.0 (first release)
+
+### Voymastina 0.4.2
+- Fixed: players with the Exo Experts warbond got the free Sinbreaker (on the EXO-49 Emancipator) instead of the one on the EXO-55 Breakthrough. The 0.4.1 download's voymastina.ini had a test setting (sin_fallback = 2); it is back to 1. If you keep your 0.4.1 ini, set sin_fallback = 1 yourself.
+
+### Executor 0.3.0
+- First release: Executor the Ex Foedere's kit from Arknights, a Laterano Guard with a shotgun.
+- Every enemy his shot hits heals him half his health (up to 3 a shot) and mends his injured limbs.
+- The Chosen One fires free extra rounds. Each shot also fires a round of his gun at every enemy in a 15 m square in front of him (25 m during Damnatus Ex Foedere). Empathy by Shotgun adds a round to each skill for every other Laterano kit installed.
+- Skills last a number of shots: Testament Exacted (more damage and armour penetration), Close Combat (more damage, 80% less damage taken, a chance to dodge a hit and get a round back), Damnatus Ex Foedere (rising damage, triple heals, then a blast on every enemy it hit).
+- HUD: his skill icons and damage numbers. Keys in executor.ini (default Z, X, C); numbers on the MODS tab (Mod Options Menu). Needs Bingus Shared Loader and HD2Runtime for the HUD. Installs beside the other character kits (pick one on the MODS tab).
+
 ## 2026-11-07: Alva 0.2.4
 - Her HUD now shows the low-stamina warning: below 25% stamina, "T-DOLL CATASTROPHIC FAILURE IMMINENT" flashes red above her status bar, faster as it empties, with a stamina bar under it.
 - The exhaustion Hellbomb now kills her even behind Brumal Barrier: her own shield gives way when it goes off. Allies' shields still hold.
