@@ -1655,11 +1655,53 @@ static double g_mechLeftAt;
 typedef struct { uint32_t entity; uint64_t res; double at; } Spawned8;
 static Spawned8 g_spawned[256];
 static unsigned g_nspawned;
+/* 0.4.2 (test): the call-in watched: the Sinbreaker and the Pelican that drops it (its stratagem's second payload),
+ * and how long the Pelican stays; the stutter began at the call-in, before she boarded */
+static atomic_uint g_watchSin, g_watchPel;
 static void MechSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* e = (const HfSpawnEvent*)info;
     Spawned8* s = &g_spawned[g_nspawned++ % 256];
     s->entity = e->entity; s->res = e->resource; s->at = g_now;
+    if ((g_sinRes && e->resource == g_sinRes) || (g_sinFreeRes && e->resource == g_sinFreeRes)) atomic_store(&g_watchSin, e->entity);
+    if (e->resource == HF_ENTITY_PELICAN_TRANSPORT) atomic_store(&g_watchPel, e->entity);
+}
+static void CallInFrame(void)
+{
+    static uint32_t sin, pel;
+    static double sinAt, pelAt, next;
+    uint32_t ns = atomic_load(&g_watchSin), np = atomic_load(&g_watchPel);
+    if (ns && ns != sin)
+    {
+        sin = ns; sinAt = g_now;
+        /* what spawned with it (2 s either side) */
+        char line[600];
+        int at = snprintf(line, sizeof line, "call-in: the %s spawned (entity %u); with it:", ns && g_spawned[0].entity ? "Sinbreaker" : "Sinbreaker", ns);
+        for (unsigned i = 0; i < 256 && at < (int)sizeof line - 40; i++)
+            if (g_spawned[i].entity && g_spawned[i].entity != ns && fabs(g_spawned[i].at - g_now) < 2.0)
+                at += snprintf(line + at, sizeof line - at, " %u (%016llx)", g_spawned[i].entity, (unsigned long long)g_spawned[i].res);
+        Log("%s", line);
+    }
+    if (np && np != pel) { pel = np; pelAt = g_now; Log("call-in: a transport Pelican spawned (entity %u)", np); }
+    if (g_now < next) return;
+    next = g_now + 5;
+    uint8_t d[24];
+    float p[3];
+    if (pel)
+    {
+        int alive = Descriptor(pel, d) && Quad(d) == HF_ENTITY_PELICAN_TRANSPORT;
+        int pos = alive && UnitNode(Word(d + 12), 0, p);
+        Log("call-in: the Pelican %u, %.0f s after it came: %s%s", pel, g_now - pelAt, alive ? "still here" : "gone", pos ? "" : (alive ? " (position unread)" : ""));
+        if (pos) Log("  at %.0f %.0f %.0f", p[0], p[1], p[2]);
+        if (!alive) pel = 0;
+    }
+    if (sin)
+    {
+        int alive = Descriptor(sin, d);
+        static unsigned told;
+        if (told++ < 12) Log("call-in: the Sinbreaker %u, %.0f s after it came: %s, %s", sin, g_now - sinAt, alive ? "here" : "gone", g_mech == sin ? "piloted" : "empty");
+        if (!alive) sin = 0;
+    }
 }
 static void MechParts(uint32_t mech)
 {
@@ -3100,6 +3142,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         if (t) { g_lastTarget = t; memcpy(g_lastPos, g_hookPos, sizeof g_lastPos); g_lastAt = g_now; }
     }
     PF(PF_KIT, KitFrame());
+    CallInFrame();
     RetryFrame();
     PF(PF_SUPPORT, SupportFrame());
     PF(PF_DASH, DashFrame());
