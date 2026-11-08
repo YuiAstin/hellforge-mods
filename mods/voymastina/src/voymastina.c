@@ -3036,6 +3036,20 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (!g_inMission || !kb_kit_on) return;   /* (standing by: another kit is picked) */
     double pfTick = PfNow();
     PfReport(step);
+    {
+        /* 0.4.2: her foes' list holds every enemy seen this mission (1024 places, never emptied: the dead and the
+         * despawned stayed), and the suit's list of enemies near it walked all of it 4 times a second, about 14 reads
+         * each. Gone entries are cleared, 48 a frame, so the walks cost what the living enemies cost */
+        static unsigned at;
+        uint8_t fd[24];
+        for (int k = 0; k < 48; k++, at++)
+        {
+            unsigned i = at % FOES;
+            int32_t hp;
+            uint32_t life;
+            if (g_foe[i] && (!Descriptor(g_foe[i], fd) || Quad(fd) != g_foeRes[i] || (HealthOf(g_foe[i], &hp, &life) && hp <= 0))) g_foe[i] = 0;   /* and the dead */
+        }
+    }
     atomic_store(&g_ppArmorOn, g_ppReady || g_now < g_ppArmorUntil);
     PF(PF_STAMINA, StaminaGuard());
     PF(PF_BARE, BareFrame());
