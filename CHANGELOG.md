@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-11-08: Voymastina 0.4.2 · Executor 0.3.0 (first release) · Lost Contact 0.4.1
+## 2026-11-08: Voymastina 0.4.2 · Executor 0.3.0 (first release) · Lost Contact 0.4.1 · Lemuen 0.1.11
 
 ### Voymastina 0.4.2
 - Fixed: players with the Exo Experts warbond got the free Sinbreaker (on the EXO-49 Emancipator) instead of the one on the EXO-55 Breakthrough. The 0.4.1 download's voymastina.ini had a test setting (sin_fallback = 2); it is back to 1. If you keep your 0.4.1 ini, set sin_fallback = 1 yourself.
@@ -8,6 +8,11 @@
 ### Lost Contact 0.4.1
 - Patrols setting out now walk past you instead of onto you: when a patrol's leader is aimed so that its route would pass within pass_by m of you (50 by default), it is aimed to pass you at pass_by m instead, as it sets out and whenever the game aims it again. Patrols already sent at you still walk between their own outposts.
 - New setting pass_by (0 off, or 20 to 150 m): lost-contact.ini, or Pass By on the MODS tab.
+
+### Lemuen 0.1.11
+- Honesta Missio holds the first enemy under her crosshair: an enemy behind it no longer takes the lock, and another enemy takes it only after 0.3 s in her sights, so the build-up no longer resets while she aims.
+- Big enemies can be held and marked wherever she aims on them: a Factory Strider's hull, a War Strider's legs and armour.
+- War Striders are her foes from the moment they spawn, so Persecution marks them and Memento Mori hits them without casting Honesta Missio first.
 
 ### Executor 0.3.0
 - First release: Executor the Ex Foedere's kit from Arknights, a Laterano Guard with a shotgun.
