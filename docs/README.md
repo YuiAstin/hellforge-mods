@@ -16,3 +16,4 @@ The research notes were written while working, so their file paths point at a sc
 
 - [leva-design.md](leva-design.md): Leva's original kit plan.
 - [leva-future.md](leva-future.md): ideas parked for later (a Lenna + Leva duo arc, a Wise Support rework).
+- [executor-design.md](executor-design.md): Executor the Ex Foedere's kit (built as `mods/executor`, a test build).
