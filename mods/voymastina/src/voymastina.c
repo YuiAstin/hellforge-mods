@@ -40,7 +40,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.1"
+#define VERSION "0.4.2"
 static int HerRide(uint32_t target);
 /* her two kits (p8): the Sinbreaker's GFL2 kit, the AK-15 kit on foot */
 static void AkHit(HfDamageEvent* d);
@@ -66,6 +66,49 @@ static double HowlImmuneUntil(void);
 
 /* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
 KB_ROSTER_EXPORTS(voymastina)
+
+/* ---- 0.4.2 (test): where the time goes. A player's Sinbreaker (the free one, an Emancipator) brought steady stutter
+ * from its call-in, and piloting it was unplayable (2026-11-08). Each part of the game-thread update and each hit hook is
+ * timed; once a second, when the slowest call of a part took over 1 ms or a frame over 50 ms, one line says which */
+enum { PF_TICK, PF_KIT, PF_SEAT, PF_FOES, PF_WALK, PF_LUNGE, PF_MPB, PF_AK, PF_BARE, PF_FIST, PF_MOVE, PF_SUPPORT, PF_DASH,
+       PF_CHARGE, PF_RIPPLE, PF_EYE, PF_DROP, PF_EXHAUST, PF_ITEMS, PF_STAMINA, PF_SIN, PF_HIT, PF_N };
+static const char* const kPf[PF_N] = {"update", "kit", "seat", "foes near the suit", "suit walk", "suit lunge", "pile bunker", "AK-15",
+    "bare", "fist", "move", "support", "dash", "charge", "ripple", "eye", "drop", "exhaustion", "items", "stamina", "sinbreaker frames", "hit hook"};
+static double g_pfMax[PF_N], g_pfSum[PF_N], g_pfFreq;
+static unsigned g_pfCalls[PF_N];
+static float g_pfFrameMax;
+static unsigned g_pfSlowFrames, g_pfLines;
+static double PfNow(void)
+{
+    LARGE_INTEGER c;
+    if (g_pfFreq <= 0) { LARGE_INTEGER f; QueryPerformanceFrequency(&f); g_pfFreq = (double)f.QuadPart; }
+    QueryPerformanceCounter(&c);
+    return (double)c.QuadPart / g_pfFreq * 1000.0;
+}
+#define PF(k, call) do { double pf0_ = PfNow(); call; double pf1_ = PfNow() - pf0_; if (pf1_ > g_pfMax[k]) g_pfMax[k] = pf1_; g_pfSum[k] += pf1_; g_pfCalls[k]++; } while (0)
+static uint32_t g_mech;
+static void PfReport(float dt)
+{
+    static double next;
+    if (dt > g_pfFrameMax) g_pfFrameMax = dt;
+    if (dt > 0.05f) g_pfSlowFrames++;
+    if (g_now < next) return;
+    next = g_now + 1;
+    int slow = g_pfFrameMax > 0.05f;
+    for (int k = 0; k < PF_N && !slow; k++) slow = g_pfMax[k] > 1.0;
+    if (slow && g_pfLines < 200)
+    {
+        char line[700];
+        int at = snprintf(line, sizeof line, "perf (%s): slowest frame %.0f ms, %u over 50 ms;", g_mech ? "in the suit" : "on foot", (double)g_pfFrameMax * 1000, g_pfSlowFrames);
+        for (int k = 0; k < PF_N; k++)
+            if (g_pfMax[k] > 0.3 && at < (int)sizeof line - 60)
+                at += snprintf(line + at, sizeof line - at, " %s %.1f ms (%u calls, %.1f total)", kPf[k], g_pfMax[k], g_pfCalls[k], g_pfSum[k]);
+        g_pfLines++;
+        Log("%s", line);
+    }
+    memset(g_pfMax, 0, sizeof g_pfMax); memset(g_pfSum, 0, sizeof g_pfSum); memset(g_pfCalls, 0, sizeof g_pfCalls);
+    g_pfFrameMax = 0; g_pfSlowFrames = 0;
+}
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static float s_sfCd = 6, s_sfRange = 40, s_sfWindow = 10;
@@ -2161,14 +2204,13 @@ static void SinTune(void);
 static void MechWalkFrame(void);
 static void KitFrame(void)
 {
-    SinHide();
-    SinPackage();
-    GrantFrame();
+    PF(PF_SIN, (SinHide(), SinPackage(), GrantFrame()));
     static double next;
     if (g_now >= next)
     {
         next = g_now + 0.1;
-        Seat s = ReadSeat();
+        Seat s;
+        PF(PF_SEAT, s = ReadSeat());
         uint8_t d[24];
         uint32_t mech = 0;
         if (s.found && !s.changing && s.vehicle && Descriptor(s.vehicle, d) && HerMechKind(Quad(d))) mech = s.vehicle;
@@ -2221,6 +2263,7 @@ static void KitFrame(void)
         was = bash;
     }
     SinTune();
+    double pfFoes = PfNow();
     if (g_mech)
     {   /* the enemies' units near the suit, so its rays see through them (the leap's list, refreshed 4 times a second) */
         static double nextFoes;
@@ -2238,11 +2281,12 @@ static void KitFrame(void)
             }
         }
     }
+    { double t = PfNow() - pfFoes; if (t > g_pfMax[PF_FOES]) g_pfMax[PF_FOES] = t; g_pfSum[PF_FOES] += t; g_pfCalls[PF_FOES]++; }
     if (g_mpbFireAt > 0 && g_now >= g_mpbFireAt) { g_mpbFireAt = 0; if (g_mech) MpbFire(); }
-    MechLungeFrame();
-    MechWalkFrame();
-    MpbFrame();
-    AkFrame();
+    PF(PF_LUNGE, MechLungeFrame());
+    PF(PF_WALK, MechWalkFrame());
+    PF(PF_MPB, MpbFrame());
+    PF(PF_AK, AkFrame());
 }
 static void KitReset(void)
 {
@@ -2990,12 +3034,14 @@ static void Tick(HfMod* mod, float dt, void* user)
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); KitReset(); g_inMission = inMission; }
     if (!g_inMission || !kb_kit_on) return;   /* (standing by: another kit is picked) */
+    double pfTick = PfNow();
+    PfReport(step);
     atomic_store(&g_ppArmorOn, g_ppReady || g_now < g_ppArmorUntil);
-    StaminaGuard();
-    BareFrame();
-    FistFrame();
-    MyItems();
-    MoveTrack();
+    PF(PF_STAMINA, StaminaGuard());
+    PF(PF_BARE, BareFrame());
+    PF(PF_FIST, FistFrame());
+    PF(PF_ITEMS, MyItems());
+    PF(PF_MOVE, MoveTrack());
     static int prev[3];
     int focused = Focused();
     int mods = focused ? ((GetAsyncKeyState(VK_SHIFT) & 0x8000) ? KM_SHIFT : 0) | ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? KM_CTRL : 0) |
@@ -3039,15 +3085,15 @@ static void Tick(HfMod* mod, float dt, void* user)
         uint32_t t = atomic_load(&g_hookTarget);
         if (t) { g_lastTarget = t; memcpy(g_lastPos, g_hookPos, sizeof g_lastPos); g_lastAt = g_now; }
     }
-    KitFrame();
+    PF(PF_KIT, KitFrame());
     RetryFrame();
-    SupportFrame();
-    DashFrame();
-    ChargeFrame();
-    RippleFrame();
-    EyeFrame();
-    DropFrame(step);
-    Exhaustion();
+    PF(PF_SUPPORT, SupportFrame());
+    PF(PF_DASH, DashFrame());
+    PF(PF_CHARGE, ChargeFrame());
+    PF(PF_RIPPLE, RippleFrame());
+    PF(PF_EYE, EyeFrame());
+    PF(PF_DROP, DropFrame(step));
+    PF(PF_EXHAUST, Exhaustion());
     /* Stability refills after stab_delay s unhurt; broken until it is full again */
     if (g_now - g_stabHitAt >= s_stabDelay && g_stab < s_stabMax)
     {
@@ -3060,6 +3106,9 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (own) { g_selfSpared += own; static unsigned noted; if (noted++ < 5) Log("Mastiff's Pledge: %u hit(s) of her own blasts cleared on her", own); }
     unsigned kd = atomic_exchange(&g_kdStopped, 0);
     if (kd) { g_knockdowns += kd; static unsigned noted2; if (noted2++ < 20) Log("Mastiff's Pledge: %u knockdown(s) stopped", kd); }
+    double pfT = PfNow() - pfTick;
+    if (pfT > g_pfMax[PF_TICK]) g_pfMax[PF_TICK] = pfT;
+    g_pfSum[PF_TICK] += pfT; g_pfCalls[PF_TICK]++;
 }
 
 /* ---- the Mod Options Menu (through the Voymastina HUD addon): read and set a setting by its voymastina.ini name ---- */
@@ -3180,6 +3229,8 @@ static int HitTaken(const uint8_t* h, void* result, unsigned long long now)
     return 0;
 }
 
+/* 0.4.2: the hit hook, timed (its slowest call shows in the perf lines; hits come on the game thread) */
+static void OnDamagePreTimed(HfMod* mod, const HfEventInfo* info, void* user) { PF(PF_HIT, OnDamagePre(mod, info, user)); }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
@@ -3223,7 +3274,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         g_fistBolt = g_fistBoltDamage ? api->add_projectile(mod, &bolt) : 0;
         if (!g_fistBolt || api->on(mod, HF_EVENT_PROJECTILES_READY, FistBoltReady, NULL)) g_fistBolt = 0;
     }
-    int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
+    int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePreTimed, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
              api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_SPAWN, MechSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_PLAYER_DOWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeaponAk, NULL, 0) &&
              api->on_game_thread(mod, Tick, NULL);
