@@ -13,7 +13,16 @@
  *
  * After each beacon it follows what spawns within 300 m of the beacon and of the position(s) it asked for, for 25 s:
  * where each lands (stops moving) and how far from the asked position. Everything that spawns within 8 m of you is
- * logged too (the thrown ball, for a later "call it without throwing" test). Credit: the entity and unit lookups'
+ * logged too (the thrown ball, for a later "call it without throwing" test).
+ *
+ * 0.2.0, Yui's idea: Call In Destroyer is a stratagem too, and it can be called while the Destroyer is away. Two test
+ * stratagems in the loadout picker (supply section), each a reward ammo rack with 5 uses, 5 s cooldown:
+ *   Rack Test D (D U D U D U L)  a copy of Call In Destroyer whose delivery, payload, package, traits and beacon flags are
+ *                                the reward rack's (written into its row once the game has loaded the stratagems)
+ *   Rack Test O (D U D U D U R)  a copy of the reward rack (Ammo Rack President Reward) given Call In Destroyer's
+ *                                origin (+0x70) and call-in type (+0x74), the fields most likely to say "needs the ship"
+ * Both rows are logged before and after (delivery, origin, call-in type, cooldown type, payload, traits...). In Commando:
+ * take them in the loadout and try them after the Destroyer has left. Credit: the entity and unit lookups'
  * layouts are HD2Runtime's research (SkyeShade), as Commando Plus uses them; the function is in HellForge's SDK
  * reference (from HD2Runtime 0.40.1's research). */
 #include <math.h>
@@ -26,7 +35,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.0"
+#define VERSION "0.2.0"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -222,6 +231,54 @@ static uint64_t Detour(void* manager, int32_t element, uint32_t thrower, const f
     return r;
 }
 
+/* ---- 0.2.0: the two test racks ---------------------------------------------------------------------------- */
+static uint32_t g_typeD, g_typeO;
+static int g_rowsDone;
+static void Row(const char* name, uintptr_t row)
+{
+    uint8_t r[400];
+    if (!row || !ReadAt(row, r, sizeof r)) { Log("%s: row unreadable", name); return; }
+    uint64_t pay = Quad(r + 0x98), pk = Quad(r + 0xA8);
+    uint32_t n = Word(r + 0xA0);
+    char ents[200] = "";
+    for (uint32_t i = 0; i < n && i < 8; i++)
+    {
+        uint64_t e = 0;
+        if (pay && ReadAt((uintptr_t)pay + 8u * i, &e, 8)) snprintf(ents + strlen(ents), sizeof ents - strlen(ents), " %016llx", (unsigned long long)e);
+    }
+    float cit, cd;
+    memcpy(&cit, r + 0x54, 4); memcpy(&cd, r + 0x68, 4);
+    Log("%s: type %u delivery %u uses %d call-in %.1f s cooldown %.0f s origin %u call-in type %u cooldown type %u hud %u traits %08x beacon %02x "
+        "package %016llx payload %u:%s", name, Word(r), Word(r + 0x3C), (int)Word(r + 0x50), cit, cd, Word(r + 0x70), Word(r + 0x74),
+        Word(r + 0x94), Word(r + 0xB8), Word(r + 0x104), r[0x170], (unsigned long long)pk, n, ents);
+}
+static int Put(uintptr_t to, uintptr_t from, uint32_t offset, uint32_t size, const char* what)
+{
+    uint8_t b[16];
+    if (size > sizeof b || !ReadAt(from + offset, b, size) || hf->write(to + offset, b, size)) { Log("  %s: could not be written", what); return 0; }
+    return 1;
+}
+static void TestRows(void)
+{
+    if (g_rowsDone || (!g_typeD && !g_typeO)) return;
+    uintptr_t d = g_typeD ? hf->stratagem_row(g_typeD) : 0, o = g_typeO ? hf->stratagem_row(g_typeO) : 0;
+    if ((g_typeD && !d) || (g_typeO && !o)) return;   /* not loaded yet */
+    g_rowsDone = 1;
+    Row("Rack Test D as copied (Call In Destroyer's row)", d);
+    Row("Rack Test O as copied (the reward rack's row)", o);
+    if (d && o)
+    {
+        uint8_t originD[8];
+        if (!ReadAt(d + 0x70, originD, 8)) { Log("the rows: unreadable"); return; }
+        int ok = Put(d, o, 0x3C, 4, "D delivery") & Put(d, o, 0x98, 12, "D payload") & Put(d, o, 0xA8, 8, "D package") &
+                 Put(d, o, 0x104, 4, "D traits") & Put(d, o, 0x170, 1, "D beacon flags");
+        ok &= !hf->write(o + 0x70, originD, 8);
+        Log(ok ? "the test racks are set" : "the test racks: some writes failed (see above)");
+        Row("Rack Test D now", d);
+        Row("Rack Test O now", o);
+    }
+}
+
 /* ---- the game thread -------------------------------------------------------------------------------------------- */
 static int g_inMission;
 static int Down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
@@ -301,6 +358,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         g_ringTail = atomic_load(&g_ringHead);
         Log(m ? "mission start: mode %d (%s); Ctrl+Alt+F3 changes it" : "mission end", s_mode, kMode[s_mode]);
     }
+    TestRows();
     if (!m) return;
     for (int i = 0; i < g_nsite; i++)
         if (!g_site[i].placed && Position(g_site[i].entity, g_site[i].pos))
@@ -342,6 +400,17 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     Log("Stratagem Probe " VERSION " (research: where a Resupply is delivered)");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
+    {
+        HfStratagem d = {sizeof d}, o = {sizeof o};
+        d.base = 123; d.name = "yui/stratagem-probe/rack-test-d"; d.title = "Rack Test D"; d.code = "DUDUDUL"; d.uses = 5; d.cooldown = 5;
+        d.description = "Research: a copy of Call In Destroyer that drops the reward ammo rack.";
+        o.base = 109; o.name = "yui/stratagem-probe/rack-test-o"; o.title = "Rack Test O"; o.code = "DUDUDUR"; o.uses = 5; o.cooldown = 5;
+        o.description = "Research: the reward ammo rack with Call In Destroyer's origin.";
+        g_typeD = api->add_stratagem(mod, &d);
+        g_typeO = api->add_stratagem(mod, &o);
+        Log("test racks: Rack Test D type %u (DUDUDUL), Rack Test O type %u (DUDUDUR)%s", g_typeD, g_typeO,
+            g_typeD && g_typeO ? "" : " (0: refused, the log above says why)");
+    }
     if (!api->on_game_thread(mod, Tick, NULL)) { Log("the game thread could not be hooked"); return 1; }
     if (!api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) || !api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) ||
         !api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnLand, NULL, 0) || !api->subscribe(mod, HF_ON_STRATAGEM, OnStratagem, NULL, 0))
