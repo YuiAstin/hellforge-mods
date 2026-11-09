@@ -37,7 +37,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.1"
+#define VERSION "0.3.2"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -339,12 +339,30 @@ static void TestRows(void)
     uintptr_t call = ScanRow(123, 0xf8f90965u);
     if (!call) { Log("Call In Destroyer's row was not found: the test racks stay plain (the Resupply's boxes by hellpod)"); return; }
     Row("Call In Destroyer", call);
-    /* D: Call In Destroyer's row but its own type, id, texts, code, uses, cooldown, delivery, payload, package, hud and traits */
-    int ok = PutRange(d, call, 0x08, 0x28, "D 08-28") & PutRange(d, call, 0x34, 0x3C, "D 34-3C") & PutRange(d, call, 0x54, 0x68, "D 54-68") &
-             PutRange(d, call, 0x6C, 0x98, "D 6C-98") & PutRange(d, call, 0xBC, 0x104, "D BC-104") & PutRange(d, call, 0x108, 0x170, "D 108-170") &
-             PutRange(d, call, 0x171, 0x190, "D 171-190");
-    /* O: only Call In Destroyer's origin, call-in type and cooldown type */
-    ok &= PutRange(o, call, 0x70, 0x78, "O origin and call-in type") & PutRange(o, call, 0x94, 0x98, "O cooldown type");
+    /* 0.3.2: the vanilla rows beside it, to compare: what can be called while the Destroyer is away (Reinforce, the
+     * Destroyer call) and what cannot (the Resupply, the reward rack) */
+    static const struct { uint32_t type, stable; const char* name; } kCmp[] = {
+        {124, 0x87147bdbu, "Reinforcement Beacon (callable without the Destroyer)"},
+        {33, 0x33babe96u, "Resupply (locked without it)"},
+        {109, 0x4d36b84cu, "the reward rack (locked without it)"},
+        {101, 0x71b6d7dau, "B-1 Supply Pack (the copies' base)"}};
+    for (unsigned i = 0; i < sizeof kCmp / sizeof kCmp[0]; i++)
+    {
+        uint8_t h[8];
+        uintptr_t r = 0;
+        for (int k = -300; k <= 300 && !r; k++)
+        {
+            uintptr_t at = call + (intptr_t)k * 400;
+            if (ReadAt(at, h, 8) && Word(h) == kCmp[i].type && Word(h + 4) == kCmp[i].stable) r = at;
+        }
+        if (r) Row(kCmp[i].name, r);
+        else Log("%s: not within 300 rows of Call In Destroyer's", kCmp[i].name);
+    }
+    /* 0.3.1's O (Call In Destroyer's origin, call-in type and cooldown type) was still locked out, and its D (all of
+     * Call In Destroyer's row but the drop) did not show in the loadout. Now: D gets only the HUD section "mission"
+     * (Call In Destroyer's: 1; the copies had 2, supply), O gets that and the origin, call-in type and cooldown type. */
+    int ok = PutRange(d, call, 0xB8, 0xBC, "D hud");
+    ok &= PutRange(o, call, 0x70, 0x78, "O origin and call-in type") & PutRange(o, call, 0x94, 0x98, "O cooldown type") & PutRange(o, call, 0xB8, 0xBC, "O hud");
     Log(ok ? "the test racks are set" : "the test racks: some writes failed (see above)");
     Row("Rack Test D now", d);
     Row("Rack Test O now", o);
