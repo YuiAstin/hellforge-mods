@@ -37,7 +37,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.3"
+#define VERSION "0.3.4"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -358,12 +358,12 @@ static void TestRows(void)
         if (r) Row(kCmp[i].name, r);
         else Log("%s: not within 300 rows of Call In Destroyer's", kCmp[i].name);
     }
-    /* 0.3.3: 0.3.2's racks (HUD "mission", and origin 1) were still locked out. What Call In Destroyer and Reinforce
-     * (both callable without the Destroyer) share and the racks lack: delivery 4 ("mission": not from the ship) and a
-     * call-in time of 0. D gets delivery 4 only; O gets delivery 4, call-in time 0, origin 1 and HUD "mission". */
-    int ok = PutRange(d, call, 0x3C, 0x40, "D delivery");
-    ok &= PutRange(o, call, 0x3C, 0x40, "O delivery") & PutRange(o, call, 0x54, 0x58, "O call-in time") & PutRange(o, call, 0x70, 0x78, "O origin and call-in type") &
-          PutRange(o, call, 0x94, 0x98, "O cooldown type") & PutRange(o, call, 0xB8, 0xBC, "O hud");
+    /* 0.3.4: 0.3.3's delivery 4 did not unlock them either. Last field test before "the game checks the type": D gets
+     * ALL of Call In Destroyer's row but its own type, id, texts, code, uses, cooldown, payload, package, icon, the loadout
+     * block (+0xBC..+0x104: 0.3.1's D took that too and was hidden from the loadout) and traits. O stays a plain rack
+     * (the B-1 copy with the Resupply's boxes) for comparison. */
+    int ok = PutRange(d, call, 0x08, 0x28, "D 08-28") & PutRange(d, call, 0x34, 0x40, "D 34-40") & PutRange(d, call, 0x54, 0x68, "D 54-68") &
+             PutRange(d, call, 0x6C, 0x98, "D 6C-98") & PutRange(d, call, 0xB8, 0xBC, "D hud") & PutRange(d, call, 0x108, 0x190, "D 108-190");
     Log(ok ? "the test racks are set" : "the test racks: some writes failed (see above)");
     Row("Rack Test D now", d);
     Row("Rack Test O now", o);
