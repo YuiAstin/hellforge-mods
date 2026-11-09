@@ -37,7 +37,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.2"
+#define VERSION "0.3.0"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -150,6 +150,14 @@ static Track g_track[MAXTRACK];
 static unsigned g_ntrack;
 
 /* ---- the hook --------------------------------------------------------------------------------------------------- */
+#define BALL UINT64_C(0x16F397CA5F51F271)
+typedef void (*SetVecFn)(void*, uint32_t, const float*);
+static SetVecFn g_setPosition, g_setVelocity;
+static uint32_t g_balls[8];
+static unsigned g_nballs;
+static uint32_t g_moved;
+static float g_movedTo[3];
+static double g_movedAt;
 typedef uint64_t (*ActivateFn)(void*, int32_t, uint32_t, const float*, void*, uint32_t, uint64_t, uint64_t, uint64_t, uint64_t);
 static ActivateFn g_orig;
 static int s_mode = 1;
@@ -194,16 +202,31 @@ static uint64_t Detour(void* manager, int32_t element, uint32_t thrower, const f
     }
     if (s_mode == 1)
     {
+        /* 0.3.0: 0.2.2 passed another position: the game reported it, but the pod and its boxes landed at the ball
+         * (the beacon follows the thrown ball, 16f397ca5f51f271). So: the game's own call, then the ball is moved
+         * with the game's warp setter (the one Voymastina moves her Helldiver and exosuit with). */
         float to[3] = {p[0] + 20, p[1], p[2]};
         int site = NearestUnserved(p);
         if (site >= 0) { SiteTarget(&g_site[site], to); g_site[site].served = 1; }
-        Log("  redirect: Resupply to %.1f %.1f %.1f (%s, %.0f m from the beacon)", to[0], to[1], to[2],
-            site >= 0 ? "a pod site" : "20 m east", Flat(to, p));
+        uint64_t r = g_orig(manager, element, thrower, position, record, type, s7, s8, s9, s10);
+        uint32_t ball = 0;
+        float bp[3], bd = 3;
+        for (unsigned k = 0; k < 8; k++)
+        {
+            float q[3];
+            if (g_balls[k] && Position(g_balls[k], q) && Dist(q, p) < bd) { bd = Dist(q, p); ball = g_balls[k]; memcpy(bp, q, 12); }
+        }
+        if (!ball) { Log("  move: the ball was not found within 3 m of the beacon: nothing moved"); return r; }
+        if (!g_setPosition) { Log("  move: the warp setter is not available on this build: nothing moved"); return r; }
+        static const float zero[3] = {0, 0, 0};
+        g_setPosition(NULL, ball, to);
+        if (g_setVelocity) g_setVelocity(NULL, ball, zero);
+        float now[3] = {0, 0, 0};
+        int got = Position(ball, now);
+        Log("  move: the ball (entity %u) from %.1f %.1f %.1f to %.1f %.1f %.1f (%s, %.0f m); reads back %s%.1f %.1f %.1f", ball, bp[0], bp[1], bp[2],
+            to[0], to[1], to[2], site >= 0 ? "a pod site" : "20 m east", Flat(to, p), got ? "" : "(unreadable) ", now[0], now[1], now[2]);
         AddWatch(to, site >= 0 ? "the pod site" : "20 m east");
-        RecordBytes("before", record);
-        uint64_t r = g_orig(manager, element, thrower, to, record, type, s7, s8, s9, s10);
-        RecordBytes("after", record);
-        Log("  -> %llx", (unsigned long long)r);
+        g_moved = ball; memcpy(g_movedTo, to, 12); g_movedAt = g_now;
         return r;
     }
     /* copies: the game's call, then one more per site (or one 20 m east) */
@@ -254,7 +277,8 @@ static void Row(const char* name, uintptr_t row)
         Word(r + 0x94), Word(r + 0xB8), Word(r + 0x104), r[0x170], (unsigned long long)pk, n, ents);
 }
 /* 0.2.2: HellForge copies only stratagems players can pick (0.2.0's copies of Call In Destroyer and of the reward rack
- * were refused), so both test racks are copies of the Resupply, and the vanilla rows of Call In Destroyer (123) and the
+ * were refused), so both test racks are copies of a pickable stratagem (0.3.0: the B-1 Supply Pack; the Resupply is
+ * not pickable either), and the vanilla rows of Call In Destroyer (123) and the
  * reward rack (109) are found next to them (the table's 400-byte rows; checked by type and stable id) and copied in. */
 static uintptr_t VanillaRow(uintptr_t at, uint32_t atType, uint32_t type, uint32_t stable)
 {
@@ -321,6 +345,7 @@ static void NewSpawns(void)
             memset(s, 0, sizeof *s);
             s->entity = e;
         }
+        if (res == BALL) g_balls[g_nballs++ % 8] = e;
         if (!Position(e, p)) continue;
         int w = -1;
         float wd = 1e9f;
@@ -395,6 +420,13 @@ static void Tick(HfMod* mod, float dt, void* user)
         }
     NewSpawns();
     Follow();
+    if (g_moved && g_now - g_movedAt < 8)
+    {
+        static double next;
+        float q[3];
+        if (g_now >= next) { next = g_now + 1; if (Position(g_moved, q)) Log("  the moved ball at %.1f %.1f %.1f: %.1f m from where it was sent", q[0], q[1], q[2], Flat(q, g_movedTo)); else Log("  the moved ball: gone"); }
+    }
+    else g_moved = 0;
 }
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {
@@ -406,6 +438,10 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     { g_ready = -1; Log("REFUSED: ActivateStratagemBeacon (game.dll+0x6ABDB0) is not the reviewed code"); return; }
     if (hf->hook_ex(self, game + 0x6ABDB0, (void*)Detour, (void**)&g_orig, 0) || !g_orig)
     { g_ready = -1; g_orig = NULL; Log("REFUSED: ActivateStratagemBeacon could not be hooked"); return; }
+    if (hf->code_matches(game + 0x5A2BB0, "48 89 5c 24 08 48 89 6c 24 10 56 57 41 54 41 56 41 57 48 83 ec 40") &&
+        hf->code_matches(game + 0x4A7550, "48 89 5c 24 18 57 48 83 ec 20 3b 15 ?? ?? ?? ?? 48 8b 1d"))
+    { g_setPosition = (SetVecFn)(game + 0x5A2BB0); g_setVelocity = (SetVecFn)(game + 0x4A7550); }
+    else Log("the warp setter is not the reviewed code: the ball cannot be moved");
     g_ready = 1;
     Log("ready: ActivateStratagemBeacon hooked; mode %d (%s)", s_mode, kMode[s_mode]);
 }
@@ -434,9 +470,9 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     {
         HfStratagem d = {sizeof d}, o = {sizeof o};
-        d.base = 33; d.name = "yui/stratagem-probe/rack-test-d"; d.title = "Rack Test D"; d.code = "DUDUDUL"; d.uses = 5; d.cooldown = 5;
+        d.base = 101; d.name = "yui/stratagem-probe/rack-test-d"; d.title = "Rack Test D"; d.code = "DUDUDUL"; d.uses = 5; d.cooldown = 5;
         d.description = "Research: Call In Destroyer's settings, dropping the reward ammo rack.";
-        o.base = 33; o.name = "yui/stratagem-probe/rack-test-o"; o.title = "Rack Test O"; o.code = "DUDUDUR"; o.uses = 5; o.cooldown = 5;
+        o.base = 101; o.name = "yui/stratagem-probe/rack-test-o"; o.title = "Rack Test O"; o.code = "DUDUDUR"; o.uses = 5; o.cooldown = 5;
         o.description = "Research: the reward ammo rack with Call In Destroyer's origin.";
         g_typeD = api->add_stratagem(mod, &d);
         g_typeO = api->add_stratagem(mod, &o);
