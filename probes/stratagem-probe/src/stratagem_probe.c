@@ -37,7 +37,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.2"
+#define VERSION "0.3.3"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -358,11 +358,12 @@ static void TestRows(void)
         if (r) Row(kCmp[i].name, r);
         else Log("%s: not within 300 rows of Call In Destroyer's", kCmp[i].name);
     }
-    /* 0.3.1's O (Call In Destroyer's origin, call-in type and cooldown type) was still locked out, and its D (all of
-     * Call In Destroyer's row but the drop) did not show in the loadout. Now: D gets only the HUD section "mission"
-     * (Call In Destroyer's: 1; the copies had 2, supply), O gets that and the origin, call-in type and cooldown type. */
-    int ok = PutRange(d, call, 0xB8, 0xBC, "D hud");
-    ok &= PutRange(o, call, 0x70, 0x78, "O origin and call-in type") & PutRange(o, call, 0x94, 0x98, "O cooldown type") & PutRange(o, call, 0xB8, 0xBC, "O hud");
+    /* 0.3.3: 0.3.2's racks (HUD "mission", and origin 1) were still locked out. What Call In Destroyer and Reinforce
+     * (both callable without the Destroyer) share and the racks lack: delivery 4 ("mission": not from the ship) and a
+     * call-in time of 0. D gets delivery 4 only; O gets delivery 4, call-in time 0, origin 1 and HUD "mission". */
+    int ok = PutRange(d, call, 0x3C, 0x40, "D delivery");
+    ok &= PutRange(o, call, 0x3C, 0x40, "O delivery") & PutRange(o, call, 0x54, 0x58, "O call-in time") & PutRange(o, call, 0x70, 0x78, "O origin and call-in type") &
+          PutRange(o, call, 0x94, 0x98, "O cooldown type") & PutRange(o, call, 0xB8, 0xBC, "O hud");
     Log(ok ? "the test racks are set" : "the test racks: some writes failed (see above)");
     Row("Rack Test D now", d);
     Row("Rack Test O now", o);
