@@ -37,7 +37,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.0"
+#define VERSION "0.3.1"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -87,6 +87,16 @@ static int Position(uint32_t entity, float out[3])
         return 0;
     for (int i = 0; i < 3; i++) if (!isfinite(out[i]) || fabsf(out[i]) > 100000) return 0;
     return 1;
+}
+static uintptr_t NodeOf(uint32_t entity)
+{
+    uint32_t unit = UnitOf(entity);
+    uintptr_t registry = Pointer(exe + 0x1A100F0), objects, object, nodes;
+    uint32_t count, id, slot = unit & 0x3FFFFF;
+    if (!unit || !registry || !ReadAt(registry + 0x98, &count, 4) || slot >= count || !(objects = Pointer(registry + 0x88)) ||
+        !(object = Pointer(objects + 8u * slot)) || !ReadAt(object + 8, &id, 4) || id != unit || !(nodes = Pointer(object + 0x88)))
+        return 0;
+    return nodes;
 }
 static float Dist(const float a[3], const float b[3]) { float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2]; return sqrtf(dx * dx + dy * dy + dz * dz); }
 static float Flat(const float a[3], const float b[3]) { float dx = a[0] - b[0], dy = a[1] - b[1]; return sqrtf(dx * dx + dy * dy); }
@@ -151,8 +161,6 @@ static unsigned g_ntrack;
 
 /* ---- the hook --------------------------------------------------------------------------------------------------- */
 #define BALL UINT64_C(0x16F397CA5F51F271)
-typedef void (*SetVecFn)(void*, uint32_t, const float*);
-static SetVecFn g_setPosition, g_setVelocity;
 static uint32_t g_balls[8];
 static unsigned g_nballs;
 static uint32_t g_moved;
@@ -217,14 +225,10 @@ static uint64_t Detour(void* manager, int32_t element, uint32_t thrower, const f
             if (g_balls[k] && Position(g_balls[k], q) && Dist(q, p) < bd) { bd = Dist(q, p); ball = g_balls[k]; memcpy(bp, q, 12); }
         }
         if (!ball) { Log("  move: the ball was not found within 3 m of the beacon: nothing moved"); return r; }
-        if (!g_setPosition) { Log("  move: the warp setter is not available on this build: nothing moved"); return r; }
-        static const float zero[3] = {0, 0, 0};
-        g_setPosition(NULL, ball, to);
-        if (g_setVelocity) g_setVelocity(NULL, ball, zero);
-        float now[3] = {0, 0, 0};
-        int got = Position(ball, now);
-        Log("  move: the ball (entity %u) from %.1f %.1f %.1f to %.1f %.1f %.1f (%s, %.0f m); reads back %s%.1f %.1f %.1f", ball, bp[0], bp[1], bp[2],
-            to[0], to[1], to[2], site >= 0 ? "a pod site" : "20 m east", Flat(to, p), got ? "" : "(unreadable) ", now[0], now[1], now[2]);
+        /* 0.3.1: the warp setter crashed on the ball (0.3.0, game.dll+0x5a2c69: like a Strider's pilot in Voymastina);
+         * now the ball's world position in the scene graph is written, every frame for 1.5 s */
+        Log("  move: the ball (entity %u) at %.1f %.1f %.1f, written to %.1f %.1f %.1f (%s, %.0f m) for 1.5 s", ball, bp[0], bp[1], bp[2],
+            to[0], to[1], to[2], site >= 0 ? "a pod site" : "20 m east", Flat(to, p));
         AddWatch(to, site >= 0 ? "the pod site" : "20 m east");
         g_moved = ball; memcpy(g_movedTo, to, 12); g_movedAt = g_now;
         return r;
@@ -280,16 +284,42 @@ static void Row(const char* name, uintptr_t row)
  * were refused), so both test racks are copies of a pickable stratagem (0.3.0: the B-1 Supply Pack; the Resupply is
  * not pickable either), and the vanilla rows of Call In Destroyer (123) and the
  * reward rack (109) are found next to them (the table's 400-byte rows; checked by type and stable id) and copied in. */
-static uintptr_t VanillaRow(uintptr_t at, uint32_t atType, uint32_t type, uint32_t stable)
+/* 0.3.1: the copies' rows sit in HellForge's own table, not beside the game's (0.3.0 found nothing within 400 rows), so
+ * Call In Destroyer's row is found by scanning the process's readable memory for its type and stable id (once). */
+static uintptr_t ScanRow(uint32_t type, uint32_t stable)
 {
-    uint8_t h[8];
-    uintptr_t guess = at + (intptr_t)((int64_t)type - (int64_t)atType) * 400;
-    if (ReadAt(guess, h, 8) && Word(h) == type && Word(h + 4) == stable) return guess;
-    for (int i = -400; i <= 400; i++)
+    uint8_t* a = (uint8_t*)0x10000;
+    MEMORY_BASIC_INFORMATION mi;
+    unsigned regions = 0;
+    double t0 = (double)GetTickCount64();
+    while ((uintptr_t)a < UINT64_C(0x7FFFFFFF0000) && VirtualQuery(a, &mi, sizeof mi) == sizeof mi)
     {
-        uintptr_t r = at + (intptr_t)i * 400;
-        if (ReadAt(r, h, 8) && Word(h) == type && Word(h + 4) == stable) return r;
+        uint8_t* base = (uint8_t*)mi.BaseAddress;
+        size_t size = mi.RegionSize;
+        int ok = mi.State == MEM_COMMIT && !(mi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) &&
+                 (mi.Protect & (PAGE_READWRITE | PAGE_READONLY | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)) && size < (512u << 20);
+        if (ok)
+        {
+            regions++;
+            static uint8_t buf[(1u << 20) + 400];
+            for (size_t off = 0; off < size; off += 1u << 20)
+            {
+                size_t n = size - off < (1u << 20) + 400 ? size - off : (1u << 20) + 400;
+                if (n < 400 || hf->read((uintptr_t)(base + off), buf, n)) continue;
+                for (size_t i = 0; i + 400 <= n; i += 4)
+                {
+                    const uint8_t* r = buf + i;
+                    if (Word(r) == type && Word(r + 4) == stable && Word(r + 0x3C) <= 7 && Word(r + 0x48) >= 1 && Word(r + 0x48) <= 12)
+                    {
+                        Log("scan: row of type %u found at %p (%u regions, %.0f ms)", type, (void*)(base + off + i), regions, (double)GetTickCount64() - t0);
+                        return (uintptr_t)(base + off + i);
+                    }
+                }
+            }
+        }
+        a = base + size;
     }
+    Log("scan: no row of type %u (%u regions, %.0f ms)", type, regions, (double)GetTickCount64() - t0);
     return 0;
 }
 static int PutRange(uintptr_t to, uintptr_t from, uint32_t a, uint32_t b, const char* what)
@@ -304,20 +334,17 @@ static void TestRows(void)
     uintptr_t d = hf->stratagem_row(g_typeD), o = hf->stratagem_row(g_typeO);
     if (!d || !o) return;   /* not loaded yet */
     g_rowsDone = 1;
-    uintptr_t call = VanillaRow(d, g_typeD, 123, 0xf8f90965u), rack = VanillaRow(d, g_typeD, 109, 0x4d36b84cu);
-    Log("rows: Rack Test D %p, Rack Test O %p, Call In Destroyer %p, the reward rack %p", (void*)d, (void*)o, (void*)call, (void*)rack);
-    if (!call || !rack) { Log("the vanilla rows were not found next to the copies: no test racks"); return; }
+    Row("Rack Test D as added", d);
+    Row("Rack Test O as added", o);
+    uintptr_t call = ScanRow(123, 0xf8f90965u);
+    if (!call) { Log("Call In Destroyer's row was not found: the test racks stay plain (the Resupply's boxes by hellpod)"); return; }
     Row("Call In Destroyer", call);
-    Row("the reward rack", rack);
-    Row("Rack Test D as copied (the Resupply's)", d);
-    /* D: Call In Destroyer's row (but its own type, id, texts, code, uses and cooldown), with the rack's delivery */
-    int ok = PutRange(d, call, 0x08, 0x28, "D 08-28") & PutRange(d, call, 0x34, 0x40, "D 34-40") & PutRange(d, call, 0x54, 0x68, "D 54-68") &
-             PutRange(d, call, 0x6C, 0x190, "D 6C-190");
-    ok &= PutRange(d, rack, 0x3C, 0x40, "D delivery") & PutRange(d, rack, 0x98, 0xB0, "D payload and package") & PutRange(d, rack, 0xB8, 0xBC, "D hud") &
-          PutRange(d, rack, 0x104, 0x108, "D traits") & PutRange(d, rack, 0x170, 0x171, "D beacon flags");
-    /* O: the Resupply's row with the rack's delivery and Call In Destroyer's origin, call-in type and cooldown type */
-    ok &= PutRange(o, rack, 0x3C, 0x40, "O delivery") & PutRange(o, rack, 0x98, 0xB0, "O payload and package") & PutRange(o, rack, 0x104, 0x108, "O traits") &
-          PutRange(o, rack, 0x170, 0x171, "O beacon flags") & PutRange(o, call, 0x70, 0x78, "O origin and call-in type") & PutRange(o, call, 0x94, 0x98, "O cooldown type");
+    /* D: Call In Destroyer's row but its own type, id, texts, code, uses, cooldown, delivery, payload, package, hud and traits */
+    int ok = PutRange(d, call, 0x08, 0x28, "D 08-28") & PutRange(d, call, 0x34, 0x3C, "D 34-3C") & PutRange(d, call, 0x54, 0x68, "D 54-68") &
+             PutRange(d, call, 0x6C, 0x98, "D 6C-98") & PutRange(d, call, 0xBC, 0x104, "D BC-104") & PutRange(d, call, 0x108, 0x170, "D 108-170") &
+             PutRange(d, call, 0x171, 0x190, "D 171-190");
+    /* O: only Call In Destroyer's origin, call-in type and cooldown type */
+    ok &= PutRange(o, call, 0x70, 0x78, "O origin and call-in type") & PutRange(o, call, 0x94, 0x98, "O cooldown type");
     Log(ok ? "the test racks are set" : "the test racks: some writes failed (see above)");
     Row("Rack Test D now", d);
     Row("Rack Test O now", o);
@@ -420,6 +447,11 @@ static void Tick(HfMod* mod, float dt, void* user)
         }
     NewSpawns();
     Follow();
+    if (g_moved && g_now - g_movedAt < 1.5)
+    {
+        uintptr_t n = NodeOf(g_moved);
+        if (n) hf->write(n + 48, g_movedTo, 12);
+    }
     if (g_moved && g_now - g_movedAt < 8)
     {
         static double next;
@@ -438,10 +470,6 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     { g_ready = -1; Log("REFUSED: ActivateStratagemBeacon (game.dll+0x6ABDB0) is not the reviewed code"); return; }
     if (hf->hook_ex(self, game + 0x6ABDB0, (void*)Detour, (void**)&g_orig, 0) || !g_orig)
     { g_ready = -1; g_orig = NULL; Log("REFUSED: ActivateStratagemBeacon could not be hooked"); return; }
-    if (hf->code_matches(game + 0x5A2BB0, "48 89 5c 24 08 48 89 6c 24 10 56 57 41 54 41 56 41 57 48 83 ec 40") &&
-        hf->code_matches(game + 0x4A7550, "48 89 5c 24 18 57 48 83 ec 20 3b 15 ?? ?? ?? ?? 48 8b 1d"))
-    { g_setPosition = (SetVecFn)(game + 0x5A2BB0); g_setVelocity = (SetVecFn)(game + 0x4A7550); }
-    else Log("the warp setter is not the reviewed code: the ball cannot be moved");
     g_ready = 1;
     Log("ready: ActivateStratagemBeacon hooked; mode %d (%s)", s_mode, kMode[s_mode]);
 }
@@ -474,6 +502,9 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         d.description = "Research: Call In Destroyer's settings, dropping the reward ammo rack.";
         o.base = 101; o.name = "yui/stratagem-probe/rack-test-o"; o.title = "Rack Test O"; o.code = "DUDUDUR"; o.uses = 5; o.cooldown = 5;
         o.description = "Research: the reward ammo rack with Call In Destroyer's origin.";
+        static const uint64_t boxes[4] = {UINT64_C(0xA94913CA014F7579), UINT64_C(0xA94913CA014F7579), UINT64_C(0xA94913CA014F7579), UINT64_C(0xA94913CA014F7579)};
+        d.payload = o.payload = boxes;   /* the Resupply's (and the reward rack's) four boxes, by hellpod */
+        d.payload_count = o.payload_count = 4;
         g_typeD = api->add_stratagem(mod, &d);
         g_typeO = api->add_stratagem(mod, &o);
         Log("test racks: Rack Test D type %u (DUDUDUL), Rack Test O type %u (DUDUDUR)%s", g_typeD, g_typeO,
