@@ -37,7 +37,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.4"
+#define VERSION "0.3.5"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -260,7 +260,7 @@ static uint64_t Detour(void* manager, int32_t element, uint32_t thrower, const f
 }
 
 /* ---- 0.2.0: the two test racks ---------------------------------------------------------------------------- */
-static uint32_t g_typeD, g_typeO;
+static uint32_t g_typeD, g_typeO, g_typeU, g_typeX;
 static int g_rowsDone;
 static void Row(const char* name, uintptr_t row)
 {
@@ -330,14 +330,20 @@ static int PutRange(uintptr_t to, uintptr_t from, uint32_t a, uint32_t b, const 
 }
 static void TestRows(void)
 {
-    if (g_rowsDone || !g_typeD || !g_typeO) return;
-    uintptr_t d = hf->stratagem_row(g_typeD), o = hf->stratagem_row(g_typeO);
-    if (!d || !o) return;   /* not loaded yet */
+    if (g_rowsDone || !g_typeD || !g_typeO || !g_typeU || !g_typeX) return;
+    uintptr_t d = hf->stratagem_row(g_typeD), o = hf->stratagem_row(g_typeO), u = hf->stratagem_row(g_typeU), x = hf->stratagem_row(g_typeX);
+    if (!d || !o || !u || !x) return;   /* not loaded yet */
     g_rowsDone = 1;
-    Row("Rack Test D as added", d);
-    Row("Rack Test O as added", o);
+    Row("the racks as added (a B-1 Supply Pack copy with the Resupply's boxes)", d);
     uintptr_t call = ScanRow(123, 0xf8f90965u);
     if (!call) { Log("Call In Destroyer's row was not found: the test racks stay plain (the Resupply's boxes by hellpod)"); return; }
+    {
+        uint8_t rc[400], rd[400];
+        unsigned told = 0;
+        if (ReadAt(call, rc, 400) && ReadAt(d, rd, 400))
+            for (unsigned i = 8; i < 400; i += 4)
+                if (Word(rc + i) != Word(rd + i) && told++ < 80) Log("  differs +0x%03x: Call In Destroyer %08x, the racks %08x", i, Word(rc + i), Word(rd + i));
+    }
     Row("Call In Destroyer", call);
     /* 0.3.2: the vanilla rows beside it, to compare: what can be called while the Destroyer is away (Reinforce, the
      * Destroyer call) and what cannot (the Resupply, the reward rack) */
@@ -358,15 +364,24 @@ static void TestRows(void)
         if (r) Row(kCmp[i].name, r);
         else Log("%s: not within 300 rows of Call In Destroyer's", kCmp[i].name);
     }
-    /* 0.3.4: 0.3.3's delivery 4 did not unlock them either. Last field test before "the game checks the type": D gets
-     * ALL of Call In Destroyer's row but its own type, id, texts, code, uses, cooldown, payload, package, icon, the loadout
-     * block (+0xBC..+0x104: 0.3.1's D took that too and was hidden from the loadout) and traits. O stays a plain rack
-     * (the B-1 copy with the Resupply's boxes) for comparison. */
-    int ok = PutRange(d, call, 0x08, 0x28, "D 08-28") & PutRange(d, call, 0x34, 0x40, "D 34-40") & PutRange(d, call, 0x54, 0x68, "D 54-68") &
-             PutRange(d, call, 0x6C, 0x98, "D 6C-98") & PutRange(d, call, 0xB8, 0xBC, "D hud") & PutRange(d, call, 0x108, 0x190, "D 108-190");
+    /* 0.3.5: 0.3.4's D (all of Call In Destroyer's row but a few blocks) was hidden again: the hiding field is in one
+     * of the blocks below. Four racks, each with what 0.3.3's O had (delivery 4, call-in time 0, origin, call-in type,
+     * cooldown type, HUD "mission": shown, but locked) plus one more block of Call In Destroyer's row:
+     *   D +0x08..+0x28   O +0x34..+0x3C, +0x58..+0x68, +0x6C..+0x70   U +0x78..+0x94   X +0x108..+0x190 */
+    int ok = 1;
+    uintptr_t all[4] = {d, o, u, x};
+    for (int i = 0; i < 4; i++)
+        ok &= PutRange(all[i], call, 0x3C, 0x40, "delivery") & PutRange(all[i], call, 0x54, 0x58, "call-in time") & PutRange(all[i], call, 0x70, 0x78, "origin") &
+              PutRange(all[i], call, 0x94, 0x98, "cooldown type") & PutRange(all[i], call, 0xB8, 0xBC, "hud");
+    ok &= PutRange(d, call, 0x08, 0x28, "D 08-28");
+    ok &= PutRange(o, call, 0x34, 0x3C, "O 34-3C") & PutRange(o, call, 0x58, 0x68, "O 58-68") & PutRange(o, call, 0x6C, 0x70, "O 6C-70");
+    ok &= PutRange(u, call, 0x78, 0x94, "U 78-94");
+    ok &= PutRange(x, call, 0x108, 0x190, "X 108-190");
     Log(ok ? "the test racks are set" : "the test racks: some writes failed (see above)");
     Row("Rack Test D now", d);
     Row("Rack Test O now", o);
+    Row("Rack Test U now", u);
+    Row("Rack Test X now", x);
 }
 
 /* ---- the game thread -------------------------------------------------------------------------------------------- */
@@ -516,7 +531,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     }
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     {
-        HfStratagem d = {sizeof d}, o = {sizeof o};
+        HfStratagem d = {sizeof d}, o = {sizeof o}, u = {sizeof u}, x = {sizeof x};
         d.base = 101; d.name = "yui/stratagem-probe/rack-test-d"; d.title = "Rack Test D"; d.code = "DUDUDUL"; d.uses = 5; d.cooldown = 5;
         d.description = "Research: Call In Destroyer's settings, dropping the reward ammo rack.";
         o.base = 101; o.name = "yui/stratagem-probe/rack-test-o"; o.title = "Rack Test O"; o.code = "DUDUDUR"; o.uses = 5; o.cooldown = 5;
@@ -524,8 +539,13 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         static const uint64_t boxes[4] = {UINT64_C(0xA94913CA014F7579), UINT64_C(0xA94913CA014F7579), UINT64_C(0xA94913CA014F7579), UINT64_C(0xA94913CA014F7579)};
         d.payload = o.payload = boxes;   /* the Resupply's (and the reward rack's) four boxes, by hellpod */
         d.payload_count = o.payload_count = 4;
+        u = o; u.name = "yui/stratagem-probe/rack-test-u"; u.title = "Rack Test U"; u.code = "DUDUDUU";
+        x = o; x.name = "yui/stratagem-probe/rack-test-x"; x.title = "Rack Test X"; x.code = "DUDUDUD";
         g_typeD = api->add_stratagem(mod, &d);
         g_typeO = api->add_stratagem(mod, &o);
+        g_typeU = api->add_stratagem(mod, &u);
+        g_typeX = api->add_stratagem(mod, &x);
+        Log("test racks: U type %u (DUDUDUU), X type %u (DUDUDUD)", g_typeU, g_typeX);
         Log("test racks: Rack Test D type %u (DUDUDUL), Rack Test O type %u (DUDUDUR)%s", g_typeD, g_typeO,
             g_typeD && g_typeO ? "" : " (0: refused, the log above says why)");
     }
