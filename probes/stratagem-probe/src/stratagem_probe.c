@@ -37,7 +37,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.1"
+#define VERSION "0.2.2"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -253,31 +253,50 @@ static void Row(const char* name, uintptr_t row)
         "package %016llx payload %u:%s", name, Word(r), Word(r + 0x3C), (int)Word(r + 0x50), cit, cd, Word(r + 0x70), Word(r + 0x74),
         Word(r + 0x94), Word(r + 0xB8), Word(r + 0x104), r[0x170], (unsigned long long)pk, n, ents);
 }
-static int Put(uintptr_t to, uintptr_t from, uint32_t offset, uint32_t size, const char* what)
+/* 0.2.2: HellForge copies only stratagems players can pick (0.2.0's copies of Call In Destroyer and of the reward rack
+ * were refused), so both test racks are copies of the Resupply, and the vanilla rows of Call In Destroyer (123) and the
+ * reward rack (109) are found next to them (the table's 400-byte rows; checked by type and stable id) and copied in. */
+static uintptr_t VanillaRow(uintptr_t at, uint32_t atType, uint32_t type, uint32_t stable)
 {
-    uint8_t b[16];
-    if (size > sizeof b || !ReadAt(from + offset, b, size) || hf->write(to + offset, b, size)) { Log("  %s: could not be written", what); return 0; }
+    uint8_t h[8];
+    uintptr_t guess = at + (intptr_t)((int64_t)type - (int64_t)atType) * 400;
+    if (ReadAt(guess, h, 8) && Word(h) == type && Word(h + 4) == stable) return guess;
+    for (int i = -400; i <= 400; i++)
+    {
+        uintptr_t r = at + (intptr_t)i * 400;
+        if (ReadAt(r, h, 8) && Word(h) == type && Word(h + 4) == stable) return r;
+    }
+    return 0;
+}
+static int PutRange(uintptr_t to, uintptr_t from, uint32_t a, uint32_t b, const char* what)
+{
+    uint8_t buf[400];
+    if (b <= a || b > 400 || !ReadAt(from + a, buf, b - a) || hf->write(to + a, buf, b - a)) { Log("  %s: could not be written", what); return 0; }
     return 1;
 }
 static void TestRows(void)
 {
-    if (g_rowsDone || (!g_typeD && !g_typeO)) return;
-    uintptr_t d = g_typeD ? hf->stratagem_row(g_typeD) : 0, o = g_typeO ? hf->stratagem_row(g_typeO) : 0;
-    if ((g_typeD && !d) || (g_typeO && !o)) return;   /* not loaded yet */
+    if (g_rowsDone || !g_typeD || !g_typeO) return;
+    uintptr_t d = hf->stratagem_row(g_typeD), o = hf->stratagem_row(g_typeO);
+    if (!d || !o) return;   /* not loaded yet */
     g_rowsDone = 1;
-    Row("Rack Test D as copied (Call In Destroyer's row)", d);
-    Row("Rack Test O as copied (the reward rack's row)", o);
-    if (d && o)
-    {
-        uint8_t originD[8];
-        if (!ReadAt(d + 0x70, originD, 8)) { Log("the rows: unreadable"); return; }
-        int ok = Put(d, o, 0x3C, 4, "D delivery") & Put(d, o, 0x98, 12, "D payload") & Put(d, o, 0xA8, 8, "D package") &
-                 Put(d, o, 0x104, 4, "D traits") & Put(d, o, 0x170, 1, "D beacon flags");
-        ok &= !hf->write(o + 0x70, originD, 8);
-        Log(ok ? "the test racks are set" : "the test racks: some writes failed (see above)");
-        Row("Rack Test D now", d);
-        Row("Rack Test O now", o);
-    }
+    uintptr_t call = VanillaRow(d, g_typeD, 123, 0xf8f90965u), rack = VanillaRow(d, g_typeD, 109, 0x4d36b84cu);
+    Log("rows: Rack Test D %p, Rack Test O %p, Call In Destroyer %p, the reward rack %p", (void*)d, (void*)o, (void*)call, (void*)rack);
+    if (!call || !rack) { Log("the vanilla rows were not found next to the copies: no test racks"); return; }
+    Row("Call In Destroyer", call);
+    Row("the reward rack", rack);
+    Row("Rack Test D as copied (the Resupply's)", d);
+    /* D: Call In Destroyer's row (but its own type, id, texts, code, uses and cooldown), with the rack's delivery */
+    int ok = PutRange(d, call, 0x08, 0x28, "D 08-28") & PutRange(d, call, 0x34, 0x40, "D 34-40") & PutRange(d, call, 0x54, 0x68, "D 54-68") &
+             PutRange(d, call, 0x6C, 0x190, "D 6C-190");
+    ok &= PutRange(d, rack, 0x3C, 0x40, "D delivery") & PutRange(d, rack, 0x98, 0xB0, "D payload and package") & PutRange(d, rack, 0xB8, 0xBC, "D hud") &
+          PutRange(d, rack, 0x104, 0x108, "D traits") & PutRange(d, rack, 0x170, 0x171, "D beacon flags");
+    /* O: the Resupply's row with the rack's delivery and Call In Destroyer's origin, call-in type and cooldown type */
+    ok &= PutRange(o, rack, 0x3C, 0x40, "O delivery") & PutRange(o, rack, 0x98, 0xB0, "O payload and package") & PutRange(o, rack, 0x104, 0x108, "O traits") &
+          PutRange(o, rack, 0x170, 0x171, "O beacon flags") & PutRange(o, call, 0x70, 0x78, "O origin and call-in type") & PutRange(o, call, 0x94, 0x98, "O cooldown type");
+    Log(ok ? "the test racks are set" : "the test racks: some writes failed (see above)");
+    Row("Rack Test D now", d);
+    Row("Rack Test O now", o);
 }
 
 /* ---- the game thread -------------------------------------------------------------------------------------------- */
@@ -415,9 +434,9 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     {
         HfStratagem d = {sizeof d}, o = {sizeof o};
-        d.base = 123; d.name = "yui/stratagem-probe/rack-test-d"; d.title = "Rack Test D"; d.code = "DUDUDUL"; d.uses = 5; d.cooldown = 5;
-        d.description = "Research: a copy of Call In Destroyer that drops the reward ammo rack.";
-        o.base = 109; o.name = "yui/stratagem-probe/rack-test-o"; o.title = "Rack Test O"; o.code = "DUDUDUR"; o.uses = 5; o.cooldown = 5;
+        d.base = 33; d.name = "yui/stratagem-probe/rack-test-d"; d.title = "Rack Test D"; d.code = "DUDUDUL"; d.uses = 5; d.cooldown = 5;
+        d.description = "Research: Call In Destroyer's settings, dropping the reward ammo rack.";
+        o.base = 33; o.name = "yui/stratagem-probe/rack-test-o"; o.title = "Rack Test O"; o.code = "DUDUDUR"; o.uses = 5; o.cooldown = 5;
         o.description = "Research: the reward ammo rack with Call In Destroyer's origin.";
         g_typeD = api->add_stratagem(mod, &d);
         g_typeO = api->add_stratagem(mod, &o);
