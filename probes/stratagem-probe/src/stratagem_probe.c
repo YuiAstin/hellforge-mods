@@ -3,7 +3,7 @@
  *
  * A stratagem is delivered where its beacon was activated: game.dll+0x6ABDB0 (ActivateStratagemBeacon, SDK reference:
  * "hook or call"; HellForge's HF_ON_STRATAGEM comes from it) takes the beacon's position and starts the delivery.
- * This probe hooks it and, for the Resupply (type 33) you throw, in the mode Ctrl+Alt+F3 picks:
+ * This probe hooks it and, for every Resupply (type 33) thrown, in the mode stratagem-probe.ini sets (mode = 0, 1 or 2):
  *   0 observe    logs the call (its arguments, the beacon record's first bytes before and after) and changes nothing
  *   1 redirect   passes another position: the nearest reinforcement-pod site that has had none (Commando), else 20 m
  *                east of the beacon (any mission). Does the pod land there instead?
@@ -11,7 +11,9 @@
  *                pods arrive from one throw?
  * (default 1). Every other stratagem is only logged.
  *
- * After each beacon it follows what spawns within 300 m of the beacon and of the position(s) it asked for, for 25 s:
+ * 0.2.1: every Resupply is taken (0.2.0 took only "yours" and compared the thrower, a player entity, with your Helldiver:
+ * none was ever yours), and the mode is the ini's (Ctrl+Alt+F3 flipped by itself while stratagems were being called).
+ * After each beacon it follows what spawns within 60 m of the beacon and of the position(s) it asked for, for 25 s:
  * where each lands (stops moving) and how far from the asked position. Everything that spawns within 8 m of you is
  * logged too (the thrown ball, for a later "call it without throwing" test).
  *
@@ -35,14 +37,14 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
 static int g_ready;
 static double g_now;
 static unsigned g_lines;
-#define LOG_CAP 600
+#define LOG_CAP 2000
 #define Log(...) do { if (g_lines++ < LOG_CAP) hf->log(self, __VA_ARGS__); else if (g_lines == LOG_CAP + 1) hf->log(self, "log cap reached: quiet from here"); } while (0)
 
 static uint32_t Word(const uint8_t* p) { uint32_t v; memcpy(&v, p, 4); return v; }
@@ -177,10 +179,9 @@ static uint64_t Detour(void* manager, int32_t element, uint32_t thrower, const f
 {
     float p[3] = {0, 0, 0};
     if (position) memcpy(p, position, 12);
-    uint32_t me = atomic_load(&g_avatar);
-    int mine = !me || thrower == me;
+    int mine = 1;   /* every Resupply (solo or host) */
     Log("beacon: type %u by entity %u%s at %.1f %.1f %.1f | manager %p element %d record %p | %llx %llx %llx %llx", type, thrower,
-        mine ? " (you)" : "", p[0], p[1], p[2], manager, element, record, (unsigned long long)s7, (unsigned long long)s8,
+        "", p[0], p[1], p[2], manager, element, record, (unsigned long long)s7, (unsigned long long)s8,
         (unsigned long long)s9, (unsigned long long)s10);
     AddWatch(p, "the beacon");
     if (type != RESUPPLY || !mine || s_mode == 0 || !position)
@@ -281,7 +282,6 @@ static void TestRows(void)
 
 /* ---- the game thread -------------------------------------------------------------------------------------------- */
 static int g_inMission;
-static int Down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
 static void NewSpawns(void)
 {
     unsigned head = atomic_load(&g_ringHead);
@@ -309,11 +309,19 @@ static void NewSpawns(void)
             if (g_now < g_watch[k].until)
             {
                 float d = Flat(p, g_watch[k].pos);
-                if (d < 300 && d < wd) { wd = d; w = (int)k; }
+                if (d < 60 && d < wd) { wd = d; w = (int)k; }
             }
         int nearMe = haveMe && Dist(p, me) < 8 && e != av;
         if (w < 0 && !nearMe) continue;
         if (w < 0 && nearTold++ >= 80) continue;
+        if (w >= 0)
+        {
+            static uint64_t seenRes[64];
+            static unsigned seenN[64];
+            unsigned h = (unsigned)(res ^ (res >> 29)) % 64;
+            if (seenRes[h] != res) { seenRes[h] = res; seenN[h] = 0; }
+            if (++seenN[h] > 6) continue;
+        }
         if (w >= 0) Log("spawn: entity %u (%016llx) at %.1f %.1f %.1f, %.0f m across from %s", e, (unsigned long long)res, p[0], p[1], p[2], wd, g_watch[w].label);
         else Log("spawn near you: entity %u (%016llx) at %.1f %.1f %.1f, %.1f m from you", e, (unsigned long long)res, p[0], p[1], p[2], Dist(p, me));
         Track* t = &g_track[g_ntrack++ % MAXTRACK];
@@ -356,7 +364,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         memset(g_watch, 0, sizeof g_watch);
         memset(g_track, 0, sizeof g_track);
         g_ringTail = atomic_load(&g_ringHead);
-        Log(m ? "mission start: mode %d (%s); Ctrl+Alt+F3 changes it" : "mission end", s_mode, kMode[s_mode]);
+        Log(m ? "mission start: mode %d (%s; stratagem-probe.ini)" : "mission end", s_mode, kMode[s_mode]);
     }
     TestRows();
     if (!m) return;
@@ -368,16 +376,6 @@ static void Tick(HfMod* mod, float dt, void* user)
         }
     NewSpawns();
     Follow();
-    static int was;
-    int key = Down(VK_F3) && Down(VK_CONTROL) && Down(VK_MENU);
-    if (key && !was)
-    {
-        s_mode = s_mode == 1 ? 2 : s_mode == 2 ? 0 : 1;
-        int left = 0;
-        for (int i = 0; i < g_nsite; i++) left += g_site[i].placed && !g_site[i].served;
-        Log("mode %d: %s (Resupply only; %d pod sites known, %d not yet served)", s_mode, kMode[s_mode], g_nsite, left);
-    }
-    was = key;
 }
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {
@@ -390,7 +388,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     if (hf->hook_ex(self, game + 0x6ABDB0, (void*)Detour, (void**)&g_orig, 0) || !g_orig)
     { g_ready = -1; g_orig = NULL; Log("REFUSED: ActivateStratagemBeacon could not be hooked"); return; }
     g_ready = 1;
-    Log("ready: ActivateStratagemBeacon hooked; mode %d (%s); Ctrl+Alt+F3: redirect -> copies -> observe", s_mode, kMode[s_mode]);
+    Log("ready: ActivateStratagemBeacon hooked; mode %d (%s)", s_mode, kMode[s_mode]);
 }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
@@ -399,6 +397,21 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 15) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     Log("Stratagem Probe " VERSION " (research: where a Resupply is delivered)");
+    {
+        char path[1024], line[256];
+        snprintf(path, sizeof path, "%s\\stratagem-probe.ini", api->mod_folder(mod));
+        FILE* f = fopen(path, "r");
+        if (f)
+        {
+            while (fgets(line, sizeof line, f))
+            {
+                int v;
+                if (sscanf(line, " mode = %d", &v) == 1 && v >= 0 && v <= 2) s_mode = v;
+            }
+            fclose(f);
+        }
+        Log("settings: %s %s: mode %d (%s)", f ? "read" : "no", path, s_mode, kMode[s_mode]);
+    }
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     {
         HfStratagem d = {sizeof d}, o = {sizeof o};
