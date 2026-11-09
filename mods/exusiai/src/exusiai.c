@@ -38,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.13"
+#define VERSION "0.2.14"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -392,13 +392,39 @@ static int DeadLife(uint32_t life)
     for (int i = 0; i < g_ndeadLife; i++) if (g_deadLife[i] == life) return 1;
     return 0;
 }
+/* 0.2.14: the kill event comes while the victim still has its living state (1 on every enemy): 0.2.13 learned 1 as
+ * dead at the first kill and her guns then shot nothing until the game restarted. Now the state is read again a second
+ * after the kill, and only a state the victim changed to is learned as dead. */
+#define PENDKILL 16
+static struct { uint32_t e, life0; double at; } g_pendKill[PENDKILL];
+static unsigned g_pendKillN;
 static void LearnDeadLife(uint32_t e)
 {
     int32_t hp = 0;
     uint32_t life = 0;
-    if (!HealthOf(e, &hp, &life) || !life || DeadLife(life) || g_ndeadLife >= 8) return;
-    g_deadLife[g_ndeadLife++] = life;
-    Log("a kill showed life state %u (health %d left): an enemy in it is dead to her guns", life, hp);
+    if (!HealthOf(e, &hp, &life)) return;
+    unsigned i = g_pendKillN++ % PENDKILL;
+    g_pendKill[i].e = e; g_pendKill[i].life0 = life; g_pendKill[i].at = g_now + 1.0;
+}
+static void PendingKills(void)
+{
+    for (unsigned i = 0; i < PENDKILL; i++)
+    {
+        if (!g_pendKill[i].e || g_now < g_pendKill[i].at) continue;
+        uint32_t e = g_pendKill[i].e, life0 = g_pendKill[i].life0, life = 0;
+        int32_t hp = 0;
+        g_pendKill[i].e = 0;
+        if (!HealthOf(e, &hp, &life)) continue;   /* gone already */
+        if (!life || life == life0)
+        {
+            static unsigned told;
+            if (told++ < 3) Log("a kill left life state %u as it was a second later (health %d): not taken as dead", life, hp);
+            continue;
+        }
+        if (DeadLife(life) || g_ndeadLife >= 8) continue;
+        g_deadLife[g_ndeadLife++] = life;
+        Log("a kill changed life state %u -> %u (health %d left): an enemy in state %u is dead to her guns", life0, life, hp, life);
+    }
 }
 static int Living(uint32_t e, int32_t* hp)
 {
@@ -1091,6 +1117,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
     if (!g_inMission || !kb_kit_on) return;   /* (standing by: another kit is picked) */
+    PendingKills();
     MyItems();
     static int prev[3];
     int focused = Focused();
