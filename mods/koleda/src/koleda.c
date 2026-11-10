@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.10"
+#define VERSION "0.2.11"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -352,6 +352,13 @@ static int BodyOffset(uint32_t unit, const float root[3], float off[3])
     }
     if (used < 2) return 0;
     for (int k = 0; k < 3; k++) { qsort(v[k], used, sizeof(float), CmpF); off[k] = v[k][used / 2]; }
+    /* (Yui, 2026-11-11: the guns shot the floor under an Illuminate spawner) a tall thing whose nodes cluster at its
+     * foot (a structure: most of them on the ground, its body metres up): half its height instead (its 90th-percentile
+     * node, so a stray effect node far up does not count) */
+    {
+        float top = v[2][(used * 9) / 10];
+        if (top > 3.0f && off[2] < 0.35f * top) off[2] = 0.5f * top;
+    }
     if (off[2] < 0.3f) off[2] = 0.3f;
     g_body[h].unit = unit; g_body[h].at = g_now; memcpy(g_body[h].off, off, 12);
     return 1;
