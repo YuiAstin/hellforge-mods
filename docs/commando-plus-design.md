@@ -121,3 +121,7 @@ Calling in the Super Destroyer is cashing in: cleared bases bank ammo boxes, and
   +0x58), set as the Destroyer arrives and cleared as it leaves (network property a3df1643, game.dll+0x67181B). 0.5.5
   logs the window opening and closing for the record's stratagems; `destroyer_window` keeps the bytes that opened set
   until that many seconds after the window opened (the caches too), then clears them. The lockout is only logged now.
+- 0.5.5 played (Yui): both calls lasted exactly 60 s; the bytes were never read set (the manager or its map is not
+  where 0.5.5 looked). 0.5.6 hooks the check itself (game.dll+0x671440; called by the availability check, the beacon
+  and the HUD): from each lockout's end until `destroyer_window` s after it, a stratagem it refuses (but Call In
+  Destroyer and Reinforce) answers usable. Uses and cooldowns are checked by the game before it.
