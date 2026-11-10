@@ -50,7 +50,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.6.2"
+#define VERSION "0.6.3"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -1050,10 +1050,35 @@ static int WindowLength(void)
     return w > s_windowMax ? s_windowMax : w;
 }
 static unsigned g_holdTold;
+/* 0.6.3 (Yui: the 158 s one was no respawn: the sabotage objective, an ammo cache blown up, brought the Destroyer back):
+ * a window opens whenever the game's own does, whatever brought it (the drop-in, a call, an objective): told by the
+ * check itself, as a stratagem it refused (one that needs the Destroyer) answers usable again after more than 10 s of
+ * none answering usable. A gap of 10 s or less (a lockout inside a window: a respawn) is the same window. */
+static uint8_t g_needs[256];     /* types the check has refused this mission (they need the Destroyer) */
+static double g_gameUsableAt = -1000;
+static unsigned g_windows;
 static uint8_t Usable(void* mgr, uint32_t player, uint32_t type, uint32_t* reason)
 {
     uint8_t r = g_usable(mgr, player, type, reason);
-    if (r || !g_applied || type == CALL_IN || type == 124 || g_holdUntil <= 0 || g_now < g_holdFrom || g_now >= g_holdUntil) return r;
+    if (type == CALL_IN || type == 124 || type >= 256) return r;
+    if (!r) g_needs[type] = 1;
+    else if (g_needs[type])
+    {
+        if (g_now - g_gameUsableAt > 10)
+        {
+            g_holdFrom = g_now;
+            g_holdUntil = g_now + WindowLength();
+            g_holdBases = g_basesCleared;
+            g_holdTold = 0;
+            g_windows++;
+            Log("destroyer window: the game's window opened (%s, %.0f s into the mission): it runs %d s (%u bases cleared)",
+                g_cidCallAt > 0 && g_now - g_cidCallAt < 15 ? "a Call In Destroyer call" : g_now - g_missionAt < 30 ? "the drop-in" : "no call: an objective?",
+                g_now - g_missionAt, WindowLength(), g_basesCleared);
+        }
+        g_gameUsableAt = g_now;
+        return r;
+    }
+    if (r || !g_applied || g_holdUntil <= 0 || g_now < g_holdFrom || g_now >= g_holdUntil) return r;
     if (g_lockoutOn) return r;   /* a respawn's lockout inside the window stays the game's */
     if (reason) *reason = 0;
     if (g_holdTold++ < 3) Log("destroyer window: type %u answered usable, %.0f s after the window opened (past the game's 60 s)", type, g_now - g_holdFrom);
@@ -1090,16 +1115,7 @@ static void DestroyerTimer(void)
             /* 0.6.2 (played 2026-11-10): a lockout also comes with a respawn (the reinforced Helldiver's drop), which opens
              * no window (the game refused every stratagem after it): only the drop-in's (the mission's first 30 s) and a
              * Call In Destroyer call's open one. (The drop-in comes before Commando is told: Usable checks g_applied.) */
-            int opens = g_now - g_missionAt < 30 || (g_cidCallAt > 0 && g_now - g_cidCallAt < 10);
-            if (!opens) Log("destroyer window: a lockout without a Call In Destroyer call (a respawn?): no window");
-            if (g_usable && left <= 30 && opens)
-            {
-                g_holdFrom = g_now + left;
-                g_holdUntil = g_holdFrom + WindowLength();
-                g_holdBases = g_basesCleared;
-                g_holdTold = 0;
-                Log("destroyer window: the window opens for %d s (%u bases cleared)", WindowLength(), g_basesCleared);
-            }
+            /* (0.6.3: the window opens in Usable, when the game's own does) */
         }
         else if (left > 0 && g_now - g_dsTold[i] >= 15) { g_dsTold[i] = g_now; Log("destroyer window: slot %d: lockout %.1f s left (+0x1FAE8 %.1f)", i, left, other); }
         else if (left <= 0 && g_dsLast[i] > 0) Log("destroyer window: slot %d: the lockout is over, %.0f s after it began", i, g_now - g_dsSince[i]);
@@ -1379,7 +1395,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         g_checkTries = g_applied = g_commando = g_timerTries = 0;
         g_timerAt = g_recheckAt = 0;
         g_checkAt = m ? g_now + 8 : 0;
-        if (m) { CashReset(0); CacheRefill(); g_missionAt = g_now; memset(g_cidMarks, 0, sizeof g_cidMarks); memset(g_dsLast, 0, sizeof g_dsLast); g_cidCallAt = 0; g_holdFrom = g_holdUntil = 0; }
+        if (m) { CashReset(0); CacheRefill(); g_missionAt = g_now; memset(g_cidMarks, 0, sizeof g_cidMarks); memset(g_dsLast, 0, sizeof g_dsLast); g_cidCallAt = 0; g_holdFrom = g_holdUntil = 0; memset(g_needs, 0, sizeof g_needs); g_gameUsableAt = -1000; }
         Log(m ? "mission start: the stratagem record is read in 8 s" : "mission end");
     }
     if (!m) return;

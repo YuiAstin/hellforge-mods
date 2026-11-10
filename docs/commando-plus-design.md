@@ -138,3 +138,8 @@ stretches it. `destroyer_window` is gone.
 - 0.6.1 played (Yui): mostly right, but a 5 s lockout 158 s in (no Call In Destroyer call: a respawn) opened a second
   75 s window. 0.6.2: only the drop-in's lockout (the mission's first 30 s) and a call's open a window; a lockout inside
   a window stays the game's.
+- Yui: the 158 s lockout was no respawn: blowing up the sabotage ammo caches (a sub-objective) brought the Destroyer
+  back for a window of the game's own. 0.6.3: a window opens whenever the game's does, told by the check itself (a
+  stratagem it refused answers usable again after more than 10 s with none usable); a gap of 10 s or less (a lockout
+  inside a window) is the same window. So the drop-in, every call and every objective that brings the Destroyer get
+  the bases' bonus.
