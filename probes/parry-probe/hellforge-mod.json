@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.parry-probe",
   "name": "Parry Probe (research)",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Research for Texas the Omertosa's parry: press right-click just before a hit lands (any weapon; 0.3 s window). Every hit on you is logged with how long after your last right-click press it came; a press within the window cancels the hit, teleports you behind the attacker and strikes it, with a slash of harmless laser bolts whose look changes after each slash (Quasar short-lived, Quasar, Talon). F10 / F11 still cycle the window and look. Host or solo. Turn off when done.",
   "gameplay": false,
   "code": {

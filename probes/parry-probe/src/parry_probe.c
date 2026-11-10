@@ -32,7 +32,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.2"
+#define VERSION "0.1.3"
 #define BUILD "25480438"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
@@ -66,19 +66,38 @@ typedef struct Counter { uint32_t dealer, owner, kind; float origin[3], at[3]; d
 static Counter g_counter;
 static atomic_int g_counterReady;
 static atomic_ullong g_parryUntilMs;     /* the damage event's backstop cancels hits until then */
+#define INVULN_MS 1000
+static atomic_ullong g_invulnUntilMs;
+static unsigned g_invulnLogged;
 static int HitTaken(const uint8_t* h, void* result, unsigned long long now)
 {
     unsigned long long press = atomic_load(&g_pressMs);
     double dt = press ? (double)(now - press) / 1000.0 : 99;
     int armed = Armed(), parry = armed && dt <= kWindows[g_window];
-    uint32_t kind = Word(h), dealer = Word(h + 0x80), owner = Word(h + 0x100);
+    uint32_t kind = Word(h), dealer = Word(h + 0x80), owner = Word(h + 0x100), me = atomic_load(&g_avatar);
+    /* 0.1.3 (Yui: bleeding from an injured torso set the parry off): a hit she deals herself (bleeding: dealer and owner
+     * are her own entity) is no attack: never parried, never counted */
+    if (me && (dealer == me || owner == me))
+    {
+        static unsigned told;
+        if (told++ < 3) Log("hit on her: kind %u dealt by herself (entity %u: bleeding): not an attack, ignored", kind, me);
+        return 0;
+    }
+    /* 0.1.3 (Yui): after a perfect parry she takes no hit for INVULN_MS (the hit's other parts, and the pack around her) */
+    if (now < atomic_load(&g_invulnUntilMs))
+    {
+        memset(result, 0, RESULT_SIZE);
+        if (g_invulnLogged++ < 40) Log("hit on her: kind %u, dealer %u: nulled (invulnerable after the parry)", kind, dealer);
+        return 1;
+    }
     if (g_hitsLogged++ < 80)
         Log("hit on her: kind %u, dealer %u, owner %u; %.3f s after her right-click press%s%s", kind, dealer, owner, dt, armed ? "" : " (not armed: no melee)",
             parry ? ": PERFECT PARRY" : armed && dt < 1 ? ": too late" : "");
     if (!parry) { if (armed && dt < 1) g_misses++; return 0; }
     memset(result, 0, RESULT_SIZE);
     g_parries++;
-    atomic_store(&g_parryUntilMs, now + 150);
+    atomic_store(&g_parryUntilMs, now + INVULN_MS);
+    atomic_store(&g_invulnUntilMs, now + INVULN_MS);
     if (!atomic_load(&g_counterReady))
     {
         g_counter.dealer = dealer;
