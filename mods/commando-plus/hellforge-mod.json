@@ -2,9 +2,9 @@
   "format": 1,
   "id": "yui.commando-plus",
   "name": "Commando Plus",
-  "version": "0.6.4",
+  "version": "0.7.0",
   "icon": "icon.png",
-  "description": "TEST BUILD: untested in game. Commando missions made a little more forgiving, each option in commando-plus.ini: no mission timer, free Resupply calls at the drop-in (0 to 2), extra uses of the Super Destroyer call-in, more stims and grenades in point-of-interest caches, and outpost caches: every enemy base cleared banks ammo boxes, called in by the Outpost Cache stratagems (a pod of 8, and a small one for the rest; in Commando while the Super Destroyer is overhead). The Super Destroyer stays 15 s longer for every base cleared (up to 3 minutes). A banner shows the time bought past the game's 60 s (needs Bingus Shared Loader and HD2Runtime). every_mission 1 applies them to every mission. Host or solo.",
+  "description": "Commando missions made a little more forgiving, each option in commando-plus.ini: no mission timer, free Resupply calls at the drop-in (0 to 2), extra uses of the Super Destroyer call-in, and outpost caches: every enemy base cleared banks ammo boxes, called in by the Outpost Cache stratagems (a pod of 8, and a small one for the rest; in Commando while the Super Destroyer is overhead). The Super Destroyer stays 15 s longer for every base cleared (up to 3 minutes). A banner shows the time bought past the game's 60 s (needs Bingus Shared Loader and HD2Runtime). every_mission 1 applies them to every mission. Host or solo.",
   "gameplay": true,
   "code": {
     "dll": "commando_plus.dll",

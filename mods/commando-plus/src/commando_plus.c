@@ -49,7 +49,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.6.4"
+#define VERSION "0.7.0"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -1359,7 +1359,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     self = mod;
     if (!api || api->version < 15 || api->size < offsetof(HfApi, stats_source) + sizeof api->stats_source) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
-    Log("Commando Plus " VERSION " (TEST BUILD; SDK %u, game " BUILD ")", api->version);
+    Log("Commando Plus " VERSION " (SDK %u, game " BUILD ")", api->version);
     LoadSettings();
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) { Log("REFUSED: the game-loaded event"); return 1; }
     RegisterCache();
