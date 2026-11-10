@@ -37,7 +37,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.5"
+#define VERSION "0.3.6"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -261,6 +261,13 @@ static uint64_t Detour(void* manager, int32_t element, uint32_t thrower, const f
 
 /* ---- 0.2.0: the two test racks ---------------------------------------------------------------------------- */
 static uint32_t g_typeD, g_typeO, g_typeU, g_typeX;
+static uintptr_t g_rowU, g_rowX;
+static void MissionRows(int on)
+{
+    uint32_t u = on ? 1 : 3, x = on ? 0 : 1;
+    if (g_rowU) Log("Rack Test U +0x80 -> %u: %s", u, hf->write(g_rowU + 0x80, &u, 4) ? "not written" : "written");
+    if (g_rowX) Log("Rack Test X +0xBC -> %u: %s", x, hf->write(g_rowX + 0xBC, &x, 4) ? "not written" : "written");
+}
 static int g_rowsDone;
 static void Row(const char* name, uintptr_t row)
 {
@@ -375,7 +382,11 @@ static void TestRows(void)
               PutRange(all[i], call, 0x94, 0x98, "cooldown type") & PutRange(all[i], call, 0xB8, 0xBC, "hud");
     ok &= PutRange(d, call, 0x08, 0x28, "D 08-28");
     ok &= PutRange(o, call, 0x34, 0x3C, "O 34-3C") & PutRange(o, call, 0x58, 0x68, "O 58-68") & PutRange(o, call, 0x6C, 0x70, "O 6C-70");
-    ok &= PutRange(u, call, 0x78, 0x94, "U 78-94");
+    /* 0.3.6: U's block (+0x78..+0x94) hid it; the only value there that differs is +0x80 (Call In Destroyer 1, the
+     * racks 3). So U keeps 3 for the loadout, and gets 1 only while a mission runs (written at mission start, put back at
+     * the end): it can be picked, then carries Call In Destroyer's +0x80 in the mission. X does the same with +0xBC
+     * (Call In Destroyer 0, the racks 1), the other loadout-block value that differs. */
+    g_rowU = u; g_rowX = x;
     ok &= PutRange(x, call, 0x108, 0x190, "X 108-190");
     Log(ok ? "the test racks are set" : "the test racks: some writes failed (see above)");
     Row("Rack Test D now", d);
@@ -470,6 +481,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         memset(g_track, 0, sizeof g_track);
         g_ringTail = atomic_load(&g_ringHead);
         Log(m ? "mission start: mode %d (%s; stratagem-probe.ini)" : "mission end", s_mode, kMode[s_mode]);
+        MissionRows(m);
     }
     TestRows();
     if (!m) return;
