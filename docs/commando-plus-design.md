@@ -115,3 +115,9 @@ Calling in the Super Destroyer is cashing in: cleared bases bank ammo boxes, and
   usable only while the player's float at [game+0x3326340] + 0x90 x slot + 0x1FAE4 is above 0: the Destroyer's time
   left (+0x1FAE0 a byte and +0x1FAE8 a float the HUD reads beside it). 0.5.3 logs it per slot and `destroyer_window`
   (61 to 600 s) sets it when it rises.
+- 0.5.4 played (Yui): that float at 180 locked every stratagem, Call In Destroyer too, until it was under 60... read
+  again, game.dll+0x671440 returns 1 for usable: the float is a lockout (5 s at the drop-in, the dropping animations),
+  and the window is a byte per stratagem, [ [game+0x33266D0] + 0x164 + index ] (index from the manager's type map at
+  +0x58), set as the Destroyer arrives and cleared as it leaves (network property a3df1643, game.dll+0x67181B). 0.5.5
+  logs the window opening and closing for the record's stratagems; `destroyer_window` keeps the bytes that opened set
+  until that many seconds after the window opened (the caches too), then clears them. The lockout is only logged now.

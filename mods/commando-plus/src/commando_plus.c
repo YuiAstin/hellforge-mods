@@ -48,7 +48,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.5.4"
+#define VERSION "0.5.5"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -1027,7 +1027,7 @@ static void DestroyerFrame(void)
             Log("destroyer window: +0x%X reached, %.0f s after the call (%.0f s into the mission)", k == 1 ? 0x18 : 0x20, g_now - g_cidCallAt, g_now - g_missionAt);
         }
 }
-/* 0.5.3 (Yui: the window is 1 minute, neither timer above): the lock itself (game.dll+0x671440, the availability check;
+/* (0.5.5: this float is the lockout before the window, not the window; see WindowBytes) 0.5.3: the lock itself (game.dll+0x671440, the availability check;
  * read in the game.dll dump, 2026-11-10): in a mission without the Destroyer (its state's +0x2D), a stratagem other
  * than Call In Destroyer / Reinforce is usable only while the player's float at [game+0x3326340] + 0x90 x slot +
  * 0x1FAE4 is above 0 (the HUD reads +0x1FAE0 / +0x1FAE8 beside it). So: the Destroyer's time left, per player slot.
@@ -1054,23 +1054,84 @@ static void DestroyerTimer(void)
         if (left > 0 && g_dsLast[i] <= 0)
         {
             g_dsSince[i] = g_dsTold[i] = g_now;
-            Log("destroyer window: player slot %d: the Super Destroyer is overhead, %.1f s left (+0x1FAE0 %u, +0x1FAE8 %.1f), %.0f s into the mission", i, left, b[8], other, g_now - g_missionAt);
-            /* 0.5.4: only after a Call In Destroyer call (0.5.3 stretched the 5 s it has at the drop-in to 180) */
-            int called = g_cidCallAt > 0 && g_now - g_cidCallAt < 20;
-            if (!called) Log("destroyer window: not after a Call In Destroyer call (the drop-in?): left as it is");
-            if (called && s_destroyerWindow > 0 && (float)s_destroyerWindow > left)
-            {
-                float w = (float)s_destroyerWindow;
-                int ok = !hf->write(base + 0x90u * i + 0x1FAE4, &w, 4);
-                if (ok && other > 0 && other < w) hf->write(base + 0x90u * i + 0x1FAE8, &w, 4);
-                Log("destroyer window: destroyer_window %d: its time left %s", s_destroyerWindow, ok ? "set" : "could NOT be set");
-                left = w;
-            }
+            Log("destroyer window: player slot %d: a stratagem lockout of %.1f s (+0x1FAE0 %u, +0x1FAE8 %.1f), %.0f s into the mission", i, left, b[8], other, g_now - g_missionAt);
         }
-        else if (left > 0 && g_now - g_dsTold[i] >= 15) { g_dsTold[i] = g_now; Log("destroyer window: slot %d: %.1f s left (+0x1FAE8 %.1f)", i, left, other); }
-        else if (left <= 0 && g_dsLast[i] > 0) Log("destroyer window: slot %d: the Super Destroyer has gone, %.0f s after it came", i, g_now - g_dsSince[i]);
+        else if (left > 0 && g_now - g_dsTold[i] >= 15) { g_dsTold[i] = g_now; Log("destroyer window: slot %d: lockout %.1f s left (+0x1FAE8 %.1f)", i, left, other); }
+        else if (left <= 0 && g_dsLast[i] > 0) Log("destroyer window: slot %d: the lockout is over, %.0f s after it began", i, g_now - g_dsSince[i]);
         g_dsLast[i] = left;
     }
+}
+/* 0.5.5 (Yui: with that time left at 180, every stratagem, Call In Destroyer too, was locked until it was under 60).
+ * Read again: game.dll+0x671440 returns 1 for usable. A stratagem whose row has +0x78 bit 0x80 (Commando's "needs the
+ * Destroyer"), in a mission whose state has +0x2D, is usable only when its byte [mgr + 0x164 + index] is 1 and that time
+ * left is 0 or less: the time left is a lockout (5 s at the drop-in: the dropping animations), not the window. The
+ * bytes (mgr [game+0x33266D0]; index from its type map at +0x58, as Lookup reads it) are the window: the game sets them
+ * as the Destroyer arrives (network property a3df1643, game.dll+0x67181B) and clears them as it leaves. Logged for the
+ * record's stratagems as they open and close; destroyer_window > 0 keeps the ones that opened set until that many
+ * seconds after they opened, then clears them. */
+#define STRATAGEM_MGR 0x33266D0u
+static int g_wOk = -1;
+static uint32_t g_wIdx[16], g_wType[16], g_wKeep[16], g_wNKeep;
+static int g_wOpen;                  /* the window: open (as the game has it) */
+static double g_wOpenedAt, g_wUntil; /* when it opened; destroyer_window's end (0: not held) */
+static unsigned g_wHeld;
+static void WindowBytes(void)
+{
+    if (g_wOk < 0)
+        g_wOk = hf->code_matches(game + 0x67178C, "48 8B 3D 3D 4F CB 02") && hf->code_matches(game + 0x671580, "0F B6 94 30 64 01 00 00") ? 1 : 0;
+    if (!g_wOk) { static int told; if (!told++) Log("destroyer window: game.dll+0x67178C / +0x671580 are not as researched: the window is not read"); return; }
+    uintptr_t mgr = Pointer(game + STRATAGEM_MGR), st;
+    uint32_t count = 0;
+    if (!mgr || !List(&st, &count)) return;
+    /* the record's types and their bytes */
+    uint32_t n = 0, open = 0;
+    uint8_t v[16];
+    for (uint32_t i = 0; i < count && n < 16; i++)
+    {
+        uint32_t t = 0, idx;
+        if (!ReadAt(st + 0x188 + i * 0x30u, &t, 4) || t == CALL_IN || t == 124 || !Lookup(mgr + 0x58, t, 4096, &idx) || idx > 1024) continue;
+        if (!ReadAt(mgr + 0x164 + idx, &v[n], 1)) continue;
+        g_wType[n] = t; g_wIdx[n] = idx;
+        open += v[n] != 0;
+        n++;
+    }
+    if (!n) return;
+    int nowOpen = open > 0;
+    if (g_wUntil > 0 && g_now < g_wUntil)
+    {
+        /* held: every byte kept at 1 */
+        static const uint8_t one = 1;
+        for (uint32_t i = 0; i < n; i++)
+        {
+            int keep = g_wType[i] == g_cacheType[0] || g_wType[i] == g_cacheType[1];   /* the caches, granted during it */
+            for (uint32_t k = 0; k < g_wNKeep && !keep; k++) keep = g_wKeep[k] == g_wType[i];
+            if (keep && !v[i] && !hf->write(mgr + 0x164 + g_wIdx[i], &one, 1)) { if (g_wHeld++ < 4) Log("destroyer window: type %u closed by the game %.0f s after the window opened: kept open", g_wType[i], g_now - g_wOpenedAt); }
+        }
+        return;
+    }
+    if (g_wUntil > 0)
+    {
+        static const uint8_t zero = 0;
+        for (uint32_t i = 0; i < n; i++)
+        {
+            int keep = g_wType[i] == g_cacheType[0] || g_wType[i] == g_cacheType[1];
+            for (uint32_t k = 0; k < g_wNKeep && !keep; k++) keep = g_wKeep[k] == g_wType[i];
+            if (keep && v[i]) hf->write(mgr + 0x164 + g_wIdx[i], &zero, 1);
+        }
+        Log("destroyer window: destroyer_window %d s is over: the stratagems are locked again", s_destroyerWindow);
+        g_wUntil = 0; g_wOpen = 0;
+        return;
+    }
+    if (nowOpen && !g_wOpen)
+    {
+        g_wOpenedAt = g_now; g_wHeld = 0; g_wNKeep = 0;
+        for (uint32_t i = 0; i < n; i++) if (v[i]) g_wKeep[g_wNKeep++] = g_wType[i];
+        Log("destroyer window: the window opened (%u of %u stratagems usable), %.0f s into the mission%s", open, n, g_now - g_missionAt,
+            g_cidCallAt > 0 ? "" : " (no Call In Destroyer call: the drop-in's)");
+        if (s_destroyerWindow > 0) { g_wUntil = g_now + s_destroyerWindow; Log("destroyer window: destroyer_window: held open %d s", s_destroyerWindow); }
+    }
+    else if (!nowOpen && g_wOpen) Log("destroyer window: the window closed, %.0f s after it opened", g_now - g_wOpenedAt);
+    g_wOpen = nowOpen;
 }
 static void OnDestroyerCall(const HfStratagemEvent* s)
 {
@@ -1249,6 +1310,7 @@ static void CashFrame(void)
     if (cid != cidSeen) { cidSeen = cid; g_cidCallAt = g_now; OnDestroyerCall(NULL); }
     DestroyerFrame();
     DestroyerTimer();
+    WindowBytes();
 }
 static void FixPods(void)
 {
@@ -1314,7 +1376,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         g_checkTries = g_applied = g_commando = g_timerTries = 0;
         g_timerAt = g_recheckAt = 0;
         g_checkAt = m ? g_now + 8 : 0;
-        if (m) { CashReset(0); CacheRefill(); g_missionAt = g_now; memset(g_cidMarks, 0, sizeof g_cidMarks); memset(g_dsLast, 0, sizeof g_dsLast); g_cidCallAt = 0; }
+        if (m) { CashReset(0); CacheRefill(); g_missionAt = g_now; memset(g_cidMarks, 0, sizeof g_cidMarks); memset(g_dsLast, 0, sizeof g_dsLast); g_cidCallAt = 0; g_wOpen = 0; g_wUntil = 0; }
         Log(m ? "mission start: the stratagem record is read in 8 s" : "mission end");
     }
     if (!m) return;
