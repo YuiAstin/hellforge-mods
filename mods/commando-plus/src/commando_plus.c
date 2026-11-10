@@ -48,7 +48,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.5.0"
+#define VERSION "0.5.1"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -88,6 +88,7 @@ static int s_poiExtra = 1;   /* 0.3.1: off by default: the hooked roll is the PO
 static int s_caches = 1, s_cacheSmall = 1, s_cacheLarge = 2, s_cacheReward = 0, s_baseRadius = 40;
 static int s_cashIn = 1, s_boxSmall = 4, s_boxLarge = 8;   /* 0.5.0: the cash-in (the Outpost Cache) */
 static int s_toPods = 0;                                     /* 0.5.0: resupply_to_pods */
+static int s_destroyerWindow = 0;                            /* 0.5.1 (test): Call In Destroyer's cooldown, s; 0 the game's */
 static int ReadSettings(const char* path)
 {
     char line[256];
@@ -119,6 +120,7 @@ static int ReadSettings(const char* path)
         else if (!strcmp(k, "cache_boxes_small")) { if (x >= 0 && x <= 24) s_boxSmall = x; }
         else if (!strcmp(k, "cache_boxes_large")) { if (x >= 0 && x <= 24) s_boxLarge = x; }
         else if (!strcmp(k, "resupply_to_pods")) s_toPods = x ? 1 : 0;
+        else if (!strcmp(k, "destroyer_window")) { if (x >= 0 && x <= 1800) s_destroyerWindow = x; }
     }
     fclose(f);
     return 1;
@@ -781,10 +783,11 @@ static int g_bigN = 8;             /* the boxes in a full pod */
 /* g_cacheRow (declared above): 0 not seen, 1 hidden (the Resupply's row searched), 2 filled, -1 refused */
 static int g_cachePkg;
 static uint8_t g_resRow[400];
+static uintptr_t g_resAt;          /* where it is: read again at each mission start */
 static atomic_int g_scan;         /* 0 not started, 1 running, 2 found, 3 not found */
 static int g_payN = 4, g_pending, g_pendingN;   /* g_bank (above): the boxes banked */
 static double g_pendingUntil, g_usesAt;
-static atomic_uint g_cacheCalls[2];
+static atomic_uint g_cacheCalls[2], g_cidCalls;
 static unsigned g_cacheCallsSeen[2];
 
 static int ResupplyRow(const uint8_t* r)
@@ -797,12 +800,15 @@ static int TakeResupplyRow(uintptr_t at, const char* where)
     uint8_t r[400];
     uint64_t pay[2] = {0, 0};
     if (!ReadAt(at, r, 400) || !ResupplyRow(r)) return 0;
-    if (Word(r + 0xA0) != 2 || !ReadAt((uintptr_t)Quad(r + 0x98), pay, 16) || pay[0] != RES_POD)
+    /* 0.5.1: its payload is three (pod, marker) pairs (6 entries; 0.5.0 asked for 2 and refused it) */
+    uint32_t n = Word(r + 0xA0);
+    if (n < 2 || n > 8 || (n & 1) || !ReadAt((uintptr_t)Quad(r + 0x98), pay, 16) || pay[0] != RES_POD)
     {
-        Log("cash-in: the Resupply's row (%s, %p) has payload %u x %016llx, not (the Resupply pod, its marker): refused", where, (void*)at, Word(r + 0xA0), (unsigned long long)pay[0]);
+        Log("cash-in: the Resupply's row (%s, %p) has payload %u x %016llx, not (the Resupply pod, its marker) pairs: refused", where, (void*)at, n, (unsigned long long)pay[0]);
         return -1;
     }
     memcpy(g_resRow, r, 400);
+    g_resAt = at;
     for (int n = 1; n <= 8; n++) { g_pay[n][0] = g_pod[n]; g_pay[n][1] = pay[1]; }
     if (pay[1] != POD_MARKER) Log("cash-in: the Resupply's marker is %016llx (researched %016llx): the game's taken", (unsigned long long)pay[1], (unsigned long long)POD_MARKER);
     Log("cash-in: the Resupply's row found (%s)", where);
@@ -883,12 +889,15 @@ static void SetPod(int n)
     if (row && !hf->write(row + 0x98, &p, 8)) g_payN = n;
 }
 static int Rest(void) { return g_bank % g_bigN; }
+static void DestroyerRow(void);
 /* the two stratagems' rows, once the game has loaded its stratagems (menu and mission) */
 static void CacheRowFrame(void)
 {
     static double next;
-    if (!g_cacheType[0] || !g_cacheType[1] || g_cacheRow < 0 || g_now < next) return;
+    if (g_now < next) return;
     next = g_now + 1;
+    if (hf->stratagem_row(g_cacheType[0])) DestroyerRow();   /* the stratagems are loaded */
+    if (!g_cacheType[0] || !g_cacheType[1] || g_cacheRow < 0) return;
     uintptr_t row[2] = {hf->stratagem_row(g_cacheType[0]), hf->stratagem_row(g_cacheType[1])};
     if (!row[0] || !row[1]) return;
     if (g_cacheRow == 0)
@@ -925,6 +934,109 @@ static void CacheRowFrame(void)
             if (!ok) g_cacheRow = -1;
         }
 }
+/* at each mission start: the Resupply's row read again (its pointers as the mission has them) and both rows filled */
+static void CacheRefill(void)
+{
+    uint8_t r[400];
+    if (g_cacheRow != 2 || !g_resAt || !ReadAt(g_resAt, r, 400) || !ResupplyRow(r)) return;
+    memcpy(g_resRow, r, 400);
+    for (int i = 0; i < 2; i++)
+    {
+        uintptr_t row = hf->stratagem_row(g_cacheType[i]);
+        if (!row || !FillCacheRow(row, i ? g_payN : g_bigN)) { Log("cash-in: %s's row could not be filled at the mission start", kCacheName[i]); g_cacheRow = -1; return; }
+    }
+}
+
+/* 0.5.1: the Super Destroyer's window (Yui: how long is it?). Call In Destroyer's row (type 123, stable id f8f90965;
+ * the probe: cooldown 120 s, +0x60 6.0, +0x64 5.0) and its entry on the record: at a call, +0x10 / +0x18 / +0x20 move
+ * (0.4.1's log: +0x18 = the call + ~119 s, +0x20 = the call + 5 s, on the clock [game+0x3326348]+0x18). The guess: the
+ * Destroyer stays while Call In Destroyer cools down (+0x68). Logged: the row at the menu, every call with each field
+ * as seconds from it, and when each is reached. destroyer_window > 0 writes that many seconds into +0x68 (a test). */
+#define CID_STABLE 0xF8F90965u
+static uintptr_t g_cidRow;
+static void DestroyerRow(void)
+{
+    static int done;
+    if (done) return;
+    uintptr_t p = Pointer(game + 0x37CB600u + 8u * CALL_IN);
+    uint8_t r[400];
+    if (!p || !ReadAt(p, r, 400)) return;
+    done = 1;
+    if (Word(r) != CALL_IN || Word(r + 4) != CID_STABLE) { Log("destroyer window: Call In Destroyer's row is not in the game's list (type %u, id %08x)", Word(r), Word(r + 4)); return; }
+    g_cidRow = p;
+    float f[8];
+    memcpy(f, r + 0x54, 4); memcpy(f + 1, r + 0x58, 4); memcpy(f + 2, r + 0x60, 4); memcpy(f + 3, r + 0x64, 4); memcpy(f + 4, r + 0x68, 4); memcpy(f + 5, r + 0x6C, 4);
+    Log("destroyer window: Call In Destroyer's row: call-in %.1f s, +0x58 %.1f, +0x60 (linger) %.1f, +0x64 %.1f, cooldown %.1f s, +0x6C %.1f; uses %d, cooldown type %u",
+        f[0], f[1], f[2], f[3], f[4], f[5], (int)Word(r + 0x50), Word(r + 0x94));
+    char line[400];
+    int at = 0;
+    for (unsigned o = 0x50; o < 0x190 && at < (int)sizeof line - 24; o += 4)
+    {
+        float v;
+        memcpy(&v, r + o, 4);
+        if (isfinite(v) && v >= 1.0f && v <= 3600.0f && v == (float)(int)v) at += snprintf(line + at, sizeof line - at, " +0x%X=%.0f", o, v);
+    }
+    Log("destroyer window: every whole number of seconds (1 to 3600) in its row:%s", at ? line : " none");
+    if (s_destroyerWindow > 0)
+    {
+        float w = (float)s_destroyerWindow;
+        int ok = !hf->write(p + 0x68, &w, 4);
+        Log("destroyer window: destroyer_window %d: its cooldown %s %.0f s (a test: does the Destroyer stay that long?)", s_destroyerWindow, ok ? "set to" : "could NOT be set to", w);
+    }
+}
+static uint64_t ClockNow(void)
+{
+    uintptr_t o = Pointer(game + 0x3326348u);
+    uint64_t t = 0;
+    return o && ReadAt(o + 0x18, &t, 8) ? t : 0;
+}
+static double g_tickRate;           /* clock ticks a second, measured */
+static uint64_t g_cidMarks[3];      /* +0x10, +0x18, +0x20 at the last call */
+static int g_cidTold[3];
+static double g_cidCallAt;
+static void DestroyerFrame(void)
+{
+    static double next, rateAt;
+    static uint64_t rateT;
+    if (g_now < next) return;
+    next = g_now + 0.25;
+    uint64_t now = ClockNow();
+    if (!now) return;
+    if (!g_tickRate)
+    {
+        if (!rateT) { rateT = now; rateAt = g_now; return; }
+        if (g_now - rateAt < 3) return;
+        g_tickRate = (double)(now - rateT) / (g_now - rateAt);
+        Log("destroyer window: the game's clock runs %.0f ticks a second", g_tickRate);
+        if (g_tickRate <= 0) g_tickRate = 0;
+        return;
+    }
+    uintptr_t st;
+    uint32_t count = 0;
+    if (!List(&st, &count)) return;
+    int slot = Find(st, count, CALL_IN);
+    uint8_t e[0x30];
+    if (slot < 0 || !ReadAt(st + 0x188 + (uint32_t)slot * 0x30u, e, sizeof e)) return;
+    uint64_t m[3] = {Quad(e + 0x10), Quad(e + 0x18), Quad(e + 0x20)};
+    if (m[0] != g_cidMarks[0] && m[0])
+    {
+        memcpy(g_cidMarks, m, sizeof m);
+        g_cidTold[0] = g_cidTold[1] = g_cidTold[2] = 0;
+        g_cidCallAt = g_now - ((double)now - (double)m[0]) / g_tickRate;
+        Log("destroyer window: Call In Destroyer called (%.0f s into the mission): its entry +0x18 is %.1f s after the call, +0x20 %.1f s (uses left %u)",
+            g_cidCallAt - g_missionAt, ((double)m[1] - (double)m[0]) / g_tickRate, ((double)m[2] - (double)m[0]) / g_tickRate, Word(e + 4));
+    }
+    for (int k = 1; k < 3; k++)
+        if (g_cidMarks[0] && !g_cidTold[k] && now >= g_cidMarks[k])
+        {
+            g_cidTold[k] = 1;
+            Log("destroyer window: +0x%X reached, %.0f s after the call (%.0f s into the mission)", k == 1 ? 0x18 : 0x20, g_now - g_cidCallAt, g_now - g_missionAt);
+        }
+}
+static void OnDestroyerCall(const HfStratagemEvent* s)
+{
+    Log("destroyer window: a Call In Destroyer beacon activated (%.0f s into the mission)", g_now - g_missionAt);
+}
 static void CacheUses(const char* why)
 {
     uintptr_t st;
@@ -955,6 +1067,7 @@ static void OnStratagem(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfStratagemEvent* s = (const HfStratagemEvent*)info;
     for (int i = 0; i < 2; i++) if (g_cacheType[i] && s->type == g_cacheType[i]) atomic_fetch_add(&g_cacheCalls[i], 1);
+    if (s->type == CALL_IN) atomic_fetch_add(&g_cidCalls, 1);
 }
 /* spawns watched for the cash-in and resupply_to_pods (event threads -> the game thread) */
 #define WATCHED 64
@@ -1080,6 +1193,10 @@ static void CashFrame(void)
         if (Rest()) SetPod(Rest());
     }
     if (g_usesAt > 0 && g_now >= g_usesAt) { g_usesAt = 0; CacheUses("after a call"); }
+    static unsigned cidSeen;
+    unsigned cid = atomic_load(&g_cidCalls);
+    if (cid != cidSeen) { cidSeen = cid; OnDestroyerCall(NULL); }
+    DestroyerFrame();
 }
 static void FixPods(void)
 {
@@ -1145,7 +1262,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         g_checkTries = g_applied = g_commando = g_timerTries = 0;
         g_timerAt = g_recheckAt = 0;
         g_checkAt = m ? g_now + 8 : 0;
-        if (m) { CashReset(0); g_missionAt = g_now; }
+        if (m) { CashReset(0); CacheRefill(); g_missionAt = g_now; memset(g_cidMarks, 0, sizeof g_cidMarks); }
         Log(m ? "mission start: the stratagem record is read in 8 s" : "mission end");
     }
     if (!m) return;

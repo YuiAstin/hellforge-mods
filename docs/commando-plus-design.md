@@ -96,3 +96,14 @@ Calling in the Super Destroyer is cashing in: cleared bases bank ammo boxes, and
   after a Resupply's beacon activates, its thrown ball's scene-graph world position is written every frame for 1.5 s, to
   the nearest Reinforcement Pods (their switch + 6 m) that have had none. Probe 0.3.1: the pod lands there.
 - 0.4's tests are gone: `pods_resupply` (the pods have no mount) and `racks_anytime` (the lock is not the granted byte).
+
+## 0.5.1
+
+- 0.5.0 never made the caches (played 2026-11-10): it asked the Resupply's payload for 2 entries; it has 6 (three
+  pod / marker pairs), so the row was refused and bases paid reward-rack calls. Now any even count of pairs is taken. The
+  row was found at once in the game's list (game.dll+0x37CB600 holds pointers to the rows), no scan needed. It is read
+  again at each mission start before both caches are filled.
+- The Super Destroyer's window (Yui: how long?): Call In Destroyer's row holds 6.0 (+0x60), 5.0 (+0x64) and 120 (its
+  cooldown, +0x68); its record entry's +0x18 lands ~119 s after a call (0.4.1's log). The wiki gives 1 minute. Logged
+  now: the row's numbers, each call, and when +0x18 / +0x20 are reached, to set against when stratagems lock.
+  `destroyer_window` (test, 0 = the game's) writes its cooldown.
