@@ -73,3 +73,23 @@ HD2Runtime lists it as blocked). So a cleared base pays out as a free call inste
 - 10 "bases" paid at once 20 s in: 10 bot fabricators read 0 health 2 s into the mission, as they spawned, 1100 m from
   Yui (health not set yet). 0.3.2: 0 health counts only after the spawner was seen above 0; one that never reads above
   0 by 20 s in leaves its base.
+
+## 0.5.0: the cash-in (Yui, 2026-11-09; built from Stratagem Probe 0.5.1)
+
+Calling in the Super Destroyer is cashing in: cleared bases bank ammo boxes, and one stratagem calls them in.
+
+- **Bank:** a small base 4 boxes, a large one 8 (`cache_boxes_small`, `cache_boxes_large`; `cash_in 0` keeps 0.4's
+  reward-rack calls).
+- **The Outpost Cache** (D U D U D U R): a copy of the B-1 Supply Pack whose settings row becomes the Resupply's (all but
+  type, id, names, code, uses and cooldown; the probe's Rack Test D). The Resupply's row is found once at the menu: the
+  game's list first, else a memory scan on a thread of its own (~30 s). It is hidden from the loadout and granted on the
+  record with uses = ceil(banked / 8). In Commando it is locked outside the Super Destroyer's window like every
+  stratagem but Call In Destroyer and Reinforce (the lock is by type: probe 0.2-0.4).
+- **Pods:** eight copies of the Resupply pod with 1 to 8 boxes (its HellpodRackComponentData: slots 4-7 take the box and
+  slot 0-3's other bytes, spawn count +0x22C). The row's payload names the pod for min(8, banked); after a call it is
+  switched once the called pod spawns. Probe 0.5.1: the 8-box pod brought 8 boxes. Pods under 4 boxes set only the
+  spawn count (unverified).
+- **`resupply_to_pods`** (off by default): the probe's redirect. ActivateStratagemBeacon (game.dll+0x6ABDB0) is hooked;
+  after a Resupply's beacon activates, its thrown ball's scene-graph world position is written every frame for 1.5 s, to
+  the nearest Reinforcement Pods (their switch + 6 m) that have had none. Probe 0.3.1: the pod lands there.
+- 0.4's tests are gone: `pods_resupply` (the pods have no mount) and `racks_anytime` (the lock is not the granted byte).
