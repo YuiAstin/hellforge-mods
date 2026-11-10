@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-10: Commando Plus 0.7.0 (first release)
+- Commando missions made a little more forgiving; every option is a setting in commando-plus.ini. Host or solo.
+- No mission timer in Commando, and one extra use of Call In Destroyer (0 to 3).
+- Outpost caches: every enemy base you clear (bug holes, fabricators, Illuminate spawners) banks ammo boxes, 4 for a small base and 8 for a large one. Two stratagems on your list call them in: the Outpost Cache drops a pod of 8 boxes, the Small Outpost Cache a pod of the rest. In Commando they work while the Super Destroyer is overhead, so calling it in is cashing in.
+- The Super Destroyer's window grows with the bases cleared: the game's 60 s plus 15 s a base, at most 3 minutes, after the drop-in and every call. Past the game's 60 s a banner at the top of the screen counts the time bought down (needs Bingus Shared Loader and HD2Runtime).
+- every_mission 1 applies the options to every mission, not only Commando.
+
 ## 2026-11-08: Voymastina 0.4.2 · Executor 0.3.0 (first release) · Lost Contact 0.4.1 · Lemuen 0.1.11
 
 ### Voymastina 0.4.2

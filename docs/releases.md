@@ -18,7 +18,7 @@ The released versions are the ones on Yui's PC (the same as on hf-mod.com), as o
 | Exusiai | (in test) | 0.2.11 | `exusiai-guns` (7d2bbee) | not ready: gun models, sounds |
 | Executor | 0.3.0 | – | main (merged 2026-11-08 from `executor-area-rounds`) | first release 2026-11-08: Nexus 18660, AyakaMods 5954 |
 | Voymastina | 0.4.2 | – | main | Nexus 18604 and AyakaMods 5922 updated to 0.4.2 (2026-11-08): the 0.4.1 zip shipped the PC's test ini (sin_fallback = 2: everyone got the free Sinbreaker); 0.4.2 ships the repo's ini. Stage every release with the repo's ini, never the PC's |
-| Commando Plus | (new) | 0.3.0 | `commando-plus` | not played yet |
+| Commando Plus | 0.7.0 | – | main (merged 2026-11-10 from `commando-plus`) | first release 2026-11-10 (0.6.4 as played, renumbered): Nexus and AyakaMods pages to be added |
 | Lemuen | 0.1.11 | – | main (merged 2026-11-08 from `lemuen-target`) | Nexus 18605 and AyakaMods 5923 updated from 0.1.6 to 0.1.11 (2026-11-08): crosshair lock, War Strider and Factory Strider; played: War Strider marked before Honesta Missio |
 | Veterancy System, Stat Tuner, Fire Mission, Primed Sure Footed, Extra Boosters | check on the PC | | | off in the current mod list: their released versions to read from the PC's mods folder |
 | Smooth GC (Lua) | check | | not in this repo | save a copy before 3 December if hf-mod.com is its only home |
