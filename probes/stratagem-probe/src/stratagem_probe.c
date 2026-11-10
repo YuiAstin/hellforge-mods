@@ -37,7 +37,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.4.2"
+#define VERSION "0.4.3"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -320,8 +320,16 @@ static int ScanRows(int n, const uint32_t* type, const uint32_t* stable, uintptr
  *   O the Resupply as it is          D the Resupply with four more boxes in its payload
  *   X the reward rack as it is       U the reward rack with four more boxes
  * Call each in a normal mission (no lockout there): does D bring eight boxes? */
-static uint8_t g_rowB1[4][400], g_rowRes[400], g_rowRack[400];
-static int g_haveRes, g_haveRack, g_saved;
+static uint8_t g_rowB1[4][400], g_rowRes[400], g_rowRack[400], g_rowEat[400], g_rowEatB[400];
+static int g_haveRes, g_haveRack, g_haveEat, g_haveEatB, g_saved;
+/* 0.4.3, Yui: the EAT-17 drops two launchers in one pod. Does its delivery carry more than one payload item, so a pod
+ * of it could carry the banked boxes? Its row (147) and the Surplus EAT booster's (15) are read too; at mission start:
+ *   O the EAT-17 as it is (two launchers)      D the EAT-17 with every launcher in its payload made a box
+ *   U as D, with four more boxes appended      X the Surplus EAT booster's stratagem as it is */
+#define EAT_ENTITY UINT64_C(0x80932FA0ED6901D3)
+#define BOX_ENTITY UINT64_C(0xA94913CA014F7579)
+static uint64_t g_payD[16], g_payU[16];
+static uint32_t g_nPayD, g_nPayU;
 static uintptr_t g_rows[4];
 static void TestRows(void)
 {
@@ -331,9 +339,28 @@ static void TestRows(void)
     g_rowsDone = 1;
     g_rows[0] = d; g_rows[1] = o; g_rows[2] = u; g_rows[3] = x;
     for (int i = 0; i < 4; i++) g_saved += ReadAt(g_rows[i], g_rowB1[i], 400);
-    static const uint32_t types[2] = {33, 109}, stables[2] = {0x33babe96u, 0x4d36b84cu};
-    uintptr_t at[2];
-    ScanRows(2, types, stables, at);
+    static const uint32_t types[4] = {33, 109, 147, 15}, stables[4] = {0x33babe96u, 0x4d36b84cu, 0xcb778090u, 0xdfb589b2u};
+    uintptr_t at[4];
+    ScanRows(4, types, stables, at);
+    g_haveEat = at[2] && ReadAt(at[2], g_rowEat, 400);
+    g_haveEatB = at[3] && ReadAt(at[3], g_rowEatB, 400);
+    if (g_haveEat) Row("EAT-17", at[2]); else Log("EAT-17's row: not found");
+    if (g_haveEatB) Row("Surplus EAT (the booster's)", at[3]); else Log("the Surplus EAT stratagem's row: not found");
+    if (g_haveEat)
+    {
+        uint32_t n = Word(g_rowEat + 0xA0);
+        uint64_t src = Quad(g_rowEat + 0x98);
+        if (n && n <= 8 && src && ReadAt((uintptr_t)src, g_payD, 8u * n))
+        {
+            int swapped = 0;
+            for (uint32_t i = 0; i < n; i++) if (g_payD[i] == EAT_ENTITY) { g_payD[i] = BOX_ENTITY; swapped++; }
+            memcpy(g_payU, g_payD, 8u * n);
+            for (uint32_t i = 0; i < 4; i++) g_payU[n + i] = BOX_ENTITY;
+            g_nPayD = n; g_nPayU = n + 4;
+            Log("EAT-17's payload: %u entries, %d launcher(s) made boxes", n, swapped);
+        }
+        else Log("EAT-17's payload: unreadable");
+    }
     g_haveRes = at[0] && ReadAt(at[0], g_rowRes, 400);
     g_haveRack = at[1] && ReadAt(at[1], g_rowRack, 400);
     if (g_haveRes) Row("Resupply", at[0]); else Log("Resupply's row: not found");
@@ -365,8 +392,21 @@ static void MissionRows(int on)
         Log("the racks: the B-1 rows put back (for the loadout)");
         return;
     }
-    if (g_haveRes) { FillRack(g_rows[1], g_rowRes, 1, "Rack Test O (the Resupply)"); FillRack(g_rows[0], g_rowRes, 1, "Rack Test D (the Resupply)"); }
-    if (g_haveRack) { FillRack(g_rows[3], g_rowRack, 1, "Rack Test X (the reward rack)"); FillRack(g_rows[2], g_rowRack, 1, "Rack Test U (the reward rack)"); }
+    if (g_haveEat)
+    {
+        FillRack(g_rows[1], g_rowEat, 1, "Rack Test O (the EAT-17)");
+        FillRack(g_rows[0], g_rowEat, 1, "Rack Test D (the EAT-17, boxes)");
+        FillRack(g_rows[2], g_rowEat, 1, "Rack Test U (the EAT-17, boxes + 4)");
+        if (g_nPayD)
+        {
+            uint64_t pd = (uint64_t)(uintptr_t)g_payD, pu = (uint64_t)(uintptr_t)g_payU;
+            hf->write(g_rows[0] + 0x98, &pd, 8); hf->write(g_rows[0] + 0xA0, &g_nPayD, 4);
+            hf->write(g_rows[2] + 0x98, &pu, 8); hf->write(g_rows[2] + 0xA0, &g_nPayU, 4);
+            Row("Rack Test D now", g_rows[0]);
+            Row("Rack Test U now", g_rows[2]);
+        }
+    }
+    if (g_haveEatB) FillRack(g_rows[3], g_rowEatB, 1, "Rack Test X (Surplus EAT)");
 }
 
 /* ---- the game thread -------------------------------------------------------------------------------------------- */
