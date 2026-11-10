@@ -85,9 +85,12 @@ Calling in the Super Destroyer is cashing in: cleared bases bank ammo boxes, and
   game's list first, else a memory scan on a thread of its own (~30 s). It is hidden from the loadout and granted on the
   record with uses = ceil(banked / 8). In Commando it is locked outside the Super Destroyer's window like every
   stratagem but Call In Destroyer and Reinforce (the lock is by type: probe 0.2-0.4).
+- **Two stratagems** (Yui 2026-11-10, so the player knows what a throw brings): the Outpost Cache always drops 8
+  boxes (uses: the full 8s banked); the Small Outpost Cache (D U D U D U L, 1 use while there is a rest) drops the boxes
+  past the last 8 (4 with the defaults).
 - **Pods:** eight copies of the Resupply pod with 1 to 8 boxes (its HellpodRackComponentData: slots 4-7 take the box and
-  slot 0-3's other bytes, spawn count +0x22C). The row's payload names the pod for min(8, banked); after a call it is
-  switched once the called pod spawns. Probe 0.5.1: the 8-box pod brought 8 boxes. Pods under 4 boxes set only the
+  slot 0-3's other bytes, spawn count +0x22C). The Small one's payload names the pod of the rest; after a call it is
+  switched once its pod spawns. Probe 0.5.1: the 8-box pod brought 8 boxes. Pods under 4 boxes set only the
   spawn count (unverified).
 - **`resupply_to_pods`** (off by default): the probe's redirect. ActivateStratagemBeacon (game.dll+0x6ABDB0) is hooked;
   after a Resupply's beacon activates, its thrown ball's scene-graph world position is written every frame for 1.5 s, to

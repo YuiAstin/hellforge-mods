@@ -13,7 +13,7 @@
  *                   base_radius m of each other (bug holes, bot fabricators, Illuminate spawners), noted as they spawn;
  *                   cleared: the last one closed (HF_ON_BUGHOLE), destroyed (HF_ON_KILL) or gone / at 0 health.
  *   cash_in         0.5.0 (default): instead, each base cleared banks ammo boxes (cache_boxes_small 4 / _large 8),
- *                   called in by one stratagem, the Outpost Cache, at most 8 boxes a pod (section "the cash-in" below)
+ *                   called in by the Outpost Cache (8 a pod) and the Small Outpost Cache (the rest) (section "the cash-in" below)
  *   resupply_to_pods  0.5.0 (off by default): a Resupply thrown in Commando lands at the Reinforcement Pods
  *   poi_extra       0.3.0: the loot caches at points of interest that hold stims or grenades come up poi_extra times as
  *                   often. The caches' tables are HellForge's own research (native/mod-loader/forge_credits.c, 0.4.0:
@@ -741,8 +741,9 @@ static void Recheck(void)
 }
 
 /* ---- 0.5.0: the cash-in (Yui, 2026-11-09; Stratagem Probe 0.5.1) ---------------------------------------------------- */
-/* Every base cleared banks ammo boxes (cache_boxes_small / _large); one stratagem, the Outpost Cache, calls them in, at
- * most 8 a pod. In Commando it can be thrown only while the Super Destroyer is overhead (without it the game unlocks only
+/* Every base cleared banks ammo boxes (cache_boxes_small / _large); two stratagems call them in: the Outpost Cache, a
+ * pod of 8 (uses: the full 8s banked), and the Small Outpost Cache, a pod of the rest (1 use while there is a rest;
+ * Yui 2026-11-10: which one is lit tells what a throw brings). In Commando they can be thrown only while the Super Destroyer is overhead (without it the game unlocks only
  * Call In Destroyer and Reinforce, by type): calling the Destroyer is cashing in.
  *   The stratagem: a copy of the B-1 Supply Pack (HellForge copies only pickable stratagems; the Resupply is not one)
  *   whose settings row becomes the Resupply's (found once by its type and stable id), all but its type, id, names, code,
@@ -751,9 +752,9 @@ static void Recheck(void)
  *   The pods: the Resupply pod (5052ec6a928ccf1a) holds its four boxes in its HellpodRackComponentData (eight 64-byte
  *   slots, spawn count +0x22C). Eight copies of it, 1 to 8 boxes: above 4, slot k takes the box and slot k-4's other 56
  *   bytes once the entities are ready (zero bytes crashed the game, probe 0.5.0); below 4, only the spawn count
- *   (unverified). The row's payload (pod, marker) names the pod for min(8, banked); after a call it is switched once
- *   the called pod has spawned (or 14 s later), so a call never changes the pod already on its way.
- *   Uses on the record: ceil(banked / 8), the entry appended as option 2's Resupply.
+ *   (unverified). The Outpost Cache's payload (pod, marker) names the 8-box pod; the Small one's the
+ *   pod of the rest, switched after a call once its pod has spawned (or 14 s later), so a pod on its way never changes.
+ *   The entries are appended to the record as option 2's Resupply.
  * resupply_to_pods (0.5.0, off by default; the probe's mode 1): a Resupply thrown in Commando lands at the nearest
  * Reinforcement Pods (their power switch, + 6 m) that have had none: the beacon (game.dll+0x6ABDB0, hooked behind
  * HellForge's own) follows the thrown ball (16f397ca5f51f271), so the ball's world position in the scene graph is
@@ -775,15 +776,16 @@ static HfEntityDef g_podDef[9];
 static char g_podName[9][48];
 static HfRef g_pod[9];
 static uint64_t g_pay[9][2];
-static uint32_t g_cacheType;
+static uint32_t g_cacheType[2];   /* the Outpost Cache (a full pod), the Small Outpost Cache (the rest) */
+static int g_bigN = 8;             /* the boxes in a full pod */
 /* g_cacheRow (declared above): 0 not seen, 1 hidden (the Resupply's row searched), 2 filled, -1 refused */
 static int g_cachePkg;
 static uint8_t g_resRow[400];
 static atomic_int g_scan;         /* 0 not started, 1 running, 2 found, 3 not found */
 static int g_payN = 4, g_pending, g_pendingN;   /* g_bank (above): the boxes banked */
 static double g_pendingUntil, g_usesAt;
-static atomic_uint g_cacheCalls;
-static unsigned g_cacheCallsSeen;
+static atomic_uint g_cacheCalls[2];
+static unsigned g_cacheCallsSeen[2];
 
 static int ResupplyRow(const uint8_t* r)
 {
@@ -853,7 +855,8 @@ static int PayloadOurs(uintptr_t row)
     uint64_t p = 0;
     return ReadAt(row + 0x98, &p, 8) && p >= (uint64_t)(uintptr_t)g_pay[1] && p <= (uint64_t)(uintptr_t)g_pay[8];
 }
-static int FillCacheRow(uintptr_t row)
+static const char* const kCacheName[2] = {"the Outpost Cache", "the Small Outpost Cache"};
+static int FillCacheRow(uintptr_t row, int pod)
 {
     uint8_t r[400], own[400];
     if (!ReadAt(row, own, 400)) return 0;
@@ -863,34 +866,36 @@ static int FillCacheRow(uintptr_t row)
     memcpy(r + 0x40, own + 0x40, 0x14);   /* code, code length, uses */
     float cd = CACHE_COOLDOWN;
     memcpy(r + 0x68, &cd, 4);
-    uint64_t p = (uint64_t)(uintptr_t)g_pay[g_payN];
+    uint64_t p = (uint64_t)(uintptr_t)g_pay[pod];
     uint32_t two = 2;
     memcpy(r + 0x98, &p, 8);
     memcpy(r + 0xA0, &two, 4);
     return !hf->write(row, r, 400);
 }
+/* the Small Outpost Cache's pod: n boxes (1 to 7, the boxes past the last full pod) */
 static void SetPod(int n)
 {
-    uintptr_t row = g_cacheRow == 2 ? hf->stratagem_row(g_cacheType) : 0;
+    uintptr_t row = g_cacheRow == 2 ? hf->stratagem_row(g_cacheType[1]) : 0;
     if (n < 1) n = 1;
-    if (n > 8) n = 8;
+    if (n > 7) n = 7;
     while (n > 4 && !g_pod[n]) n--;   /* a pod without a record of its own is not used */
     uint64_t p = (uint64_t)(uintptr_t)g_pay[n];
     if (row && !hf->write(row + 0x98, &p, 8)) g_payN = n;
 }
-/* the stratagem's row, once the game has loaded its stratagems (menu and mission) */
+static int Rest(void) { return g_bank % g_bigN; }
+/* the two stratagems' rows, once the game has loaded its stratagems (menu and mission) */
 static void CacheRowFrame(void)
 {
     static double next;
-    if (!g_cacheType || g_cacheRow < 0 || g_now < next) return;
+    if (!g_cacheType[0] || !g_cacheType[1] || g_cacheRow < 0 || g_now < next) return;
     next = g_now + 1;
-    uintptr_t row = hf->stratagem_row(g_cacheType);
-    if (!row) return;
+    uintptr_t row[2] = {hf->stratagem_row(g_cacheType[0]), hf->stratagem_row(g_cacheType[1])};
+    if (!row[0] || !row[1]) return;
     if (g_cacheRow == 0)
     {
         uint32_t one = 1;
-        int hid = !hf->write(row + 0x80, &one, 4);
-        Log("cash-in: the Outpost Cache (type %u) %s from the loadout", g_cacheType, hid ? "hidden" : "could NOT be hidden");
+        for (int i = 0; i < 2; i++)
+            Log("cash-in: %s (type %u) %s from the loadout", kCacheName[i], g_cacheType[i], !hf->write(row[i] + 0x80, &one, 4) ? "hidden" : "could NOT be hidden");
         g_cacheRow = 1;
         FindResupplyRow();
     }
@@ -899,33 +904,41 @@ static void CacheRowFrame(void)
         int s = atomic_load(&g_scan);
         if (s == 3) { g_cacheRow = -1; Log("cash-in: the Resupply's row was not found: cleared bases pay out reward ammo rack calls instead (a call for every 4 boxes)"); return; }
         if (s != 2) return;
-        if (!FillCacheRow(row)) { g_cacheRow = -1; Log("cash-in: the Outpost Cache's row could not be written: reward ammo rack calls instead"); return; }
+        g_bigN = 8;
+        while (g_bigN > 4 && !g_pod[g_bigN]) g_bigN--;
+        if (!FillCacheRow(row[0], g_bigN) || !FillCacheRow(row[1], 4)) { g_cacheRow = -1; Log("cash-in: the caches' rows could not be written: reward ammo rack calls instead"); return; }
         g_cacheRow = 2;
-        SetPod(4);
+        g_payN = 4;
         float cit = 0;
         memcpy(&cit, g_resRow + 0x54, 4);
-        Log("cash-in: the Outpost Cache is the Resupply's delivery (call-in %.1f s), %.0f s cooldown; pods of 1 to 8 boxes", cit, CACHE_COOLDOWN);
+        Log("cash-in: the Outpost Cache (%d boxes a pod) and the Small Outpost Cache (the rest) are the Resupply's delivery (call-in %.1f s), %.0f s cooldown",
+            g_bigN, cit, CACHE_COOLDOWN);
         return;
     }
     static double pkgNext;
-    HoldPackage(g_cacheType, "the Outpost Cache", &g_cachePkg, &pkgNext);
-    if (!PayloadOurs(row))   /* the game reloaded its stratagems */
-    {
-        int ok = FillCacheRow(row);
-        Log("cash-in: the Outpost Cache's row was reset by the game: %s", ok ? "filled again" : "NOT filled again");
-        if (!ok) g_cacheRow = -1;
-    }
+    HoldPackage(g_cacheType[0], "the Outpost Cache", &g_cachePkg, &pkgNext);
+    for (int i = 0; i < 2; i++)
+        if (!PayloadOurs(row[i]))   /* the game reloaded its stratagems */
+        {
+            int ok = FillCacheRow(row[i], i ? g_payN : g_bigN);
+            Log("cash-in: %s's row was reset by the game: %s", kCacheName[i], ok ? "filled again" : "NOT filled again");
+            if (!ok) g_cacheRow = -1;
+        }
 }
 static void CacheUses(const char* why)
 {
     uintptr_t st;
-    uint32_t count = 0, uses = 0, want = (uint32_t)(g_bank + 7) / 8;
-    char what[96];
-    snprintf(what, sizeof what, "Outpost Cache (%s, %d boxes banked)", why, g_bank);
-    if (!GrantPins() || !List(&st, &count)) { Log("%s: the stratagem record is unreadable", what); return; }
-    int slot = Find(st, count, g_cacheType);
-    if (slot >= 0 && ReadAt(st + 0x188 + (uint32_t)slot * 0x30u + 4, &uses, 4)) { if (uses != want) SetUses(st, slot, want, what); }
-    else if (slot == -1 && want) Append(st, count, g_cacheType, want, what);
+    uint32_t count = 0;
+    if (!GrantPins() || !List(&st, &count)) { Log("the caches (%s): the stratagem record is unreadable", why); return; }
+    for (int i = 0; i < 2; i++)
+    {
+        uint32_t uses = 0, want = i ? (Rest() ? 1u : 0u) : (uint32_t)(g_bank / g_bigN);
+        char what[112];
+        snprintf(what, sizeof what, "%s (%s, %d boxes banked)", kCacheName[i], why, g_bank);
+        int slot = Find(st, count, g_cacheType[i]);
+        if (slot >= 0 && ReadAt(st + 0x188 + (uint32_t)slot * 0x30u + 4, &uses, 4)) { if (uses != want) SetUses(st, slot, want, what); }
+        else if (slot == -1 && want && Append(st, count, g_cacheType[i], want, what)) count++;
+    }
 }
 /* n boxes from a cleared base. 1 paid */
 static int Bank(int n, const char* why)
@@ -934,14 +947,14 @@ static int Bank(int n, const char* why)
     if (g_cacheRow != 2) return PayOut((n + 3) / 4, why);
     g_bank = g_bank + n > 160 ? 160 : g_bank + n;
     g_boxesBanked += (unsigned)n;
-    if (!g_pending) SetPod(g_bank);
+    if (!g_pending && Rest()) SetPod(Rest());
     CacheUses(why);
     return 1;
 }
 static void OnStratagem(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfStratagemEvent* s = (const HfStratagemEvent*)info;
-    if (g_cacheType && s->type == g_cacheType) atomic_fetch_add(&g_cacheCalls, 1);
+    for (int i = 0; i < 2; i++) if (g_cacheType[i] && s->type == g_cacheType[i]) atomic_fetch_add(&g_cacheCalls[i], 1);
 }
 /* spawns watched for the cash-in and resupply_to_pods (event threads -> the game thread) */
 #define WATCHED 64
@@ -1009,7 +1022,7 @@ static void CashReset(int end)
 {
     g_bank = g_pending = 0;
     g_boxesBanked = g_boxesCalled = 0;
-    g_cacheCallsSeen = atomic_load(&g_cacheCalls);
+    for (int i = 0; i < 2; i++) g_cacheCallsSeen[i] = atomic_load(&g_cacheCalls[i]);
     g_usesAt = 0;
     if (g_cacheRow == 2) SetPod(4);
     if (!end) return;   /* at the start: the pods' switches may have spawned as the mission loaded */
@@ -1030,8 +1043,8 @@ static void CashFrame(void)
         else if (g_pending && res == g_pod[g_pendingN])
         {
             g_pending = 0;
-            Log("cash-in: the pod of %d boxes has spawned; %d boxes left in the bank", g_pendingN, g_bank);
-            if (g_bank > 0) SetPod(g_bank);
+            Log("cash-in: the Small Outpost Cache's pod of %d boxes has spawned; %d boxes left in the bank", g_pendingN, g_bank);
+            if (Rest()) SetPod(Rest());
         }
     }
     for (int i = 0; i < g_nsite; i++)
@@ -1046,23 +1059,25 @@ static void CashFrame(void)
         if (n) hf->write(n + 48, g_movedTo, 12);
     }
     else g_moved = 0;
-    unsigned calls = atomic_load(&g_cacheCalls);
-    if (calls != g_cacheCallsSeen)
+    for (int i = 0; i < 2; i++)
     {
-        g_cacheCallsSeen = calls;
-        int n = g_payN < g_bank ? g_payN : g_bank;
-        if (n < 1) n = g_payN;
-        g_bank = g_bank > n ? g_bank - n : 0;
+        unsigned calls = atomic_load(&g_cacheCalls[i]);
+        if (calls == g_cacheCallsSeen[i]) continue;
+        g_cacheCallsSeen[i] = calls;
+        int n = i ? Rest() : g_bigN;
+        if (i && !n) n = g_payN;   /* (its use should have been 0) */
+        if (n > g_bank) n = g_bank;
+        g_bank -= n;
         g_boxesCalled += (unsigned)n;
-        g_pending = 1; g_pendingN = g_payN; g_pendingUntil = g_now + 14;
         g_usesAt = g_now + 1;
-        Log("cash-in: the Outpost Cache called: a pod of %d boxes; %d left in the bank", g_payN, g_bank);
+        if (i) { g_pending = 1; g_pendingN = g_payN; g_pendingUntil = g_now + 14; }
+        Log("cash-in: %s called: a pod of %d boxes; %d left in the bank", kCacheName[i], i ? g_payN : g_bigN, g_bank);
     }
     if (g_pending && g_now >= g_pendingUntil)
     {
         g_pending = 0;
-        Log("cash-in: the pod of %d boxes was not seen to spawn in 14 s; %d boxes left in the bank", g_pendingN, g_bank);
-        if (g_bank > 0) SetPod(g_bank);
+        Log("cash-in: the Small Outpost Cache's pod of %d boxes was not seen to spawn in 14 s; %d boxes left in the bank", g_pendingN, g_bank);
+        if (Rest()) SetPod(Rest());
     }
     if (g_usesAt > 0 && g_now >= g_usesAt) { g_usesAt = 0; CacheUses("after a call"); }
 }
@@ -1092,12 +1107,18 @@ static void RegisterCache(void)
     s.base = HF_STRATAGEM_B1_SUPPLY_PACK;
     s.name = "yui/commando-plus/outpost-cache";
     s.title = "Outpost Cache";
-    s.description = "The ammo boxes banked from the enemy bases you cleared, up to 8 a pod.";
+    s.description = "A pod of 8 ammo boxes, from the boxes banked by the enemy bases you cleared. In Commando, while the Super Destroyer is overhead.";
     s.code = "DUDUDUR";
     s.uses = 1;
     s.cooldown = CACHE_COOLDOWN;
-    g_cacheType = hf->add_stratagem(self, &s);
-    Log("cash-in: the Outpost Cache is stratagem type %u (D U D U D U R)%s", g_cacheType, g_cacheType ? "" : ": REFUSED (the log above says why)");
+    g_cacheType[0] = hf->add_stratagem(self, &s);
+    s.name = "yui/commando-plus/small-outpost-cache";
+    s.title = "Small Outpost Cache";
+    s.description = "The ammo boxes banked past the last full Outpost Cache (4 with the default settings), in one pod.";
+    s.code = "DUDUDUL";
+    g_cacheType[1] = hf->add_stratagem(self, &s);
+    Log("cash-in: the Outpost Cache is stratagem type %u (D U D U D U R), the Small Outpost Cache type %u (D U D U D U L)%s", g_cacheType[0], g_cacheType[1],
+        g_cacheType[0] && g_cacheType[1] ? "" : ": REFUSED (the log above says why)");
 }
 
 static void Tick(HfMod* mod, float dt, void* user)
