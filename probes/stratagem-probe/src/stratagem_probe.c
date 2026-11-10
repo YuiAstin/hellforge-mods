@@ -37,7 +37,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.4.1"
+#define VERSION "0.4.2"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -190,6 +190,7 @@ static int NearestUnserved(const float from[3])
         }
     return best;
 }
+static uint32_t g_typeD, g_typeO, g_typeU, g_typeX;
 static uint64_t Detour(void* manager, int32_t element, uint32_t thrower, const float* position, void* record, uint32_t type,
                        uint64_t s7, uint64_t s8, uint64_t s9, uint64_t s10)
 {
@@ -200,7 +201,8 @@ static uint64_t Detour(void* manager, int32_t element, uint32_t thrower, const f
         "", p[0], p[1], p[2], manager, element, record, (unsigned long long)s7, (unsigned long long)s8,
         (unsigned long long)s9, (unsigned long long)s10);
     AddWatch(p, "the beacon");
-    if (type != RESUPPLY || !mine || s_mode == 0 || !position)
+    int ours = type == RESUPPLY || type == 109 || (type && (type == g_typeD || type == g_typeO || type == g_typeU || type == g_typeX));
+    if (!ours || !mine || s_mode == 0 || !position || (s_mode == 1 && type != RESUPPLY))
     {
         RecordBytes("before", record);
         uint64_t r = g_orig(manager, element, thrower, position, record, type, s7, s8, s9, s10);
@@ -233,34 +235,22 @@ static uint64_t Detour(void* manager, int32_t element, uint32_t thrower, const f
         g_moved = ball; memcpy(g_movedTo, to, 12); g_movedAt = g_now;
         return r;
     }
-    /* copies: the game's call, then one more per site (or one 20 m east) */
+    /* 0.4.2, copies: the game's call, then two more at the same beacon (the delivery follows the ball, so a position
+     * passed is ignored anyway): do three pods come from one call? (Resupply, the reward rack and the test racks) */
     RecordBytes("before", record);
     uint64_t r = g_orig(manager, element, thrower, position, record, type, s7, s8, s9, s10);
     RecordBytes("after", record);
     Log("  -> %llx (the game's own call)", (unsigned long long)r);
-    int copies = 0;
-    for (int i = 0; i < g_nsite && copies < 4; i++)
+    for (int i = 1; i <= 2; i++)
     {
-        if (!g_site[i].placed) continue;
-        float to[3];
-        SiteTarget(&g_site[i], to);
-        AddWatch(to, "a copy at a pod site");
-        uint64_t c = g_orig(manager, element, thrower, to, record, type, s7, s8, s9, s10);
-        Log("  copy %d: at %.1f %.1f %.1f (pod site %d, %.0f m away) -> %llx", ++copies, to[0], to[1], to[2], i, Flat(to, p), (unsigned long long)c);
-    }
-    if (!copies)
-    {
-        float to[3] = {p[0] + 20, p[1], p[2]};
-        AddWatch(to, "a copy 20 m east");
-        uint64_t c = g_orig(manager, element, thrower, to, record, type, s7, s8, s9, s10);
-        Log("  copy: at %.1f %.1f %.1f (20 m east) -> %llx", to[0], to[1], to[2], (unsigned long long)c);
+        uint64_t c = g_orig(manager, element, thrower, position, record, type, s7, s8, s9, s10);
+        Log("  copy %d at the same beacon -> %llx", i, (unsigned long long)c);
     }
     RecordBytes("after the copies", record);
     return r;
 }
 
 /* ---- 0.2.0: the two test racks ---------------------------------------------------------------------------- */
-static uint32_t g_typeD, g_typeO, g_typeU, g_typeX;
 static void MissionRows(int on);
 static int g_rowsDone;
 static void Row(const char* name, uintptr_t row)
@@ -375,8 +365,8 @@ static void MissionRows(int on)
         Log("the racks: the B-1 rows put back (for the loadout)");
         return;
     }
-    if (g_haveRes) { FillRack(g_rows[1], g_rowRes, 2, "Rack Test O (the Resupply, 2 waves)"); FillRack(g_rows[0], g_rowRes, 4, "Rack Test D (the Resupply, 4 waves)"); }
-    if (g_haveRack) { FillRack(g_rows[3], g_rowRack, 2, "Rack Test X (the reward rack, 2 waves)"); FillRack(g_rows[2], g_rowRack, 8, "Rack Test U (the reward rack, 8 waves)"); }
+    if (g_haveRes) { FillRack(g_rows[1], g_rowRes, 1, "Rack Test O (the Resupply)"); FillRack(g_rows[0], g_rowRes, 1, "Rack Test D (the Resupply)"); }
+    if (g_haveRack) { FillRack(g_rows[3], g_rowRack, 1, "Rack Test X (the reward rack)"); FillRack(g_rows[2], g_rowRack, 1, "Rack Test U (the reward rack)"); }
 }
 
 /* ---- the game thread -------------------------------------------------------------------------------------------- */
