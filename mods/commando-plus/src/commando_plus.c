@@ -48,7 +48,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.5.3"
+#define VERSION "0.5.4"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -987,7 +987,7 @@ static uint64_t ClockNow(void)
 static double g_tickRate;           /* clock ticks a second, measured */
 static uint64_t g_cidMarks[3];      /* +0x10, +0x18, +0x20 at the last call */
 static int g_cidTold[3];
-static double g_cidCallAt;
+static double g_cidCallAt;          /* g_now at the last Call In Destroyer call (0: none this mission) */
 static void DestroyerFrame(void)
 {
     static double next, rateAt;
@@ -1055,7 +1055,10 @@ static void DestroyerTimer(void)
         {
             g_dsSince[i] = g_dsTold[i] = g_now;
             Log("destroyer window: player slot %d: the Super Destroyer is overhead, %.1f s left (+0x1FAE0 %u, +0x1FAE8 %.1f), %.0f s into the mission", i, left, b[8], other, g_now - g_missionAt);
-            if (s_destroyerWindow > 0 && (float)s_destroyerWindow > left)
+            /* 0.5.4: only after a Call In Destroyer call (0.5.3 stretched the 5 s it has at the drop-in to 180) */
+            int called = g_cidCallAt > 0 && g_now - g_cidCallAt < 20;
+            if (!called) Log("destroyer window: not after a Call In Destroyer call (the drop-in?): left as it is");
+            if (called && s_destroyerWindow > 0 && (float)s_destroyerWindow > left)
             {
                 float w = (float)s_destroyerWindow;
                 int ok = !hf->write(base + 0x90u * i + 0x1FAE4, &w, 4);
@@ -1243,7 +1246,7 @@ static void CashFrame(void)
     if (g_usesAt > 0 && g_now >= g_usesAt) { g_usesAt = 0; CacheUses("after a call"); }
     static unsigned cidSeen;
     unsigned cid = atomic_load(&g_cidCalls);
-    if (cid != cidSeen) { cidSeen = cid; OnDestroyerCall(NULL); }
+    if (cid != cidSeen) { cidSeen = cid; g_cidCallAt = g_now; OnDestroyerCall(NULL); }
     DestroyerFrame();
     DestroyerTimer();
 }
@@ -1311,7 +1314,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         g_checkTries = g_applied = g_commando = g_timerTries = 0;
         g_timerAt = g_recheckAt = 0;
         g_checkAt = m ? g_now + 8 : 0;
-        if (m) { CashReset(0); CacheRefill(); g_missionAt = g_now; memset(g_cidMarks, 0, sizeof g_cidMarks); memset(g_dsLast, 0, sizeof g_dsLast); }
+        if (m) { CashReset(0); CacheRefill(); g_missionAt = g_now; memset(g_cidMarks, 0, sizeof g_cidMarks); memset(g_dsLast, 0, sizeof g_dsLast); g_cidCallAt = 0; }
         Log(m ? "mission start: the stratagem record is read in 8 s" : "mission end");
     }
     if (!m) return;
