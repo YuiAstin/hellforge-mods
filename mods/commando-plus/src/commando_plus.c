@@ -48,7 +48,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.5.1"
+#define VERSION "0.5.2"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -1049,7 +1049,19 @@ static void CacheUses(const char* why)
         snprintf(what, sizeof what, "%s (%s, %d boxes banked)", kCacheName[i], why, g_bank);
         int slot = Find(st, count, g_cacheType[i]);
         if (slot >= 0 && ReadAt(st + 0x188 + (uint32_t)slot * 0x30u + 4, &uses, 4)) { if (uses != want) SetUses(st, slot, want, what); }
-        else if (slot == -1 && want && Append(st, count, g_cacheType[i], want, what)) count++;
+        else if (slot == -1 && want && Append(st, count, g_cacheType[i], want, what)) slot = (int)count++;
+        /* 0.5.2 (played 2026-11-10): the HUD kept showing 1 with 3 on the record, and a cache at 0 uses could still be
+         * thrown. So the row's uses (+0x50, which the HUD may show) follow the record, and an empty cache is made not
+         * granted (+9), as a used-up stratagem is greyed out; granted again when it has a use */
+        uintptr_t row = hf->stratagem_row(g_cacheType[i]);
+        uint32_t shown = want ? want : 1, was = 0;
+        if (row && ReadAt(row + 0x50, &was, 4) && was != shown) hf->write(row + 0x50, &shown, 4);
+        if (slot >= 0)
+        {
+            uint8_t g = want ? 1 : 0, had = 0;
+            uintptr_t at = st + 0x188 + (uint32_t)slot * 0x30u + 9;
+            if (ReadAt(at, &had, 1) && had != g && !hf->write(at, &g, 1)) Log("%s: %s", what, g ? "usable again (granted)" : "empty: not usable (not granted)");
+        }
     }
 }
 /* n boxes from a cleared base. 1 paid */

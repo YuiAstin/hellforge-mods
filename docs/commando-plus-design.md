@@ -107,3 +107,6 @@ Calling in the Super Destroyer is cashing in: cleared bases bank ammo boxes, and
   cooldown, +0x68); its record entry's +0x18 lands ~119 s after a call (0.4.1's log). The wiki gives 1 minute. Logged
   now: the row's numbers, each call, and when +0x18 / +0x20 are reached, to set against when stratagems lock.
   `destroyer_window` (test, 0 = the game's) writes its cooldown.
+- 0.5.1 played 2026-11-10: both caches landed as they should (4 and 8 boxes). But the HUD showed 1 with 3 on the
+  record, and the Small Outpost Cache was thrown at 0 uses. 0.5.2: the row's uses follow the record (the HUD may show
+  those), and an empty cache is not granted (+9 0) until it has a use again.
