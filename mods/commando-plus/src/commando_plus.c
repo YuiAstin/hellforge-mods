@@ -15,6 +15,8 @@
  *   cash_in         0.5.0 (default): instead, each base cleared banks ammo boxes (cache_boxes_small 4 / _large 8),
  *                   called in by the Outpost Cache (8 a pod) and the Small Outpost Cache (the rest) (section "the cash-in" below)
  *   resupply_to_pods  0.5.0 (off by default): a Resupply thrown in Commando lands at the Reinforcement Pods
+ *   window_per_base 0.6.0 (Yui: clearing bases lessens the resistance, so the Destroyer holds orbit longer): the Super
+ *                   Destroyer's window is 60 s + 15 s for every base cleared this mission, at most window_max (180)
  *   poi_extra       0.3.0: the loot caches at points of interest that hold stims or grenades come up poi_extra times as
  *                   often. The caches' tables are HellForge's own research (native/mod-loader/forge_credits.c, 0.4.0:
  *                   the loot roll game+0xF3A800, its context +0x18 -> +0x2D0 -> +0x68: tables at +0x90, 0x28 each, count
@@ -48,7 +50,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.5.6"
+#define VERSION "0.6.0"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -88,7 +90,7 @@ static int s_poiExtra = 1;   /* 0.3.1: off by default: the hooked roll is the PO
 static int s_caches = 1, s_cacheSmall = 1, s_cacheLarge = 2, s_cacheReward = 0, s_baseRadius = 40;
 static int s_cashIn = 1, s_boxSmall = 4, s_boxLarge = 8;   /* 0.5.0: the cash-in (the Outpost Cache) */
 static int s_toPods = 0;                                     /* 0.5.0: resupply_to_pods */
-static int s_destroyerWindow = 0;                            /* 0.5.1 (test): Call In Destroyer's cooldown, s; 0 the game's */
+static int s_windowPerBase = 15, s_windowMax = 180;          /* 0.6.0: the Destroyer's window: 60 s + per base cleared, at most */
 static int ReadSettings(const char* path)
 {
     char line[256];
@@ -120,7 +122,8 @@ static int ReadSettings(const char* path)
         else if (!strcmp(k, "cache_boxes_small")) { if (x >= 0 && x <= 24) s_boxSmall = x; }
         else if (!strcmp(k, "cache_boxes_large")) { if (x >= 0 && x <= 24) s_boxLarge = x; }
         else if (!strcmp(k, "resupply_to_pods")) s_toPods = x ? 1 : 0;
-        else if (!strcmp(k, "destroyer_window")) { if (x == 0 || (x > 60 && x <= 600)) s_destroyerWindow = x; }
+        else if (!strcmp(k, "window_per_base")) { if (x >= 0 && x <= 60) s_windowPerBase = x; }
+        else if (!strcmp(k, "window_max")) { if (x >= 60 && x <= 600) s_windowMax = x; }
     }
     fclose(f);
     return 1;
@@ -136,6 +139,7 @@ static void LoadSettings(void)
     if (s_cashIn) Log("settings: outpost_caches %d, cash_in 1 (small base %d, large base %d ammo boxes, called in by the Outpost Cache), base_radius %d m", s_caches, s_boxSmall, s_boxLarge, s_baseRadius);
     else Log("settings: outpost_caches %d, cash_in 0 (small base %d, large base %d calls of %s), base_radius %d m", s_caches, s_cacheSmall, s_cacheLarge,
              s_cacheReward ? "Resupply" : "the reward ammo rack", s_baseRadius);
+    Log("settings: window_per_base %d, window_max %d (the Super Destroyer's window: 60 s + %d s a base cleared, at most %d s)", s_windowPerBase, s_windowMax, s_windowPerBase, s_windowMax);
     Log("settings: resupply_to_pods %d (%s)", s_toPods, s_toPods ? "a Resupply thrown in Commando lands at the Reinforcement Pods that have had none" : "Resupplies land where they are thrown");
 }
 
@@ -318,11 +322,11 @@ typedef struct { int members, alive, large, paid, destroyed; float pos[3]; } Bas
 static Spawner g_sp[SPAWNERS];
 static Base g_base[BASES];
 static int g_nsp, g_nbase;
-static unsigned g_basesPaid, g_callsPaid;
+static unsigned g_basesPaid, g_callsPaid, g_basesCleared;   /* g_basesCleared: 0.6.0, every base cleared while the options apply */
 static atomic_uint g_avatar;      /* the local Helldiver (HF_ON_WEAPON) */
 static double g_missionAt;         /* g_now at mission start */
 static unsigned g_spLogged, g_goneLogged;
-static void CachesReset(void) { g_nsp = g_nbase = 0; g_basesPaid = g_callsPaid = 0; g_spLogged = g_goneLogged = 0; }
+static void CachesReset(void) { g_nsp = g_nbase = 0; g_basesPaid = g_callsPaid = g_basesCleared = 0; g_spLogged = g_goneLogged = 0; }
 static uint32_t UnitOf(uint32_t entity)
 {
     uintptr_t root = Pointer(game + 0x346BF98);
@@ -514,6 +518,7 @@ static void CachesFrame(void)
         int large = base->large || base->members >= 3, n = s_cashIn ? (large ? s_boxLarge : s_boxSmall) : large ? s_cacheLarge : s_cacheSmall;
         char why[64];
         snprintf(why, sizeof why, "a %s base of %d spawner%s cleared", large ? "large" : "small", base->members, base->members == 1 ? "" : "s");
+        if (g_applied) g_basesCleared++;
         if (!s_caches || !g_applied) { Log("base %d, %s at %.0f %.0f: no cache (%s)", b, why, base->pos[0], base->pos[1], !s_caches ? "outpost_caches 0" : "the options do not apply this mission"); continue; }
         if (s_cashIn) { if (Bank(n, why)) { g_basesPaid++; Log("base %d, %s at %.0f %.0f: %d ammo boxes banked", b, why, base->pos[0], base->pos[1], n); } }
         else if (PayOut(n, why)) { g_basesPaid++; g_callsPaid += (unsigned)n; Log("base %d, %s at %.0f %.0f: %d free call%s", b, why, base->pos[0], base->pos[1], n, n == 1 ? "" : "s"); }
@@ -1037,13 +1042,19 @@ static void DestroyerFrame(void)
 typedef uint8_t (*UsableFn)(void*, uint32_t, uint32_t, uint32_t*);
 static UsableFn g_usable;
 static double g_holdFrom, g_holdUntil;
+static unsigned g_holdBases;
+static int WindowLength(void)
+{
+    int w = 60 + s_windowPerBase * (int)g_basesCleared;
+    return w > s_windowMax ? s_windowMax : w;
+}
 static unsigned g_holdTold;
 static uint8_t Usable(void* mgr, uint32_t player, uint32_t type, uint32_t* reason)
 {
     uint8_t r = g_usable(mgr, player, type, reason);
     if (r || !g_applied || type == CALL_IN || type == 124 || g_holdUntil <= 0 || g_now < g_holdFrom || g_now >= g_holdUntil) return r;
     if (reason) *reason = 0;
-    if (g_holdTold++ < 3) Log("destroyer window: type %u answered usable, %.0f s after the window opened (destroyer_window %d)", type, g_now - g_holdFrom, s_destroyerWindow);
+    if (g_holdTold++ < 3) Log("destroyer window: type %u answered usable, %.0f s after the window opened (past the game's 60 s)", type, g_now - g_holdFrom);
     return 1;
 }
 /* (0.5.5: this float is the lockout before the window, not the window; see Usable) 0.5.3: the lock itself (game.dll+0x671440, the availability check;
@@ -1074,19 +1085,26 @@ static void DestroyerTimer(void)
         {
             g_dsSince[i] = g_dsTold[i] = g_now;
             Log("destroyer window: player slot %d: a stratagem lockout of %.1f s (+0x1FAE0 %u, +0x1FAE8 %.1f), %.0f s into the mission", i, left, b[8], other, g_now - g_missionAt);
-            if (g_usable && s_destroyerWindow > 0 && left <= 30)   /* (the drop-in comes before Commando is told: Usable checks g_applied) */
+            if (g_usable && left <= 30)   /* (the drop-in comes before Commando is told: Usable checks g_applied) */
             {
                 g_holdFrom = g_now + left;
-                g_holdUntil = g_holdFrom + s_destroyerWindow;
+                g_holdUntil = g_holdFrom + WindowLength();
+                g_holdBases = g_basesCleared;
                 g_holdTold = 0;
-                Log("destroyer window: the window runs to %d s after the lockout (destroyer_window)", s_destroyerWindow);
+                Log("destroyer window: the window opens for %d s (%u bases cleared)", WindowLength(), g_basesCleared);
             }
         }
         else if (left > 0 && g_now - g_dsTold[i] >= 15) { g_dsTold[i] = g_now; Log("destroyer window: slot %d: lockout %.1f s left (+0x1FAE8 %.1f)", i, left, other); }
         else if (left <= 0 && g_dsLast[i] > 0) Log("destroyer window: slot %d: the lockout is over, %.0f s after it began", i, g_now - g_dsSince[i]);
         g_dsLast[i] = left;
     }
-    if (g_holdUntil > 0 && g_now >= g_holdUntil) { Log("destroyer window: destroyer_window's %d s are over (%.0f s into the mission)", s_destroyerWindow, g_now - g_missionAt); g_holdUntil = 0; }
+    if (g_holdUntil > 0 && g_basesCleared != g_holdBases)   /* a base cleared while it is open: it reaches further */
+    {
+        g_holdBases = g_basesCleared;
+        double until = g_holdFrom + WindowLength();
+        if (until > g_holdUntil) { g_holdUntil = until; Log("destroyer window: a base cleared: the window now %d s (%.0f s left)", WindowLength(), g_holdUntil - g_now); }
+    }
+    if (g_holdUntil > 0 && g_now >= g_holdUntil) { Log("destroyer window: the window is over, %.0f s after it opened (%.0f s into the mission)", g_now - g_holdFrom, g_now - g_missionAt); g_holdUntil = 0; }
 }
 static void OnDestroyerCall(const HfStratagemEvent* s)
 {
@@ -1351,13 +1369,13 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     g_ready = 1;
     Log("ready: game.dll and helldivers2.exe are build " BUILD "'s");
     LootInstall();
-    if (s_destroyerWindow > 0)
+    if (s_windowPerBase > 0 && s_windowMax > 60)
     {
         if (!hf->code_matches(game + 0x671440, "48 89 5C 24 18 48 89 6C 24 20 56 57 41 56 48 83 EC 20 3B 15 DC 27 E1 02 4D 8B F1 41 8B E8 8B DA 48 8B F1"))
-            Log("destroyer_window: REFUSED: the stratagem check (game.dll+0x671440) is not the reviewed code");
+            Log("the Super Destroyer's window: REFUSED: the stratagem check (game.dll+0x671440) is not the reviewed code: it stays the game's 60 s");
         else if (hf->hook_ex(self, game + 0x671440, (void*)Usable, (void**)&g_usable, 0) || !g_usable)
-        { g_usable = NULL; Log("destroyer_window: REFUSED: the stratagem check could not be hooked"); }
-        else Log("destroyer_window: %d s: the stratagem check hooked", s_destroyerWindow);
+        { g_usable = NULL; Log("the Super Destroyer's window: REFUSED: the stratagem check could not be hooked: it stays the game's 60 s"); }
+        else Log("the Super Destroyer's window: the stratagem check hooked (60 s + %d s a base cleared, at most %d s)", s_windowPerBase, s_windowMax);
     }
     if (s_toPods)
     {

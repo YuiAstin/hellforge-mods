@@ -125,3 +125,10 @@ Calling in the Super Destroyer is cashing in: cleared bases bank ammo boxes, and
   where 0.5.5 looked). 0.5.6 hooks the check itself (game.dll+0x671440; called by the availability check, the beacon
   and the HUD): from each lockout's end until `destroyer_window` s after it, a stratagem it refuses (but Call In
   Destroyer and Reinforce) answers usable. Uses and cooldowns are checked by the game before it.
+
+## 0.6.0: the window grows with the bases cleared (Yui, 2026-11-10)
+
+0.5.6 played: the window stayed open past 60 s. The design: clearing bases lessens the resistance, so the Destroyer holds
+orbit longer: the window is 60 s + `window_per_base` (15) s for every base cleared this mission, at most `window_max`
+(180) s. It opens after each lockout (the drop-in, each Call In Destroyer call); a base cleared while it is open
+stretches it. `destroyer_window` is gone.
