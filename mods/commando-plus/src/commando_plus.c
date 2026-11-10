@@ -50,7 +50,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.6.1"
+#define VERSION "0.6.2"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -1042,6 +1042,7 @@ static void DestroyerFrame(void)
 typedef uint8_t (*UsableFn)(void*, uint32_t, uint32_t, uint32_t*);
 static UsableFn g_usable;
 static double g_holdFrom, g_holdUntil;
+static int g_lockoutOn;   /* a lockout runs (DestroyerTimer) */
 static unsigned g_holdBases;
 static int WindowLength(void)
 {
@@ -1053,6 +1054,7 @@ static uint8_t Usable(void* mgr, uint32_t player, uint32_t type, uint32_t* reaso
 {
     uint8_t r = g_usable(mgr, player, type, reason);
     if (r || !g_applied || type == CALL_IN || type == 124 || g_holdUntil <= 0 || g_now < g_holdFrom || g_now >= g_holdUntil) return r;
+    if (g_lockoutOn) return r;   /* a respawn's lockout inside the window stays the game's */
     if (reason) *reason = 0;
     if (g_holdTold++ < 3) Log("destroyer window: type %u answered usable, %.0f s after the window opened (past the game's 60 s)", type, g_now - g_holdFrom);
     return 1;
@@ -1085,7 +1087,12 @@ static void DestroyerTimer(void)
         {
             g_dsSince[i] = g_dsTold[i] = g_now;
             Log("destroyer window: player slot %d: a stratagem lockout of %.1f s (+0x1FAE0 %u, +0x1FAE8 %.1f), %.0f s into the mission", i, left, b[8], other, g_now - g_missionAt);
-            if (g_usable && left <= 30)   /* (the drop-in comes before Commando is told: Usable checks g_applied) */
+            /* 0.6.2 (played 2026-11-10): a lockout also comes with a respawn (the reinforced Helldiver's drop), which opens
+             * no window (the game refused every stratagem after it): only the drop-in's (the mission's first 30 s) and a
+             * Call In Destroyer call's open one. (The drop-in comes before Commando is told: Usable checks g_applied.) */
+            int opens = g_now - g_missionAt < 30 || (g_cidCallAt > 0 && g_now - g_cidCallAt < 10);
+            if (!opens) Log("destroyer window: a lockout without a Call In Destroyer call (a respawn?): no window");
+            if (g_usable && left <= 30 && opens)
             {
                 g_holdFrom = g_now + left;
                 g_holdUntil = g_holdFrom + WindowLength();
@@ -1098,6 +1105,7 @@ static void DestroyerTimer(void)
         else if (left <= 0 && g_dsLast[i] > 0) Log("destroyer window: slot %d: the lockout is over, %.0f s after it began", i, g_now - g_dsSince[i]);
         g_dsLast[i] = left;
     }
+    g_lockoutOn = g_dsLast[0] > 0 || g_dsLast[1] > 0 || g_dsLast[2] > 0 || g_dsLast[3] > 0;
     if (g_holdUntil > 0 && g_basesCleared != g_holdBases)   /* a base cleared while it is open: it reaches further */
     {
         g_holdBases = g_basesCleared;

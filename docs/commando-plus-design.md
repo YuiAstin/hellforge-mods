@@ -135,3 +135,6 @@ stretches it. `destroyer_window` is gone.
 - 0.6.1 (Yui): the game's HUD still counts its own 60 s; past them a banner at the top of the screen reads "TIME BOUGHT
   FOR THE DESTROYER: XXs" (the window's time left). The Commando Plus HUD (`hud-src/`, an HD2Runtime overlay built into
   `data/`) reads `commando_plus_hud_state` (layout 1: show, bought_left, bought_total, bases) through LuaJIT's ffi.
+- 0.6.1 played (Yui): mostly right, but a 5 s lockout 158 s in (no Call In Destroyer call: a respawn) opened a second
+  75 s window. 0.6.2: only the drop-in's lockout (the mission's first 30 s) and a call's open a window; a lockout inside
+  a window stays the game's.
