@@ -37,7 +37,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.5.0"
+#define VERSION "0.5.1"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -338,6 +338,33 @@ static const HfSet kPod6[] = {{HF_FIELD(HellpodRack, slot4_item), HF_U64(0xA9491
 static const HfEntityDef kPodDef8 = {sizeof(HfEntityDef), "yui/stratagem-probe/cache_pod_8", RES_POD, 0, NULL, NULL, 0, NULL, kPod8, NULL, NULL, NULL, 0, NULL, NULL, NULL};
 static const HfEntityDef kPodDef6 = {sizeof(HfEntityDef), "yui/stratagem-probe/cache_pod_6", RES_POD, 0, NULL, NULL, 0, NULL, kPod6, NULL, NULL, NULL, 0, NULL, NULL, NULL};
 static HfRef g_pod8, g_pod6;
+/* 0.5.1: 0.5.0's 6-box pod crashed the game as it spawned its items (helldivers2.exe+0x5970f6): slots 4-5 had an item
+ * but the rest of their 64 bytes (56 the SDK does not name: likely where and how the item sits) were zero. Now, once the
+ * entities are ready, each added slot takes those bytes from slot (k - 4) of the same pod (the base's slots 0-3). */
+static void PodHex(const char* what, const uint8_t* p, unsigned n)
+{
+    char hex[3 * 128 + 1];
+    for (unsigned i = 0; i < n && i < 128; i++) snprintf(hex + 3 * i, 4, "%02x ", p[i]);
+    Log("  %s: %s", what, hex);
+}
+static void FixPod(HfRef pod, unsigned slots, const char* name)
+{
+    HfHellpodRack* r = pod ? hf_record(self, pod, HfHellpodRack) : NULL;
+    if (!r) { Log("%s: no record of its own (no fix)", name); return; }
+    uint8_t* b = (uint8_t*)r;
+    PodHex("slot 0", b, 64);
+    PodHex("slot 1", b + 64, 64);
+    PodHex("tail +0x1C8", b + 0x1C8, 112);
+    for (unsigned k = 4; k < slots; k++) memcpy(b + 64 * k + 8, b + 64 * (k - 4) + 8, 56);
+    Log("%s: slots 4..%u take slots 0..%u's bytes; items %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx, count %u", name, slots - 1, slots - 5,
+        (unsigned long long)r->slot0_item, (unsigned long long)r->slot1_item, (unsigned long long)r->slot2_item, (unsigned long long)r->slot3_item,
+        (unsigned long long)r->slot4_item, (unsigned long long)r->slot5_item, (unsigned long long)r->slot6_item, (unsigned long long)r->slot7_item, r->spawn_count);
+}
+static void EntitiesReady(HfMod* mod, HfEvent event, void* user)
+{
+    FixPod(g_pod8, 8, "the 8-box pod");
+    FixPod(g_pod6, 6, "the 6-box pod");
+}
 #define EAT_ENTITY UINT64_C(0x80932FA0ED6901D3)
 #define BOX_ENTITY UINT64_C(0xA94913CA014F7579)
 static uint64_t g_payD[16], g_payU[16];
@@ -571,6 +598,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         Log("settings: %s %s: mode %d (%s)", f ? "read" : "no", path, s_mode, kMode[s_mode]);
     }
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
+    api->on(mod, HF_EVENT_ENTITIES_READY, EntitiesReady, NULL);
     {
         HfStratagem d = {sizeof d}, o = {sizeof o}, u = {sizeof u}, x = {sizeof x};
         d.base = 101; d.name = "yui/stratagem-probe/rack-test-d"; d.title = "Rack Test D"; d.code = "DUDUDUL"; d.uses = 5; d.cooldown = 5;
