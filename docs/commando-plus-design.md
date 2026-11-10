@@ -143,3 +143,5 @@ stretches it. `destroyer_window` is gone.
   stratagem it refused answers usable again after more than 10 s with none usable); a gap of 10 s or less (a lockout
   inside a window) is the same window. So the drop-in, every call and every objective that brings the Destroyer get
   the bases' bonus.
+- 0.6.4: `resupply_to_pods` is gone (Yui: the idea was a free Resupply at the pods, not one's own redirected; the caches
+  replace it).

@@ -14,7 +14,6 @@
  *                   cleared: the last one closed (HF_ON_BUGHOLE), destroyed (HF_ON_KILL) or gone / at 0 health.
  *   cash_in         0.5.0 (default): instead, each base cleared banks ammo boxes (cache_boxes_small 4 / _large 8),
  *                   called in by the Outpost Cache (8 a pod) and the Small Outpost Cache (the rest) (section "the cash-in" below)
- *   resupply_to_pods  0.5.0 (off by default): a Resupply thrown in Commando lands at the Reinforcement Pods
  *   window_per_base 0.6.0 (Yui: clearing bases lessens the resistance, so the Destroyer holds orbit longer): the Super
  *                   Destroyer's window is 60 s + 15 s for every base cleared this mission, at most window_max (180)
  *   poi_extra       0.3.0: the loot caches at points of interest that hold stims or grenades come up poi_extra times as
@@ -50,7 +49,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.6.3"
+#define VERSION "0.6.4"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -89,7 +88,6 @@ static int s_noTimer = 1, s_resupplyCalls = 1, s_extraCalls = 1, s_everyMission 
 static int s_poiExtra = 1;   /* 0.3.1: off by default: the hooked roll is the POI crates' (support weapons, credits), not stims / grenades */
 static int s_caches = 1, s_cacheSmall = 1, s_cacheLarge = 2, s_cacheReward = 0, s_baseRadius = 40;
 static int s_cashIn = 1, s_boxSmall = 4, s_boxLarge = 8;   /* 0.5.0: the cash-in (the Outpost Cache) */
-static int s_toPods = 0;                                     /* 0.5.0: resupply_to_pods */
 static int s_windowPerBase = 15, s_windowMax = 180;          /* 0.6.0: the Destroyer's window: 60 s + per base cleared, at most */
 static int ReadSettings(const char* path)
 {
@@ -121,7 +119,6 @@ static int ReadSettings(const char* path)
         else if (!strcmp(k, "cash_in")) s_cashIn = x ? 1 : 0;
         else if (!strcmp(k, "cache_boxes_small")) { if (x >= 0 && x <= 24) s_boxSmall = x; }
         else if (!strcmp(k, "cache_boxes_large")) { if (x >= 0 && x <= 24) s_boxLarge = x; }
-        else if (!strcmp(k, "resupply_to_pods")) s_toPods = x ? 1 : 0;
         else if (!strcmp(k, "window_per_base")) { if (x >= 0 && x <= 60) s_windowPerBase = x; }
         else if (!strcmp(k, "window_max")) { if (x >= 60 && x <= 600) s_windowMax = x; }
     }
@@ -140,7 +137,6 @@ static void LoadSettings(void)
     else Log("settings: outpost_caches %d, cash_in 0 (small base %d, large base %d calls of %s), base_radius %d m", s_caches, s_cacheSmall, s_cacheLarge,
              s_cacheReward ? "Resupply" : "the reward ammo rack", s_baseRadius);
     Log("settings: window_per_base %d, window_max %d (the Super Destroyer's window: 60 s + %d s a base cleared, at most %d s)", s_windowPerBase, s_windowMax, s_windowPerBase, s_windowMax);
-    Log("settings: resupply_to_pods %d (%s)", s_toPods, s_toPods ? "a Resupply thrown in Commando lands at the Reinforcement Pods that have had none" : "Resupplies land where they are thrown");
 }
 
 /* ---- the local player's stratagem record ---------------------------------------------------------------------------- */
@@ -762,16 +758,11 @@ static void Recheck(void)
  *   (unverified). The Outpost Cache's payload (pod, marker) names the 8-box pod; the Small one's the
  *   pod of the rest, switched after a call once its pod has spawned (or 14 s later), so a pod on its way never changes.
  *   The entries are appended to the record as option 2's Resupply.
- * resupply_to_pods (0.5.0, off by default; the probe's mode 1): a Resupply thrown in Commando lands at the nearest
- * Reinforcement Pods (their power switch, + 6 m) that have had none: the beacon (game.dll+0x6ABDB0, hooked behind
- * HellForge's own) follows the thrown ball (16f397ca5f51f271), so the ball's world position in the scene graph is
- * written every frame for 1.5 s after it activates. */
+ * (0.5.0's resupply_to_pods, a Resupply redirected to the Reinforcement Pods, is gone in 0.6.4: the caches replace it.) */
 #define RES_POD 0x5052EC6A928CCF1Aull
 #define POD_MARKER 0x73F8498BFFDCF415ull
 #define AMMO_BOX 0xA94913CA014F7579ull
 #define RESUPPLY_STABLE 0x33BABE96u
-#define BALL 0x16F397CA5F51F271ull
-#define PODS_SWITCH 0xE8EF41881DAB0E9Full
 #define CACHE_COOLDOWN 15.0f
 #define BOX(k) {HF_FIELD(HellpodRack, slot##k##_item), HF_U64(AMMO_BOX)}
 #define COUNT(n) {HF_FIELD(HellpodRack, spawn_count), HF_U32(n)}
@@ -1178,7 +1169,7 @@ static void OnStratagem(HfMod* mod, const HfEventInfo* info, void* user)
     for (int i = 0; i < 2; i++) if (g_cacheType[i] && s->type == g_cacheType[i]) atomic_fetch_add(&g_cacheCalls[i], 1);
     if (s->type == CALL_IN) atomic_fetch_add(&g_cidCalls, 1);
 }
-/* spawns watched for the cash-in and resupply_to_pods (event threads -> the game thread) */
+/* spawns watched for the cash-in: the Small Outpost Cache's pod (event threads -> the game thread) */
 #define WATCHED 64
 static uint32_t g_wEnt[WATCHED];
 static uint64_t g_wRes[WATCHED];
@@ -1186,59 +1177,11 @@ static atomic_uint g_wHead;
 static unsigned g_wTail;
 static void Watch(uint32_t entity, uint64_t res)
 {
-    int ours = res == BALL || res == PODS_SWITCH;
+    int ours = 0;
     for (int n = 1; n <= 8 && !ours; n++) ours = g_pod[n] && res == g_pod[n];
     if (!ours) return;
     unsigned i = atomic_fetch_add(&g_wHead, 1) % WATCHED;
     g_wEnt[i] = entity; g_wRes[i] = res;
-}
-#define MAXSITE 8
-typedef struct { uint32_t entity; float pos[3]; int placed, served; } Site;
-static Site g_site[MAXSITE];
-static int g_nsite;
-static uint32_t g_balls[8];
-static unsigned g_nballs;
-static uint32_t g_moved;
-static float g_movedTo[3];
-static double g_movedAt;
-static uintptr_t NodeOf(uint32_t entity)
-{
-    uint32_t unit = UnitOf(entity);
-    uintptr_t registry = Pointer(exe + 0x1A100F0), objects, object;
-    uint32_t count, id, slot = unit & 0x3FFFFF;
-    if (!unit || !registry || !ReadAt(registry + 0x98, &count, 4) || slot >= count || !(objects = Pointer(registry + 0x88)) ||
-        !(object = Pointer(objects + 8u * slot)) || !ReadAt(object + 8, &id, 4) || id != unit) return 0;
-    return Pointer(object + 0x88);
-}
-static float Flat(const float a[3], const float b[3]) { float dx = a[0] - b[0], dy = a[1] - b[1]; return sqrtf(dx * dx + dy * dy); }
-typedef uint64_t (*ActivateFn)(void*, int32_t, uint32_t, const float*, void*, uint32_t, uint64_t, uint64_t, uint64_t, uint64_t);
-static ActivateFn g_activate;
-static uint64_t Activate(void* manager, int32_t element, uint32_t thrower, const float* position, void* record, uint32_t type,
-                         uint64_t s7, uint64_t s8, uint64_t s9, uint64_t s10)
-{
-    uint64_t r = g_activate(manager, element, thrower, position, record, type, s7, s8, s9, s10);
-    if (type != RESUPPLY || !s_toPods || !g_applied || !g_commando || !position) return r;
-    float p[3];
-    memcpy(p, position, 12);
-    int best = -1;
-    float bd = 1e9f;
-    for (int i = 0; i < g_nsite; i++)
-        if (g_site[i].placed && !g_site[i].served && Flat(g_site[i].pos, p) < bd) { bd = Flat(g_site[i].pos, p); best = i; }
-    if (best < 0) { Log("resupply_to_pods: every Reinforcement Pods site has had its Resupply: this one lands where it was thrown"); return r; }
-    uint32_t ball = 0;
-    float bp[3] = {0, 0, 0}, closest = 3;
-    for (unsigned k = 0; k < 8; k++)
-    {
-        float q[3];
-        if (g_balls[k] && Position(g_balls[k], q) && Dist(q, p) < closest) { closest = Dist(q, p); ball = g_balls[k]; memcpy(bp, q, 12); }
-    }
-    if (!ball) { Log("resupply_to_pods: the thrown ball was not found at the beacon: the Resupply lands where it was thrown"); return r; }
-    g_site[best].served = 1;
-    g_movedTo[0] = g_site[best].pos[0] + 6; g_movedTo[1] = g_site[best].pos[1]; g_movedTo[2] = g_site[best].pos[2];
-    g_moved = ball; g_movedAt = g_now;
-    Log("resupply_to_pods: a Resupply thrown at %.0f %.0f goes to the Reinforcement Pods %d at %.0f %.0f (%.0f m away)", bp[0], bp[1], best,
-        g_movedTo[0], g_movedTo[1], Flat(g_movedTo, p));
-    return r;
 }
 static void CashReset(int end)
 {
@@ -1247,11 +1190,7 @@ static void CashReset(int end)
     for (int i = 0; i < 2; i++) g_cacheCallsSeen[i] = atomic_load(&g_cacheCalls[i]);
     g_usesAt = 0;
     if (g_cacheRow == 2) SetPod(4);
-    if (!end) return;   /* at the start: the pods' switches may have spawned as the mission loaded */
-    g_nsite = 0; g_nballs = 0; g_moved = 0;
-    memset(g_site, 0, sizeof g_site);
-    memset(g_balls, 0, sizeof g_balls);
-    g_wTail = atomic_load(&g_wHead);
+    if (end) g_wTail = atomic_load(&g_wHead);
 }
 static void CashFrame(void)
 {
@@ -1260,27 +1199,14 @@ static void CashFrame(void)
         unsigned i = g_wTail++ % WATCHED;
         uint32_t e = g_wEnt[i];
         uint64_t res = g_wRes[i];
-        if (res == BALL) g_balls[g_nballs++ % 8] = e;
-        else if (res == PODS_SWITCH) { if (g_nsite < MAXSITE) { memset(&g_site[g_nsite], 0, sizeof g_site[0]); g_site[g_nsite++].entity = e; } }
-        else if (g_pending && res == g_pod[g_pendingN])
+        (void)e;
+        if (g_pending && res == g_pod[g_pendingN])
         {
             g_pending = 0;
             Log("cash-in: the Small Outpost Cache's pod of %d boxes has spawned; %d boxes left in the bank", g_pendingN, g_bank);
             if (Rest()) SetPod(Rest());
         }
     }
-    for (int i = 0; i < g_nsite; i++)
-        if (!g_site[i].placed && Position(g_site[i].entity, g_site[i].pos))
-        {
-            g_site[i].placed = 1;
-            if (s_toPods) Log("resupply_to_pods: Reinforcement Pods %d at %.0f %.0f %.0f", i, g_site[i].pos[0], g_site[i].pos[1], g_site[i].pos[2]);
-        }
-    if (g_moved && g_now - g_movedAt < 1.5)
-    {
-        uintptr_t n = NodeOf(g_moved);
-        if (n) hf->write(n + 48, g_movedTo, 12);
-    }
-    else g_moved = 0;
     for (int i = 0; i < 2; i++)
     {
         unsigned calls = atomic_load(&g_cacheCalls[i]);
@@ -1424,14 +1350,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         { g_usable = NULL; Log("the Super Destroyer's window: REFUSED: the stratagem check could not be hooked: it stays the game's 60 s"); }
         else Log("the Super Destroyer's window: the stratagem check hooked (60 s + %d s a base cleared, at most %d s)", s_windowPerBase, s_windowMax);
     }
-    if (s_toPods)
-    {
-        if (!hf->code_matches(game + 0x6ABDB0, "48 89 5c 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8d ac 24 b0 fc ff ff 48 81 ec 50 04 00 00"))
-            Log("resupply_to_pods: REFUSED: ActivateStratagemBeacon (game.dll+0x6ABDB0) is not the reviewed code");
-        else if (hf->hook_ex(self, game + 0x6ABDB0, (void*)Activate, (void**)&g_activate, 0) || !g_activate)
-        { g_activate = NULL; Log("resupply_to_pods: REFUSED: ActivateStratagemBeacon could not be hooked"); }
-        else Log("resupply_to_pods: ActivateStratagemBeacon hooked");
-    }
+
 }
 
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
