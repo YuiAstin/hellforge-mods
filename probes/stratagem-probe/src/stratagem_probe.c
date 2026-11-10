@@ -37,7 +37,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.4.0"
+#define VERSION "0.4.1"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -333,7 +333,6 @@ static int ScanRows(int n, const uint32_t* type, const uint32_t* stable, uintptr
 static uint8_t g_rowB1[4][400], g_rowRes[400], g_rowRack[400];
 static int g_haveRes, g_haveRack, g_saved;
 static uintptr_t g_rows[4];
-static uint64_t g_payD[16], g_payU[16];
 static void TestRows(void)
 {
     if (g_rowsDone || !g_typeD || !g_typeO || !g_typeU || !g_typeX) return;
@@ -349,20 +348,12 @@ static void TestRows(void)
     g_haveRack = at[1] && ReadAt(at[1], g_rowRack, 400);
     if (g_haveRes) Row("Resupply", at[0]); else Log("Resupply's row: not found");
     if (g_haveRack) Row("the reward rack", at[1]); else Log("the reward rack's row: not found");
-    for (int k = 0; k < 2; k++)
-    {
-        const uint8_t* r = k ? g_rowRack : g_rowRes;
-        uint64_t* pay = k ? g_payU : g_payD;
-        if (!(k ? g_haveRack : g_haveRes)) continue;
-        uint32_t n = Word(r + 0xA0);
-        uint64_t src = Quad(r + 0x98);
-        if (n > 8 || !src || !ReadAt((uintptr_t)src, pay, 8u * n)) { Log("%s: its payload is unreadable", k ? "the reward rack" : "Resupply"); continue; }
-        uint64_t box = UINT64_C(0xA94913CA014F7579);
-        for (uint32_t i = 0; i < 4; i++) pay[n + i] = box;
-    }
-    Log("the racks are filled at each mission start (O the Resupply, D the Resupply + 4 boxes, X the reward rack, U the rack + 4 boxes)");
+    Log("the racks are filled at each mission start (O the Resupply x2 waves, D x4, X the reward rack x2, U x8)");
 }
-static void FillRack(uintptr_t row, const uint8_t* from, const uint64_t* extra, const char* name)
+/* 0.4.1: 0.4.0's extra boxes did nothing: the payload is (pod 5052ec6a928ccf1a, marker 73f8498bffdcf415) pairs and the
+ * four boxes come with the pod itself. The knob left: "waves" (+0x12C, waves minus one; Eagles and barrages use it).
+ * O the Resupply, 2 waves; D the Resupply, 4 waves; X the reward rack, 2 waves; U the reward rack, 8 waves. */
+static void FillRack(uintptr_t row, const uint8_t* from, uint32_t waves, const char* name)
 {
     uint8_t r[400], own[400];
     if (!ReadAt(row, own, 400)) return;
@@ -370,15 +361,10 @@ static void FillRack(uintptr_t row, const uint8_t* from, const uint64_t* extra, 
     memcpy(r, own, 8);                    /* type, stable id */
     memcpy(r + 0x40, own + 0x40, 0x10);   /* code, code length, uses */
     memcpy(r + 0x68, own + 0x68, 4);      /* cooldown */
-    if (extra)
-    {
-        uint64_t p = (uint64_t)(uintptr_t)extra;
-        uint32_t n = Word(from + 0xA0) + 4;
-        memcpy(r + 0x98, &p, 8);
-        memcpy(r + 0xA0, &n, 4);
-    }
-    Log("%s: %s", name, hf->write(row, r, 400) ? "NOT written" : "filled");
-    Row(name, row);
+    uint32_t w = waves - 1;
+    memcpy(r + 0x12C, &w, 4);
+    Log("%s: %s (+0x12C was %u, now %u; +0x120..+0x13C: %08x %08x %08x %08x %08x %08x %08x)", name, hf->write(row, r, 400) ? "NOT written" : "filled",
+        Word(from + 0x12C), w, Word(from + 0x120), Word(from + 0x124), Word(from + 0x128), Word(from + 0x12C), Word(from + 0x130), Word(from + 0x134), Word(from + 0x138));
 }
 static void MissionRows(int on)
 {
@@ -389,8 +375,8 @@ static void MissionRows(int on)
         Log("the racks: the B-1 rows put back (for the loadout)");
         return;
     }
-    if (g_haveRes) { FillRack(g_rows[1], g_rowRes, NULL, "Rack Test O (the Resupply)"); FillRack(g_rows[0], g_rowRes, g_payD, "Rack Test D (the Resupply + 4 boxes)"); }
-    if (g_haveRack) { FillRack(g_rows[3], g_rowRack, NULL, "Rack Test X (the reward rack)"); FillRack(g_rows[2], g_rowRack, g_payU, "Rack Test U (the reward rack + 4 boxes)"); }
+    if (g_haveRes) { FillRack(g_rows[1], g_rowRes, 2, "Rack Test O (the Resupply, 2 waves)"); FillRack(g_rows[0], g_rowRes, 4, "Rack Test D (the Resupply, 4 waves)"); }
+    if (g_haveRack) { FillRack(g_rows[3], g_rowRack, 2, "Rack Test X (the reward rack, 2 waves)"); FillRack(g_rows[2], g_rowRack, 8, "Rack Test U (the reward rack, 8 waves)"); }
 }
 
 /* ---- the game thread -------------------------------------------------------------------------------------------- */
