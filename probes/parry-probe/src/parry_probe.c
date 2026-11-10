@@ -12,6 +12,10 @@
  *   no damage and set off no explosion; Ctrl+F11 draws one in front of her any time.
  * Every hit on her is logged (the first 80) with how long after her last right-click press it came, its kind, the
  * dealer and owner and whether she held a melee weapon, so the window can be set from real presses.
+ * 0.1.2 (Yui: F11 did nothing, parrying did nothing): in 15 sessions' logs no melee weapon was ever reported in hand
+ *   (the armory melee is a quick strike, not a held weapon) and no F10 / F11 press was ever read, so nothing needs a
+ *   key now: any weapon arms the parry (right-click), the window is 0.3 s, and the slash look changes by itself after
+ *   each slash (Quasar short-lived, Quasar, Talon, logged). F10 / F11 still work if the keyboard sends them.
  * Credit: the hit hook, entity, scene-graph and raycast reads are the kit base's (Helldiver Survival Rework, MIT;
  * HD2Runtime by SkyeShade); the teleport is the LIFT-182 Warp Pack's call as Warp Probe found it. */
 #include <errno.h>
@@ -28,7 +32,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.1"
+#define VERSION "0.1.2"
 #define BUILD "25480438"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
@@ -37,7 +41,7 @@
 #include "kitbase/kb_damage.h"
 
 static const float kWindows[4] = {0.15f, 0.2f, 0.3f, 0.5f};
-static int g_window = 1, g_anyWeapon;
+static int g_window = 2, g_anyWeapon = 1;   /* 0.1.2: 0.3 s and any weapon by default (no melee was ever reported held) */
 static atomic_ullong g_pressMs;          /* her last right-click press (GetTickCount64) */
 static atomic_int g_melee;               /* a melee weapon in hand */
 static unsigned g_hitsLogged, g_parries, g_counters, g_misses;
@@ -151,6 +155,8 @@ static uint32_t Attacker(const Counter* c)
     return best;
 }
 static void Slash(const float at[3], const float from[3]);
+static int g_look;
+static const char* const kLook[3];
 static void CounterFrame(void)
 {
     if (!atomic_load(&g_counterReady)) return;
@@ -190,13 +196,13 @@ static void CounterFrame(void)
     }
     if (hf->apply_status) stun = Act("the counter's stun", hf->apply_status(self, foe, HF_STATUS_STUN_MEDIUM, 300));
     Slash(at, dest);
+    Log("COUNTER (slash look: %s):", kLook[g_look]);
     Log("COUNTER: behind entity %u (%.1f m from her, facing %.2f %.2f), %.0f ms after the hit; round %s, stun %s", foe, dist, fwd[0], fwd[1],
         (double)(GetTickCount64() - (unsigned long long)c.ms), shot ? "fired" : "NOT fired", stun ? "applied" : "not applied");
 }
 
 /* ---- the slash look: a fan of harmless laser bolts across the target ------------------------------------------- */
 static uint32_t g_slashDamage, g_slashType[3];
-static int g_look;
 static const char* const kLook[3] = {"Quasar, short-lived", "Quasar as it is", "Talon"};
 static void SlashAdd(void)
 {
@@ -277,6 +283,7 @@ static void SlashFrame(void)
     if (res == HF_ACT_WAITING) return;   /* its package: the next frame */
     if (!Act("a slash bolt", res)) { g_slashLeft = 0; return; }
     g_slashLeft--;
+    if (!g_slashLeft) g_look = (g_look + 1) % 3;   /* 0.1.2: the next slash shows the next look */
 }
 
 /* ---- events and the frame ----------------------------------------------------------------------------------------- */
@@ -356,7 +363,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         Log("teleport ready");
     }
     else Log("teleport off: its functions are not the reviewed code (parries only)");
-    Log("ready: melee in hand, right-click just before a hit (window %.2f s; F10 cycles it, Ctrl+F10 any weapon); F11 slash look, Ctrl+F11 test slash", (double)kWindows[g_window]);
+    Log("ready: any weapon, right-click just before a hit (window %.2f s); the slash look changes after each slash (F10 / F11 also cycle them, Ctrl+F10 melee only, Ctrl+F11 test slash)", (double)kWindows[g_window]);
 }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
