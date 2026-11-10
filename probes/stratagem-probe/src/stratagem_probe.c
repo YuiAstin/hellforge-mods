@@ -37,7 +37,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.4.3"
+#define VERSION "0.5.0"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -326,6 +326,18 @@ static int g_haveRes, g_haveRack, g_haveEat, g_haveEatB, g_saved;
  * of it could carry the banked boxes? Its row (147) and the Surplus EAT booster's (15) are read too; at mission start:
  *   O the EAT-17 as it is (two launchers)      D the EAT-17 with every launcher in its payload made a box
  *   U as D, with four more boxes appended      X the Surplus EAT booster's stratagem as it is */
+/* 0.5.0: the pods hold their items (the Resupply pod 5052ec6a928ccf1a four boxes, the EAT pod two launchers): a pod is
+ * a HellpodRackComponentData of eight slots and a spawn count. Two copies of the Resupply pod: four more boxes in
+ * slots 4-7 (count 8), and two more in 4-5 (count 6). D and U drop them. */
+#define RES_POD UINT64_C(0x5052EC6A928CCF1A)
+static const HfSet kPod8[] = {{HF_FIELD(HellpodRack, slot4_item), HF_U64(0xA94913CA014F7579)}, {HF_FIELD(HellpodRack, slot5_item), HF_U64(0xA94913CA014F7579)},
+                              {HF_FIELD(HellpodRack, slot6_item), HF_U64(0xA94913CA014F7579)}, {HF_FIELD(HellpodRack, slot7_item), HF_U64(0xA94913CA014F7579)},
+                              {HF_FIELD(HellpodRack, spawn_count), HF_U32(8)}, {0}};
+static const HfSet kPod6[] = {{HF_FIELD(HellpodRack, slot4_item), HF_U64(0xA94913CA014F7579)}, {HF_FIELD(HellpodRack, slot5_item), HF_U64(0xA94913CA014F7579)},
+                              {HF_FIELD(HellpodRack, spawn_count), HF_U32(6)}, {0}};
+static const HfEntityDef kPodDef8 = {sizeof(HfEntityDef), "yui/stratagem-probe/cache_pod_8", RES_POD, 0, NULL, NULL, 0, NULL, kPod8, NULL, NULL, NULL, 0, NULL, NULL, NULL};
+static const HfEntityDef kPodDef6 = {sizeof(HfEntityDef), "yui/stratagem-probe/cache_pod_6", RES_POD, 0, NULL, NULL, 0, NULL, kPod6, NULL, NULL, NULL, 0, NULL, NULL, NULL};
+static HfRef g_pod8, g_pod6;
 #define EAT_ENTITY UINT64_C(0x80932FA0ED6901D3)
 #define BOX_ENTITY UINT64_C(0xA94913CA014F7579)
 static uint64_t g_payD[16], g_payU[16];
@@ -392,21 +404,24 @@ static void MissionRows(int on)
         Log("the racks: the B-1 rows put back (for the loadout)");
         return;
     }
-    if (g_haveEat)
+    if (g_haveRes)
     {
-        FillRack(g_rows[1], g_rowEat, 1, "Rack Test O (the EAT-17)");
-        FillRack(g_rows[0], g_rowEat, 1, "Rack Test D (the EAT-17, boxes)");
-        FillRack(g_rows[2], g_rowEat, 1, "Rack Test U (the EAT-17, boxes + 4)");
-        if (g_nPayD)
-        {
-            uint64_t pd = (uint64_t)(uintptr_t)g_payD, pu = (uint64_t)(uintptr_t)g_payU;
-            hf->write(g_rows[0] + 0x98, &pd, 8); hf->write(g_rows[0] + 0xA0, &g_nPayD, 4);
-            hf->write(g_rows[2] + 0x98, &pu, 8); hf->write(g_rows[2] + 0xA0, &g_nPayU, 4);
-            Row("Rack Test D now", g_rows[0]);
-            Row("Rack Test U now", g_rows[2]);
-        }
+        FillRack(g_rows[1], g_rowRes, 1, "Rack Test O (the Resupply)");
+        FillRack(g_rows[0], g_rowRes, 1, "Rack Test D (the Resupply, the 8-box pod)");
+        FillRack(g_rows[2], g_rowRes, 1, "Rack Test U (the Resupply, the 6-box pod)");
+        uint64_t marker = Quad(g_rowRes + 0x98) ? 0 : 0;
+        uint64_t src = Quad(g_rowRes + 0x98);
+        if (src) ReadAt((uintptr_t)src + 8, &marker, 8);
+        static uint64_t pay8[2], pay6[2];
+        pay8[0] = g_pod8; pay8[1] = marker; pay6[0] = g_pod6; pay6[1] = marker;
+        uint64_t p8 = (uint64_t)(uintptr_t)pay8, p6 = (uint64_t)(uintptr_t)pay6;
+        uint32_t two = 2;
+        if (g_pod8) { hf->write(g_rows[0] + 0x98, &p8, 8); hf->write(g_rows[0] + 0xA0, &two, 4); }
+        if (g_pod6) { hf->write(g_rows[2] + 0x98, &p6, 8); hf->write(g_rows[2] + 0xA0, &two, 4); }
+        Row("Rack Test D now", g_rows[0]);
+        Row("Rack Test U now", g_rows[2]);
     }
-    if (g_haveEatB) FillRack(g_rows[3], g_rowEatB, 1, "Rack Test X (Surplus EAT)");
+    if (g_haveRack) FillRack(g_rows[3], g_rowRack, 1, "Rack Test X (the reward rack)");
 }
 
 /* ---- the game thread -------------------------------------------------------------------------------------------- */
@@ -567,6 +582,9 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         d.payload_count = o.payload_count = 4;
         u = o; u.name = "yui/stratagem-probe/rack-test-u"; u.title = "Rack Test U"; u.code = "DUDUDUU";
         x = o; x.name = "yui/stratagem-probe/rack-test-x"; x.title = "Rack Test X"; x.code = "DUDUDUD";
+        g_pod8 = api->register_entity(mod, &kPodDef8);
+        g_pod6 = api->register_entity(mod, &kPodDef6);
+        Log("cache pods: 8 boxes %016llx, 6 boxes %016llx (0: refused, the log above says why)", (unsigned long long)g_pod8, (unsigned long long)g_pod6);
         g_typeD = api->add_stratagem(mod, &d);
         g_typeO = api->add_stratagem(mod, &o);
         g_typeU = api->add_stratagem(mod, &u);
