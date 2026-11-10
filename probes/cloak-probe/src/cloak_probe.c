@@ -19,7 +19,7 @@
 #include "hellforge_mod.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.2"
+#define VERSION "0.1.3"
 #define BUILD "25480438"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"

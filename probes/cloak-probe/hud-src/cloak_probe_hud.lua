@@ -99,7 +99,8 @@ local function describe(u, label)
     if not okn or type(n) ~= 'number' then return end
     for i = 1, math.min(n, 40) do
         local okm, mesh = pc(U.mesh, u, i)
-        local okc, c = okm and pc(M and M.num_materials, mesh)
+        local okc, c = false, nil
+        if okm then okc, c = pc(M and M.num_materials, mesh) end   -- 0.1.3: 'okm and pc(...)' kept only pc's first result (every count read nil)
         local mats = {}
         if okc and type(c) == 'number' then
             for j = 1, math.min(c, 8) do
@@ -122,7 +123,8 @@ local function copy_materials(me, stalker)
     if not stalker then src = st.cached or {} end
     for i = 1, ns do
         local okm, mesh = pc(U.mesh, stalker, i)
-        local okc, c = okm and pc(M.num_materials, mesh)
+        local okc, c = false, nil
+        if okm then okc, c = pc(M.num_materials, mesh) end   -- 0.1.3: 'okm and pc(...)' kept only pc's first result (every count read nil)
         if okc and type(c) == 'number' and c > 0 then
             for j = 1, c do local okt, mat = pc(M.material, mesh, j); if okt and mat then src[#src + 1] = mat end end
         end
@@ -134,7 +136,8 @@ local function copy_materials(me, stalker)
     local done, failed, how = 0, 0, nil
     for i = 1, n do
         local okm, mesh = pc(U.mesh, me, i)
-        local okc, c = okm and pc(M.num_materials, mesh)
+        local okc, c = false, nil
+        if okm then okc, c = pc(M.num_materials, mesh) end   -- 0.1.3: 'okm and pc(...)' kept only pc's first result (every count read nil)
         if okc and type(c) == 'number' then
             for j = 1, c do
                 local okt, mine = pc(M.material, mesh, j)
@@ -200,7 +203,8 @@ overlay:draw(function(d, dt)
                     local kept = {}
                     for i = 1, (okc and nc or 0) do
                         local okm, mesh = pc(U2.mesh, stalker, i)
-                        local okq, c = okm and pc(M2.num_materials, mesh)
+                        local okq, c = false, nil
+                        if okm then okq, c = pc(M2.num_materials, mesh) end   -- 0.1.3: 'okm and pc(...)' kept only pc's first result (every count read nil)
                         if okq and type(c) == 'number' and c > 0 then
                             for j = 1, c do local okt, mat = pc(M2.material, mesh, j); if okt and mat then kept[#kept + 1] = mat end end
                             break
