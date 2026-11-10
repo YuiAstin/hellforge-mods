@@ -37,7 +37,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.6"
+#define VERSION "0.4.0"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -261,13 +261,7 @@ static uint64_t Detour(void* manager, int32_t element, uint32_t thrower, const f
 
 /* ---- 0.2.0: the two test racks ---------------------------------------------------------------------------- */
 static uint32_t g_typeD, g_typeO, g_typeU, g_typeX;
-static uintptr_t g_rowU, g_rowX;
-static void MissionRows(int on)
-{
-    uint32_t u = on ? 1 : 3, x = on ? 0 : 1;
-    if (g_rowU) Log("Rack Test U +0x80 -> %u: %s", u, hf->write(g_rowU + 0x80, &u, 4) ? "not written" : "written");
-    if (g_rowX) Log("Rack Test X +0xBC -> %u: %s", x, hf->write(g_rowX + 0xBC, &x, 4) ? "not written" : "written");
-}
+static void MissionRows(int on);
 static int g_rowsDone;
 static void Row(const char* name, uintptr_t row)
 {
@@ -293,13 +287,15 @@ static void Row(const char* name, uintptr_t row)
  * reward rack (109) are found next to them (the table's 400-byte rows; checked by type and stable id) and copied in. */
 /* 0.3.1: the copies' rows sit in HellForge's own table, not beside the game's (0.3.0 found nothing within 400 rows), so
  * Call In Destroyer's row is found by scanning the process's readable memory for its type and stable id (once). */
-static uintptr_t ScanRow(uint32_t type, uint32_t stable)
+static int ScanRows(int n, const uint32_t* type, const uint32_t* stable, uintptr_t* out)
 {
     uint8_t* a = (uint8_t*)0x10000;
     MEMORY_BASIC_INFORMATION mi;
     unsigned regions = 0;
+    int found = 0;
     double t0 = (double)GetTickCount64();
-    while ((uintptr_t)a < UINT64_C(0x7FFFFFFF0000) && VirtualQuery(a, &mi, sizeof mi) == sizeof mi)
+    for (int k = 0; k < n; k++) out[k] = 0;
+    while (found < n && (uintptr_t)a < UINT64_C(0x7FFFFFFF0000) && VirtualQuery(a, &mi, sizeof mi) == sizeof mi)
     {
         uint8_t* base = (uint8_t*)mi.BaseAddress;
         size_t size = mi.RegionSize;
@@ -311,88 +307,90 @@ static uintptr_t ScanRow(uint32_t type, uint32_t stable)
             static uint8_t buf[(1u << 20) + 400];
             for (size_t off = 0; off < size; off += 1u << 20)
             {
-                size_t n = size - off < (1u << 20) + 400 ? size - off : (1u << 20) + 400;
-                if (n < 400 || hf->read((uintptr_t)(base + off), buf, n)) continue;
-                for (size_t i = 0; i + 400 <= n; i += 4)
+                size_t m = size - off < (1u << 20) + 400 ? size - off : (1u << 20) + 400;
+                if (m < 400 || hf->read((uintptr_t)(base + off), buf, m)) continue;
+                for (size_t i = 0; i + 400 <= m; i += 4)
                 {
                     const uint8_t* r = buf + i;
-                    if (Word(r) == type && Word(r + 4) == stable && Word(r + 0x3C) <= 7 && Word(r + 0x48) >= 1 && Word(r + 0x48) <= 12)
-                    {
-                        Log("scan: row of type %u found at %p (%u regions, %.0f ms)", type, (void*)(base + off + i), regions, (double)GetTickCount64() - t0);
-                        return (uintptr_t)(base + off + i);
-                    }
+                    for (int k = 0; k < n; k++)
+                        if (!out[k] && Word(r) == type[k] && Word(r + 4) == stable[k] && Word(r + 0x3C) <= 7 && Word(r + 0x48) >= 1 && Word(r + 0x48) <= 12)
+                        { out[k] = (uintptr_t)(base + off + i); found++; }
                 }
             }
         }
         a = base + size;
     }
-    Log("scan: no row of type %u (%u regions, %.0f ms)", type, regions, (double)GetTickCount64() - t0);
-    return 0;
+    Log("scan: %d of %d rows found (%u regions, %.0f ms)", found, n, regions, (double)GetTickCount64() - t0);
+    return found;
 }
-static int PutRange(uintptr_t to, uintptr_t from, uint32_t a, uint32_t b, const char* what)
-{
-    uint8_t buf[400];
-    if (b <= a || b > 400 || !ReadAt(from + a, buf, b - a) || hf->write(to + a, buf, b - a)) { Log("  %s: could not be written", what); return 0; }
-    return 1;
-}
+/* 0.4.0, Yui's "cash in" idea: one rack call, as many boxes as outposts cleared. 0.3.x's racks (a B-1 Supply Pack copy
+ * with four boxes as payload) dropped one box, at once, no pod: the B-1's delivery spawns its first payload entity. So the
+ * Resupply's and the reward rack's own rows are found (one scan) and, while a mission runs (after the loadout is picked;
+ * the B-1 rows are put back at the end), copied into the racks (all but their type, id, code, uses and cooldown):
+ *   O the Resupply as it is          D the Resupply with four more boxes in its payload
+ *   X the reward rack as it is       U the reward rack with four more boxes
+ * Call each in a normal mission (no lockout there): does D bring eight boxes? */
+static uint8_t g_rowB1[4][400], g_rowRes[400], g_rowRack[400];
+static int g_haveRes, g_haveRack, g_saved;
+static uintptr_t g_rows[4];
+static uint64_t g_payD[16], g_payU[16];
 static void TestRows(void)
 {
     if (g_rowsDone || !g_typeD || !g_typeO || !g_typeU || !g_typeX) return;
     uintptr_t d = hf->stratagem_row(g_typeD), o = hf->stratagem_row(g_typeO), u = hf->stratagem_row(g_typeU), x = hf->stratagem_row(g_typeX);
     if (!d || !o || !u || !x) return;   /* not loaded yet */
     g_rowsDone = 1;
-    Row("the racks as added (a B-1 Supply Pack copy with the Resupply's boxes)", d);
-    uintptr_t call = ScanRow(123, 0xf8f90965u);
-    if (!call) { Log("Call In Destroyer's row was not found: the test racks stay plain (the Resupply's boxes by hellpod)"); return; }
+    g_rows[0] = d; g_rows[1] = o; g_rows[2] = u; g_rows[3] = x;
+    for (int i = 0; i < 4; i++) g_saved += ReadAt(g_rows[i], g_rowB1[i], 400);
+    static const uint32_t types[2] = {33, 109}, stables[2] = {0x33babe96u, 0x4d36b84cu};
+    uintptr_t at[2];
+    ScanRows(2, types, stables, at);
+    g_haveRes = at[0] && ReadAt(at[0], g_rowRes, 400);
+    g_haveRack = at[1] && ReadAt(at[1], g_rowRack, 400);
+    if (g_haveRes) Row("Resupply", at[0]); else Log("Resupply's row: not found");
+    if (g_haveRack) Row("the reward rack", at[1]); else Log("the reward rack's row: not found");
+    for (int k = 0; k < 2; k++)
     {
-        uint8_t rc[400], rd[400];
-        unsigned told = 0;
-        if (ReadAt(call, rc, 400) && ReadAt(d, rd, 400))
-            for (unsigned i = 8; i < 400; i += 4)
-                if (Word(rc + i) != Word(rd + i) && told++ < 80) Log("  differs +0x%03x: Call In Destroyer %08x, the racks %08x", i, Word(rc + i), Word(rd + i));
+        const uint8_t* r = k ? g_rowRack : g_rowRes;
+        uint64_t* pay = k ? g_payU : g_payD;
+        if (!(k ? g_haveRack : g_haveRes)) continue;
+        uint32_t n = Word(r + 0xA0);
+        uint64_t src = Quad(r + 0x98);
+        if (n > 8 || !src || !ReadAt((uintptr_t)src, pay, 8u * n)) { Log("%s: its payload is unreadable", k ? "the reward rack" : "Resupply"); continue; }
+        uint64_t box = UINT64_C(0xA94913CA014F7579);
+        for (uint32_t i = 0; i < 4; i++) pay[n + i] = box;
     }
-    Row("Call In Destroyer", call);
-    /* 0.3.2: the vanilla rows beside it, to compare: what can be called while the Destroyer is away (Reinforce, the
-     * Destroyer call) and what cannot (the Resupply, the reward rack) */
-    static const struct { uint32_t type, stable; const char* name; } kCmp[] = {
-        {124, 0x87147bdbu, "Reinforcement Beacon (callable without the Destroyer)"},
-        {33, 0x33babe96u, "Resupply (locked without it)"},
-        {109, 0x4d36b84cu, "the reward rack (locked without it)"},
-        {101, 0x71b6d7dau, "B-1 Supply Pack (the copies' base)"}};
-    for (unsigned i = 0; i < sizeof kCmp / sizeof kCmp[0]; i++)
+    Log("the racks are filled at each mission start (O the Resupply, D the Resupply + 4 boxes, X the reward rack, U the rack + 4 boxes)");
+}
+static void FillRack(uintptr_t row, const uint8_t* from, const uint64_t* extra, const char* name)
+{
+    uint8_t r[400], own[400];
+    if (!ReadAt(row, own, 400)) return;
+    memcpy(r, from, 400);
+    memcpy(r, own, 8);                    /* type, stable id */
+    memcpy(r + 0x40, own + 0x40, 0x10);   /* code, code length, uses */
+    memcpy(r + 0x68, own + 0x68, 4);      /* cooldown */
+    if (extra)
     {
-        uint8_t h[8];
-        uintptr_t r = 0;
-        for (int k = -300; k <= 300 && !r; k++)
-        {
-            uintptr_t at = call + (intptr_t)k * 400;
-            if (ReadAt(at, h, 8) && Word(h) == kCmp[i].type && Word(h + 4) == kCmp[i].stable) r = at;
-        }
-        if (r) Row(kCmp[i].name, r);
-        else Log("%s: not within 300 rows of Call In Destroyer's", kCmp[i].name);
+        uint64_t p = (uint64_t)(uintptr_t)extra;
+        uint32_t n = Word(from + 0xA0) + 4;
+        memcpy(r + 0x98, &p, 8);
+        memcpy(r + 0xA0, &n, 4);
     }
-    /* 0.3.5: 0.3.4's D (all of Call In Destroyer's row but a few blocks) was hidden again: the hiding field is in one
-     * of the blocks below. Four racks, each with what 0.3.3's O had (delivery 4, call-in time 0, origin, call-in type,
-     * cooldown type, HUD "mission": shown, but locked) plus one more block of Call In Destroyer's row:
-     *   D +0x08..+0x28   O +0x34..+0x3C, +0x58..+0x68, +0x6C..+0x70   U +0x78..+0x94   X +0x108..+0x190 */
-    int ok = 1;
-    uintptr_t all[4] = {d, o, u, x};
-    for (int i = 0; i < 4; i++)
-        ok &= PutRange(all[i], call, 0x3C, 0x40, "delivery") & PutRange(all[i], call, 0x54, 0x58, "call-in time") & PutRange(all[i], call, 0x70, 0x78, "origin") &
-              PutRange(all[i], call, 0x94, 0x98, "cooldown type") & PutRange(all[i], call, 0xB8, 0xBC, "hud");
-    ok &= PutRange(d, call, 0x08, 0x28, "D 08-28");
-    ok &= PutRange(o, call, 0x34, 0x3C, "O 34-3C") & PutRange(o, call, 0x58, 0x68, "O 58-68") & PutRange(o, call, 0x6C, 0x70, "O 6C-70");
-    /* 0.3.6: U's block (+0x78..+0x94) hid it; the only value there that differs is +0x80 (Call In Destroyer 1, the
-     * racks 3). So U keeps 3 for the loadout, and gets 1 only while a mission runs (written at mission start, put back at
-     * the end): it can be picked, then carries Call In Destroyer's +0x80 in the mission. X does the same with +0xBC
-     * (Call In Destroyer 0, the racks 1), the other loadout-block value that differs. */
-    g_rowU = u; g_rowX = x;
-    ok &= PutRange(x, call, 0x108, 0x190, "X 108-190");
-    Log(ok ? "the test racks are set" : "the test racks: some writes failed (see above)");
-    Row("Rack Test D now", d);
-    Row("Rack Test O now", o);
-    Row("Rack Test U now", u);
-    Row("Rack Test X now", x);
+    Log("%s: %s", name, hf->write(row, r, 400) ? "NOT written" : "filled");
+    Row(name, row);
+}
+static void MissionRows(int on)
+{
+    if (!g_rowsDone || g_saved != 4) return;
+    if (!on)
+    {
+        for (int i = 0; i < 4; i++) hf->write(g_rows[i], g_rowB1[i], 400);
+        Log("the racks: the B-1 rows put back (for the loadout)");
+        return;
+    }
+    if (g_haveRes) { FillRack(g_rows[1], g_rowRes, NULL, "Rack Test O (the Resupply)"); FillRack(g_rows[0], g_rowRes, g_payD, "Rack Test D (the Resupply + 4 boxes)"); }
+    if (g_haveRack) { FillRack(g_rows[3], g_rowRack, NULL, "Rack Test X (the reward rack)"); FillRack(g_rows[2], g_rowRack, g_payU, "Rack Test U (the reward rack + 4 boxes)"); }
 }
 
 /* ---- the game thread -------------------------------------------------------------------------------------------- */
