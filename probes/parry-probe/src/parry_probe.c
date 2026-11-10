@@ -32,7 +32,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.4"
+#define VERSION "0.1.5"
 #define BUILD "25480438"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
@@ -222,7 +222,7 @@ static void CounterFrame(void)
 
 /* ---- the slash look: a fan of harmless laser bolts across the target ------------------------------------------- */
 static uint32_t g_slashDamage, g_slashType[3];
-static const char* const kLook[3] = {"Quasar, short-lived", "Quasar as it is", "Talon"};
+static const char* const kLook[3] = {"slow Quasar bolts (6, orange-white)", "slow Talon bolts (6, thin red)", "wide Quasar fan (12, faster)"};
 static void SlashAdd(void)
 {
     HfDamage dmg;
@@ -232,8 +232,8 @@ static void SlashAdd(void)
     dmg.name = "yui/parry_probe/slash_damage";
     dmg.scale = 0.001f;
     g_slashDamage = hf->add_damage ? hf->add_damage(self, &dmg) : 0;
-    static const char* names[3] = {"yui/parry_probe/slash_quasar_short", "yui/parry_probe/slash_quasar", "yui/parry_probe/slash_talon"};
-    const uint32_t base[3] = {HF_PROJECTILE_LAS99_QUASAR_CANNON, HF_PROJECTILE_LAS99_QUASAR_CANNON, HF_PROJECTILE_LAS58_TALON};
+    static const char* names[3] = {"yui/parry_probe/slash_quasar_slow", "yui/parry_probe/slash_talon_slow", "yui/parry_probe/slash_quasar_fan"};
+    const uint32_t base[3] = {HF_PROJECTILE_LAS99_QUASAR_CANNON, HF_PROJECTILE_LAS58_TALON, HF_PROJECTILE_LAS99_QUASAR_CANNON};
     for (int i = 0; i < 3; i++)
     {
         HfProjectile p;
@@ -256,7 +256,13 @@ static void ProjectilesReady(HfMod* mod, HfEvent event, void* user)
             (double)r->lifetime, r->pellet_count, r->impact_explosion, r->expiry_explosion);
         r->impact_explosion = 0;
         r->expiry_explosion = 0;
-        if (i == 0) { r->lifetime = 0.12f; if (r->velocity > 120) r->velocity = 120; }
+        /* 0.1.5 (Yui: no difference seen between the looks): at 1300 m/s a bolt left the 1.3 m arc within a frame, so no
+         * look ever showed. Now each crawls along the arc and dies there: slow Quasar bolts, slow Talon bolts, and a
+         * wider, faster Quasar fan of 12 */
+        r->velocity = i == 2 ? 45.0f : 18.0f;
+        r->lifetime = i == 2 ? 0.2f : 0.35f;
+        r->gravity = 0;
+        r->drag = 0;
     }
     HfDamageInfo* d = g_slashDamage && hf->damage_row ? (HfDamageInfo*)hf->damage_row(g_slashDamage) : NULL;
     if (d) Log("slash damage row ready");
@@ -264,12 +270,12 @@ static void ProjectilesReady(HfMod* mod, HfEvent event, void* user)
 /* the slash: 6 bolts along an arc around `at` (radius 1.3 m, a tilted plane facing `from`), one a frame, each flying
  * along the arc so their streaks join into one cut */
 static float g_slashAt[3], g_slashFrom[3];
-static int g_slashLeft;
+static int g_slashLeft, g_slashCount = 6;
 static void Slash(const float at[3], const float from[3])
 {
     memcpy(g_slashAt, at, 12);
     memcpy(g_slashFrom, from, 12);
-    g_slashLeft = 6;
+    g_slashLeft = g_slashCount = g_look == 2 ? 12 : 6;
 }
 static void SlashFrame(void)
 {
@@ -282,16 +288,17 @@ static void SlashFrame(void)
     f[0] /= h; f[1] /= h;
     float r[3] = {f[1], -f[0], 0};
     /* the arc: from upper left to lower right, tilted 35 degrees */
-    int i = 6 - g_slashLeft;
-    float a0 = -1.1f + 2.2f * i / 5.0f, a1 = a0 + 0.44f;
+    int i = g_slashCount - g_slashLeft;
+    float span = g_look == 2 ? 2.8f : 2.2f, radius = g_look == 2 ? 2.0f : 1.3f;
+    float a0 = -span / 2 + span * i / (float)(g_slashCount - 1), a1 = a0 + span / g_slashCount * 1.2f;
     float tilt = 0.61f, cu = cosf(tilt), su = sinf(tilt);
     float p0[3], p1[3];
     for (int k = 0; k < 3; k++)
     {
         float up = k == 2 ? 1.0f : 0.0f;
         float axisX = r[k] * cu + up * su, axisY = -r[k] * su + up * cu;   /* the slash plane's two axes */
-        p0[k] = g_slashAt[k] - f[k] * 0.4f + (axisX * sinf(a0) + axisY * cosf(a0) * 0.35f) * 1.3f;
-        p1[k] = g_slashAt[k] - f[k] * 0.4f + (axisX * sinf(a1) + axisY * cosf(a1) * 0.35f) * 1.3f;
+        p0[k] = g_slashAt[k] - f[k] * 0.8f + (axisX * sinf(a0) + axisY * cosf(a0) * 0.35f) * radius;
+        p1[k] = g_slashAt[k] - f[k] * 0.8f + (axisX * sinf(a1) + axisY * cosf(a1) * 0.35f) * radius;
     }
     p0[2] += 1.0f; p1[2] += 1.0f;
     float d[3] = {p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]};
