@@ -132,3 +132,6 @@ Calling in the Super Destroyer is cashing in: cleared bases bank ammo boxes, and
 orbit longer: the window is 60 s + `window_per_base` (15) s for every base cleared this mission, at most `window_max`
 (180) s. It opens after each lockout (the drop-in, each Call In Destroyer call); a base cleared while it is open
 stretches it. `destroyer_window` is gone.
+- 0.6.1 (Yui): the game's HUD still counts its own 60 s; past them a banner at the top of the screen reads "TIME BOUGHT
+  FOR THE DESTROYER: XXs" (the window's time left). The Commando Plus HUD (`hud-src/`, an HD2Runtime overlay built into
+  `data/`) reads `commando_plus_hud_state` (layout 1: show, bought_left, bought_total, bases) through LuaJIT's ffi.

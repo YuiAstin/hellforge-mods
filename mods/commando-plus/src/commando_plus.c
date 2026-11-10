@@ -50,7 +50,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.6.0"
+#define VERSION "0.6.1"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -1322,6 +1322,29 @@ static void RegisterCache(void)
     g_cacheType[1] = hf->add_stratagem(self, &s);
     Log("cash-in: the Outpost Cache is stratagem type %u (D U D U D U R), the Small Outpost Cache type %u (D U D U D U L)%s", g_cacheType[0], g_cacheType[1],
         g_cacheType[0] && g_cacheType[1] ? "" : ": REFUSED (the log above says why)");
+}
+
+/* ---- 0.6.1: the banner (Commando Plus HUD, an HD2Runtime overlay reading this through LuaJIT's ffi) ----------------- */
+/* Yui: the game's HUD still counts the window's 60 s down; once those are over and the window is still open (bases
+ * cleared bought it more), the HUD addon shows "Time bought for the Destroyer: XXs" at the top of the screen. */
+typedef struct CommandoPlusHud
+{
+    uint32_t version;     /* 1 */
+    uint32_t show;        /* 1: the banner is up (the game's 60 s are over, the window still open) */
+    float bought_left;    /* seconds of the window left past the game's 60 */
+    float bought_total;   /* the seconds bought this window (the window's length - 60) */
+    uint32_t bases;       /* the bases cleared this mission */
+} CommandoPlusHud;
+static CommandoPlusHud g_hudState = {1, 0, 0, 0, 0};
+HF_MOD_EXPORT CommandoPlusHud* commando_plus_hud_state(void)
+{
+    double past = g_now - (g_holdFrom + 60);
+    int on = g_inMission && g_applied && g_usable && g_holdUntil > 0 && past >= 0 && g_now < g_holdUntil;
+    g_hudState.show = (uint32_t)on;
+    g_hudState.bought_left = on ? (float)(g_holdUntil - g_now) : 0;
+    g_hudState.bought_total = g_holdUntil > 0 ? (float)(g_holdUntil - g_holdFrom - 60) : 0;
+    g_hudState.bases = g_basesCleared;
+    return &g_hudState;
 }
 
 static void Tick(HfMod* mod, float dt, void* user)
