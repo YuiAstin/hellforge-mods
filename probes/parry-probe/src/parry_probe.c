@@ -32,7 +32,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.3"
+#define VERSION "0.1.4"
 #define BUILD "25480438"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
@@ -41,7 +41,7 @@
 #include "kitbase/kb_damage.h"
 
 static const float kWindows[4] = {0.15f, 0.2f, 0.3f, 0.5f};
-static int g_window = 2, g_anyWeapon = 1;   /* 0.1.2: 0.3 s and any weapon by default (no melee was ever reported held) */
+static int g_window = 2, g_anyWeapon = 0;   /* 0.1.4 (Yui: not while aiming a gun): melee in hand only again (the Breaching Hammer was reported held, 0.1.2's run); Ctrl+F10: any weapon */
 static atomic_ullong g_pressMs;          /* her last right-click press (GetTickCount64) */
 static atomic_int g_melee;               /* a melee weapon in hand */
 static unsigned g_hitsLogged, g_parries, g_counters, g_misses;
@@ -382,7 +382,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         Log("teleport ready");
     }
     else Log("teleport off: its functions are not the reviewed code (parries only)");
-    Log("ready: any weapon, right-click just before a hit (window %.2f s); the slash look changes after each slash (F10 / F11 also cycle them, Ctrl+F10 melee only, Ctrl+F11 test slash)", (double)kWindows[g_window]);
+    Log("ready: melee weapon in hand, right-click just before a hit (window %.2f s); the slash look changes after each slash (F10 / F11 also cycle them, Ctrl+F10 any weapon, Ctrl+F11 test slash)", (double)kWindows[g_window]);
 }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
