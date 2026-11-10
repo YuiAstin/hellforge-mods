@@ -110,3 +110,8 @@ Calling in the Super Destroyer is cashing in: cleared bases bank ammo boxes, and
 - 0.5.1 played 2026-11-10: both caches landed as they should (4 and 8 boxes). But the HUD showed 1 with 3 on the
   record, and the Small Outpost Cache was thrown at 0 uses. 0.5.2: the row's uses follow the record (the HUD may show
   those), and an empty cache is not granted (+9 0) until it has a use again.
+- The window (Yui: 1 minute, neither of Call In Destroyer's timers): found in the availability check
+  (game.dll+0x671440). In a mission without the Destroyer, a stratagem other than Call In Destroyer / Reinforce is
+  usable only while the player's float at [game+0x3326340] + 0x90 x slot + 0x1FAE4 is above 0: the Destroyer's time
+  left (+0x1FAE0 a byte and +0x1FAE8 a float the HUD reads beside it). 0.5.3 logs it per slot and `destroyer_window`
+  (61 to 600 s) sets it when it rises.

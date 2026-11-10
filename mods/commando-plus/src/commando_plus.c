@@ -48,7 +48,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.5.2"
+#define VERSION "0.5.3"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -120,7 +120,7 @@ static int ReadSettings(const char* path)
         else if (!strcmp(k, "cache_boxes_small")) { if (x >= 0 && x <= 24) s_boxSmall = x; }
         else if (!strcmp(k, "cache_boxes_large")) { if (x >= 0 && x <= 24) s_boxLarge = x; }
         else if (!strcmp(k, "resupply_to_pods")) s_toPods = x ? 1 : 0;
-        else if (!strcmp(k, "destroyer_window")) { if (x >= 0 && x <= 1800) s_destroyerWindow = x; }
+        else if (!strcmp(k, "destroyer_window")) { if (x == 0 || (x > 60 && x <= 600)) s_destroyerWindow = x; }
     }
     fclose(f);
     return 1;
@@ -977,12 +977,6 @@ static void DestroyerRow(void)
         if (isfinite(v) && v >= 1.0f && v <= 3600.0f && v == (float)(int)v) at += snprintf(line + at, sizeof line - at, " +0x%X=%.0f", o, v);
     }
     Log("destroyer window: every whole number of seconds (1 to 3600) in its row:%s", at ? line : " none");
-    if (s_destroyerWindow > 0)
-    {
-        float w = (float)s_destroyerWindow;
-        int ok = !hf->write(p + 0x68, &w, 4);
-        Log("destroyer window: destroyer_window %d: its cooldown %s %.0f s (a test: does the Destroyer stay that long?)", s_destroyerWindow, ok ? "set to" : "could NOT be set to", w);
-    }
 }
 static uint64_t ClockNow(void)
 {
@@ -1032,6 +1026,48 @@ static void DestroyerFrame(void)
             g_cidTold[k] = 1;
             Log("destroyer window: +0x%X reached, %.0f s after the call (%.0f s into the mission)", k == 1 ? 0x18 : 0x20, g_now - g_cidCallAt, g_now - g_missionAt);
         }
+}
+/* 0.5.3 (Yui: the window is 1 minute, neither timer above): the lock itself (game.dll+0x671440, the availability check;
+ * read in the game.dll dump, 2026-11-10): in a mission without the Destroyer (its state's +0x2D), a stratagem other
+ * than Call In Destroyer / Reinforce is usable only while the player's float at [game+0x3326340] + 0x90 x slot +
+ * 0x1FAE4 is above 0 (the HUD reads +0x1FAE0 / +0x1FAE8 beside it). So: the Destroyer's time left, per player slot.
+ * Logged as it rises and runs out; destroyer_window > 0 sets it (and +0x1FAE8) to that many seconds when it rises. */
+#define DESTROYER_STATE 0x3326340u
+static int g_dsOk = -1;
+static float g_dsLast[4];
+static double g_dsSince[4], g_dsTold[4];
+static void DestroyerTimer(void)
+{
+    if (g_dsOk < 0)
+        g_dsOk = hf->code_matches(game + 0x6715CC, "48 8B 05 6D 4D CB 02 4B 8D 0C FF 48 03 C9 0F 57 C0 F3 0F 10 8C C8 E4 FA 01 00") ? 1 : 0;
+    if (!g_dsOk) { static int told; if (!told++) Log("destroyer window: game.dll+0x6715CC is not as researched: the window is not read"); return; }
+    uintptr_t base = Pointer(game + DESTROYER_STATE);
+    if (!base) return;
+    for (int i = 0; i < 4; i++)
+    {
+        uint8_t b[0x14];
+        if (!ReadAt(base + 0x90u * i + 0x1FAD8, b, sizeof b)) return;
+        float left, other;
+        memcpy(&left, b + 0xC, 4);
+        memcpy(&other, b + 0x10, 4);
+        if (!isfinite(left)) continue;
+        if (left > 0 && g_dsLast[i] <= 0)
+        {
+            g_dsSince[i] = g_dsTold[i] = g_now;
+            Log("destroyer window: player slot %d: the Super Destroyer is overhead, %.1f s left (+0x1FAE0 %u, +0x1FAE8 %.1f), %.0f s into the mission", i, left, b[8], other, g_now - g_missionAt);
+            if (s_destroyerWindow > 0 && (float)s_destroyerWindow > left)
+            {
+                float w = (float)s_destroyerWindow;
+                int ok = !hf->write(base + 0x90u * i + 0x1FAE4, &w, 4);
+                if (ok && other > 0 && other < w) hf->write(base + 0x90u * i + 0x1FAE8, &w, 4);
+                Log("destroyer window: destroyer_window %d: its time left %s", s_destroyerWindow, ok ? "set" : "could NOT be set");
+                left = w;
+            }
+        }
+        else if (left > 0 && g_now - g_dsTold[i] >= 15) { g_dsTold[i] = g_now; Log("destroyer window: slot %d: %.1f s left (+0x1FAE8 %.1f)", i, left, other); }
+        else if (left <= 0 && g_dsLast[i] > 0) Log("destroyer window: slot %d: the Super Destroyer has gone, %.0f s after it came", i, g_now - g_dsSince[i]);
+        g_dsLast[i] = left;
+    }
 }
 static void OnDestroyerCall(const HfStratagemEvent* s)
 {
@@ -1209,6 +1245,7 @@ static void CashFrame(void)
     unsigned cid = atomic_load(&g_cidCalls);
     if (cid != cidSeen) { cidSeen = cid; OnDestroyerCall(NULL); }
     DestroyerFrame();
+    DestroyerTimer();
 }
 static void FixPods(void)
 {
@@ -1274,7 +1311,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         g_checkTries = g_applied = g_commando = g_timerTries = 0;
         g_timerAt = g_recheckAt = 0;
         g_checkAt = m ? g_now + 8 : 0;
-        if (m) { CashReset(0); CacheRefill(); g_missionAt = g_now; memset(g_cidMarks, 0, sizeof g_cidMarks); }
+        if (m) { CashReset(0); CacheRefill(); g_missionAt = g_now; memset(g_cidMarks, 0, sizeof g_cidMarks); memset(g_dsLast, 0, sizeof g_dsLast); }
         Log(m ? "mission start: the stratagem record is read in 8 s" : "mission end");
     }
     if (!m) return;
