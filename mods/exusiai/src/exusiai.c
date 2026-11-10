@@ -38,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.14"
+#define VERSION "0.2.15"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -197,6 +197,8 @@ static const float kGunAt[6][3] = {{-1.15f, 0.45f, 0.2f}, {1.15f, 0.45f, 0.2f}, 
 static const char* const kPriority[4] = {"the nearest", "the most heavily armoured", "whoever last hit her", "the weakest"};
 static double g_gunNext[6];
 static uint32_t g_gunTarget[6];
+static double g_gunPickAt[6], g_gunSince[6];
+static int32_t g_gunHp[6];
 /* her shots' marks (where they landed): S2's guns fire at the next ones on the game thread */
 typedef struct Shot { float p[3]; uint32_t target; } Shot;
 static Shot g_assist[8];
@@ -227,14 +229,18 @@ static uint32_t g_round[5], g_roundBad[5];
 /* 0.2.8: at most max_rounds projectiles a second in all (two game crashes in rendering came in fights with the guns at
  * the real fire rates and a shotgun's whole shot: thousands of spawned rounds a mission); her rounds' speed (her copies
  * only, round_speed m/s, 0: the base's): at 800-1000 m/s a round is first seen metres out from its gun */
-static double g_projTokens = 30, g_projAt;
-static int ProjBudget(void)
+/* 0.2.15 (Yui: a gun sometimes refuses to shoot): one bucket for all let the shotgun gun (11 pellets, 300 rpm) drain it
+ * and the others then fired nothing. Now each gun out has its own share of max_rounds. */
+static double g_projTok[6], g_projAt[6];
+static int ProjBudget(int i)
 {
-    double el = g_now - g_projAt;
-    g_projAt = g_now;
-    if (el > 0) g_projTokens += el * s_maxRounds;
-    if (g_projTokens > s_maxRounds) g_projTokens = s_maxRounds;
-    return (int)g_projTokens;
+    int out = (g_now < g_s2Until ? 2 : 0) + (g_now < g_s3Until ? 4 : 0);
+    double rate = s_maxRounds / (out > 0 ? out : 1), cap = rate < 2 ? 2 : rate;
+    double el = g_now - g_projAt[i];
+    g_projAt[i] = g_now;
+    if (el > 0) g_projTok[i] += el * rate;
+    if (g_projTok[i] > cap) g_projTok[i] = cap;
+    return (int)g_projTok[i];
 }
 static uint8_t g_speedSet[5];
 static void RoundSpeed(int r)
@@ -336,10 +342,10 @@ static int Fire(int i, const float at[3])
     int r = 0;
     RoundSpeed(role);
     {
-        int budget = ProjBudget();
+        int budget = ProjBudget(i);
         if (budget < 1) return 0;
         if (pellets > budget) pellets = budget;
-        g_projTokens -= pellets;
+        g_projTok[i] -= pellets;
     }
     for (int p = 0; p < pellets; p++)
     {
@@ -442,7 +448,7 @@ static int Living(uint32_t e, int32_t* hp)
 }
 /* 0.2.4: the middle of a unit's body: the centre of its scene-graph nodes' box (a Bile Titan's root is on the ground
  * between its legs, its body 6 m up), kept a second per enemy */
-#define BODIES 64
+#define BODIES 256
 static struct { uint32_t unit; double at; float off[3]; } g_body[BODIES];
 static int CmpF(const void* x, const void* y) { float a = *(const float*)x, b = *(const float*)y; return a < b ? -1 : a > b; }
 static int BodyOffset(uint32_t unit, const float root[3], float off[3])
@@ -602,6 +608,29 @@ static int ReticlePoint(float out[3])
     for (int k = 0; k < 3; k++) out[k] = cam[k] + fwd[k] * len;
     return 1;
 }
+static int RootPos(uint32_t e, uint64_t res, float out[3])
+{
+    uint8_t d[24];
+    if (!Descriptor(e, d) || Quad(d) != res || !UnitNode(Word(d + 12), 0, out)) return 0;
+    out[2] += 1.0f;
+    return 1;
+}
+/* 0.2.15 (Yui: her guns sometimes shoot dead bodies): a target a gun has fired at for 2 s without its health changing
+ * (a body whose dead state no kill has shown yet, or something her rounds cannot hurt) is left alone for 15 s */
+static struct { uint32_t e; double until; } g_shun[32];
+static unsigned g_shunN;
+static int Shunned(uint32_t e)
+{
+    for (int k = 0; k < 32; k++) if (g_shun[k].e == e && g_now < g_shun[k].until) return 1;
+    return 0;
+}
+static void Shun(uint32_t e)
+{
+    unsigned k = g_shunN++ % 32;
+    g_shun[k].e = e; g_shun[k].until = g_now + 15;
+    static unsigned told;
+    if (told++ < 6) Log("entity %u took 2 s of a gun's fire with its health unchanged: left alone for 15 s (a body, or beyond her rounds)", e);
+}
 static uint32_t Pick(int i, float at[3])
 {
     float me[3], q[3], from[3];
@@ -611,15 +640,17 @@ static uint32_t Pick(int i, float at[3])
     uint32_t threat = atomic_load(&g_threat);
     int threatFresh = threat && GetTickCount64() - atomic_load(&g_threatMs) < 10000;
     /* 0.2.6: the candidates by score, then the best one with a clear shot from the gun (the first 5 tried) */
-    struct { uint32_t e; double s; float q[3]; } c[48];
+    /* 0.2.15 (Yui: laggy in her ult): scored by its root's position (one small read); the body's middle (a read of all
+     * its nodes) only for the ones tried. Each gun also keeps its target 0.3 s (GunsFrame) */
+    struct { uint32_t e; uint64_t res; double s; float q[3]; } c[48];
     int nc = 0;
     for (int k = 0; k < FOES; k++)
     {
         uint32_t e = g_foe[k];
         int32_t hp;
-        if (!e || !TargetPos(e, g_foeRes[k], q) || !Living(e, &hp)) continue;
+        if (!e || Shunned(e) || !RootPos(e, g_foeRes[k], q)) continue;
         float d2 = Dist2(me, q);
-        if (d2 > s_s3Range * s_s3Range) continue;
+        if (d2 > s_s3Range * s_s3Range || !Living(e, &hp)) continue;
         double sc = -d2;                                                   /* 0: the nearest */
         if (prio == 1) sc = ArmourOf(g_foeRes[k]) * 1e6 - d2;              /* 1: the most armour, then the nearest */
         else if (prio == 2) sc = (threatFresh && e == threat ? 1e9 : 0) - d2;   /* 2: her attacker, else the nearest */
@@ -628,10 +659,13 @@ static uint32_t Pick(int i, float at[3])
         if (nc == 48) { if (sc <= c[47].s) continue; j = 47; }
         else j = nc++;
         while (j > 0 && c[j - 1].s < sc) { c[j] = c[j - 1]; j--; }
-        c[j].e = e; c[j].s = sc; memcpy(c[j].q, q, 12);
+        c[j].e = e; c[j].res = g_foeRes[k]; c[j].s = sc; memcpy(c[j].q, q, 12);
     }
-    for (int j = 0; j < nc && j < 5; j++)
+    for (int j = 0; j < nc && j < 10; j++)   /* 0.2.15: the first 10 tried (5 left guns idle in cover-heavy fights) */
+    {
+        if (!TargetPos(c[j].e, c[j].res, c[j].q)) continue;
         if (ClearShot(from, c[j].q, c[j].e)) { memcpy(at, c[j].q, 12); return c[j].e; }
+    }
     return 0;
 }
 static int FoePos(uint32_t e, float out[3])
@@ -676,12 +710,28 @@ static void GunsFrame(void)
         if (g_now < g_gunNext[i]) continue;
         g_gunNext[i] = g_now + RoleEvery(i - 2);
         float at[3];
-        uint32_t t = Pick(i, at);
+        uint32_t t = 0;
+        int32_t hp = 0;
+        /* 0.2.15: its target kept 0.3 s while it lives (a full pick, with its raycasts, for every shot was the lag) */
+        if (g_gunTarget[i] && g_now < g_gunPickAt[i] + 0.3 && Living(g_gunTarget[i], &hp) && FoePos(g_gunTarget[i], at)) t = g_gunTarget[i];
+        else
+        {
+            t = Pick(i, at);
+            g_gunPickAt[i] = g_now;
+            if (!t) g_gunNext[i] = g_now + 0.15;   /* nothing in sight: look again soon, not a whole shot later */
+        }
         if (t != g_gunTarget[i])
         {
             g_gunTarget[i] = t;
+            g_gunSince[i] = g_now;
+            g_gunHp[i] = t && Living(t, &hp) ? hp : 0;
             static unsigned told;
             if (t && told++ < 8) Log("Overloading Mode: gun %d (%s) on entity %u", i - 1, kPriority[i - 2], t);
+        }
+        else if (t && Living(t, &hp))
+        {
+            if (hp != g_gunHp[i]) { g_gunHp[i] = hp; g_gunSince[i] = g_now; }
+            else if (g_now - g_gunSince[i] > 2.0) { Shun(t); g_gunTarget[i] = 0; continue; }
         }
         if (t) Fire(i, at);
     }
