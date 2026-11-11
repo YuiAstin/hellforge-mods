@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-11: Veterancy System 0.19.1
+
+### Fixed
+- **Rocket Sentry Last Stand no longer hits allies.** It only drops on units on the other side from the sentry (the game's own faction check, the one its lock-on uses), so SEAF soldiers and other friendly units are never targets.
+- **Last Stand only fires when the sentry is destroyed.** When its time runs out it now just goes.
+- **No more ring or blast with no enemies near.** With no enemy within range, nothing drops and there is no blast where the sentry stood.
+- **The release carries the default settings file.** The 0.19.0 upload on Nexus carried a test one (Rocket Sentry Elite at 15 kills instead of 150, Maxigun at 10 / 20, Mortar at 10 / 25, among others).
+
+Released on Nexus (18607) and AyakaMods (5924).
+
 ## 2026-11-02: Veterancy System 0.19.0
 
 This release also brings 0.17.1 and 0.18.0 below (the Maxigun, banner settings, the settings-file fix and the mod icon), which were not released on their own.

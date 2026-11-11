@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.field-promotions",
   "name": "Veterancy System",
-  "version": "0.19.0",
+  "version": "0.19.1",
   "description": "Red Alert-style veterancy for your gear: sentries rank up from kills during a mission (Veteran, then Elite) and reset at its end: the Mortar, Gas Mortar, Gatling, Machine Gun and Laser Sentries, the Rocket Sentry (the P-33's warhead, a bigger magazine, and a Last Stand barrage when it falls), the M-1000 Maxigun (a fire-rate choice up to 6,000 rpm, firing on the move, a backpack up to 6,000 rounds, and a free call-in at each rank), and a shared gas doctrine fed by every gas kill. Settings in field-promotions.ini (edit it with the game closed). Includes promotion banners and rank badges on the stratagem list (needs Bingus Shared Loader and HD2Runtime; the mod works without them). Rank badges and the Maxigun's call-in refund use code / research from HD2Runtime by SkyeShade: https://github.com/SkyeShade/HD2Runtime",
   "icon": "icon.png",
   "gameplay": true,

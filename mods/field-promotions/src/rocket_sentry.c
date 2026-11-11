@@ -7,17 +7,20 @@
  *     rocket's own (row 232: 525, AP 5; explosion 315: 150, 1 / 4 / 6 m). The rocket's rows are shared with a manned
  *     turret and an enemy rocket soldier, so they stay untouched. (The P-33's missile itself cannot be fired by a sentry,
  *     and HellForge's homing finds its target too late for a sentry rocket: docs in the Rocket Sentry Test mod.)
- *   Level 3, Elite: a bigger magazine still (rs_l3_mag), and Last Stand: when one of your Rocket Sentries is destroyed,
- *     or half a second before its time runs out, the rockets it has left come down on the enemies around it: its
+ *   Level 3, Elite: a bigger magazine still (rs_l3_mag), and Last Stand: when one of your Rocket Sentries is destroyed
+ *     (not when its time runs out: then it just goes), the rockets it has left come down on the enemies around it: its
  *     magazine (read when it lands) less the rockets it fired (its own blasts, told by their source; and the shot stats
  *     while it is your only Rocket Sentry out), shared evenly between the living enemies within rs_last_stand_radius m
  *     (the remainder to the nearest; the nearest few one each when there are more enemies than rockets), each a warhead
- *     rocket dropped straight down from rs_last_stand_height m above its target. With no enemy near, they go out in a
- *     ring around it instead. Then an rs_last_stand_blast explosion goes off where it stood (host).
+ *     rocket dropped straight down from rs_last_stand_height m above its target, then an rs_last_stand_blast explosion
+ *     goes off where it stood (host). With no enemy near, nothing drops and there is no blast.
  *     Enemies are the entities spawned whose kind runs a behaviour and is no turret or Helldiver, dropped on death (as
- *     Faelynn does); their positions are read from the game's entity descriptors and scene graph, research from Helldiver
+ *     Faelynn does), and that are on the other side from the sentry: the game's faction masks ([game+0x3326CB8], its
+ *     map at +0x12050, masks at +0x12078; the test the game's own lock-on uses, game.dll+0x8D4F40, pinned) share no bit
+ *     with the sentry's, so SEAF soldiers and other allies are never targets, and a unit with no faction is skipped.
+ *     Their positions are read from the game's entity descriptors and scene graph, research from Helldiver
  *     Survival Rework by enochlophobianumerophobia (MIT; THIRD_PARTY_NOTICES.md), for game build 25480438 only: another
- *     build gets the ring.
+ *     build gets no Last Stand.
  * The round and magazine are live edits of the sentry's records: they reach a Rocket Sentry called in after the level.
  * Your sentries are known by their beacons (HF_ON_STRATAGEM) paired with the sentry that spawns after each, as Fire
  * Mission does; teammates' are not (their beacons are told on their machines). Tested in game with the Rocket Sentry
@@ -73,10 +76,10 @@ void rs_write_defaults(FILE* f)
                "; Level 2: 1 its rocket carries the P-33 Missile Pistol's warhead (1000 direct, AP 5; a 300 blast, radius 2 / 4 / 12 m;\n"
                "; the rocket's own: 525, a 150 blast, 1 / 4 / 6 m); 0 off. Its magazine at level 2 and level 3 (the game's: 16).\n"
                "; Both reach a Rocket Sentry called in after the level.\nrs_warhead = %d\nrs_l2_mag = %d\nrs_l3_mag = %d\n"
-               "; Level 3, Last Stand: 1 when your Rocket Sentry is destroyed or its time runs out, the rockets it has left drop\n"
-               "; on the enemies within rs_last_stand_radius m, shared evenly (10 left and 5 enemies: 2 each), from\n"
-               "; rs_last_stand_height m straight above each; with none near, they go out in a ring around it. Then this\n"
-               "; explosion row goes off where it stood (154: the P-33's). 0: off.\n"
+               "; Level 3, Last Stand: 1 when your Rocket Sentry is destroyed (not when its time runs out), the rockets it\n"
+               "; has left drop on the enemies within rs_last_stand_radius m, shared evenly (10 left and 5 enemies: 2 each),\n"
+               "; from rs_last_stand_height m straight above each; never on SEAF or other allies. Then this explosion row goes\n"
+               "; off where it stood (154: the P-33's). With no enemy near, nothing drops and there is no blast. 0: off.\n"
                "rs_last_stand = %d\nrs_last_stand_radius = %g\nrs_last_stand_height = %g\nrs_last_stand_blast = %d\n",
         s_rsL2, s_rsL3, s_rsWarhead, s_rsL2Mag, s_rsL3Mag, s_rsLastStand, (double)s_rsLsRadius, (double)s_rsLsHeight, s_rsLsBlast);
 }
@@ -135,7 +138,7 @@ static void ProjectilesReady(HfMod* mod, HfEvent event, void* user)
 /* ---- Last Stand ----------------------------------------------------------------------------------------------- */
 typedef struct Beacon { float pos[3]; double at; int used; } Beacon;
 static Beacon g_beacons[8];
-typedef struct Sentry { uint32_t entity; float pos[3]; double until; int done, mag, fired, shots; } Sentry;
+typedef struct Sentry { uint32_t entity, side; float pos[3]; double until; int done, mag, fired, shots; } Sentry;
 static Sentry g_sentries[8];
 typedef struct Shot { double at; uint32_t type; float pos[3], dir[3]; int tries, blast; } Shot;
 static Shot g_shots[64];
@@ -166,7 +169,7 @@ static int ReadsOk(void)
     g_gameDll = g_hf->module_base("game.dll", NULL);
     g_exe = g_hf->module_base("helldivers2.exe", NULL);
     g_readsOk = build && !strcmp(build, "25480438") && g_gameDll && g_exe;
-    if (!g_readsOk) g_hf->log(g_mod, "Rocket Sentry Last Stand: enemy positions are read for game build 25480438 only (this: %s): the ring instead",
+    if (!g_readsOk) g_hf->log(g_mod, "Rocket Sentry Last Stand: enemy positions are read for game build 25480438 only (this: %s): no Last Stand",
         build ? build : "?");
     return g_readsOk;
 }
@@ -248,6 +251,27 @@ static int FoePos(int i, float p[3])
     return UnitRoot(Word(id + 12), p);
 }
 
+/* Sides: the faction mask of an entity (0: none or not readable). The game's lock-on treats two units as the same side
+ * when their masks share a bit (game.dll+0x8D4F40); both sites below are checked before the masks are trusted. */
+static int g_factionOk = -1;
+static uint32_t g_friendly;   /* the last side read off a sentry of yours */
+static int FactionOk(void)
+{
+    if (g_factionOk >= 0) return g_factionOk;
+    g_factionOk = ReadsOk() && g_hf->size > offsetof(HfApi, code_matches) && g_hf->code_matches &&
+        g_hf->code_matches(g_gameDll + 0x8D4F5A, "8B 0D ?? ?? ?? ?? 3B D1 74 5F 48 8B 35 ?? ?? ?? ?? 45 33 DB 45 8B D3 8B 9E 58 20 01 00 8B AE 60 20 01 00") &&
+        g_hf->code_matches(g_gameDll + 0x8D5074, "4C 8B BE 78 20 01 00 44 8B 96 58 20 01 00 8B 9E 60 20 01 00 8B B6 5C 20 01 00");
+    if (!g_factionOk) g_hf->log(g_mod, "Rocket Sentry Last Stand: the game's faction code is not the reviewed one: Last Stand off (it cannot tell allies from enemies)");
+    return g_factionOk;
+}
+static uint32_t Side(uint32_t entity)
+{
+    uintptr_t mgr = Pointer(g_gameDll + 0x3326CB8), masks;
+    uint32_t index, mask = 0;
+    if (!entity || !mgr || !Lookup(mgr + 0x12050, entity, 1048576, &index) || index >= 1048576 || !(masks = Pointer(mgr + 0x12078))) return 0;
+    return ReadAt(masks + 4u * index, &mask, 4) ? mask : 0;
+}
+
 static void Queue(double at, uint32_t type, const float pos[3], const float dir[3], int blast)
 {
     if (g_nshots >= (int)(sizeof g_shots / sizeof g_shots[0])) return;
@@ -259,23 +283,14 @@ static void Queue(double at, uint32_t type, const float pos[3], const float dir[
     q->tries = 0;
     q->blast = blast;
 }
-static void Ring(const Sentry* s, int rockets, uint32_t type, double now)
-{
-    for (int i = 0; i < rockets; i++)
-    {
-        double a = 6.283185307 * i / rockets;
-        float dir[3] = {(float)cos(a), (float)sin(a), -0.12f};
-        float len = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
-        for (int k = 0; k < 3; k++) dir[k] /= len;
-        float from[3] = {s->pos[0] + dir[0] * 1.5f, s->pos[1] + dir[1] * 1.5f, s->pos[2] + 2.5f};
-        Queue(now + 0.08 * i, type, from, dir, 0);
-    }
-}
 static void LastStand(Sentry* s, const char* why)
 {
     if (s->done) return;
     s->done = 1;
     if (!s_rsLastStand || !fp_in_mission() || Level() < 3) return;
+    if (!FactionOk()) return;
+    uint32_t side = s->side ? s->side : g_friendly;
+    if (!side) { g_hf->log(g_mod, "Rocket Sentry Last Stand: the sentry's side is not known: nothing drops"); return; }
     double now = fp_clock();
     uint32_t type = g_warhead && g_warheadReady && s_rsWarhead ? g_warhead : ROCKET_ROUND;
     int fired = s->fired > s->shots ? s->fired : s->shots;
@@ -284,7 +299,7 @@ static void LastStand(Sentry* s, const char* why)
     /* the living enemies within the radius, nearest first */
     enum { MAXT = 64 };
     float tp[MAXT][3], td[MAXT];
-    int nt = 0;
+    int nt = 0, allies = 0, sideless = 0;
     float r2 = s_rsLsRadius * s_rsLsRadius;
     if (left > 0 && ReadsOk())
         for (int i = 0; i < FOES; i++)
@@ -293,6 +308,9 @@ static void LastStand(Sentry* s, const char* why)
             if (!g_foe[i] || !FoePos(i, p)) continue;
             float dx = p[0] - s->pos[0], dy = p[1] - s->pos[1], dz = p[2] - s->pos[2], d2 = dx * dx + dy * dy + dz * dz;
             if (d2 > r2) continue;
+            uint32_t m = Side(g_foe[i]);
+            if (!m) { sideless++; continue; }       /* a unit with no side */
+            if (m & side) { allies++; continue; }   /* an ally (SEAF...) */
             int at;
             if (nt < MAXT) at = nt++;
             else if (d2 >= td[MAXT - 1]) continue;  /* full: only nearer ones replace the farthest */
@@ -302,8 +320,8 @@ static void LastStand(Sentry* s, const char* why)
             td[at] = d2;
         }
     int targets = nt < left ? nt : left;
-    g_hf->log(g_mod, "Rocket Sentry Last Stand (%s) at (%.0f, %.0f, %.0f): magazine %d, fired %d (blasts %d, shots %d): %d left, %d enem%s within %.0f m",
-        why, (double)s->pos[0], (double)s->pos[1], (double)s->pos[2], s->mag, fired, s->fired, s->shots, left, nt, nt == 1 ? "y" : "ies", (double)s_rsLsRadius);
+    g_hf->log(g_mod, "Rocket Sentry Last Stand (%s) at (%.0f, %.0f, %.0f): magazine %d, fired %d (blasts %d, shots %d): %d left, %d enem%s within %.0f m (skipped: %d allies, %d with no side)",
+        why, (double)s->pos[0], (double)s->pos[1], (double)s->pos[2], s->mag, fired, s->fired, s->shots, left, nt, nt == 1 ? "y" : "ies", (double)s_rsLsRadius, allies, sideless);
     double t = now;
     if (targets > 0)
     {
@@ -324,11 +342,10 @@ static void LastStand(Sentry* s, const char* why)
         g_hf->log(g_mod, "  %d rockets on %d enem%s, %d each%s, from %.0f m up", left, targets, targets == 1 ? "y" : "ies", each,
             extra ? " (the nearest one more)" : "", (double)s_rsLsHeight);
     }
-    else if (left > 0)
+    else
     {
-        Ring(s, left, type, now);
-        t = now + 0.08 * left;
-        g_hf->log(g_mod, "  no enemy near: %d rockets in a ring", left);
+        g_hf->log(g_mod, "  no enemy near: nothing drops, no blast");
+        return;
     }
     if (s_rsLsBlast > 0) Queue(t + 0.3, (uint32_t)s_rsLsBlast, s->pos, NULL, 1);
 }
@@ -373,6 +390,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     for (int i = 1; i < 8; i++) if (!g_sentries[i].entity || g_sentries[i].done || g_sentries[i].until < g_sentries[slot].until) slot = i;
     Sentry* s = &g_sentries[slot];
     s->entity = e->entity;
+    s->side = 0;   /* read on the next ticks, once the game has given it one */
     memcpy(s->pos, g_beacons[best].pos, sizeof s->pos);
     s->until = now + g_lifetime;
     s->done = 0;
@@ -417,7 +435,13 @@ void rs_shots(uint64_t resource, int added)
 void rs_tick(double now)
 {
     for (int i = 0; i < 8; i++)
-        if (g_sentries[i].entity && !g_sentries[i].done && now >= g_sentries[i].until - 0.5) LastStand(&g_sentries[i], "time up");
+    {
+        Sentry* s = &g_sentries[i];
+        if (!s->entity || s->done) continue;
+        if (!s->side && s_rsLastStand && FactionOk() && (s->side = Side(s->entity)) != 0) g_friendly = s->side;
+        /* its time up: it goes quietly (the game's own removal is no Last Stand) */
+        if (now >= s->until - 0.5) { s->done = 1; g_hf->log(g_mod, "Rocket Sentry: its time is up (no Last Stand)"); }
+    }
     if (g_nshots) RunShots(now);
 }
 
