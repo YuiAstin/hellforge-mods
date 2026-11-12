@@ -1,7 +1,8 @@
 -- Cloak Probe HUD (mods/yui/cloak_probe_hud): the material side of the Cloak Probe (research; see cloak_probe.c).
 -- Reads cloak_probe.dll's cloak_probe_state every frame; on its key counts it:
 --   F12        logs the engine's mesh / material calls, then the nearest Stalker's unit: its meshes and materials
---   Ctrl+F12   copies the Stalker's materials onto your Helldiver's meshes (each way the engine offers, logged)
+--   Ctrl+F12   first press: fades your own materials (opacity, opacity_stealth); second: the Stalker's materials if one
+--              is known, else every mesh of every part hidden
 --   Shift+F12  puts your own back (the materials it saved first)
 -- Uses HD2Runtime by SkyeShade through its public API (hd2.ui.overlay as a frame hook) and the engine's Lua API.
 local OWNER = 'mods/yui/cloak_probe_hud'
@@ -130,7 +131,7 @@ local function copy_materials(me, stalker)
         end
         if #src > 0 then break end
     end
-    if #src == 0 then log('[Cloak Probe] cloak: no material on the Stalker'); return 0 end
+    if #src == 0 then return 0 end
     st.cached = src
     -- 0.1.4: Mesh has no set_material here (0.1.3: "missing" on all 31 slots). The engine's own is Unit.set_material(unit,
     -- slot, material resource): each way of naming the slot and the Stalker's material is tried on the first slot and
@@ -243,6 +244,33 @@ local function restore()
     st.saved = nil
 end
 
+-- 0.1.6: the cheapest cloak there could be: the Helldiver's own materials, faded. Sets the two inputs the Optical Cloak
+-- Pack drives on its material (opacity, opacity_stealth) on every material of every part. Whether the armour's shader
+-- has them is the question: the calls can succeed and change nothing, so the answer is what you see.
+local function fade_own(me, value)
+    local U, M, Mat = lib('Unit'), lib('Mesh'), lib('Material')
+    local parts = parts_of(me)
+    local mats, ok, firsterr = 0, {opacity = 0, opacity_stealth = 0}, nil
+    for _, u in ipairs(parts) do
+        local okn, n = pc(U.num_meshes, u)
+        for i = 1, (okn and type(n) == 'number' and n <= 512) and n or 0 do
+            local okm, mesh = pc(U.mesh, u, i)
+            local okc, c = false, nil
+            if okm then okc, c = pc(M.num_materials, mesh) end
+            for j = 1, (okc and type(c) == 'number' and c <= 64) and c or 0 do
+                local okt, mat = pc(M.material, mesh, j)
+                if okt and mat then
+                    mats = mats + 1
+                    for _, name in ipairs({'opacity', 'opacity_stealth'}) do
+                        local oks, err = pc(Mat and Mat.set_scalar, mat, name, value)
+                        if oks then ok[name] = ok[name] + 1 elseif not firsterr then firsterr = name .. ': ' .. tostring(err) end
+                    end
+                end
+            end
+        end
+    end
+    log(('[Cloak Probe] fade: %d units, %d materials; set to %.2f: opacity on %d, opacity_stealth on %d%s'):format(#parts, mats, value, ok.opacity, ok.opacity_stealth, firsterr and (' (first error: ' .. firsterr .. ')') or ''))
+end
 local function cloak(me, stalker)
     local parts = parts_of(me)
     local total = 0
@@ -273,7 +301,25 @@ overlay:draw(function(d, dt)
                 local me = unit_near(b[0], b[1], b[2], 1.5)
                 if not me then log('[Cloak Probe] your Helldiver\'s unit was not found near you') return end
                 st.me = me
-                if k == 3 then restore() return end
+                if k == 3 then
+                    if st.stage and st.stage >= 1 then fade_own(me, 1.0) end
+                    if st.stage == 2 then restore() end
+                    st.stage = 0
+                    return
+                end
+                if k == 2 then
+                    st.stage = (st.stage or 0) + 1
+                    if st.stage == 1 then
+                        fade_own(me, 0.15)
+                        log('[Cloak Probe] step 1 of 2: your own materials faded. Still solid? Ctrl+F12 again for step 2 (material swap, else hidden)')
+                        return
+                    end
+                    st.stage = 2
+                    local stalker = nil
+                    if b[6] >= 0.5 then stalker = unit_near(b[3], b[4], b[5], 1.5) end
+                    cloak(me, stalker)
+                    return
+                end
                 if b[6] < 0.5 then
                     if k == 2 and st.cached then log('[Cloak Probe] no Stalker near: the materials kept from the last one'); cloak(me, nil) return end
                     log('[Cloak Probe] no Stalker known (a Terminid mission with Stalkers)') return
