@@ -15,5 +15,5 @@ The settings rows use **Mod Options Menu** by CowboyBingus (0BSD) through its pu
 public overlay API, and its skill panel follows the stratagem list through **HD2Runtime**'s slot overlay (internal
 modules).
 
-Exusiai is a character of Arknights (Hypergryph / Yostar). This is an unofficial fan mod; no character model or game
-art is included.
+Exusiai is a character of Arknights (Hypergryph / Yostar). This is an unofficial fan mod; no character model is included.
+The three skill icons (hud-src/images) and the mod icon are Arknights art, © Hypergryph / Yostar.
