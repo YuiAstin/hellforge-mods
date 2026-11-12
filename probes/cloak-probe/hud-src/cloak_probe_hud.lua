@@ -227,7 +227,7 @@ local function hide_parts(parts)
         end
         if any then units = units + 1 end
     end
-    log(('[Cloak Probe] cloak: no material could be set: %d meshes of %d units hidden (Shift+F12 shows them again)'):format(hid, units))
+    log(('[Cloak Probe] cloak: %d meshes of %d units hidden (Shift+F12 shows them again)'):format(hid, units))
 end
 local function restore()
     local U = lib('Unit')
@@ -273,10 +273,10 @@ local function fade_own(me, value)
 end
 local function cloak(me, stalker)
     local parts = parts_of(me)
-    local total = 0
-    for _, u in ipairs(parts) do total = total + (copy_materials(u, stalker) or 0) end
-    log(('[Cloak Probe] cloak: %d units share your root; %d material slots set in all'):format(#parts, total))
-    if total == 0 then hide_parts(parts) end
+    -- 0.1.7: the Stalker-material trials are gone (0.1.6: nothing they tried took, and the game crashed in its renderer
+    -- 32 s after three rounds of them: Unit.set_material given things it did not want is the first suspect)
+    log(('[Cloak Probe] cloak: %d units share your root'):format(#parts))
+    hide_parts(parts)
 end
 
 local overlay = hd2.ui.overlay({id = 'cloak_probe', owner = OWNER})
@@ -311,10 +311,10 @@ overlay:draw(function(d, dt)
                     st.stage = (st.stage or 0) + 1
                     if st.stage == 1 then
                         fade_own(me, 0.15)
-                        log('[Cloak Probe] step 1 of 2: your own materials faded. Still solid? Ctrl+F12 again for step 2 (material swap, else hidden)')
+                        log('[Cloak Probe] step 1 of 2: your own materials faded. Still solid? Ctrl+F12 again for step 2 (every mesh hidden)')
                         return
                     end
-                    st.stage = 2
+                    if st.stage > 2 then st.stage = 2; log('[Cloak Probe] already hidden (Shift+F12 first)') return end
                     local stalker = nil
                     if b[6] >= 0.5 then stalker = unit_near(b[3], b[4], b[5], 1.5) end
                     cloak(me, stalker)
