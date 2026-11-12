@@ -290,11 +290,12 @@ local function restore()
     if st.hidden and #st.hidden > 0 then
         local n = 0
         local live = {}
-        if st.me then for _, u in ipairs(parts_of(st.me)) do live[tostring(u)] = true end end
+        local okw, world = pc(lib('Application').main_world)
+        for _, u in ipairs(rare_units(S, okw and world or nil) or {}) do live[tostring(u)] = true end
         for _, h in ipairs(st.hidden) do if live[h.key] and pc(U.set_mesh_visibility, h.unit, h.mesh, true) then n = n + 1 end end
         log(('[Cloak Probe] uncloak: %d of %d meshes shown again'):format(n, #st.hidden))
     end
-    st.hidden = nil; st.hidkeys = nil
+    st.hidden = nil; st.hidkeys = nil; st.gear = nil; st.origin = nil
     if not st.saved or #st.saved == 0 then log('[Cloak Probe] uncloak: no material to put back'); st.saved = nil; return end
     local n = 0
     for _, s in ipairs(st.saved) do if pc(U.set_material, s.unit, s.slot, s.mat) then n = n + 1 end end
@@ -373,6 +374,56 @@ local function cloak(me, stalker)
     -- 32 s after three rounds of them: Unit.set_material given things it did not want is the first suspect)
     log(('[Cloak Probe] cloak: %d units share your root'):format(#parts))
     hide_parts(parts)
+    -- 0.1.12: weapons, backpack and tools are units of their own, rooted where they hang (0.1.11: six units 1.0 to 1.5 m
+    -- from the root stayed visible). Kept as candidates: every unit within 2 m now that is not a part; gear_tick hides
+    -- the ones still within 2 m once you have moved 1.5 m (they follow you; what lay on the ground does not).
+    local U = lib('Unit')
+    local okp, v = root(U, me, RI)
+    local mx, my, mz
+    if okp then mx, my, mz = xyz(v) end
+    st.gear, st.origin, st.gearlog = {}, mx and {mx, my, mz} or nil, false
+    if not mx then return end
+    local ispart = {}
+    for _, u in ipairs(parts) do ispart[tostring(u)] = true end
+    local okw, world = pc(lib('Application').main_world)
+    local n = 0
+    for _, u in ipairs(rare_units(S, okw and world or nil) or {}) do
+        local key = tostring(u)
+        if not ispart[key] then
+            local ok2, v2 = root(U, u, RI)
+            local x, y, z
+            if ok2 then x, y, z = xyz(v2) end
+            if x and (x - mx) ^ 2 + (y - my) ^ 2 + (z - mz) ^ 2 < 4 then st.gear[key] = u; n = n + 1 end
+        end
+    end
+    log(('[Cloak Probe] cloak: %d other units within 2 m: the ones that follow you 1.5 m are hidden as gear'):format(n))
+end
+local function gear_tick(me)
+    if not (st.gear and st.origin) then return 0 end
+    local U = lib('Unit')
+    local okp, v = root(U, me, RI)
+    local mx, my, mz
+    if okp then mx, my, mz = xyz(v) end
+    if not mx then return 0 end
+    local moved = math.sqrt((mx - st.origin[1]) ^ 2 + (my - st.origin[2]) ^ 2 + (mz - st.origin[3]) ^ 2)
+    local okw, world = pc(lib('Application').main_world)
+    local live = {}
+    for _, u in ipairs(rare_units(S, okw and world or nil) or {}) do live[tostring(u)] = true end
+    local follow = {}
+    for key, u in pairs(st.gear) do
+        local keep = false
+        if live[key] then
+            local ok2, v2 = root(U, u, RI)
+            local x, y, z
+            if ok2 then x, y, z = xyz(v2) end
+            if x and (x - mx) ^ 2 + (y - my) ^ 2 + (z - mz) ^ 2 < 4 then keep = true; follow[#follow + 1] = u end
+        end
+        if not keep then st.gear[key] = nil end
+    end
+    if moved < 1.5 then return 0 end
+    local hid = hide_parts(follow, true)
+    if not st.gearlog then st.gearlog = true; log(('[Cloak Probe] gear: %d units followed you %.1f m: %d meshes hidden'):format(#follow, moved, hid)) end
+    return hid
 end
 
 local overlay = hd2.ui.overlay({id = 'cloak_probe', owner = OWNER})
@@ -398,6 +449,7 @@ overlay:draw(function(d, dt)
                 if not me then return end
                 st.me = me
                 local again = hide_parts(parts_of(me), true)
+                gear_tick(me)
                 if again > 0 then
                     st.rehid = (st.rehid or 0) + 1
                     if st.rehid <= 6 then log(('[Cloak Probe] %s re-hid %d meshes the game had shown again'):format(stamp(), again)) end
