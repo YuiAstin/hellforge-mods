@@ -7,7 +7,9 @@
 -- Uses HD2Runtime by SkyeShade through its public API (hd2.ui.overlay as a frame hook) and the engine's Lua API.
 local OWNER = 'mods/yui/cloak_probe_hud'
 local sink, sink_tried
+local function stamp() local ok, t = pcall(function() return os.date('%H:%M:%S') end); return ok and tostring(t) or '' end
 local function log(message)
+    if type(message) == 'string' and message:sub(1, 13) == '[Cloak Probe]' and not message:find('^%[Cloak Probe%]   ') then message = '[Cloak Probe] ' .. stamp() .. message:sub(14) end
     pcall(print, message)
     if not sink_tried then
         sink_tried = true
@@ -210,7 +212,7 @@ local function parts_of(me)
     if #out == 0 then out[1] = me end
     return out
 end
-local function hide_parts(parts)
+local function hide_parts(parts, quiet)
     local U, M = lib('Unit'), lib('Mesh')
     st.hidden = st.hidden or {}
     local hid, units = 0, 0
@@ -222,21 +224,29 @@ local function hide_parts(parts)
             local okv, vis = false, nil
             if okm then okv, vis = pc(M.visibility, mesh) end
             if okm and (not okv or vis == true) then
-                if pc(U.set_mesh_visibility, u, i, false) then st.hidden[#st.hidden + 1] = {unit = u, mesh = i}; hid = hid + 1; any = true end
+                if pc(U.set_mesh_visibility, u, i, false) then
+                    local key = tostring(u) .. ':' .. i
+                    st.hidkeys = st.hidkeys or {}
+                    if not st.hidkeys[key] then st.hidkeys[key] = true; st.hidden[#st.hidden + 1] = {unit = u, mesh = i, key = tostring(u)} end
+                    hid = hid + 1; any = true
+                end
             end
         end
         if any then units = units + 1 end
     end
-    log(('[Cloak Probe] cloak: %d meshes of %d units hidden (Shift+F12 shows them again)'):format(hid, units))
+    if not quiet then log(('[Cloak Probe] cloak: %d meshes of %d units hidden (Ctrl+F12 or Shift+F12 shows them again)'):format(hid, units)) end
+    return hid
 end
 local function restore()
     local U = lib('Unit')
     if st.hidden and #st.hidden > 0 then
         local n = 0
-        for _, h in ipairs(st.hidden) do if pc(U.set_mesh_visibility, h.unit, h.mesh, true) then n = n + 1 end end
+        local live = {}
+        if st.me then for _, u in ipairs(parts_of(st.me)) do live[tostring(u)] = true end end
+        for _, h in ipairs(st.hidden) do if live[h.key] and pc(U.set_mesh_visibility, h.unit, h.mesh, true) then n = n + 1 end end
         log(('[Cloak Probe] uncloak: %d of %d meshes shown again'):format(n, #st.hidden))
     end
-    st.hidden = nil
+    st.hidden = nil; st.hidkeys = nil
     if not st.saved or #st.saved == 0 then log('[Cloak Probe] uncloak: no material to put back'); st.saved = nil; return end
     local n = 0
     for _, s in ipairs(st.saved) do if pc(U.set_material, s.unit, s.slot, s.mat) then n = n + 1 end end
@@ -327,6 +337,24 @@ overlay:draw(function(d, dt)
     end
     if st.fn(1, st.buf) == 0 then return end
     local b = st.buf
+    -- 0.1.9: the game turns meshes back on by itself (0.1.8: 30 of 31 body meshes were visible again after the hide), as
+    -- the Optical Cloak Pack's own re-hide pass says. While hidden, twice a second: find the parts again and hide again.
+    if st.stage == 2 then
+        st.acc = (st.acc or 0) + (type(dt) == 'number' and dt or 0.016)
+        if st.acc >= 0.5 then
+            st.acc = 0
+            pcall(function()
+                local me = unit_near(b[0], b[1], b[2], 1.5)
+                if not me then return end
+                st.me = me
+                local again = hide_parts(parts_of(me), true)
+                if again > 0 then
+                    st.rehid = (st.rehid or 0) + 1
+                    if st.rehid <= 6 then log(('[Cloak Probe] %s re-hid %d meshes the game had shown again'):format(stamp(), again)) end
+                end
+            end)
+        end
+    end
     for k = 1, 3 do
         local count = b[6 + k]
         if st.seen[k] < 0 then st.seen[k] = count
@@ -351,7 +379,7 @@ overlay:draw(function(d, dt)
                         log('[Cloak Probe] step 1 of 2: your own materials faded. Still solid? Ctrl+F12 again for step 2 (every mesh hidden)')
                         return
                     end
-                    if st.stage > 2 then st.stage = 2; log('[Cloak Probe] already hidden (Shift+F12 first)') return end
+                    if st.stage > 2 then fade_own(me, 1.0); restore(); st.stage = 0; log('[Cloak Probe] third press: shown again') return end
                     local stalker = nil
                     if b[6] >= 0.5 then stalker = unit_near(b[3], b[4], b[5], 1.5) end
                     cloak(me, stalker)
