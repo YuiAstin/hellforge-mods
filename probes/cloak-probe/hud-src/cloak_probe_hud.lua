@@ -1,8 +1,7 @@
 -- Cloak Probe HUD (mods/yui/cloak_probe_hud): the material side of the Cloak Probe (research; see cloak_probe.c).
 -- Reads cloak_probe.dll's cloak_probe_state every frame; on its key counts it:
 --   F12        logs the engine's mesh / material calls, then the nearest Stalker's unit: its meshes and materials
---   Ctrl+F12   first press: fades your own materials (opacity, opacity_stealth); second: the Stalker's materials if one
---              is known, else every mesh of every part hidden
+--   Ctrl+F12   first press: a live Stalker's material on every armour slot; second: everything hidden; third: back
 --   Shift+F12  puts your own back (the materials it saved first)
 -- Uses HD2Runtime by SkyeShade through its public API (hd2.ui.overlay as a frame hook) and the engine's Lua API.
 local OWNER = 'mods/yui/cloak_probe_hud'
@@ -426,6 +425,102 @@ local function gear_tick(me)
     return hid
 end
 
+-- 0.1.13: the Stalker swap on the right units (every earlier try ran on the ground unit, with guessed arguments).
+-- The Optical Cloak Pack's call: Unit.set_material(unit, slot id, material id64) returns the material it replaced.
+local STALKER = 'f540ca9d9d4a422e'
+local function cache_stalker(b)
+    local App, U, M, Mat = lib('Application'), lib('Unit'), lib('Mesh'), lib('Material')
+    local okw, world = pc(App.main_world)
+    local all = rare_units(S, okw and world or nil) or {}
+    local found, how = {}, 'its type'
+    for _, u in ipairs(all) do
+        local okr, r = pcall(U.resource_name, u)
+        if okr and tostring(r):lower():find(STALKER, 1, true) then found[#found + 1] = u end
+    end
+    if #found == 0 and b[6] >= 0.5 then
+        local near = unit_near(b[3], b[4], b[5], 1.5)
+        if near then found = parts_of(near); how = 'the units at the DLL\'s Stalker position' end
+    end
+    if #found == 0 then log('[Cloak Probe] Stalker: no unit of its type in the world' .. (b[6] >= 0.5 and ', none at the DLL\'s position' or ', and the DLL knows of none')) return end
+    local tally, order = {}, {}
+    for _, u in ipairs(found) do
+        local okn, n = pc(U.num_meshes, u)
+        for i = 1, (okn and type(n) == 'number' and n <= 512) and n or 0 do
+            local okm, mesh = pc(U.mesh, u, i)
+            local okc, c = false, nil
+            if okm then okc, c = pc(M.num_materials, mesh) end
+            for j = 1, (okc and type(c) == 'number' and c <= 64) and c or 0 do
+                local okt, mat = pc(M.material, mesh, j)
+                local oki, id = false, nil
+                if okt and mat then oki, id = pc(Mat.id64, mat) end
+                if oki and id ~= nil then
+                    local key = tostring(id)
+                    if not tally[key] then tally[key] = {id = id, n = 0, key = key}; order[#order + 1] = tally[key] end
+                    tally[key].n = tally[key].n + 1
+                end
+            end
+        end
+        if #order > 0 then break end
+    end
+    if #order == 0 then log(('[Cloak Probe] Stalker: %d units by %s, but no material id could be read'):format(#found, how)) return end
+    table.sort(order, function(x, y) return x.n > y.n end)
+    st.smat = order
+    local names = {}
+    for i = 1, math.min(#order, 6) do names[i] = order[i].key .. ' x' .. order[i].n end
+    log(('[Cloak Probe] Stalker: %d units by %s; materials kept: %s'):format(#found, how, table.concat(names, ', ')))
+end
+local function swap(me)
+    local U, M, Mat = lib('Unit'), lib('Mesh'), lib('Material')
+    local target = st.smat[1].id
+    st.swapped = st.swapped or {}
+    local seen, set, changed, errs, lines = {}, 0, 0, 0, 0
+    for _, u in ipairs(parts_of(me)) do
+        local okn, n = pc(U.num_meshes, u)
+        for i = 1, (okn and type(n) == 'number' and n <= 512) and n or 0 do
+            local okm, mesh = pc(U.mesh, u, i)
+            local okc, c = false, nil
+            if okm then okc, c = pc(M.num_materials, mesh) end
+            for j = 1, (okc and type(c) == 'number' and c <= 64) and c or 0 do
+                local oksl, slot = pc(M.material_slot_id, mesh, j)
+                local key = tostring(u) .. ':' .. tostring(slot)
+                if oksl and slot ~= nil and not seen[key] then
+                    seen[key] = true
+                    local okt, mine = pc(M.material, mesh, j)
+                    local ok64, mine64 = false, nil
+                    local okb, before = false, nil
+                    if okt and mine then ok64, mine64 = pc(Mat.id64, mine); okb, before = pc(Mat.id, mine) end
+                    local okset, old = pc(U.set_material, u, slot, target)
+                    local oka, after = false, nil
+                    if okset then
+                        set = set + 1
+                        local okt2, now = pc(M.material, mesh, j)
+                        if okt2 and now then oka, after = pc(Mat.id, now) end
+                        local did = okb and oka and tostring(before) ~= tostring(after)
+                        if did then changed = changed + 1 end
+                        st.swapped[#st.swapped + 1] = {unit = u, key = tostring(u), slot = slot, old = (old ~= nil and type(old) ~= 'boolean') and old or (ok64 and mine64 or nil)}
+                    else errs = errs + 1 end
+                    if lines < 6 then
+                        lines = lines + 1
+                        log(('[Cloak Probe]   slot %s: %s; material id %s -> %s; returned %s'):format(tostring(slot), okset and 'ok' or ('error: ' .. tostring(old)), tostring(before), tostring(after), okset and tostring(old) or '-'))
+                    end
+                end
+            end
+        end
+    end
+    log(('[Cloak Probe] swap to %s: %d slots accepted, %d really changed, %d errors'):format(st.smat[1].key, set, changed, errs))
+end
+local function unswap()
+    if not st.swapped or #st.swapped == 0 then st.swapped = nil; return end
+    local U = lib('Unit')
+    local okw, world = pc(lib('Application').main_world)
+    local live = {}
+    for _, u in ipairs(rare_units(S, okw and world or nil) or {}) do live[tostring(u)] = true end
+    local n = 0
+    for _, e in ipairs(st.swapped) do if live[e.key] and e.old ~= nil and pc(U.set_material, e.unit, e.slot, e.old) then n = n + 1 end end
+    log(('[Cloak Probe] unswap: %d of %d slots put back'):format(n, #st.swapped))
+    st.swapped = nil
+end
+
 local overlay = hd2.ui.overlay({id = 'cloak_probe', owner = OWNER})
 overlay:draw(function(d, dt)
     if not st.fn then
@@ -467,48 +562,22 @@ overlay:draw(function(d, dt)
                 local me = avatar_unit(b[0], b[1], b[2], true)
                 if not me then log('[Cloak Probe] no unit of the avatar type has a readable root') return end
                 st.me = me
-                if k == 1 then list_near(me) end
-                if k == 3 then
-                    if st.stage and st.stage >= 1 then fade_own(me, 1.0) end
-                    if st.stage == 2 then restore() end
-                    st.stage = 0
-                    return
-                end
-                if k == 2 then
-                    st.stage = (st.stage or 0) + 1
-                    if st.stage == 1 then
-                        fade_own(me, 0.15)
-                        log('[Cloak Probe] step 1 of 2: your own materials faded. Still solid? Ctrl+F12 again for step 2 (every mesh hidden)')
+                if k == 1 then list_near(me); cache_stalker(b) return end
+                if k == 3 then unswap(); restore(); st.stage = 0; return end
+                st.stage = (st.stage or 0) + 1
+                if st.stage == 1 then
+                    if not st.smat then cache_stalker(b) end
+                    if st.smat then
+                        swap(me)
+                        log('[Cloak Probe] step 1 of 2: the Stalker\'s material is on your armour. Ctrl+F12 again for step 2 (hidden)')
                         return
                     end
-                    if st.stage > 2 then fade_own(me, 1.0); restore(); st.stage = 0; log('[Cloak Probe] third press: shown again') return end
-                    local stalker = nil
-                    if b[6] >= 0.5 then stalker = unit_near(b[3], b[4], b[5], 1.5) end
-                    cloak(me, stalker)
-                    return
+                    log('[Cloak Probe] no Stalker material yet (one has to be alive in the mission): straight to hiding')
+                    st.stage = 2
                 end
-                if b[6] < 0.5 then
-                    if k == 2 and st.cached then log('[Cloak Probe] no Stalker near: the materials kept from the last one'); cloak(me, nil) return end
-                    log('[Cloak Probe] no Stalker known (a Terminid mission with Stalkers)') return
-                end
-                local stalker, how = unit_near(b[3], b[4], b[5], 1.5)
-                if not stalker then log('[Cloak Probe] the Stalker\'s unit was not found: ' .. tostring(how)) return end
-                if k == 1 then
-                    describe(stalker, ('the Stalker (entity %d, %.0f m)'):format(b[11], b[10])); describe(me, 'your Helldiver')
-                    local U2, M2 = lib('Unit'), lib('Mesh')
-                    local okc, nc = pc(U2.num_meshes, stalker)
-                    local kept = {}
-                    for i = 1, (okc and nc or 0) do
-                        local okm, mesh = pc(U2.mesh, stalker, i)
-                        local okq, c = false, nil
-                        if okm then okq, c = pc(M2.num_materials, mesh) end   -- 0.1.3: 'okm and pc(...)' kept only pc's first result (every count read nil)
-                        if okq and type(c) == 'number' and c > 0 then
-                            for j = 1, c do local okt, mat = pc(M2.material, mesh, j); if okt and mat then kept[#kept + 1] = mat end end
-                            break
-                        end
-                    end
-                    if #kept > 0 then st.cached = kept; log(('[Cloak Probe] kept %d of its materials for Ctrl+F12 later'):format(#kept)) end
-                else cloak(me, stalker) end
+                if st.stage == 2 then unswap(); cloak(me, nil) return end
+                unswap(); restore(); st.stage = 0
+                log('[Cloak Probe] third press: shown again')
             end)
             if not okr then log('[Cloak Probe] failed: ' .. tostring(err)) end
         end

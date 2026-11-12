@@ -19,7 +19,7 @@
 #include "hellforge_mod.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.12"
+#define VERSION "0.1.13"
 #define BUILD "25480438"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
@@ -98,7 +98,8 @@ static void Tick(HfMod* mod, float dt, void* user)
     }
     g_out[6] = best ? 1.0f : 0.0f;
     /* 0.1.1: the first Stalker within 40 m each mission is dumped by itself (they died before F12 last time) */
-    if (best && !dumped && bd < 40 * 40) { dumped = 1; g_keys[0]++; Log("a Stalker %.0f m away: dumped by itself (its materials kept for Ctrl+F12)", sqrtf(bd)); }
+    /* 0.1.13: no distance test (PlayerPose fails here: every distance was from the origin) */
+    if (best && !dumped) { dumped = 1; g_keys[0]++; Log("a Stalker is alive: dumped by itself (its materials kept for Ctrl+F12)"); }
     g_out[10] = best ? sqrtf(bd) : 0;
     g_out[11] = (float)best;
     static int prev;

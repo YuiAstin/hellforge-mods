@@ -2,8 +2,8 @@
   "format": 1,
   "id": "yui.cloak-probe",
   "name": "Cloak Probe (research)",
-  "version": "0.1.12",
-  "description": "Research for an invisibility ability. Ctrl+F12 once: fades your Helldiver's own materials (opacity, opacity_stealth). Ctrl+F12 again: hides every mesh of every part. Ctrl+F12 a third time, or Shift+F12, undoes it all. F12 logs the engine's mesh and material calls and the nearest Stalker's. Also logs every explosion near you. Needs Bingus Shared Loader and HD2Runtime. Host or solo. Turn off when done.",
+  "version": "0.1.13",
+  "description": "Research for an invisibility ability. Ctrl+F12 once: puts a live Stalker's material on your armour (a Terminid mission with a Stalker alive). Again: hides your Helldiver and gear. A third time, or Shift+F12: back to normal. F12 logs the units around you and the Stalker's materials. Needs Bingus Shared Loader and HD2Runtime. Solo. Turn off when done.",
   "gameplay": false,
   "code": {
     "dll": "cloak_probe.dll",
