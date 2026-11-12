@@ -103,6 +103,37 @@ local function unit_near(px, py, pz, within)
     end
     return best, best and math.sqrt(bd) or ('no unit within ' .. within .. ' m of ' .. #all .. ' rare-type units (' .. tostring(total) .. ' in all)')
 end
+-- 0.1.11: the Helldiver by its type, not by "the unit nearest you": 0.1.10's nearest unit was a piece of the ground
+-- that follows you (hiding it hid the ground), and the one unit of the avatar type was not within 3 m of it.
+local AVATAR = '4d1c334d294dfa97'
+local function avatar_unit(px, py, pz, verbose)
+    local App, U = lib('Application'), lib('Unit')
+    local okw, world = pc(App.main_world)
+    local all = rare_units(S, okw and world or nil)
+    if not all then return nil end
+    local best, bd, seen, bx, by, bz = nil, math.huge, 0, nil, nil, nil
+    for _, u in ipairs(all) do
+        local okr, r = pcall(U.resource_name, u)
+        if okr and tostring(r):lower():find(AVATAR, 1, true) then
+            seen = seen + 1
+            local okp, v = root(U, u, RI)
+            local x, y, z
+            if okp then x, y, z = xyz(v) end
+            if x then
+                local d2 = (x - px) ^ 2 + (y - py) ^ 2 + (z - pz) ^ 2
+                if d2 < bd then best, bd, bx, by, bz = u, d2, x, y, z end
+            elseif verbose then
+                local okn, n = pcall(U.num_scene_graph_items, u)
+                log(('[Cloak Probe]   an avatar-type unit has no readable root (scene graph items: %s)'):format(okn and tostring(n) or '?'))
+            end
+        end
+    end
+    if verbose then
+        log(('[Cloak Probe] avatar: %d units of the type; you are at (%.1f, %.1f, %.1f) by the DLL; the nearest one\'s root is %s'):format(seen, px, py, pz,
+            best and ('(%.1f, %.1f, %.1f), %.2f m away'):format(bx, by, bz, math.sqrt(bd)) or 'unreadable'))
+    end
+    return best
+end
 local function api_list()
     for _, name in ipairs({'Unit', 'Mesh', 'Material'}) do
         local t = lib(name)
@@ -363,7 +394,7 @@ overlay:draw(function(d, dt)
         if st.acc >= 0.5 then
             st.acc = 0
             pcall(function()
-                local me = unit_near(b[0], b[1], b[2], 1.5)
+                local me = avatar_unit(b[0], b[1], b[2], false)
                 if not me then return end
                 st.me = me
                 local again = hide_parts(parts_of(me), true)
@@ -381,8 +412,8 @@ overlay:draw(function(d, dt)
             st.seen[k] = count
             local okr, err = pcall(function()
                 if k == 1 then api_list() end
-                local me = unit_near(b[0], b[1], b[2], 1.5)
-                if not me then log('[Cloak Probe] your Helldiver\'s unit was not found near you') return end
+                local me = avatar_unit(b[0], b[1], b[2], true)
+                if not me then log('[Cloak Probe] no unit of the avatar type has a readable root') return end
                 st.me = me
                 if k == 1 then list_near(me) end
                 if k == 3 then
