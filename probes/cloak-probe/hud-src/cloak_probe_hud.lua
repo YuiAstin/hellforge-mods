@@ -565,19 +565,13 @@ overlay:draw(function(d, dt)
                 if k == 1 then list_near(me); cache_stalker(b) return end
                 if k == 3 then unswap(); restore(); st.stage = 0; return end
                 st.stage = (st.stage or 0) + 1
-                if st.stage == 1 then
-                    if not st.smat then cache_stalker(b) end
-                    if st.smat then
-                        swap(me)
-                        log('[Cloak Probe] step 1 of 2: the Stalker\'s material is on your armour. Ctrl+F12 again for step 2 (hidden)')
-                        return
-                    end
-                    log('[Cloak Probe] no Stalker material yet (one has to be alive in the mission): straight to hiding')
-                    st.stage = 2
-                end
+                -- 0.1.14: the Stalker swap is off. 0.1.13 crashed inside the first Unit.set_material (helldivers2.exe+0x4145F1,
+                -- slot a5bdd780 of the avatar, a bad read while resolving the Stalker's material id): the engine does not
+                -- take another unit's material by id this way. The cloak is the hide; a shimmer needs our own material.
+                if st.stage == 1 then st.stage = 2 end
                 if st.stage == 2 then unswap(); cloak(me, nil) return end
                 unswap(); restore(); st.stage = 0
-                log('[Cloak Probe] third press: shown again')
+                log('[Cloak Probe] shown again')
             end)
             if not okr then log('[Cloak Probe] failed: ' .. tostring(err)) end
         end
