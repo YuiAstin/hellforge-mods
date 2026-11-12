@@ -90,3 +90,8 @@ perception research (docs/research/perception.md, when written) come first.
   targets her and forgets. She is "revealed" (drawn, no dodge) while any enemy senses her and reveal_hold s after. The
   visibility cut stays on while revealed, so sight alone does not hold her. The log names the first 40 sensings with
   distance and bits: which bit is hearing and which sight is still to learn.
+- **0.1.2 (2026-11-13): hearing = an acquisition without sight, after a shot.** Two test missions (loud, then
+  suppressed) showed sense bits are sight only (always 1; 1 to 27 m; never from gunfire), so in 0.1.1 no gun revealed
+  her and enemies were forgotten 3550 times in one mission. Now an enemy that targets her or gains an entry of her
+  without seeing her, within noise_window (1 s) of her last shot (HF_ON_STAT shots), heard it and keeps her heard_hold
+  (5 s); the same with no shot is forgotten. Who hears which gun, and how far, stays the game's call.

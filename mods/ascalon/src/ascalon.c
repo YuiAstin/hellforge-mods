@@ -8,6 +8,10 @@
  *     sense bits set senses her now (it heard a shot or a blast, or she is right in front of it), and keeps her; only
  *     the ones that hold her without sensing her forget her. No invented noise ranges. While anyone senses her (and
  *     reveal_hold s after) she is drawn and the dodge is off.
+ *     0.1.2: the sense bits turned out to be sight only (two test missions: "sense bits 1" at 1 to 27 m, never from a
+ *     shot). Hearing shows as the user said it would: an enemy that takes her as its target, or gains an entry of her,
+ *     without seeing her. Such an acquisition within noise_window s of her last shot is "it heard her": that enemy
+ *     keeps her for heard_hold s. The same without a shot (stale memory, squad chatter, a melee hit) is forgotten.
  *   - The user's rule: with a backpack on, or a support weapon in her hands, there is no functional hiding at all.
  *   - Ambusher: while hidden, half the hits that still land on her miss (dodge).
  * Her skills (Pursuit, Endowment, Descent, Mortal Interrogation) are not in this build.
@@ -27,7 +31,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.1"
+#define VERSION "0.1.2"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -42,12 +46,12 @@
 KB_ROSTER_EXPORTS(ascalon)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
-static float s_visualCut = 95, s_revealHold = 1.5f;
+static float s_visualCut = 95, s_revealHold = 1.5f, s_noiseWindow = 1.0f, s_heardHold = 5;
 static float s_dodge = 0.5f, s_forgetEvery = 0.5f, s_forgetRange = 150;
 static int s_cloakVisual = 1, s_hideGear = 1, s_gearRule = 1;
 
 static const KbSetting kSettings[] = {
-    KB_F("visual_cut", s_visualCut, 0, 99.9), KB_F("reveal_hold", s_revealHold, 0, 60), KB_F("dodge", s_dodge, 0, 1),
+    KB_F("visual_cut", s_visualCut, 0, 99.9), KB_F("reveal_hold", s_revealHold, 0, 60), KB_F("noise_window", s_noiseWindow, 0, 10), KB_F("heard_hold", s_heardHold, 0, 60), KB_F("dodge", s_dodge, 0, 1),
     KB_F("forget_every", s_forgetEvery, 0.1, 5), KB_F("forget_range", s_forgetRange, 10, 500),
     KB_I("cloak_visual", s_cloakVisual, 0, 1), KB_I("hide_gear", s_hideGear, 0, 1), KB_I("gear_rule", s_gearRule, 0, 1),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
@@ -66,6 +70,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; What reveals her is the game's own hearing and sight: an enemy that senses her right now (it heard her gun, or\n"
                "; she is right in front of it) keeps her; she counts as revealed while any does, and reveal_hold s after.\n"
                "reveal_hold = %g\n"
+               "; Hearing: an enemy that picks her up without seeing her within noise_window s of her last shot heard it, and\n"
+               "; keeps her for heard_hold s (the game decides who hears which gun, and how far).\n"
+               "noise_window = %g\nheard_hold = %g\n"
                "; gear_rule 1: with a backpack on or a support weapon in her hands she is not hidden at all (she still looks it).\n"
                "gear_rule = %d\n"
                "; Ambusher: while hidden, this share of the hits that still land on her miss (0.5: half).\ndodge = %g\n"
@@ -74,7 +81,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint.\n"
                "hp_mult = 1\nstamina_mult = 1.2\nhellbomb_on_exhaustion = 0\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
-            (double)s_revealHold, s_gearRule, (double)s_dodge, s_cloakVisual,
+            (double)s_revealHold, (double)s_noiseWindow, (double)s_heardHold, s_gearRule, (double)s_dodge, s_cloakVisual,
             s_hideGear);
 }
 
@@ -82,11 +89,14 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
 enum { HIDDEN = 0, QUIET = 1 /* unused since 0.1.1 */, REVEALED = 2, GEAR = 3, AWAY = 4 };   /* AWAY: not on the ground */
 static atomic_int g_state = AWAY;
 static double g_sensedUntil, g_forgetAt;
-static int g_sensing;   /* enemies that sense her, at the last pass */
+static int g_sensing;   /* enemies that see or have heard her, at the last pass */
+static double g_noiseAt = -100, g_heardUntil[FOES];
+static uint32_t g_heardId[FOES];
+static unsigned g_heard, g_shots;
 static uint32_t g_heldSel;
 static uint64_t g_heldRes;
 static unsigned g_dodged, g_forgot, g_reveals;
-static const char* kStateName[] = {"hidden", "-", "revealed (an enemy senses her)", "not hidden (backpack or support weapon)", "away"};
+static const char* kStateName[] = {"hidden", "-", "revealed (an enemy sees or heard her)", "not hidden (backpack or support weapon)", "away"};
 
 /* ---- the visibility row (game.dll+0x3326540: map +0x20, rows +0x40, 20 bytes each: base +0, floor +12) ------------- */
 static float g_oldBase, g_wroteBase, g_wroteFloor, g_oldFloor;
@@ -160,6 +170,22 @@ static uint32_t SensedIn(uintptr_t pr, uint32_t me)
     }
     return bits;
 }
+/* does a perception record hold an entry of her at all? */
+static int HoldsIn(uintptr_t pr, uint32_t me)
+{
+    for (int l = 0; l < 3; l++)
+    {
+        uint32_t c = 0, id = 0;
+        if (!ReadAt(pr + kLists[l].count, &c, 4) || c > 16) continue;
+        for (uint32_t k = 0; k < c; k++) if (ReadAt(pr + kLists[l].entries + 0x50u * k, &id, 4) && id == me) return 1;
+    }
+    for (int k = 0; k < 3; k++)
+    {
+        uint32_t id = 0, used = 0;
+        if (ReadAt(pr + kSingles[k], &id, 4) && id == me && ReadAt(pr + kSingles[k] + 0x48, &used, 4) && used) return 1;
+    }
+    return 0;
+}
 /* her entries taken out of a perception record (the caller has checked nobody there senses her): entries removed */
 static int ForgetIn(uintptr_t pr, uint32_t me)
 {
@@ -222,6 +248,19 @@ static void ForgetPass(void)
             if (told < 40) { told++; Log("sensed by enemy %u (%016llx) at %.0f m: sense bits %x%s", id, (unsigned long long)g_foeRes[j], sqrtf(d2), bits, target ? ", its target" : ""); }
             continue;
         }
+        int holds = target || (pr && HoldsIn(pr, me)) || (sq && HoldsIn(sq, me));
+        if (holds)
+        {
+            if (g_heardId[j] != id) { g_heardId[j] = id; g_heardUntil[j] = 0; }
+            if (g_now >= g_heardUntil[j] && g_now - g_noiseAt <= s_noiseWindow)
+            {
+                g_heardUntil[j] = g_now + s_heardHold;
+                g_heard++;
+                static unsigned told;
+                if (told < 40) { told++; Log("heard by enemy %u (%016llx) at %.0f m%s", id, (unsigned long long)g_foeRes[j], sqrtf(d2), target ? ", its target" : ""); }
+            }
+            if (g_now < g_heardUntil[j]) { sensing++; continue; }
+        }
         if (target)
         {
             static const uint32_t z = 0;
@@ -239,6 +278,13 @@ static void ForgetPass(void)
 }
 
 /* ---- what reveals her ------------------------------------------------------------------------------------------ */
+static void OnStat(HfMod* mod, const HfEventInfo* info, void* user)
+{
+    const HfStatEvent* st = (const HfStatEvent*)info;
+    if (st->stat != HF_STAT_SHOTS || st->added <= 0 || !kb_kit_on || !g_alive) return;
+    g_noiseAt = g_now;
+    g_shots += (unsigned)st->added;
+}
 static void OnWeaponAsc(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfWeaponEvent* w = (const HfWeaponEvent*)info;
@@ -301,14 +347,17 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 static void Reset(const char* why)
 {
     if (g_forgot || g_reveals || g_dodged)
-        Log("%s: revealed %u times, %u times an enemy forgot her, %u hits dodged", why, g_reveals, g_forgot, g_dodged);
+        Log("%s: %u shots, heard %u times, revealed %u times, %u times an enemy forgot her, %u hits dodged", why, g_shots, g_heard, g_reveals,
+            g_forgot, g_dodged);
     int start = !strcmp(why, "mission start");
     if (start) KitDecide();
     Body(start);
     g_boomPending = 0; g_boomArmed = 0;
     g_sensedUntil = g_forgetAt = 0;
     g_sensing = 0;
-    g_forgot = g_reveals = g_dodged = 0;
+    g_forgot = g_reveals = g_dodged = g_heard = g_shots = 0;
+    g_noiseAt = -100;
+    memset(g_heardUntil, 0, sizeof g_heardUntil);
     g_cut = 0;
     atomic_store(&g_state, AWAY);
 }
@@ -381,7 +430,7 @@ static void Tick(HfMod* mod, float dt, void* user)
 
 /* ---- Mod Options Menu ------------------------------------------------------------------------------------------- */
 static const KbOption kOptions[] = {
-    {"visual_cut", &s_visualCut, NULL}, {"reveal_hold", &s_revealHold, NULL}, {"dodge", &s_dodge, NULL},
+    {"visual_cut", &s_visualCut, NULL}, {"reveal_hold", &s_revealHold, NULL}, {"noise_window", &s_noiseWindow, NULL}, {"heard_hold", &s_heardHold, NULL}, {"dodge", &s_dodge, NULL},
     {"gear_rule", NULL, &s_gearRule}, {"cloak_visual", NULL, &s_cloakVisual}, {"hide_gear", NULL, &s_hideGear},
     {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
 };
@@ -414,7 +463,8 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
              api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_PLAYER_DOWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) &&
-             api->subscribe(mod, HF_ON_WEAPON, OnWeaponAsc, NULL, 0) && api->on_game_thread(mod, Tick, NULL);
+             api->subscribe(mod, HF_ON_WEAPON, OnWeaponAsc, NULL, 0) && api->subscribe(mod, HF_ON_STAT, OnStat, NULL, 0) &&
+             api->on_game_thread(mod, Tick, NULL);
     if (!ok) api->log(mod, "events or the game thread are unavailable: Ascalon stays off");
     return 0;
 }
