@@ -4,8 +4,10 @@
  *   - Hidden: enemies' visual detection of her is cut (the game's per-entity visibility row, as the CAMO-EX01 Optical
  *     Cloak Pack found it), whoever still targets her forgets her (Lost Contact's break contact, without its wait), her
  *     body and gear are not drawn (the HUD side: Unit.set_mesh_visibility on her units, Cloak Probe 0.1.14).
- *   - What reveals her: a loud shot (to everyone, reveal_loud s), a suppressed shot (only enemies within quiet_range m
- *     keep track of her, reveal_quiet s), an explosion within blast_range m (reveal_loud s). Melee reveals nothing.
+ *   - What reveals her is the game's own senses (0.1.1, the user's idea): an enemy whose perception entry of her has
+ *     sense bits set senses her now (it heard a shot or a blast, or she is right in front of it), and keeps her; only
+ *     the ones that hold her without sensing her forget her. No invented noise ranges. While anyone senses her (and
+ *     reveal_hold s after) she is drawn and the dodge is off.
  *   - The user's rule: with a backpack on, or a support weapon in her hands, there is no functional hiding at all.
  *   - Ambusher: while hidden, half the hits that still land on her miss (dodge).
  * Her skills (Pursuit, Endowment, Descent, Mortal Interrogation) are not in this build.
@@ -25,7 +27,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -40,13 +42,12 @@
 KB_ROSTER_EXPORTS(ascalon)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
-static float s_visualCut = 95, s_revealLoud = 5, s_revealQuiet = 2, s_quietRange = 15, s_blastRange = 8;
+static float s_visualCut = 95, s_revealHold = 1.5f;
 static float s_dodge = 0.5f, s_forgetEvery = 0.5f, s_forgetRange = 150;
 static int s_cloakVisual = 1, s_hideGear = 1, s_gearRule = 1;
 
 static const KbSetting kSettings[] = {
-    KB_F("visual_cut", s_visualCut, 0, 99.9), KB_F("reveal_loud", s_revealLoud, 0, 60), KB_F("reveal_quiet", s_revealQuiet, 0, 60),
-    KB_F("quiet_range", s_quietRange, 0, 200), KB_F("blast_range", s_blastRange, 0, 50), KB_F("dodge", s_dodge, 0, 1),
+    KB_F("visual_cut", s_visualCut, 0, 99.9), KB_F("reveal_hold", s_revealHold, 0, 60), KB_F("dodge", s_dodge, 0, 1),
     KB_F("forget_every", s_forgetEvery, 0.1, 5), KB_F("forget_range", s_forgetRange, 10, 500),
     KB_I("cloak_visual", s_cloakVisual, 0, 1), KB_I("hide_gear", s_hideGear, 0, 1), KB_I("gear_rule", s_gearRule, 0, 1),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
@@ -62,9 +63,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Hidden: while she makes no noise, enemies see her visual_cut percent less far, and whoever within forget_range m\n"
                "; still targets her forgets her every forget_every s.\n"
                "visual_cut = %g\nforget_every = %g\nforget_range = %g\n"
-               "; What reveals her: a loud shot, to everyone, for reveal_loud s after the last one; a suppressed shot, only to\n"
-               "; enemies within quiet_range m, for reveal_quiet s; an explosion within blast_range m of her, for reveal_loud s.\n"
-               "reveal_loud = %g\nreveal_quiet = %g\nquiet_range = %g\nblast_range = %g\n"
+               "; What reveals her is the game's own hearing and sight: an enemy that senses her right now (it heard her gun, or\n"
+               "; she is right in front of it) keeps her; she counts as revealed while any does, and reveal_hold s after.\n"
+               "reveal_hold = %g\n"
                "; gear_rule 1: with a backpack on or a support weapon in her hands she is not hidden at all (she still looks it).\n"
                "gear_rule = %d\n"
                "; Ambusher: while hidden, this share of the hits that still land on her miss (0.5: half).\ndodge = %g\n"
@@ -73,33 +74,19 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint.\n"
                "hp_mult = 1\nstamina_mult = 1.2\nhellbomb_on_exhaustion = 0\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
-            (double)s_revealLoud, (double)s_revealQuiet, (double)s_quietRange, (double)s_blastRange, s_gearRule, (double)s_dodge, s_cloakVisual,
+            (double)s_revealHold, s_gearRule, (double)s_dodge, s_cloakVisual,
             s_hideGear);
 }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
-enum { HIDDEN = 0, QUIET = 1, REVEALED = 2, GEAR = 3, AWAY = 4 };   /* AWAY: not on the ground */
+enum { HIDDEN = 0, QUIET = 1 /* unused since 0.1.1 */, REVEALED = 2, GEAR = 3, AWAY = 4 };   /* AWAY: not on the ground */
 static atomic_int g_state = AWAY;
-static double g_loudUntil, g_quietUntil, g_forgetAt;
+static double g_sensedUntil, g_forgetAt;
+static int g_sensing;   /* enemies that sense her, at the last pass */
 static uint32_t g_heldSel;
 static uint64_t g_heldRes;
-static unsigned g_dodged, g_forgot, g_loud, g_quiet, g_blasts;
-static const char* kStateName[] = {"hidden", "heard close by", "revealed", "not hidden (backpack or support weapon)", "away"};
-
-/* ---- is the gun in her hands suppressed? (ProjectileWeapon.silenced, live record; asked once per weapon type) ---- */
-static struct { uint64_t res; int silenced; } g_sil[32];
-static int g_nsil;
-static int Silenced(uint64_t res)
-{
-    for (int i = 0; i < g_nsil; i++) if (g_sil[i].res == res) return g_sil[i].silenced;
-    HfField f = {HfProjectileWeapon_INFO, 0x22C, 1, HF_TYPE_U8, __LINE__};
-    HfLiveValue v;
-    memset(&v, 0, sizeof v);
-    int got = res && hf->get_live(self, res, &f, &v), s = got && v.base.number != 0;
-    if (g_nsil < 32) { g_sil[g_nsil].res = res; g_sil[g_nsil++].silenced = s; }
-    Log("weapon %016llx: %s", (unsigned long long)res, !got ? "no projectile-weapon record (counts as loud)" : s ? "suppressed" : "loud");
-    return s;
-}
+static unsigned g_dodged, g_forgot, g_reveals;
+static const char* kStateName[] = {"hidden", "-", "revealed (an enemy senses her)", "not hidden (backpack or support weapon)", "away"};
 
 /* ---- the visibility row (game.dll+0x3326540: map +0x20, rows +0x40, 20 bytes each: base +0, floor +12) ------------- */
 static float g_oldBase, g_wroteBase, g_wroteFloor, g_oldFloor;
@@ -159,7 +146,21 @@ static uintptr_t Perception(uint32_t e)
 }
 static const struct { uint32_t count, entries; } kLists[3] = {{0x310, 0x318}, {0x818, 0x820}, {0xD20, 0xD28}};
 static const uint32_t kSingles[3] = {0x1228, 0x1278, 0x12C8};
-/* her entries taken out of a perception record, sensed or not (she is hidden): entries removed */
+/* the sense bits (+0x4C) of her entries in a perception record, or'd: nonzero while that perceiver senses her now */
+static uint32_t SensedIn(uintptr_t pr, uint32_t me)
+{
+    uint32_t bits = 0;
+    for (int l = 0; l < 3; l++)
+    {
+        uint32_t c = 0;
+        uint8_t ent[0x50];
+        if (!ReadAt(pr + kLists[l].count, &c, 4) || c > 16) continue;
+        for (uint32_t k = 0; k < c; k++)
+            if (ReadAt(pr + kLists[l].entries + 0x50u * k, ent, sizeof ent) && Word(ent) == me) bits |= Word(ent + 0x4C);
+    }
+    return bits;
+}
+/* her entries taken out of a perception record (the caller has checked nobody there senses her): entries removed */
 static int ForgetIn(uintptr_t pr, uint32_t me)
 {
     int n = 0;
@@ -191,59 +192,53 @@ static int FoeRoot(uint32_t e, uint64_t res, float p[3])
     uint8_t d[24];
     return Descriptor(e, d) && Quad(d) == res && UnitNode(Word(d + 12), 0, p);
 }
-/* every enemy within forget_range m that targets her or holds an entry of her: forgotten. keep > 0: the ones within
- * that many metres keep her (a suppressed shot is heard close by) */
-static void ForgetPass(float keep)
+/* every enemy within forget_range m: one that senses her now keeps her (and counts); one that only remembers or
+ * targets her forgets her */
+static void ForgetPass(void)
 {
     uint32_t me = atomic_load(&g_avatar);
     float mp[3], p[3];
     if (!me || !PlayerPose(mp, NULL)) return;
-    int n = 0;
+    int n = 0, sensing = 0;
     for (int j = 0; j < FOES; j++)
     {
         uint32_t id = g_foe[j];
         if (!id) continue;
         if (!FoeRoot(id, g_foeRes[j], p)) { g_foe[j] = 0; continue; }
         float d2 = Dist2(p, mp);
-        if (d2 > s_forgetRange * s_forgetRange || (keep > 0 && d2 < keep * keep)) continue;
-        uintptr_t br = Behaviour(id), pr = Perception(id);
+        if (d2 > s_forgetRange * s_forgetRange) continue;
+        uintptr_t br = Behaviour(id), pr = Perception(id), sq = 0;
         uint8_t b[0xA0];
-        uint32_t perceiver = 0;
-        int had = 0;
-        if (br && ReadAt(br, b, sizeof b))
+        uint32_t perceiver = 0, bits = 0;
+        int target = 0, had = 0;
+        if (br && ReadAt(br, b, sizeof b)) { perceiver = Word(b + 0x68); target = Word(b + 0x18) == me; }
+        if (perceiver && perceiver != id) sq = Perception(perceiver);
+        if (pr) bits |= SensedIn(pr, me);
+        if (sq) bits |= SensedIn(sq, me);
+        if (bits)
         {
-            perceiver = Word(b + 0x68);
-            if (Word(b + 0x18) == me)
-            {
-                static const uint32_t z = 0;
-                static const uint64_t z8 = 0;
-                hf->write(br + 0x18, &z, 4); hf->write(br + 0x78, &z, 4); hf->write(br + 0x98, &z8, 8);
-                had = 1;
-            }
+            sensing++;
+            static unsigned told;
+            if (told < 40) { told++; Log("sensed by enemy %u (%016llx) at %.0f m: sense bits %x%s", id, (unsigned long long)g_foeRes[j], sqrtf(d2), bits, target ? ", its target" : ""); }
+            continue;
+        }
+        if (target)
+        {
+            static const uint32_t z = 0;
+            static const uint64_t z8 = 0;
+            hf->write(br + 0x18, &z, 4); hf->write(br + 0x78, &z, 4); hf->write(br + 0x98, &z8, 8);
+            had = 1;
         }
         if (pr && ForgetIn(pr, me)) had = 1;
-        if (perceiver && perceiver != id) { uintptr_t sq = Perception(perceiver); if (sq && ForgetIn(sq, me)) had = 1; }
+        if (sq && ForgetIn(sq, me)) had = 1;
         n += had;
     }
     g_forgot += (unsigned)n;
+    g_sensing = sensing;
+    if (sensing) g_sensedUntil = g_now + s_revealHold;
 }
 
 /* ---- what reveals her ------------------------------------------------------------------------------------------ */
-static void OnStat(HfMod* mod, const HfEventInfo* info, void* user)
-{
-    const HfStatEvent* s = (const HfStatEvent*)info;
-    if (s->stat != HF_STAT_SHOTS || s->added <= 0 || !kb_kit_on || !g_alive) return;
-    if (g_heldRes && Silenced(g_heldRes)) { g_quietUntil = g_now + s_revealQuiet; g_quiet++; }
-    else { g_loudUntil = g_now + s_revealLoud; g_loud++; }
-}
-static void OnExplosion(HfMod* mod, const HfEventInfo* info, void* user)
-{
-    const HfExplosionEvent* x = (const HfExplosionEvent*)info;
-    float me[3];
-    if (!kb_kit_on || !g_alive || !PlayerPose(me, NULL) || Dist2(me, x->position) > s_blastRange * s_blastRange) return;
-    g_loudUntil = g_now + s_revealLoud;
-    g_blasts++;
-}
 static void OnWeaponAsc(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfWeaponEvent* w = (const HfWeaponEvent*)info;
@@ -256,8 +251,7 @@ static int StateNow(void)
 {
     if (!g_alive || !atomic_load(&g_avatar)) return AWAY;
     if (s_gearRule && (Item(3) || g_heldSel == 3)) return GEAR;
-    if (g_now < g_loudUntil) return REVEALED;
-    if (g_now < g_quietUntil) return QUIET;
+    if (g_now < g_sensedUntil) return REVEALED;
     return HIDDEN;
 }
 
@@ -299,22 +293,22 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
     {
         if (p->entity && p->entity != atomic_load(&g_avatar)) { atomic_store(&g_avatar, p->entity); g_avatarNet = 0; g_cut = 0; }
         g_alive = 1;
-        g_loudUntil = g_quietUntil = 0;
+        g_sensedUntil = 0; g_sensing = 0;
         LearnNet();
     }
     else { g_alive = 0; g_cut = 0; }
 }
 static void Reset(const char* why)
 {
-    if (g_forgot || g_loud || g_quiet || g_dodged)
-        Log("%s: %u loud and %u suppressed volleys, %u blasts near her, %u times an enemy forgot her, %u hits dodged", why, g_loud, g_quiet,
-            g_blasts, g_forgot, g_dodged);
+    if (g_forgot || g_reveals || g_dodged)
+        Log("%s: revealed %u times, %u times an enemy forgot her, %u hits dodged", why, g_reveals, g_forgot, g_dodged);
     int start = !strcmp(why, "mission start");
     if (start) KitDecide();
     Body(start);
     g_boomPending = 0; g_boomArmed = 0;
-    g_loudUntil = g_quietUntil = g_forgetAt = 0;
-    g_forgot = g_loud = g_quiet = g_dodged = g_blasts = 0;
+    g_sensedUntil = g_forgetAt = 0;
+    g_sensing = 0;
+    g_forgot = g_reveals = g_dodged = 0;
     g_cut = 0;
     atomic_store(&g_state, AWAY);
 }
@@ -333,10 +327,11 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
 typedef struct AscalonHud
 {
     uint32_t version, in_mission;
-    uint32_t state;                 /* 0 hidden, 1 heard close by, 2 revealed, 3 not hidden (gear), 4 away */
-    float reveal_left;              /* seconds until hidden again (states 1 and 2) */
+    uint32_t state;                 /* 0 hidden, 2 revealed, 3 not hidden (gear), 4 away */
+    float reveal_left;              /* seconds until hidden again once nobody senses her (state 2) */
     uint32_t cloak_visual, hide_gear;
     uint32_t units[5];              /* scene units: her Helldiver, then her primary, secondary, support weapon, backpack (0: none) */
+    uint32_t sensing;               /* enemies that sense her now */
 } AscalonHud;
 static AscalonHud g_hud = {1};
 static uint32_t UnitOf(uint32_t e)
@@ -349,7 +344,8 @@ HF_MOD_EXPORT AscalonHud* ascalon_hud_state(void)
     int st = atomic_load(&g_state);
     g_hud.in_mission = (uint32_t)(g_inMission && g_alive && kb_kit_on);
     g_hud.state = (uint32_t)st;
-    g_hud.reveal_left = st == REVEALED ? (float)fmax(0, g_loudUntil - g_now) : st == QUIET ? (float)fmax(0, g_quietUntil - g_now) : 0;
+    g_hud.reveal_left = st == REVEALED && !g_sensing ? (float)fmax(0, g_sensedUntil - g_now) : 0;
+    g_hud.sensing = (uint32_t)g_sensing;
     g_hud.cloak_visual = (uint32_t)s_cloakVisual;
     g_hud.hide_gear = (uint32_t)s_hideGear;
     return &g_hud;
@@ -368,12 +364,13 @@ static void Tick(HfMod* mod, float dt, void* user)
     {
         static unsigned told;
         if (told++ < 60) Log("she is %s", kStateName[st]);
+        if (st == REVEALED) g_reveals++;
     }
-    VisCut(st == HIDDEN || st == QUIET);
-    if ((st == HIDDEN || st == QUIET) && g_now >= g_forgetAt)
+    VisCut(st == HIDDEN || st == REVEALED);   /* the cut stays while revealed: sight alone must not hold her revealed */
+    if ((st == HIDDEN || st == REVEALED) && g_now >= g_forgetAt)
     {
         g_forgetAt = g_now + s_forgetEvery;
-        ForgetPass(st == QUIET ? s_quietRange : 0);
+        ForgetPass();
     }
     g_hud.units[0] = UnitOf(atomic_load(&g_avatar));
     for (int k = 0; k < 4; k++) g_hud.units[1 + k] = UnitOf(atomic_load(&g_myItems[k]));
@@ -384,8 +381,7 @@ static void Tick(HfMod* mod, float dt, void* user)
 
 /* ---- Mod Options Menu ------------------------------------------------------------------------------------------- */
 static const KbOption kOptions[] = {
-    {"visual_cut", &s_visualCut, NULL}, {"reveal_loud", &s_revealLoud, NULL}, {"reveal_quiet", &s_revealQuiet, NULL},
-    {"quiet_range", &s_quietRange, NULL}, {"blast_range", &s_blastRange, NULL}, {"dodge", &s_dodge, NULL},
+    {"visual_cut", &s_visualCut, NULL}, {"reveal_hold", &s_revealHold, NULL}, {"dodge", &s_dodge, NULL},
     {"gear_rule", NULL, &s_gearRule}, {"cloak_visual", NULL, &s_cloakVisual}, {"hide_gear", NULL, &s_hideGear},
     {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
 };
@@ -418,8 +414,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
              api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_PLAYER_DOWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) &&
-             api->subscribe(mod, HF_ON_WEAPON, OnWeaponAsc, NULL, 0) && api->subscribe(mod, HF_ON_STAT, OnStat, NULL, 0) &&
-             api->subscribe(mod, HF_ON_EXPLOSION, OnExplosion, NULL, 0) && api->on_game_thread(mod, Tick, NULL);
+             api->subscribe(mod, HF_ON_WEAPON, OnWeaponAsc, NULL, 0) && api->on_game_thread(mod, Tick, NULL);
     if (!ok) api->log(mod, "events or the game thread are unavailable: Ascalon stays off");
     return 0;
 }

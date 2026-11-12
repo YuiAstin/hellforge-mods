@@ -84,3 +84,9 @@ perception research (docs/research/perception.md, when written) come first.
   the data patch (as the Optical Cloak Pack's content/optical_cloak/materials/cloak): the final polish.
 - **Not built:** Mortal Interrogation, Penumbral Image, Pursuit, Endowment, Descent, the skill panel, key bindings and
   Mod Options Menu rows.
+- **0.1.1 (2026-11-13): the game's own senses decide (the user's idea).** The invented reveals (shots stat, the
+  silenced flag, explosions, 15 m) are gone. Each forget pass reads the sense bits (+0x4C) of her entries in an enemy's
+  perception record (and its squad perceiver's): set = it senses her now and keeps her; clear = it only remembers or
+  targets her and forgets. She is "revealed" (drawn, no dodge) while any enemy senses her and reveal_hold s after. The
+  visibility cut stays on while revealed, so sight alone does not hold her. The log names the first 40 sensings with
+  distance and bits: which bit is hearing and which sight is still to learn.

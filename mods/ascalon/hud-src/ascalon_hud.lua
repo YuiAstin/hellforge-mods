@@ -3,8 +3,8 @@
 --     part are units of their own sharing one root) is switched off with Unit.set_mesh_visibility, and again four times
 --     a second, since the game switches meshes back on by itself; with hide_gear her weapons and backpack too. The way
 --     is the CAMO-EX01 Optical Cloak Pack's "compatibility" cloak (hide, remember, re-hide), found with the Cloak Probe.
---   * A line at the bottom middle says what she is: hidden, heard close by, revealed (with the seconds left), or not
---     hidden because of a backpack or support weapon.
+--   * A line at the bottom middle says what she is: hidden, revealed (how many enemies sense her, then the seconds
+--     left), or not hidden because of a backpack or support weapon.
 -- Ascalon is a HellForge code mod; this reads ascalon.dll's state (ascalon_hud_state, layout version 1) through LuaJIT's
 -- ffi every frame. Requires Bingus Shared Loader and HD2Runtime; uses HD2Runtime by SkyeShade
 -- (https://github.com/SkyeShade/HD2Runtime) through its public API (hd2.ui.overlay).
@@ -31,7 +31,7 @@ end
 
 local ffi = require('ffi')
 pcall(ffi.cdef, [[
-typedef struct aschud1_state { uint32_t version, in_mission, state; float reveal_left; uint32_t cloak_visual, hide_gear; uint32_t units[5]; } aschud1_state;
+typedef struct aschud1_state { uint32_t version, in_mission, state; float reveal_left; uint32_t cloak_visual, hide_gear; uint32_t units[5]; uint32_t sensing; } aschud1_state;
 void *aschud1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
 void *aschud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
 ]])
@@ -203,7 +203,7 @@ local function show_all()
 end
 local can_alive = nil
 local function cloak_frame(s, dt)
-    local want = s ~= nil and s.in_mission ~= 0 and s.cloak_visual ~= 0 and (s.state == 0 or s.state == 1 or s.state == 3)
+    local want = s ~= nil and s.in_mission ~= 0 and s.cloak_visual ~= 0 and (s.state == 0 or s.state == 3)
     if can_alive == nil then
         local U = lib('Unit')
         can_alive = U ~= nil and type(U.alive) == 'function'
@@ -236,7 +236,6 @@ end
 ---------------------------------------------------------------------------------------------- the status line --
 local LINES = {
     [0] = {'HIDDEN', TEAL},
-    [1] = {'HEARD CLOSE BY', TEAL},
     [2] = {'REVEALED', ORANGE},
     [3] = {'NOT HIDDEN: BACKPACK OR SUPPORT WEAPON', MUTED},
 }
@@ -251,7 +250,9 @@ overlay:draw(function(d, dt)
     local sc = d.scale
     local text = line[1]
     local left = tonumber(s.reveal_left)
-    if left > 0 then text = ('%s  %.1fs'):format(text, left) end
+    local n = tonumber(s.sensing)
+    if s.state == 2 and n > 0 then text = ('%s: %d %s'):format(text, n, n == 1 and 'ENEMY SENSES HER' or 'ENEMIES SENSE HER')
+    elseif left > 0 then text = ('%s  %.1fs'):format(text, left) end
     local size = 16 * sc
     local cx, y = d.width / 2, d.height - 132 * sc
     local w, h = (#text * 10 + 36) * sc, 26 * sc
