@@ -31,7 +31,7 @@ end
 
 local ffi = require('ffi')
 pcall(ffi.cdef, [[
-typedef struct aschud1_state { uint32_t version, in_mission, state; float reveal_left; uint32_t cloak_visual, hide_gear; uint32_t units[5]; uint32_t sensing; } aschud1_state;
+typedef struct aschud1_state { uint32_t version, in_mission, state; float reveal_left; uint32_t cloak_visual, hide_gear; uint32_t units[5]; uint32_t sensing; uint32_t nwanted; uint32_t wanted[256]; } aschud1_state;
 void *aschud1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
 void *aschud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
 ]])
@@ -136,6 +136,8 @@ local function collect(s)
     local U = lib('Unit')
     local want, ids = {}, {}
     for k = 0, 4 do local id = tonumber(s.units[k]); ids[#ids + 1] = id; if id ~= 0 then want[id] = true end end
+    local linked = math.min(tonumber(s.nwanted), 256)
+    for k = 0, linked - 1 do want[tonumber(s.wanted[k])] = true end
     local rare, byid, avatars, total = scan(want)
     if not rare then return nil end
     local me = byid[tonumber(s.units[0])]
@@ -147,6 +149,21 @@ local function collect(s)
     end
     local mx, my, mz = root(U, me)
     if not mx then return nil end
+    -- 0.1.3: her units by the engine's own links, when the DLL has them: exactly what hangs on her, nothing by position
+    if linked > 1 then
+        local out, found = {}, 0
+        for k = 0, linked - 1 do
+            local u = byid[tonumber(s.wanted[k])]
+            if u then out[#out + 1] = u; found = found + 1 end
+        end
+        local sig = 'links:' .. linked .. ':' .. found
+        if sig ~= cl.ids and cl.told < 12 then
+            cl.told = cl.told + 1
+            log(('[Ascalon HUD] her units: %d of the %d the engine links to her are in the worlds (%d units in all)'):format(found, linked, total))
+        end
+        cl.ids = sig
+        if found > 0 then return out end
+    end
     local out, seen = {}, {}
     local body = sharing(U, rare, mx, my, mz, out, seen)
     local gear = 0

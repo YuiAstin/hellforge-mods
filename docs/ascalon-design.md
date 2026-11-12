@@ -95,3 +95,8 @@ perception research (docs/research/perception.md, when written) come first.
   her and enemies were forgotten 3550 times in one mission. Now an enemy that targets her or gains an entry of her
   without seeing her, within noise_window (1 s) of her last shot (HF_ON_STAT shots), heard it and keeps her heard_hold
   (5 s); the same with no shot is forgotten. Who hears which gun, and how far, stays the game's call.
+- **0.1.3 (2026-11-13): her units by the engine's links.** 0.1.1 / 0.1.2 left the gear drawn: the weapons' entity
+  units were found by id but what is drawn hangs under them as linked units elsewhere. The DLL now walks the unit
+  links (first child Unit +0x1D8, next sibling +0x1E0, guarded by the two instructions the Optical Cloak Pack pins)
+  from her Helldiver's unit and from each of her ten equipment slots the attach manager says hangs on her, and hands
+  the HUD side the ids (AscalonHud.wanted).

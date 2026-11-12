@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.ascalon",
   "name": "Ascalon",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Ascalon's kit from Arknights for your Helldiver, first part: hidden until she makes noise. While hidden, enemies see her far less, the ones that still remember her forget her, half the hits that land on her miss, and her body and gear are not drawn. What reveals her is the game's own hearing and sight: an enemy that hears her gun, or has her right in front of it, keeps her, and she is drawn while any does. With a backpack on or a support weapon in hand she is not hidden. Her skills come in a later version. Solo or host. Settings in ascalon.ini. The look and the status line need Bingus Shared Loader and HD2Runtime. No character model included.",
   "gameplay": true,
   "code": {

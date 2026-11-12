@@ -31,7 +31,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.2"
+#define VERSION "0.1.3"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -88,6 +88,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
 /* ---- state ---------------------------------------------------------------------------------------------------- */
 enum { HIDDEN = 0, QUIET = 1 /* unused since 0.1.1 */, REVEALED = 2, GEAR = 3, AWAY = 4 };   /* AWAY: not on the ground */
 static atomic_int g_state = AWAY;
+static int g_linksOk;   /* the unit links are where the research has them */
 static double g_sensedUntil, g_forgetAt;
 static int g_sensing;   /* enemies that see or have heard her, at the last pass */
 static double g_noiseAt = -100, g_heardUntil[FOES];
@@ -369,6 +370,8 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     game = g;
     exe = x;
     HitsInstall("the dodge");
+    g_linksOk = hf->code_matches(exe + 0x2BEB9A, "48 8d b9 d8 01 00 00") && hf->code_matches(exe + 0x2BEBFA, "48 81 c7 e0 01 00 00");
+    if (!g_linksOk) Log("the engine's unit links are not where the research has them: her gear is found by position (it may stay drawn)");
     g_staminaOk = hf->code_matches(game + 0xA50E2D, "f3 42 0f 11 8c 11 54 78 54 00");
 }
 
@@ -381,12 +384,69 @@ typedef struct AscalonHud
     uint32_t cloak_visual, hide_gear;
     uint32_t units[5];              /* scene units: her Helldiver, then her primary, secondary, support weapon, backpack (0: none) */
     uint32_t sensing;               /* enemies that sense her now */
+    uint32_t nwanted;               /* 0.1.3: her scene units, by the engine's own links (0: not known, use units[]) */
+    uint32_t wanted[256];
 } AscalonHud;
 static AscalonHud g_hud = {1};
 static uint32_t UnitOf(uint32_t e)
 {
     uint8_t d[24];
     return e && e != UINT32_MAX && Descriptor(e, d) ? Word(d + 12) : 0;
+}
+/* 0.1.3: what she is made of, by the engine's own unit links (the Optical Cloak Pack's way): her Helldiver's unit and
+ * every unit linked under it (first child at Unit +0x1D8, next sibling at +0x1E0), and the same from each item of her
+ * equipment row (ten slots) that the attach manager (game+0x3326DC0: map +32, rows +64, 48 bytes, parent +4) says hangs
+ * on her. 0.1.2 looked for units sharing an item's root and found the weapons' entity units but not what is drawn. */
+static uintptr_t UnitObject(uint32_t unit)
+{
+    if (!exe || !unit) return 0;
+    uintptr_t registry = Pointer(exe + 0x1A100F0), generations, objects, object;
+    uint32_t count, id, slot = unit & 0x3FFFFF;
+    uint8_t generation;
+    if (!registry || !ReadAt(registry + 0x98, &count, 4) || count > 0x400000 || slot >= count ||
+        !(generations = Pointer(registry + 0xA0)) || !ReadAt(generations + slot, &generation, 1) || generation != (uint8_t)(unit >> 22) ||
+        !(objects = Pointer(registry + 0x88)) || !(object = Pointer(objects + 8u * slot)) || !ReadAt(object + 8, &id, 4) || id != unit)
+        return 0;
+    return object;
+}
+static void HerUnits(void)
+{
+    uint32_t me = atomic_load(&g_avatar), ids[256], skip[10], i;
+    int n = 0, nskip = 0, head = 0;
+    g_hud.nwanted = 0;
+    if (!g_linksOk || !me) return;
+    uint32_t mine = UnitOf(me);
+    if (!mine || !UnitObject(mine)) return;
+    ids[n++] = mine;
+    uintptr_t m = Pointer(game + 53634872u), recs, attach = Pointer(game + 0x3326DC0), rows = attach ? Pointer(attach + 64) : 0;
+    uint8_t rec[48];
+    if (m && rows && Lookup(m + 40, me, 1048576, &i) && i < 0x10000 && (recs = Pointer(m + 80)) && ReadAt(recs + 48u * i, rec, 48))
+        for (int k = 0; k < 10; k++)
+        {
+            uint32_t e = Word(rec + 4u * k), ai, parent = 0, u;
+            if (!e || e == UINT32_MAX || !Lookup(attach + 32, e, 8192, &ai) || ai >= 4096 || !ReadAt(rows + 48ull * ai + 4, &parent, 4) || parent != me) continue;
+            if (!(u = UnitOf(e)) || !UnitObject(u)) continue;
+            if (s_hideGear) { if (n < 256) ids[n++] = u; }
+            else skip[nskip++] = u;
+        }
+    while (head < n)
+    {
+        uintptr_t child = Pointer(UnitObject(ids[head++]) + 0x1D8);
+        for (int guard = 0; child && guard < 256; guard++)
+        {
+            uint32_t id = 0;
+            if (!ReadAt(child + 8, &id, 4) || UnitObject(id) != child) break;
+            int seen = 0;
+            for (int k = 0; k < n && !seen; k++) seen = ids[k] == id;
+            for (int k = 0; k < nskip && !seen; k++) seen = skip[k] == id;
+            if (!seen && n < 256) ids[n++] = id;
+            child = Pointer(child + 0x1E0);
+        }
+    }
+    memcpy(g_hud.wanted, ids, 4u * (unsigned)n);
+    g_hud.nwanted = (uint32_t)n;
+    static int told = -1;
+    if (n != told) { static unsigned times; if (times++ < 12) Log("her units by the engine's links: %d (her Helldiver's, its parts and %s)", n, s_hideGear ? "her gear" : "no gear"); told = n; }
 }
 HF_MOD_EXPORT AscalonHud* ascalon_hud_state(void)
 {
@@ -421,6 +481,8 @@ static void Tick(HfMod* mod, float dt, void* user)
         g_forgetAt = g_now + s_forgetEvery;
         ForgetPass();
     }
+    static double unitsAt;
+    if (g_now >= unitsAt) { unitsAt = g_now + 0.25; HerUnits(); }
     g_hud.units[0] = UnitOf(atomic_load(&g_avatar));
     for (int k = 0; k < 4; k++) g_hud.units[1 + k] = UnitOf(atomic_load(&g_myItems[k]));
     Exhaustion();
