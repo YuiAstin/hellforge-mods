@@ -132,38 +132,75 @@ local function copy_materials(me, stalker)
     end
     if #src == 0 then log('[Cloak Probe] cloak: no material on the Stalker'); return end
     st.cached = src
+    -- 0.1.4: Mesh has no set_material here (0.1.3: "missing" on all 31 slots). The engine's own is Unit.set_material(unit,
+    -- slot, material resource): each way of naming the slot and the Stalker's material is tried on the first slot and
+    -- logged; the first that works does the rest. If none does, the whole unit is hidden (Unit.set_unit_visibility).
+    local Mat = lib('Material')
     st.saved = st.saved or {}
-    local done, failed, how = 0, 0, nil
+    local function ids(mat)
+        local out = {}
+        local ok1, a = pc(Mat and Mat.id64, mat); if ok1 and a ~= nil then out[#out + 1] = {'Material.id64', a} end
+        local ok2, b2 = pc(Mat and Mat.id, mat); if ok2 and b2 ~= nil then out[#out + 1] = {'Material.id', b2} end
+        out[#out + 1] = {'the material itself', mat}
+        return out
+    end
+    local done, failed, how, tried = 0, 0, nil, 0
     for i = 1, n do
         local okm, mesh = pc(U.mesh, me, i)
         local okc, c = false, nil
-        if okm then okc, c = pc(M.num_materials, mesh) end   -- 0.1.3: 'okm and pc(...)' kept only pc's first result (every count read nil)
+        if okm then okc, c = pc(M.num_materials, mesh) end
         if okc and type(c) == 'number' then
             for j = 1, c do
                 local okt, mine = pc(M.material, mesh, j)
-                if okt then st.saved[#st.saved + 1] = {mesh = mesh, slot = j, mat = mine} end
+                local oksl, slot = pc(M.material_slot_id, mesh, j)
                 local mat = src[((j - 1) % #src) + 1]
-                local okset, err = pc(M.set_material, mesh, j, mat)
-                if okset then how = 'Mesh.set_material'; done = done + 1
+                local slots = {}
+                if oksl and slot ~= nil then slots[#slots + 1] = {'Mesh.material_slot_id', slot} end
+                slots[#slots + 1] = {'the slot index', j}
+                local set = false
+                if how then
+                    local sv = how.slot == 'Mesh.material_slot_id' and slot or j
+                    local mv = mat
+                    if how.mat == 'Material.id64' then local _, v = pc(Mat.id64, mat); mv = v elseif how.mat == 'Material.id' then local _, v = pc(Mat.id, mat); mv = v end
+                    set = pc(U.set_material, me, sv, mv)
                 else
-                    failed = failed + 1
-                    if failed <= 3 then log('[Cloak Probe]   Mesh.set_material failed: ' .. tostring(err)) end
+                    for _, sl in ipairs(slots) do
+                        for _, id in ipairs(ids(mat)) do
+                            local okset, err = pc(U.set_material, me, sl[2], id[2])
+                            tried = tried + 1
+                            if tried <= 8 then log(('[Cloak Probe]   Unit.set_material(me, %s = %s, %s = %s): %s'):format(sl[1], tostring(sl[2]), id[1], tostring(id[2]), okset and 'ok' or tostring(err))) end
+                            if okset then how = {slot = sl[1], mat = id[1]}; set = true; break end
+                        end
+                        if set then break end
+                    end
                 end
+                if set then
+                    done = done + 1
+                    if okt then
+                        local okid, myid = pc(Mat and Mat.id64, mine)
+                        st.saved[#st.saved + 1] = {slot = (how.slot == 'Mesh.material_slot_id') and slot or j, mat = (how.mat == 'Material.id64' and okid) and myid or mine}
+                    end
+                else failed = failed + 1 end
             end
         end
     end
-    log(('[Cloak Probe] cloak: %d material slots set (%s), %d failed, %d of yours saved'):format(done, how or 'none', failed, #(st.saved or {})))
+    log(('[Cloak Probe] cloak: %d material slots set (%s), %d failed'):format(done, how and (how.slot .. ' + ' .. how.mat) or 'no way worked', failed))
     if done == 0 then
-        -- the unit-level calls, with the slot names unknown: try what the engine offers and log it
-        local ok1, e1 = pc(U.set_material_from_other_unit, me, 'body', stalker)
-        log('[Cloak Probe]   Unit.set_material_from_other_unit(me, "body", stalker): ' .. (ok1 and 'ok' or tostring(e1)))
+        local okv, ev = pc(U.set_unit_visibility, me, false)
+        st.hidden = okv and me or nil
+        log('[Cloak Probe] cloak: no material could be set: Unit.set_unit_visibility(me, false): ' .. (okv and 'ok (your Helldiver is hidden outright; Shift+F12 shows her again)' or tostring(ev)))
     end
 end
 local function restore()
-    local M = lib('Mesh')
-    if not st.saved then log('[Cloak Probe] uncloak: nothing saved'); return end
+    local U = lib('Unit')
+    if st.hidden then
+        local okv, ev = pc(U.set_unit_visibility, st.hidden, true)
+        log('[Cloak Probe] uncloak: Unit.set_unit_visibility(me, true): ' .. (okv and 'ok' or tostring(ev)))
+        st.hidden = nil
+    end
+    if not st.saved or #st.saved == 0 then log('[Cloak Probe] uncloak: no material to put back'); st.saved = nil; return end
     local n = 0
-    for _, s in ipairs(st.saved) do if pc(M.set_material, s.mesh, s.slot, s.mat) then n = n + 1 end end
+    for _, s in ipairs(st.saved) do if pc(U.set_material, st.me, s.slot, s.mat) then n = n + 1 end end
     log(('[Cloak Probe] uncloak: %d of %d slots put back'):format(n, #st.saved))
     st.saved = nil
 end
@@ -189,6 +226,7 @@ overlay:draw(function(d, dt)
                 if k == 1 then api_list() end
                 local me = unit_near(b[0], b[1], b[2], 1.5)
                 if not me then log('[Cloak Probe] your Helldiver\'s unit was not found near you') return end
+                st.me = me
                 if k == 3 then restore() return end
                 if b[6] < 0.5 then
                     if k == 2 and st.cached then log('[Cloak Probe] no Stalker near: the materials kept from the last one'); copy_materials(me, nil) return end

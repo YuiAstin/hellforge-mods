@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.cloak-probe",
   "name": "Cloak Probe (research)",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Research for an invisibility ability: can a Helldiver wear the Stalker's cloak? On a Terminid mission with a Stalker near you: F12 logs the Stalker's meshes and materials and what the engine lets a mod do with them; Ctrl+F12 puts the Stalker's materials on your Helldiver's meshes behind a smoke puff; Shift+F12 puts yours back. Also logs every explosion near you (throw a G-3 Smoke to learn its row). Needs Bingus Shared Loader and HD2Runtime. Host or solo. Turn off when done.",
   "gameplay": false,
   "code": {
