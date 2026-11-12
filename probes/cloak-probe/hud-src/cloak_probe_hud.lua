@@ -247,6 +247,42 @@ end
 -- 0.1.6: the cheapest cloak there could be: the Helldiver's own materials, faded. Sets the two inputs the Optical Cloak
 -- Pack drives on its material (opacity, opacity_stealth) on every material of every part. Whether the armour's shader
 -- has them is the question: the calls can succeed and change nothing, so the answer is what you see.
+-- 0.1.8: with a model mod (IAS) the body you see is not one of the units at the avatar's root: F12 lists every
+-- rare-type unit within 3 m of you (type, distance from your root, meshes, how many are visible) to find it.
+local function list_near(me)
+    local App, U, M = lib('Application'), lib('Unit'), lib('Mesh')
+    local okw, world = pc(App.main_world)
+    local okp, v = pc(U.world_position, me, RI)
+    local mx, my, mz
+    if okp then mx, my, mz = xyz(v) end
+    if not (okw and world and mx) then log('[Cloak Probe] near: no world or root') return end
+    local all, total = rare_units(S, world)
+    local rows = {}
+    for _, u in ipairs(all or {}) do
+        local ok2, v2 = pc(U.world_position, u, RI)
+        local x, y, z
+        if ok2 then x, y, z = xyz(v2) end
+        if x then
+            local d = math.sqrt((x - mx) ^ 2 + (y - my) ^ 2 + (z - mz) ^ 2)
+            if d < 3 then
+                local okn, n = pc(U.num_meshes, u)
+                local vis, mats = 0, 0
+                for i = 1, (okn and type(n) == 'number' and n <= 512) and n or 0 do
+                    local okm, mesh = pc(U.mesh, u, i)
+                    if okm then
+                        local okv, vv = pc(M.visibility, mesh); if okv and vv == true then vis = vis + 1 end
+                        local okc, c = pc(M.num_materials, mesh); if okc and type(c) == 'number' then mats = mats + c end
+                    end
+                end
+                local okd, name = pc(U.debug_name, u)
+                rows[#rows + 1] = {d = d, text = ('%s  %.2f m  %s meshes (%d visible), %d materials'):format(okd and tostring(name) or '?', d, okn and tostring(n) or '?', vis, mats)}
+            end
+        end
+    end
+    table.sort(rows, function(a, b2) return a.d < b2.d end)
+    log(('[Cloak Probe] near: %d rare-type units within 3 m (%s units in the world)'):format(#rows, tostring(total)))
+    for i = 1, math.min(#rows, 60) do log('[Cloak Probe]   ' .. rows[i].text) end
+end
 local function fade_own(me, value)
     local U, M, Mat = lib('Unit'), lib('Mesh'), lib('Material')
     local parts = parts_of(me)
@@ -301,6 +337,7 @@ overlay:draw(function(d, dt)
                 local me = unit_near(b[0], b[1], b[2], 1.5)
                 if not me then log('[Cloak Probe] your Helldiver\'s unit was not found near you') return end
                 st.me = me
+                if k == 1 then list_near(me) end
                 if k == 3 then
                     if st.stage and st.stage >= 1 then fade_own(me, 1.0) end
                     if st.stage == 2 then restore() end
