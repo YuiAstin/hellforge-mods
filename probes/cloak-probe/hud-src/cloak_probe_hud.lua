@@ -46,19 +46,36 @@ local function xyz(v)
 end
 -- the world's units of rare types only (at most 4 of a type), as Exo Autopilot (marti) found: reading the position of
 -- a unit of a mass-instanced type crashed the game (helldivers2.exe+0x9E27E, a read at 0x30)
+-- 0.1.10: every world (Application.worlds, as the Optical Cloak Pack walks them), and types of up to 64 units, not 4:
+-- 0.1.9 found 5 units at the root and none was the body. The crash that set the limit of 4 (a root read on a unit
+-- with no scene graph) is guarded instead: root() asks Unit.num_scene_graph_items first, as the pack does.
+local TYPE_LIMIT = 64
 local function rare_units(s, w)
-    local oku, all = pcall(s.World.units, w)
-    if not oku or type(all) ~= 'table' then return nil end
-    local res, count = {}, {}
-    for i, u in ipairs(all) do
-        local okr, r = pcall(s.Unit.resource_name, u)
-        r = okr and tostring(r) or '?'
-        res[i] = r
-        count[r] = (count[r] or 0) + 1
+    local worlds = {}
+    local okws, ws = pcall(function() return s.Application.worlds() end)
+    if okws and type(ws) == 'table' and #ws > 0 then worlds = ws else worlds = {w} end
+    local units, res, count, total = {}, {}, {}, 0
+    for _, world in ipairs(worlds) do
+        local oku, all = pcall(s.World.units, world)
+        if oku and type(all) == 'table' then
+            for _, u in ipairs(all) do
+                local okr, r = pcall(s.Unit.resource_name, u)
+                r = okr and tostring(r) or '?'
+                units[#units + 1] = u; res[#units] = r
+                count[r] = (count[r] or 0) + 1
+                total = total + 1
+            end
+        end
     end
+    if total == 0 then return nil end
     local out = {}
-    for i, u in ipairs(all) do if count[res[i]] <= 4 and res[i] ~= '?' then out[#out + 1] = u end end
-    return out, #all
+    for i, u in ipairs(units) do if count[res[i]] <= TYPE_LIMIT and res[i] ~= '?' then out[#out + 1] = u end end
+    return out, total, #worlds, count
+end
+local function root(U, u, ri)
+    local okn, n = pcall(U.num_scene_graph_items, u)
+    if not okn or type(n) ~= 'number' or n < 1 or n > 10000 then return false, nil end
+    return pcall(U.world_position, u, ri)
 end
 local function node_index()
     local s = rawget(_G, 'stingray')
@@ -76,7 +93,7 @@ local function unit_near(px, py, pz, within)
     if not all then return nil, 'World.units unavailable' end
     local best, bd = nil, within * within
     for _, u in ipairs(all) do
-        local okp, v = pc(U.world_position, u, RI)
+        local okp, v = root(U, u, RI)
         local x, y, z
         if okp then x, y, z = xyz(v) end            -- 0.1.1: (okp and xyz(v)) kept only x
         if x then
@@ -198,13 +215,13 @@ end
 local function parts_of(me)
     local App, W, U = lib('Application'), lib('World'), lib('Unit')
     local okw, world = pc(App.main_world)
-    local okp, v = pc(U.world_position, me, RI)
+    local okp, v = root(U, me, RI)
     local mx, my, mz
     if okp then mx, my, mz = xyz(v) end
     if not (okw and world and mx) then return {me} end
     local out = {}
     for _, u in ipairs(rare_units(S, world) or {}) do
-        local ok2, v2 = pc(U.world_position, u, RI)
+        local ok2, v2 = root(U, u, RI)
         local x, y, z
         if ok2 then x, y, z = xyz(v2) end
         if x and (x - mx) ^ 2 + (y - my) ^ 2 + (z - mz) ^ 2 < 0.0004 then out[#out + 1] = u end
@@ -262,14 +279,14 @@ end
 local function list_near(me)
     local App, U, M = lib('Application'), lib('Unit'), lib('Mesh')
     local okw, world = pc(App.main_world)
-    local okp, v = pc(U.world_position, me, RI)
+    local okp, v = root(U, me, RI)
     local mx, my, mz
     if okp then mx, my, mz = xyz(v) end
     if not (okw and world and mx) then log('[Cloak Probe] near: no world or root') return end
-    local all, total = rare_units(S, world)
+    local all, total, nworlds, count = rare_units(S, world)
     local rows = {}
     for _, u in ipairs(all or {}) do
-        local ok2, v2 = pc(U.world_position, u, RI)
+        local ok2, v2 = root(U, u, RI)
         local x, y, z
         if ok2 then x, y, z = xyz(v2) end
         if x then
@@ -290,7 +307,9 @@ local function list_near(me)
         end
     end
     table.sort(rows, function(a, b2) return a.d < b2.d end)
-    log(('[Cloak Probe] near: %d rare-type units within 3 m (%s units in the world)'):format(#rows, tostring(total)))
+    local av = 0
+    for r, c in pairs(count or {}) do if tostring(r):lower():find('4d1c334d294dfa97', 1, true) then av = av + c end end
+    log(('[Cloak Probe] near: %d units within 3 m (types of up to %d; %s units in %s worlds; %d of the avatar type)'):format(#rows, TYPE_LIMIT, tostring(total), tostring(nworlds), av))
     for i = 1, math.min(#rows, 60) do log('[Cloak Probe]   ' .. rows[i].text) end
 end
 local function fade_own(me, value)
