@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-12: Exusiai 0.3.0 (first release)
+- Exusiai's kit from Arknights for your Helldiver. Solo or host; no character model included.
+- Charging Mode (passive): every 4th burst of her gun sets off 3 free bursts.
+- The summoned guns (S2): a pair hover at her shoulders and fire her primary's rounds at what she hits.
+- Overloading Mode (S3): four more guns for 15 s, each with its own target and rounds: a shotgun for the nearest, heavy-penetration rounds for the most armoured, staggering rounds for whoever last hit her, quick rounds for the weakest. They only pick what they have a clear shot at.
+- Fast Cartridge (faster-firing guns) and Angel's Blessings (more health and damage).
+- HUD (Bingus Shared Loader and HD2Runtime): her skills beside the stratagem list with icons and cooldowns, the guns' models and their firing sounds.
+
 ## 2026-11-10: Commando Plus 0.7.0 (first release)
 - Commando missions made a little more forgiving; every option is a setting in commando-plus.ini. Host or solo.
 - No mission timer in Commando, and one extra use of Call In Destroyer (0 to 3).
