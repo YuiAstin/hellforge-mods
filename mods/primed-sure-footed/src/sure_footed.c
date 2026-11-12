@@ -183,7 +183,8 @@ static int BoosterAllows(int mission)
 static void Tick(HfMod* mod, float dt, void* user)
 {
     int mission = hf->game_state(self) == HF_STATE_MISSION;
-    int on = g_enabled && mission && BoosterAllows(mission);
+    int allowed = g_enabled ? BoosterAllows(mission) : 0;   /* called every tick, so each mission starts with a fresh look */
+    int on = g_enabled && mission && allowed;
     atomic_store(&g_on, on);
     static uint64_t reported;
     static float since;
