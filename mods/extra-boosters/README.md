@@ -5,9 +5,23 @@ Enhancement by default) under an item id of its own. It is owned as soon as you 
 picker. HellForge has no `add_booster` yet, so this mod moves the game's booster table itself to make room. It is
 the first step towards adding that to HellForge.
 
-**Version 0.1.0 is a test build.** It has not been run in game yet. The new booster has the base booster's name,
-icon, description and effect, so in the picker it looks like a second Muscle Enhancement. Custom text, icons and
-effects come later.
+**Version 0.2.0 is a test build.** 0.1.0 was played: the booster table moved, the new booster was owned and showed in
+the picker. 0.2.0 makes it the **Primed Sure Footed** booster: its own name and description (and optionally another
+booster's icon). A new booster has no vanilla effect; the effect comes from the
+[Primed Sure Footed](../primed-sure-footed) mod 0.2.0, which stops knockdowns only while this booster is active.
+
+### For other mods
+
+The DLL (`extra_boosters.dll`) exports two functions, found with `GetModuleHandleA` / `GetProcAddress`:
+
+- `int extra_boosters_value(uint32_t item_id)`: the booster value of a booster this mod added (21), or -1.
+- `int extra_boosters_active(uint32_t item_id)`: 1 while the game has it active in the mission (game thread only).
+
+### Text
+
+The name and description are text ids of the mod's own, served by a link in the engine's text function chain: the
+same slot HellForge's loader hooks for its mods' text, linked once the game reaches the ship, after HellForge's own link.
+Any other text id goes on down the chain.
 
 ## Co-op
 
@@ -27,15 +41,17 @@ someone who declines it.
 
 ## Settings (`extra-boosters.ini`)
 
-Written with the defaults on first launch.
+Shipped with the mod (a mod never writes its own folder: HellForge holds it read-only in a session).
 
 | Setting | Default | |
 |---|---|---|
 | `enabled` | `1` | `0` writes nothing. |
-| `base` | `3` | The booster copied: 1 Vitality, 2 Stamina, 3 Muscle Enhancement … 20 Surplus EAT Allocation. |
+| `base` | `3` | The row copied: 1 Vitality, 2 Stamina, 3 Muscle Enhancement … 20 Surplus EAT Allocation. |
+| `icon_from` | `0` | Another vanilla booster's icon (same numbers); `0` keeps the base's. |
 | `id` | `0x1041BB56` | The new booster's item id. Change it only if another mod uses the same id. |
 | `value` | (empty) | The booster's tuning value (row `+0x08`); empty keeps the base's. |
-| `name` | `ExtraBooster1` | Its enum name, where the game prints booster names. |
+| `name` | `PrimedSureFooted` | Its enum name, where the game prints booster names. |
+| `title`, `description` | Primed Sure Footed text | Its text in the picker and loadout; empty keeps the base's. |
 
 ## How it works
 

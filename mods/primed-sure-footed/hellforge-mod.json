@@ -2,8 +2,8 @@
   "format": 1,
   "id": "yui.primed-sure-footed",
   "name": "Primed Sure Footed",
-  "version": "0.1.0",
-  "description": "Your Helldiver is never knocked down or ragdolled. Hits still make you flinch and push you back. Setting in primed-sure-footed.ini. Hit research from Helldiver Survival Rework by enochlophobianumerophobia (MIT).",
+  "version": "0.2.0",
+  "description": "Your Helldiver is never knocked down or ragdolled. Hits still make you flinch and push you back. With Extra Boosters installed, it works as the Primed Sure Footed booster: only while the booster is in your squad. Settings in primed-sure-footed.ini. Hit research from Helldiver Survival Rework by enochlophobianumerophobia (MIT).",
   "gameplay": true,
   "code": {
     "dll": "primed_sure_footed.dll",

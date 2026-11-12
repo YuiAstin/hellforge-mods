@@ -10,6 +10,12 @@
  * Each function's bytes are checked before hooking (code_matches, SDK 13: another mod's hook on it does not fail the
  * check), and the module sizes must be the supported build's; otherwise nothing is hooked and the log says why.
  *
+ * As a booster (0.2.0): with Extra Boosters (yui.extra-boosters) adding the Primed Sure Footed booster (its item id:
+ * booster_id), knockdowns are stopped only while the game has that booster active in the mission (boosters work for the
+ * whole squad; each player's machine does it for its own Helldiver, so everyone needs this mod). booster = 0, or no
+ * Extra Boosters / no such booster in it: always on, as 0.1.0 was. Extra Boosters is asked through its exports
+ * (extra_boosters_value / extra_boosters_active), on the game thread.
+ *
  * Research credit: the hit layout, the hooked functions and their guards come from Helldiver Survival Rework 0.3.2 by
  * enochlophobianumerophobia (MIT; see THIRD_PARTY_NOTICES.md), whose research in turn used HD2Runtime by SkyeShade's
  * catalogues (https://github.com/SkyeShade/HD2Runtime). */
@@ -32,7 +38,8 @@ static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game;
 static atomic_int g_ready, g_on;
-static int g_enabled = 1;
+static int g_enabled = 1, g_needBooster = 1;
+static uint32_t g_boosterId = 0x1041BB56u;   /* Extra Boosters' booster 21 by default */
 static _Atomic uint64_t g_cleared, g_seen, g_byKind[8];
 
 static const struct { uint32_t rva; const char* hex; } kPins[] = {
@@ -142,9 +149,41 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         g_enabled ? "" : " (OFF in the ini)");
 }
 
+/* The booster: 1 when this mission's knockdowns are to be stopped (always, without the booster set up) */
+typedef int (*BoosterFn)(uint32_t itemId);
+static int BoosterAllows(int mission)
+{
+    static int wasMission, mode;          /* mode: 0 not looked yet, 1 always on, 2 needs the booster */
+    static int active = -1;
+    static BoosterFn isActive;
+    if (!mission) { wasMission = 0; return 0; }
+    if (!wasMission)
+    {
+        wasMission = 1;
+        active = -1;
+        mode = 1;
+        HMODULE eb = g_needBooster ? GetModuleHandleA("extra_boosters.dll") : NULL;
+        BoosterFn value = eb ? (BoosterFn)(void*)GetProcAddress(eb, "extra_boosters_value") : NULL;
+        isActive = eb ? (BoosterFn)(void*)GetProcAddress(eb, "extra_boosters_active") : NULL;
+        if (!g_needBooster) hf->log(self, "mission: on (booster = 0 in the ini: no booster needed)");
+        else if (!value || !isActive) hf->log(self, "mission: on (Extra Boosters is not loaded, so no booster needed)");
+        else if (value(g_boosterId) < 0) hf->log(self, "mission: on (Extra Boosters has no booster 0x%08X, so no booster needed)", g_boosterId);
+        else mode = 2;
+    }
+    if (mode != 2) return 1;
+    int now = isActive(g_boosterId) != 0;
+    if (now != active)
+    {
+        active = now;
+        hf->log(self, "mission: the Primed Sure Footed booster is %s: knockdowns %s", now ? "active" : "not active", now ? "stopped" : "as in the game");
+    }
+    return now;
+}
+
 static void Tick(HfMod* mod, float dt, void* user)
 {
-    int on = g_enabled && hf->game_state(self) == HF_STATE_MISSION;
+    int mission = hf->game_state(self) == HF_STATE_MISSION;
+    int on = g_enabled && mission && BoosterAllows(mission);
     atomic_store(&g_on, on);
     static uint64_t reported;
     static float since;
@@ -162,24 +201,21 @@ static void Tick(HfMod* mod, float dt, void* user)
     }
 }
 
+/* The settings ship in primed-sure-footed.ini: a mod never writes its folder (HellForge holds it read-only in a session). */
 static void LoadSettings(void)
 {
     char path[MAX_PATH * 2], line[256];
     snprintf(path, sizeof path, "%s\\primed-sure-footed.ini", hf->mod_folder(self));
     FILE* f = fopen(path, "r");
-    if (!f)
-    {
-        if ((f = fopen(path, "w")) != NULL)
-        {
-            fprintf(f, "; Primed Sure Footed: 1 your Helldiver is never knocked down (flinch and push stay); 0 off.\nenabled = 1\n");
-            fclose(f);
-        }
-        return;
-    }
+    if (!f) { hf->log(self, "no primed-sure-footed.ini: the built-in settings"); return; }
     while (fgets(line, sizeof line, f))
     {
         int v;
+        unsigned u;
+        if (line[0] == ';') continue;
         if (sscanf(line, " enabled = %d", &v) == 1) g_enabled = v != 0;
+        else if (sscanf(line, " booster = %d", &v) == 1) g_needBooster = v != 0;
+        else if (sscanf(line, " booster_id = %x", &u) == 1) g_boosterId = u;
     }
     fclose(f);
 }
@@ -191,7 +227,8 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches || !api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
-    api->log(mod, "Primed Sure Footed 0.1.0 (SDK %u, game " BUILD "): %s", api->version, g_enabled ? "on" : "off in the ini");
+    api->log(mod, "Primed Sure Footed 0.2.0 (SDK %u, game " BUILD "): %s%s", api->version, g_enabled ? "on" : "off in the ini",
+        g_enabled && g_needBooster ? " (with Extra Boosters: while its Primed Sure Footed booster is active)" : "");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) { api->log(mod, "REFUSED: the game-loaded event"); return 1; }
     /* registered: from here the DLL stays loaded, so a failure only leaves the mod inert */
     if (!api->on_game_thread(mod, Tick, NULL)) api->log(mod, "the game thread could not be hooked: the mod stays off");

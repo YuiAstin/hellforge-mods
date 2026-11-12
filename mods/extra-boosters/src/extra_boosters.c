@@ -18,6 +18,13 @@
  * Every instruction is checked against its reviewed bytes first, and none may sit under another hook; if one differs
  * (another mod moved the table, or another build) nothing is written and the log says which.
  *
+ * Its own text and icon (0.2.0): the new row's name (+0x10), short name (+0x14) and description (+0x18) are text ids of
+ * this mod's own, served by a link in the engine's text function chain (the slot HellForge's loader hooks for its mods'
+ * text: [[game + 0x3326308] + 0x10] + 1000), added once the game reaches the ship, after HellForge's own link; any other
+ * id goes on down the chain. Its icon (+0x20) can be another vanilla booster's (icon_from).
+ * Other mods: extra_boosters_value(item id) gives the booster value of a booster this mod added (-1: none, or not
+ * installed), and extra_boosters_active(item id) whether the game has it active in this mission (game thread only).
+ *
  * Co-op: the booster choice goes over the network as the raw row index, and the game stores a received index without a
  * check, so every player in the session must run this mod with the same settings (HellForge's mod sync offers it).
  *
@@ -30,7 +37,7 @@
 #include <windows.h>
 #include "hellforge_mod.h"
 
-#define VERSION "0.1.0"
+#define VERSION "0.2.0"
 #define BUILD "25480438"
 #define GAME_SIZE 74727424u
 #define EXE_SIZE 60719104u
@@ -61,7 +68,12 @@ static uint32_t g_base = 3;                     /* the row copied: 3 MuscleEnhan
 static uint32_t g_id = 0x1041BB56u;             /* the new booster's item id (+0x00), FNV-1a of "yui.extra-boosters/booster.21" */
 static float g_value;                           /* +0x08, the tuning value; NaN: the base's */
 static int g_valueSet;
-static char g_name[NAME_LEN] = "ExtraBooster1"; /* the enum name (the mission report's) */
+static char g_name[NAME_LEN] = "PrimedSureFooted"; /* the enum name (the mission report's) */
+#define TEXT_LEN 512u
+static char g_title[TEXT_LEN] = "Primed Sure Footed";
+static char g_upper[TEXT_LEN];
+static char g_desc[TEXT_LEN] = "Helldivers are never knocked down or ragdolled. Hits still make them flinch and push them back. (Needs the Primed Sure Footed mod.)";
+static uint32_t g_iconFrom;                     /* 0: the base's icon */
 
 static const HfApi* hf;
 static HfMod* self;
@@ -146,6 +158,70 @@ static uint8_t* NearBlock(size_t image)
     return NULL;
 }
 
+/* ---- text ------------------------------------------------------------------------------------------------------ */
+/* Ids of this mod's own, from the item id: FNV-1a of "yui.extra-boosters/<id>/<field>" (0 is never one). */
+static uint32_t g_textId[3];
+static uint32_t Fnv(const char* text)
+{
+    uint32_t h = 2166136261u;
+    for (; *text; text++) h = (h ^ (uint8_t)*text) * 16777619u;
+    return h ? h : 1u;
+}
+static void TextIds(void)
+{
+    static const char* const kField[3] = {"title", "short", "description"};
+    for (int i = 0; i < 3; i++)
+    {
+        char key[96];
+        snprintf(key, sizeof key, "yui.extra-boosters/%08X/%s", g_id, kField[i]);
+        g_textId[i] = Fnv(key);
+    }
+    size_t n = 0;
+    for (; g_title[n] && n < TEXT_LEN - 1; n++) g_upper[n] = (char)(g_title[n] >= 'a' && g_title[n] <= 'z' ? g_title[n] - 32 : g_title[n]);
+    g_upper[n] = 0;
+}
+
+/* The engine's text function slot: [[game + ENGINE_API] + 0x10] + 1000, as HellForge's loader hooks it (registry.c). */
+#define ENGINE_API 0x3326308u
+typedef const char* (*TextFn)(uint32_t id, void* a, void* b, void* c);
+static TextFn g_nextText;
+static const char* Text(uint32_t id, void* a, void* b, void* c)
+{
+    if (id && id == g_textId[0] && g_title[0]) return g_title;
+    if (id && id == g_textId[1] && g_title[0]) return g_upper;
+    if (id && id == g_textId[2] && g_desc[0]) return g_desc;
+    return g_nextText ? g_nextText(id, a, b, c) : "";
+}
+/* 1 linked (or nothing to link), 0 not yet (the engine API is not set up), -1 refused */
+static int LinkText(void)
+{
+    if (!g_title[0] && !g_desc[0]) return 1;
+    uintptr_t api = 0, table = 0, current = 0;
+    if (hf->read(game + ENGINE_API, &api, 8) || !api || hf->read(api + 0x10, &table, 8) || !table || hf->read(table + 1000, &current, 8) || !current)
+        return 0;
+    if (current == (uintptr_t)Text) return 1;
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!VirtualQuery((void*)current, &mbi, sizeof mbi) || mbi.State != MEM_COMMIT || !(mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)))
+    {
+        hf->log(self, "the engine's text function is not code (0x%llx): the booster keeps its base's text", (unsigned long long)current);
+        return -1;
+    }
+    char module[MAX_PATH] = "";
+    HMODULE owner = NULL;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)current, &owner))
+        GetModuleFileNameA(owner, module, sizeof module);
+    g_nextText = (TextFn)current;
+    MemoryBarrier();
+    void* mine = (void*)Text;
+    DWORD old;
+    if (!VirtualProtect((void*)(table + 1000), 8, PAGE_READWRITE, &old)) { g_nextText = NULL; hf->log(self, "the engine's text slot cannot be written: base text kept"); return -1; }
+    InterlockedExchangePointer((void* volatile*)(table + 1000), mine);
+    VirtualProtect((void*)(table + 1000), 8, old, &old);
+    const char* base = strrchr(module, '\\');
+    hf->log(self, "text linked: \"%s\" (ids %08X / %08X / %08X), then %s", g_title, g_textId[0], g_textId[1], g_textId[2], base ? base + 1 : module[0] ? module : "unknown code");
+    return 1;
+}
+
 static const char* Install(size_t image)
 {
     static char why[160];
@@ -163,6 +239,10 @@ static const char* Install(size_t image)
     memcpy(added, rows + g_base * ROW, ROW);
     memcpy(added + 0x00, &g_id, 4);
     if (g_valueSet) memcpy(added + 0x08, &g_value, 4);
+    if (g_iconFrom > 0 && g_iconFrom < VANILLA) memcpy(added + 0x20, rows + g_iconFrom * ROW + 0x20, 8);
+    TextIds();
+    if (g_title[0]) { memcpy(added + 0x10, &g_textId[0], 4); memcpy(added + 0x14, &g_textId[1], 4); }
+    if (g_desc[0]) memcpy(added + 0x18, &g_textId[2], 4);
     for (unsigned r = 0; r < VANILLA; r++)
     {
         uint32_t id;
@@ -291,10 +371,25 @@ static int Own(const char** why)
 static const char kIsActivePin[] = "48 8b 0d 59 f9 ac 02 48 8b 05 ea fb ac 02 83 79 08 00 76 06 83 79 40 04 74 46 44 8b 48 10 33 c9";
 typedef char (*IsActiveFn)(uintptr_t unused, uint32_t booster);
 
+__declspec(dllexport) int extra_boosters_value(uint32_t itemId)
+{
+    return atomic_load(&g_installed) && itemId == g_id ? (int)VANILLA : -1;
+}
+__declspec(dllexport) int extra_boosters_active(uint32_t itemId)
+{
+    static int pinned = -1;   /* the check's code, looked at once */
+    if (pinned < 0 && atomic_load(&g_installed)) pinned = hf->code_matches(game + IS_ACTIVE, kIsActivePin) != 0;
+    if (extra_boosters_value(itemId) < 0 || pinned != 1) return 0;
+    return ((IsActiveFn)(game + IS_ACTIVE))(0, VANILLA) != 0;
+}
+
 static void Tick(HfMod* mod, float dt, void* user)
 {
     (void)mod; (void)user;
     if (!atomic_load(&g_installed)) return;
+    /* the text, once the game is at the ship (after HellForge's own link in the chain) */
+    static int linked;
+    if (!linked && hf->game_state(self) >= HF_STATE_SHIP) linked = LinkText();
     static int owned; /* 0 waiting, 1 done, -1 refused */
     static float wait;
     if (owned == 0 && (wait += dt) >= 1.0f)
@@ -344,35 +439,28 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     hf->log(self, "booster table moved to 0x%llx (+0x%llx from game.dll): %u sites re-pointed, %u bounds raised to %u, names moved",
         (unsigned long long)(uintptr_t)g_block, (unsigned long long)((uintptr_t)g_block - game), (unsigned)COUNT(kBoosterSites),
         (unsigned)COUNT(kBoosterBounds), VANILLA + ADDED);
-    hf->log(self, "booster %u \"%s\": a copy of booster %u (item 0x%08X) as item 0x%08X, value %g", VANILLA, g_name, g_base, baseId, g_id, value);
+    hf->log(self, "booster %u \"%s\" (%s): a copy of booster %u (item 0x%08X) as item 0x%08X, value %g, icon %s", VANILLA, g_name,
+        g_title[0] ? g_title : "the base's text", g_base, baseId, g_id, value, g_iconFrom ? "of another booster" : "the base's");
 }
 
 /* ---- settings ---------------------------------------------------------------------------------------------------- */
+/* The settings ship in extra-boosters.ini: a mod never writes its folder (HellForge holds it read-only in a session). */
+static void Unquote(char* out, const char* in, size_t size)
+{
+    while (*in == ' ' || *in == '\t') in++;
+    size_t n = strlen(in);
+    while (n && (in[n - 1] == '\n' || in[n - 1] == '\r' || in[n - 1] == ' ' || in[n - 1] == '\t')) n--;
+    if (n >= 2 && in[0] == '"' && in[n - 1] == '"') { in++; n -= 2; }
+    if (n >= size) n = size - 1;
+    memcpy(out, in, n);
+    out[n] = 0;
+}
 static void LoadSettings(void)
 {
-    char path[MAX_PATH * 2], line[256];
+    char path[MAX_PATH * 2], line[1024];
     snprintf(path, sizeof path, "%s\\extra-boosters.ini", hf->mod_folder(self));
     FILE* f = fopen(path, "r");
-    if (!f)
-    {
-        if ((f = fopen(path, "w")) != NULL)
-        {
-            fprintf(f,
-                "; Extra Boosters: adds booster 21, a copy of a vanilla booster under its own item id.\n"
-                "; Every player in a co-op session needs this mod with the same settings.\n"
-                "enabled = 1\n"
-                "; the booster copied (its name, icon, description and effect): 1 Vitality, 2 Stamina, 3 Muscle Enhancement ... 20 Surplus EAT\n"
-                "base = 3\n"
-                "; the new booster's item id, as hex; change it only if it clashes with another mod's\n"
-                "id = 0x1041BB56\n"
-                "; its tuning value (row +0x08); empty for the base's\n"
-                "value =\n"
-                "; its enum name, shown where the game prints booster names\n"
-                "name = ExtraBooster1\n");
-            fclose(f);
-        }
-        return;
-    }
+    if (!f) { hf->log(self, "no extra-boosters.ini: the built-in settings"); return; }
     while (fgets(line, sizeof line, f))
     {
         int v;
@@ -382,9 +470,12 @@ static void LoadSettings(void)
         if (line[0] == ';') continue;
         if (sscanf(line, " enabled = %d", &v) == 1) g_enabled = v != 0;
         else if (sscanf(line, " base = %u", &u) == 1) g_base = u;
+        else if (sscanf(line, " icon_from = %u", &u) == 1) g_iconFrom = u;
         else if (sscanf(line, " id = %x", &u) == 1) g_id = u;
         else if (sscanf(line, " value = %f", &x) == 1) { g_value = x; g_valueSet = 1; }
         else if (sscanf(line, " name = %47[A-Za-z0-9_]", s) == 1) { memcpy(g_name, s, sizeof s); g_name[NAME_LEN - 1] = 0; }
+        else if (!strncmp(line, "title =", 7) || !strncmp(line, "title=", 6)) Unquote(g_title, strchr(line, '=') + 1, sizeof g_title);
+        else if (!strncmp(line, "description =", 13) || !strncmp(line, "description=", 12)) Unquote(g_desc, strchr(line, '=') + 1, sizeof g_desc);
     }
     fclose(f);
 }
