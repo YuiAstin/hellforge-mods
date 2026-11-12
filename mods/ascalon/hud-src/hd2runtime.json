@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "Ascalon HUD",
+  "resource": "mods/yui/ascalon_hud",
+  "guid": "1961718b-eb32-5ac6-b676-ec62369229de",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.30.0",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}
