@@ -14,7 +14,16 @@
  *     keeps her for heard_hold s. The same without a shot (stale memory, squad chatter, a melee hit) is forgotten.
  *   - The user's rule: with a backpack on, or a support weapon in her hands, there is no functional hiding at all.
  *   - Ambusher: while hidden, half the hits that still land on her miss (dodge).
- * Her skills (Pursuit, Endowment, Descent, Mortal Interrogation) are not in this build.
+ * 0.2.0, her trait and her first skill (Yui, 2026-11-14: "hit everything should always be on, in a radius of 15 m";
+ * Pursuit without the gas: "the slow, AoE damage, double hits and the multiplier, AoE as the Executor's"):
+ *   - Ambusher (always on): every hit of hers (melee, bullet, beam) also strikes every living enemy within area_radius m
+ *     of her that she has a clear line to, for area_mult times that hit's damage. As the Executor's area rounds: one
+ *     spawned round an enemy, its hit's amount set in the damage event. At most one volley every area_every s, area_max
+ *     enemies. The rounds are the mod's, not her gun's: they are not noise.
+ *   - Pursuit (S1, by itself, pursuit_charges charges, one back every pursuit_every s): her next hit deals pursuit_mult
+ *     times its damage and lands twice (a second volley that takes in the enemy she hit), on everyone in range, and
+ *     slows each one it strikes (the flamer slow, pursuit_slow build-up).
+ * Endowment, Descent and Mortal Interrogation are not in this build.
  *
  * Built on the kit base (src/kitbase). Solo or host. */
 #include <errno.h>
@@ -31,7 +40,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.3"
+#define VERSION "0.2.0"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -46,11 +55,16 @@
 KB_ROSTER_EXPORTS(ascalon)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
+static float s_areaRadius = 15, s_areaMult = 1, s_areaEvery = 0.25f, s_pursuitMult = 2.1f, s_pursuitEvery = 7, s_pursuitSlow = 100;
+static int s_areaMax = 12, s_areaRound = 7, s_pursuitCharges = 3;
 static float s_visualCut = 95, s_revealHold = 1.5f, s_noiseWindow = 1.0f, s_heardHold = 5;
 static float s_dodge = 0.5f, s_forgetEvery = 0.5f, s_forgetRange = 150;
 static int s_cloakVisual = 1, s_hideGear = 1, s_gearRule = 1;
 
 static const KbSetting kSettings[] = {
+    KB_F("area_radius", s_areaRadius, 0, 60), KB_F("area_mult", s_areaMult, 0, 10), KB_F("area_every", s_areaEvery, 0.05, 5),
+    KB_I("area_max", s_areaMax, 0, 24), KB_I("area_round", s_areaRound, 1, 100000), KB_F("pursuit_mult", s_pursuitMult, 1, 20),
+    KB_F("pursuit_every", s_pursuitEvery, 0.5, 120), KB_F("pursuit_slow", s_pursuitSlow, 0, 1000), KB_I("pursuit_charges", s_pursuitCharges, 0, 9),
     KB_F("visual_cut", s_visualCut, 0, 99.9), KB_F("reveal_hold", s_revealHold, 0, 60), KB_F("noise_window", s_noiseWindow, 0, 10), KB_F("heard_hold", s_heardHold, 0, 60), KB_F("dodge", s_dodge, 0, 1),
     KB_F("forget_every", s_forgetEvery, 0.1, 5), KB_F("forget_range", s_forgetRange, 10, 500),
     KB_I("cloak_visual", s_cloakVisual, 0, 1), KB_I("hide_gear", s_hideGear, 0, 1), KB_I("gear_rule", s_gearRule, 0, 1),
@@ -64,6 +78,13 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
     fprintf(f, "; Ascalon %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for a\n"
                "; combo (Shift+Q). (Her skills are not in this build: the keys are kept for them.)\n"
                "key_spare = %s\nkey_endowment = %s\nkey_descent = %s\n"
+               "; Ambusher (always on): every hit of hers also strikes every enemy within area_radius m of her that she has a\n"
+               "; clear line to, for area_mult times that hit's damage: at most area_max enemies, one volley every area_every s.\n"
+               "; area_round: the vanilla projectile the strikes fly as (7: a rifle round).\n"
+               "area_radius = %g\narea_mult = %g\narea_max = %d\narea_every = %g\narea_round = %d\n"
+               "; Pursuit (by itself): pursuit_charges charges, one back every pursuit_every s. A hit with a charge deals\n"
+               "; pursuit_mult times its damage, lands twice on everyone in range and slows them (pursuit_slow: 100 a full dose).\n"
+               "pursuit_charges = %d\npursuit_every = %g\npursuit_mult = %g\npursuit_slow = %g\n"
                "; Hidden: while she makes no noise, enemies see her visual_cut percent less far, and whoever within forget_range m\n"
                "; still targets her forgets her every forget_every s.\n"
                "visual_cut = %g\nforget_every = %g\nforget_range = %g\n"
@@ -80,10 +101,18 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; are her weapons and backpack.\ncloak_visual = %d\nhide_gear = %d\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint.\n"
                "hp_mult = 1\nstamina_mult = 1.2\nhellbomb_on_exhaustion = 0\n",
-            VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
+            VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_areaRadius, (double)s_areaMult, s_areaMax, (double)s_areaEvery,
+            s_areaRound, s_pursuitCharges, (double)s_pursuitEvery, (double)s_pursuitMult, (double)s_pursuitSlow, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
             (double)s_revealHold, (double)s_noiseWindow, (double)s_heardHold, s_gearRule, (double)s_dodge, s_cloakVisual,
             s_hideGear);
 }
+
+static uint32_t UnitOf(uint32_t e)
+{
+    uint8_t d[24];
+    return e && e != UINT32_MAX && Descriptor(e, d) ? Word(d + 12) : 0;
+}
+#include "as_world.h"
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
 enum { HIDDEN = 0, QUIET = 1 /* unused since 0.1.1 */, REVEALED = 2, GEAR = 3, AWAY = 4 };   /* AWAY: not on the ground */
@@ -283,8 +312,14 @@ static void OnStat(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfStatEvent* st = (const HfStatEvent*)info;
     if (st->stat != HF_STAT_SHOTS || st->added <= 0 || !kb_kit_on || !g_alive) return;
+    /* only shots the game credits to the gun in her hands: her area strikes are spawned rounds (credited to her
+     * Helldiver, as Exusiai 0.3.1 found) and are not noise */
+    int mine = 0;
+    for (uint32_t k = 0; k < st->count && k < HF_STAT_SOURCES; k++)
+        if (g_heldRes && st->sources[k].resource == g_heldRes && st->sources[k].added > 0) mine += st->sources[k].added;
+    if (mine <= 0) return;
     g_noiseAt = g_now;
-    g_shots += (unsigned)st->added;
+    g_shots += (unsigned)mine;
 }
 static void OnWeaponAsc(HfMod* mod, const HfEventInfo* info, void* user)
 {
@@ -318,7 +353,119 @@ static int HitTaken(const uint8_t* h, void* result, unsigned long long now)
     return 1;
 }
 static void DamageTaken(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me) { (void)e; (void)d; (void)me; }
-static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me) { (void)e; (void)d; (void)me; }
+
+/* ---- Ambusher: her hits strike everyone in range; Pursuit --------------------------------------------------------- */
+static int Friend(uint32_t e)
+{
+    uint8_t d[24];
+    return Descriptor(e, d) && (Quad(d) == AVATAR || FriendRes(Quad(d)));
+}
+#define VOL 24
+static struct { double at; int n, pursuit; int32_t damage; uint32_t tgt[VOL]; uint8_t left[VOL]; } g_vol;
+static int g_volOwed, g_volPursuit, g_charges;
+static int32_t g_volDamage;
+static uint32_t g_volPrimary;
+static double g_areaAt = -100, g_chargeAt;
+static uint32_t g_slowQ[32];
+static int g_nslow;
+static unsigned g_volleys, g_strikes, g_pursuits;
+static void SlowLater(uint32_t e) { if (s_pursuitSlow > 0 && g_nslow < 32) g_slowQ[g_nslow++] = e; }
+static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
+{
+    (void)e; (void)me;
+    if (!MineHit(d) || d->amount <= 0 || Friend(d->target) || s_areaMax < 1 || s_areaRadius <= 0) return;
+    /* one of the last volley's strikes landing: its amount is the hit's that set it off */
+    if (d->kind == 0 && g_vol.n && g_now - g_vol.at <= 1.0)
+        for (int i = 0; i < g_vol.n; i++)
+            if (g_vol.tgt[i] == d->target && g_vol.left[i])
+            {
+                g_vol.left[i]--;
+                double a = (double)g_vol.damage * s_areaMult * (g_vol.pursuit ? s_pursuitMult : 1);
+                d->amount = a < 1 ? 1 : a > 2000000 ? 2000000 : (int32_t)a;
+                if (g_vol.pursuit) SlowLater(d->target);
+                g_strikes++;
+                return;
+            }
+    /* a hit of her own: not damage over time (2), an explosion (4), drowning or bleeding (8, 9) */
+    if (d->kind == 2 || d->kind == 4 || d->kind >= 8) return;
+    /* a bullet's hit counts only when her gun has just fired (the shot counter): a strike round that hits a bystander on
+     * its way would otherwise set off the next volley, and that one the next */
+    if (d->kind == 0 && g_now - g_noiseAt > 1.0) return;
+    if (g_now - g_areaAt < s_areaEvery) return;
+    g_areaAt = g_now;
+    int pursuit = g_charges > 0;
+    g_volDamage = d->amount;
+    g_volPrimary = d->target;
+    g_volPursuit = pursuit;
+    g_volOwed = pursuit ? 2 : 1;
+    static unsigned told;
+    if (told < 12) { told++; Log("a hit of hers (kind %u, %d damage) on entity %u: everyone within %.0f m is struck%s", d->kind, d->amount, d->target, (double)s_areaRadius, pursuit ? " (Pursuit: twice, and slowed)" : ""); }
+    if (pursuit)
+    {
+        if (g_charges == s_pursuitCharges) g_chargeAt = g_now;
+        g_charges--;
+        g_pursuits++;
+        double a = (double)d->amount * s_pursuitMult;
+        d->amount = a > 2000000 ? 2000000 : (int32_t)a;
+        SlowLater(d->target);
+    }
+}
+/* the GAME THREAD: the volleys owed (one a frame), the slows owed, Pursuit's charges */
+static void AreaFrame(void)
+{
+    for (int i = 0; i < g_nslow; i++) if (hf->apply_status) Act("Pursuit's slow", hf->apply_status(self, g_slowQ[i], HF_STATUS_FLAMER_SLOWED, s_pursuitSlow));
+    g_nslow = 0;
+    if (g_charges < s_pursuitCharges && g_now - g_chargeAt >= s_pursuitEvery) { g_charges++; g_chargeAt = g_now; }
+    if (g_volOwed <= 0) return;
+    int second = g_volPursuit && g_volOwed == 1;   /* Pursuit's second landing takes in the enemy she hit */
+    g_volOwed--;
+    float pos[3], aim[3];
+    if (!PlayerPose(pos, aim)) return;
+    float from[3] = {pos[0], pos[1], pos[2] + 1.3f};
+    struct { uint32_t e; float d2; float q[3]; } c[VOL];
+    int nc = 0, cap = s_areaMax < VOL ? s_areaMax : VOL;
+    for (int k = 0; k < FOES; k++)
+    {
+        uint32_t en = g_foe[k];
+        uint8_t d[24];
+        float r[3];
+        if (!en || (en == g_volPrimary && !second) || !Descriptor(en, d) || Quad(d) != g_foeRes[k] || !UnitNode(Word(d + 12), 0, r)) continue;
+        float d2 = Dist2(r, pos);
+        if (d2 > s_areaRadius * s_areaRadius || (nc == cap && d2 >= c[cap - 1].d2) || !Living(en)) continue;
+        int j = nc < cap ? nc++ : cap - 1;
+        while (j > 0 && c[j - 1].d2 > d2) { c[j] = c[j - 1]; j--; }
+        c[j].e = en; c[j].d2 = d2;
+        float off[3];
+        if (BodyOffset(Word(d + 12), r, off)) for (int t = 0; t < 3; t++) r[t] += off[t];
+        else r[2] += 1.0f;
+        memcpy(c[j].q, r, 12);
+    }
+    if (!nc) return;
+    if (!second) { memset(&g_vol, 0, sizeof g_vol); g_vol.damage = g_volDamage; g_vol.pursuit = g_volPursuit; }
+    g_vol.at = g_now;
+    int fired = 0;
+    for (int j = 0; j < nc; j++)
+    {
+        if (!ClearShot(from, c[j].q)) continue;
+        float v[3] = {c[j].q[0] - from[0], c[j].q[1] - from[1], c[j].q[2] - from[2]};
+        float vn = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        if (!(vn > 0.1f)) continue;
+        for (int k = 0; k < 3; k++) v[k] /= vn;
+        int i = 0;
+        while (i < g_vol.n && g_vol.tgt[i] != c[j].e) i++;
+        if (i == g_vol.n) { if (g_vol.n == VOL) continue; g_vol.tgt[g_vol.n++] = c[j].e; }
+        g_vol.left[i]++;                       /* before the spawn: the round may land at once */
+        int r = hf->spawn_projectile(self, (uint32_t)s_areaRound, from, v);
+        if (r == HF_ACT_WAITING || !Act("an area strike", r)) { g_vol.left[i]--; if (r == HF_ACT_WAITING) g_volOwed++; break; }
+        fired++;
+    }
+    if (fired)
+    {
+        g_volleys++;
+        static unsigned told;
+        if (told++ < 10) Log("area strike: %d enem%s of the %d within %.0f m (projectile %d)%s", fired, fired == 1 ? "y" : "ies", nc, (double)s_areaRadius, s_areaRound, second ? ", Pursuit's second" : "");
+    }
+}
 
 /* ---- events ------------------------------------------------------------------------------------------------------ */
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
@@ -348,8 +495,8 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 static void Reset(const char* why)
 {
     if (g_forgot || g_reveals || g_dodged)
-        Log("%s: %u shots, heard %u times, revealed %u times, %u times an enemy forgot her, %u hits dodged", why, g_shots, g_heard, g_reveals,
-            g_forgot, g_dodged);
+        Log("%s: %u shots, heard %u times, revealed %u times, %u times an enemy forgot her, %u hits dodged; %u area volleys (%u strikes landed), Pursuit %u times",
+            why, g_shots, g_heard, g_reveals, g_forgot, g_dodged, g_volleys, g_strikes, g_pursuits);
     int start = !strcmp(why, "mission start");
     if (start) KitDecide();
     Body(start);
@@ -357,6 +504,9 @@ static void Reset(const char* why)
     g_sensedUntil = g_forgetAt = 0;
     g_sensing = 0;
     g_forgot = g_reveals = g_dodged = g_heard = g_shots = 0;
+    g_volleys = g_strikes = g_pursuits = 0;
+    g_volOwed = 0; g_nslow = 0; g_vol.n = 0;
+    g_charges = s_pursuitCharges; g_chargeAt = g_now;
     g_noiseAt = -100;
     memset(g_heardUntil, 0, sizeof g_heardUntil);
     g_cut = 0;
@@ -370,6 +520,13 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     game = g;
     exe = x;
     HitsInstall("the dodge");
+    if (hf->code_matches(exe + 0x79F860, "33 c0 4c 8d 05 c7 b2 01 02 0f 1f 80 00 00 00 00 49 39 0c c0 74 0c ff c0 83 f8 04 75 f3") &&
+        hf->code_matches(exe + 0x7F4590, "48 8b c4 f3 0f 11 58 20 89 48 08 55 53 56 57 41 54 41 55 41 56 41 57 48"))
+    {
+        g_worldId = (WorldFn)(exe + 0x79F860);
+        g_raycast = (RayFn)(exe + 0x7F4590);
+    }
+    else Log("the game's raycast is not the reviewed code: her area strikes do not check for walls");
     g_linksOk = hf->code_matches(exe + 0x2BEB9A, "48 8d b9 d8 01 00 00") && hf->code_matches(exe + 0x2BEBFA, "48 81 c7 e0 01 00 00");
     if (!g_linksOk) Log("the engine's unit links are not where the research has them: her gear is found by position (it may stay drawn)");
     g_staminaOk = hf->code_matches(game + 0xA50E2D, "f3 42 0f 11 8c 11 54 78 54 00");
@@ -384,15 +541,12 @@ typedef struct AscalonHud
     uint32_t cloak_visual, hide_gear;
     uint32_t units[5];              /* scene units: her Helldiver, then her primary, secondary, support weapon, backpack (0: none) */
     uint32_t sensing;               /* enemies that sense her now */
+    uint32_t charges, charges_max;  /* 0.2.0: Pursuit */
+    float charge_left;              /* seconds until the next charge (0: full) */
     uint32_t nwanted;               /* 0.1.3: her scene units, by the engine's own links (0: not known, use units[]) */
     uint32_t wanted[256];
 } AscalonHud;
 static AscalonHud g_hud = {1};
-static uint32_t UnitOf(uint32_t e)
-{
-    uint8_t d[24];
-    return e && e != UINT32_MAX && Descriptor(e, d) ? Word(d + 12) : 0;
-}
 /* 0.1.3: what she is made of, by the engine's own unit links (the Optical Cloak Pack's way): her Helldiver's unit and
  * every unit linked under it (first child at Unit +0x1D8, next sibling at +0x1E0), and the same from each item of her
  * equipment row (ten slots) that the attach manager (game+0x3326DC0: map +32, rows +64, 48 bytes, parent +4) says hangs
@@ -455,6 +609,9 @@ HF_MOD_EXPORT AscalonHud* ascalon_hud_state(void)
     g_hud.state = (uint32_t)st;
     g_hud.reveal_left = st == REVEALED && !g_sensing ? (float)fmax(0, g_sensedUntil - g_now) : 0;
     g_hud.sensing = (uint32_t)g_sensing;
+    g_hud.charges = (uint32_t)g_charges;
+    g_hud.charges_max = (uint32_t)s_pursuitCharges;
+    g_hud.charge_left = g_charges < s_pursuitCharges ? (float)fmax(0, s_pursuitEvery - (g_now - g_chargeAt)) : 0;
     g_hud.cloak_visual = (uint32_t)s_cloakVisual;
     g_hud.hide_gear = (uint32_t)s_hideGear;
     return &g_hud;
@@ -485,6 +642,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (g_now >= unitsAt) { unitsAt = g_now + 0.25; HerUnits(); }
     g_hud.units[0] = UnitOf(atomic_load(&g_avatar));
     for (int k = 0; k < 4; k++) g_hud.units[1 + k] = UnitOf(atomic_load(&g_myItems[k]));
+    AreaFrame();
     Exhaustion();
     atomic_exchange(&g_ownStopped, 0);
     atomic_exchange(&g_kdStopped, 0);
@@ -492,6 +650,8 @@ static void Tick(HfMod* mod, float dt, void* user)
 
 /* ---- Mod Options Menu ------------------------------------------------------------------------------------------- */
 static const KbOption kOptions[] = {
+    {"area_radius", &s_areaRadius, NULL}, {"area_mult", &s_areaMult, NULL}, {"area_max", NULL, &s_areaMax}, {"pursuit_mult", &s_pursuitMult, NULL},
+    {"pursuit_every", &s_pursuitEvery, NULL}, {"pursuit_slow", &s_pursuitSlow, NULL}, {"pursuit_charges", NULL, &s_pursuitCharges},
     {"visual_cut", &s_visualCut, NULL}, {"reveal_hold", &s_revealHold, NULL}, {"noise_window", &s_noiseWindow, NULL}, {"heard_hold", &s_heardHold, NULL}, {"dodge", &s_dodge, NULL},
     {"gear_rule", NULL, &s_gearRule}, {"cloak_visual", NULL, &s_cloakVisual}, {"hide_gear", NULL, &s_hideGear},
     {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
@@ -520,7 +680,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
-    api->log(mod, "Ascalon %s: hidden until she makes noise (her skills are not in this build)", VERSION);
+    api->log(mod, "Ascalon %s: hidden until she makes noise; her hits strike everyone within %.0f m; Pursuit", VERSION, (double)s_areaRadius);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
              api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&

@@ -100,3 +100,10 @@ perception research (docs/research/perception.md, when written) come first.
   links (first child Unit +0x1D8, next sibling +0x1E0, guarded by the two instructions the Optical Cloak Pack pins)
   from her Helldiver's unit and from each of her ten equipment slots the attach manager says hangs on her, and hands
   the HUD side the ids (AscalonHud.wanted).
+- **0.2.0 (2026-11-14): the Ambusher trait and Pursuit, as Yui set them after a second look at the wiki.** Kept out
+  on purpose: the modules (a later system), Descent's long form (ours stays: the short immunity dive). In: every hit
+  of hers strikes every enemy within 15 m (always on; spawned rounds as the Executor's area rounds, the amount set in
+  the damage event, not noise); Pursuit with no gas: 210%, twice, and the slow (HF_STATUS_FLAMER_SLOWED) on everyone
+  struck; 3 charges, one every 7 s. Correction to "Source kit" above: in Arknights she is not invisible; "always
+  hidden" is this port's own idea. Not built: Mortal Interrogation's stacks and damage a second, Penumbral Image,
+  Endowment, Descent.

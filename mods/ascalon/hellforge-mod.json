@@ -2,8 +2,8 @@
   "format": 1,
   "id": "yui.ascalon",
   "name": "Ascalon",
-  "version": "0.1.3",
-  "description": "Ascalon's kit from Arknights for your Helldiver, first part: hidden until she makes noise. While hidden, enemies see her far less, the ones that still remember her forget her, half the hits that land on her miss, and her body and gear are not drawn. What reveals her is the game's own hearing and sight: an enemy that hears her gun, or has her right in front of it, keeps her, and she is drawn while any does. With a backpack on or a support weapon in hand she is not hidden. Her skills come in a later version. Solo or host. Settings in ascalon.ini. The look and the status line need Bingus Shared Loader and HD2Runtime. No character model included.",
+  "version": "0.2.0",
+  "description": "Ascalon's kit from Arknights for your Helldiver, in progress. Hidden until she makes noise: enemies see her far less and forget her, half the hits on her miss, her body and gear are not drawn; an enemy that hears her gun or has her in front of it keeps her. Ambusher: every hit of hers also strikes every enemy within 15 m she has a clear line to. Pursuit (by itself, 3 charges): a hit deals 210%, lands twice on everyone in range and slows them. With a backpack on or a support weapon in hand she is not hidden. Endowment and Descent come later. Solo or host. Settings in ascalon.ini. The look and the status line need Bingus Shared Loader and HD2Runtime. No character model included.",
   "gameplay": true,
   "code": {
     "dll": "ascalon.dll",
