@@ -386,11 +386,17 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
                 g_strikes++;
                 return;
             }
-    /* a hit of her own: not damage over time (2), an explosion (4), drowning or bleeding (8, 9) */
-    if (d->kind == 2 || d->kind == 4 || d->kind >= 8) return;
+    /* a hit of her own, told as Voymastina tells them: a shot (IsShot: a projectile, a ricochet, a beam), or melee: a hit
+     * of hers of kind 5, 6 or 7 (impact, ability, flat: bayonet, lance, punches are kind 6) that is not on herself and
+     * lands within 6 m of her */
+    int shot = IsShot(d);
+    float mePos[3];
+    int melee = !shot && (d->kind == 5 || d->kind == 6 || d->kind == 7) && d->target != atomic_load(&g_avatar) && PlayerPose(mePos, NULL) &&
+                Dist2(d->position, mePos) < 6.0f * 6.0f;
+    if (!shot && !melee) return;
     /* a bullet's hit counts only when her gun has just fired (the shot counter): a strike round that hits a bystander on
      * its way would otherwise set off the next volley, and that one the next */
-    if (d->kind == 0 && g_now - g_noiseAt > 1.0) return;
+    if (shot && d->kind != 3 && g_now - g_noiseAt > 1.0) return;
     if (g_now - g_areaAt < s_areaEvery) return;
     g_areaAt = g_now;
     int pursuit = g_charges > 0;
@@ -399,7 +405,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     g_volPursuit = pursuit;
     g_volOwed = pursuit ? 2 : 1;
     static unsigned told;
-    if (told < 12) { told++; Log("a hit of hers (kind %u, %d damage) on entity %u: everyone within %.0f m is struck%s", d->kind, d->amount, d->target, (double)s_areaRadius, pursuit ? " (Pursuit: twice, and slowed)" : ""); }
+    if (told < 12) { told++; Log("%s of hers (kind %u, %d damage) on entity %u: everyone within %.0f m is struck%s", melee ? "a melee hit" : "a shot", d->kind, d->amount, d->target, (double)s_areaRadius, pursuit ? " (Pursuit: twice, and slowed)" : ""); }
     if (pursuit)
     {
         if (g_charges == s_pursuitCharges) g_chargeAt = g_now;
