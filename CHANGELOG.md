@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-13: Exusiai 0.3.1
+- The summoned guns are now called Shooting Mode, her skill's own name: on the HUD, the MODS tab, the settings file's comments and the logs. The key setting is still key_guns, so your exusiai.ini keeps working.
+- Charging Mode counts every gun: weapons that run on heat or fire a beam (the Sickle, the Talon) and the Grenade Pistol charged nothing before, because only a dropping magazine was counted. A gun with no round to copy fires the guns' own round for its free bursts.
+- Shooting Mode's pair answer explosions: a blast from the gun in her hands (the Grenade Pistol's, say) now calls them onto whoever it hurt.
+- Overloading Mode no longer gives up on walkers: a gun that is dealing damage stays on its target even while the target's health number does not move (War Striders). Thanks to ElectroDasher for the reports and logs.
+
 ## 2026-11-12: Exusiai 0.3.0 (first release)
 - Exusiai's kit from Arknights for your Helldiver. Solo or host; no character model included.
 - Charging Mode (passive): every 4th burst of her gun sets off 3 free bursts.
