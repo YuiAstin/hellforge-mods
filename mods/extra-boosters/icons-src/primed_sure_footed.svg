@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Anchored Boot: a boot driven into the ground by a heavy downward chevron -->
+  <g fill="#e8262c">
+    <path d="M128 56 l52 -34 v20 l-52 34 l-52 -34 v-20 z"/>
+    <path d="M128 92 l40 -26 v18 l-40 26 l-40 -26 v-18 z"/>
+  </g>
+  <g fill="#fff">
+    <path d="M100 104 h46 l6 8 v44 c34 3 52 12 56 30 v10 H86 v-34 l14 -10 z"/>
+    <rect x="80" y="200" width="134" height="12" rx="3"/>
+    <!-- ground with cracks -->
+    <rect x="22" y="220" width="212" height="9"/>
+    <path d="M60 229 l-10 18 h8 l10 -18 z M200 229 l12 18 h-8 l-12 -18 z M128 229 l-4 20 h8 l-4 -20z"/>
+  </g>
+  <g fill="#000"><rect x="104" y="124" width="40" height="6"/></g>
+</svg>

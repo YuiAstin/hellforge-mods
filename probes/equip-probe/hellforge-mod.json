@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "id": "yui.equip-probe",
+  "name": "Equipment Probe (research)",
+  "version": "0.1.0",
+  "description": "Research only, not for release: once the game's entities are loaded, saves the game's Equipment and Wieldable component records (every entity's) to this session's logs folder, to find what makes a weapon one-handed. Changes nothing in the game. Turn it off after one session.",
+  "gameplay": false,
+  "code": { "dll": "equip_probe.dll", "sdk": 13 }
+}

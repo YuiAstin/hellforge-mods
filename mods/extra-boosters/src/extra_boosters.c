@@ -74,6 +74,7 @@ static char g_title[TEXT_LEN] = "Primed Sure Footed";
 static char g_upper[TEXT_LEN];
 static char g_desc[TEXT_LEN] = "Helldivers are never knocked down or ragdolled. Hits still make them flinch and push them back. (Needs the Primed Sure Footed mod.)";
 static uint32_t g_iconFrom;                     /* 0: the base's icon */
+static char g_icon[128] = "yui/extra_boosters/icons/primed_sure_footed"; /* an icon the data spec builds, or "" */
 
 static const HfApi* hf;
 static HfMod* self;
@@ -240,6 +241,13 @@ static const char* Install(size_t image)
     memcpy(added + 0x00, &g_id, 4);
     if (g_valueSet) memcpy(added + 0x08, &g_value, 4);
     if (g_iconFrom > 0 && g_iconFrom < VANILLA) memcpy(added + 0x20, rows + g_iconFrom * ROW + 0x20, 8);
+    /* its own icon: the texture and GUI material hellforge-data.json builds under this name (HellForge loads the mod only
+     * when its data built, so the material is there: a missing one would crash the widgets that draw it) */
+    if (g_icon[0])
+    {
+        uint64_t icon = hf->resource_hash(g_icon);
+        memcpy(added + 0x20, &icon, 8);
+    }
     TextIds();
     if (g_title[0]) { memcpy(added + 0x10, &g_textId[0], 4); memcpy(added + 0x14, &g_textId[1], 4); }
     if (g_desc[0]) memcpy(added + 0x18, &g_textId[2], 4);
@@ -440,7 +448,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         (unsigned long long)(uintptr_t)g_block, (unsigned long long)((uintptr_t)g_block - game), (unsigned)COUNT(kBoosterSites),
         (unsigned)COUNT(kBoosterBounds), VANILLA + ADDED);
     hf->log(self, "booster %u \"%s\" (%s): a copy of booster %u (item 0x%08X) as item 0x%08X, value %g, icon %s", VANILLA, g_name,
-        g_title[0] ? g_title : "the base's text", g_base, baseId, g_id, value, g_iconFrom ? "of another booster" : "the base's");
+        g_title[0] ? g_title : "the base's text", g_base, baseId, g_id, value, g_icon[0] ? g_icon : g_iconFrom ? "of another booster" : "the base's");
 }
 
 /* ---- settings ---------------------------------------------------------------------------------------------------- */
@@ -471,6 +479,7 @@ static void LoadSettings(void)
         if (sscanf(line, " enabled = %d", &v) == 1) g_enabled = v != 0;
         else if (sscanf(line, " base = %u", &u) == 1) g_base = u;
         else if (sscanf(line, " icon_from = %u", &u) == 1) g_iconFrom = u;
+        else if (!strncmp(line, "icon =", 6) || !strncmp(line, "icon=", 5)) Unquote(g_icon, strchr(line, '=') + 1, sizeof g_icon);
         else if (sscanf(line, " id = %x", &u) == 1) g_id = u;
         else if (sscanf(line, " value = %f", &x) == 1) { g_value = x; g_valueSet = 1; }
         else if (sscanf(line, " name = %47[A-Za-z0-9_]", s) == 1) { memcpy(g_name, s, sizeof s); g_name[NAME_LEN - 1] = 0; }
@@ -485,6 +494,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     hf = api;
     self = mod;
     if (!api || api->version < 13 || api->size < offsetof(HfApi, read_code) + sizeof api->read_code || !api->read_code) return 1;
+    if (api->size < offsetof(HfApi, resource_hash) + sizeof api->resource_hash || !api->resource_hash) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
     api->log(mod, "Extra Boosters " VERSION " (SDK %u, game " BUILD "): %s", api->version, g_enabled ? "on" : "off in the ini");

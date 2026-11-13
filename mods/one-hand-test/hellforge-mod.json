@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "id": "yui.one-hand-test",
+  "name": "One-Handed Test (research)",
+  "version": "0.1.0",
+  "description": "Test build, not for release: makes the weapons listed in one-hand-test.ini one-handed (the AR-23 Liberator by default), so they can be used while carrying an objective or a ballistic shield. Sets the bit every one-handed weapon has in its Equipment record, and optionally the one-handed grip pose. Logs what it changed.",
+  "gameplay": true,
+  "code": { "dll": "one_hand_test.dll", "sdk": 13 }
+}

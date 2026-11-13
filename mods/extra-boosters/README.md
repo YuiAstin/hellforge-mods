@@ -6,8 +6,7 @@ picker. HellForge has no `add_booster` yet, so this mod moves the game's booster
 the first step towards adding that to HellForge.
 
 **Version 0.2.0 is a test build.** 0.1.0 was played: the booster table moved, the new booster was owned and showed in
-the picker. 0.2.0 makes it the **Primed Sure Footed** booster: its own name and description (and optionally another
-booster's icon). A new booster has no vanilla effect; the effect comes from the
+the picker. 0.2.0 makes it the **Primed Sure Footed** booster: its own name, description and icon. A new booster has no vanilla effect; the effect comes from the
 [Primed Sure Footed](../primed-sure-footed) mod 0.2.0, which stops knockdowns only while this booster is active.
 
 ### For other mods
@@ -47,6 +46,7 @@ Shipped with the mod (a mod never writes its own folder: HellForge holds it read
 |---|---|---|
 | `enabled` | `1` | `0` writes nothing. |
 | `base` | `3` | The row copied: 1 Vitality, 2 Stamina, 3 Muscle Enhancement … 20 Surplus EAT Allocation. |
+| `icon` | `yui/extra_boosters/icons/primed_sure_footed` | Its own icon, built by `hellforge-data.json` from `icons/primed_sure_footed.png` (256 x 256; source `icons-src/`). Empty: `icon_from`. |
 | `icon_from` | `0` | Another vanilla booster's icon (same numbers); `0` keeps the base's. |
 | `id` | `0x1041BB56` | The new booster's item id. Change it only if another mod uses the same id. |
 | `value` | (empty) | The booster's tuning value (row `+0x08`); empty keeps the base's. |

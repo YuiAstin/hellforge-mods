@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "patches": [
+    {
+      "archives": ["9ba626afa44a3aa3"],
+      "resources": [
+        { "icon": "icons/primed_sure_footed.png", "name": "yui/extra_boosters/icons/primed_sure_footed", "prepare": "image" }
+      ]
+    }
+  ]
+}
