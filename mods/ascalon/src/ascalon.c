@@ -546,7 +546,7 @@ typedef struct AscalonHud
     uint32_t nwanted;               /* 0.1.3: her scene units, by the engine's own links (0: not known, use units[]) */
     uint32_t wanted[256];
 } AscalonHud;
-static AscalonHud g_hud = {1};
+static AscalonHud g_hud = {2};
 /* 0.1.3: what she is made of, by the engine's own unit links (the Optical Cloak Pack's way): her Helldiver's unit and
  * every unit linked under it (first child at Unit +0x1D8, next sibling at +0x1E0), and the same from each item of her
  * equipment row (ten slots) that the attach manager (game+0x3326DC0: map +32, rows +64, 48 bytes, parent +4) says hangs
