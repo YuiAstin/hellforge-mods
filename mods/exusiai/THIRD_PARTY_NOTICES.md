@@ -7,7 +7,7 @@ licensed: its licence is kept in LICENSE-Helldiver-Survival-Rework.txt. The head
 91) come from Scope of Authority's Apex knockdown notes. Their research in turn used **HD2Runtime by SkyeShade**
 (https://github.com/SkyeShade/HD2Runtime).
 
-The summoned guns fire the AX/AR-23 Guard Dog's round (projectile type 7), found in **HD2Runtime**'s attack catalogue;
+Her guns (Shooting Mode, Overloading Mode) fire the AX/AR-23 Guard Dog's round (projectile type 7), found in **HD2Runtime**'s attack catalogue;
 the weapons' fire-rate field is the one HellForge's SDK names (ProjectileWeapon +0x04). Her stamina is read from the
 game's action manager ([game.dll+0x3326D20] + 0x547854, 0x78 per Helldiver).
 

@@ -7,7 +7,7 @@
  *     her gun's own rounds along her aim, for free (no ammunition). A burst is a group of her rounds with gaps under
  *     ch_gap s, or her gun's burst size (WeaponData burst_rounds; 3 without one) in full-auto fire. Her rounds are
  *     counted from the magazine the HUD reads (hd2.local_player():ammo()) and passes in (exusiai_ammo).
- *   Summoned guns (key_guns, default X): for s2_seconds two guns hover at her shoulders; each time she lands a shot,
+ *   Shooting Mode (key_guns, default X; "the summoned guns" until 0.3.1): for s2_seconds two guns hover at her shoulders; each time she lands a shot,
  *     each fires at what she hit (at most once every gun_every s).
  *   Overloading Mode (key_overload, default C): for s3_seconds four more guns hover behind her, each choosing its own
  *     target within s3_range m by its own priority (the nearest, the most heavily armoured, whoever last hit her, the
@@ -38,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.0"
+#define VERSION "0.3.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -101,7 +101,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Charging Mode: every ch_every bursts she fires, the next sets off ch_free more bursts of her gun's rounds for free.\n"
                "; ch_gap: a pause longer than this (s) ends a burst; ch_spread: the free rounds' spread (degrees).\n"
                "ch_every = %d\nch_free = %d\nch_gap = %g\nch_spread = %g\n"
-               "; Summoned guns: cooldown; for s2_seconds two guns beside her fire at what she last hit while she keeps hitting it\n"
+               "; Shooting Mode: cooldown; for s2_seconds two guns beside her fire at what she last hit while she keeps hitting it\n"
                "; (her last hit within pair_hold s). pair_rate 1: each at her primary's fire rate (the two alternate); 0: once\n"
                "; every gun_every s.\ns2_cooldown = %g\ns2_seconds = %g\ngun_every = %g\npair_rate = %d\npair_hold = %g\n"
                "; Overloading Mode: cooldown; for s3_seconds four more guns each pick their own target within s3_range m (the\n"
@@ -109,7 +109,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; (0: at the fire rate of the gun its round comes from).\n"
                "; (s3_every: no longer used.)\n"
                "s3_cooldown = %g\ns3_seconds = %g\ns3_every = %g\ns3_range = %g\n"
-               "; Her guns' own rounds: copies of these vanilla projectiles (types 1-350). round_pair: the summoned pair (241: the\n"
+               "; Her guns' own rounds: copies of these vanilla projectiles (types 1-350). round_pair: Shooting Mode's pair (241: the\n"
                "; R-63CS Diligence Counter Sniper's, medium armour penetration, for whatever she hits); round_nearest: a shotgun\n"
                "; (179: the SG-225 Breaker's, pellets of them pellet_spread degrees wide); round_armoured: heavy penetration (226:\n"
                "; the APW-1 Anti-Materiel Rifle's); round_attacker: one that staggers (177: the JAR-5 Dominator's); round_weakest:\n"
@@ -118,7 +118,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "every_nearest = %g\nevery_armoured = %g\nevery_attacker = %g\nevery_weakest = %g\npellets = %d\npellet_spread = %g\n"
                "; max_rounds: the most projectiles her guns spawn a second, in all; round_speed: m/s of her guns' own rounds (her\n"
                "; copies; 0: the base's): slower, a round is seen from its gun.\nmax_rounds = %g\nround_speed = %g\n"
-               "; pair_primary 1: the summoned pair fire her primary's own round (round_pair when it fires none or it cannot be\n"
+               "; pair_primary 1: Shooting Mode's pair fire her primary's own round (round_pair when it fires none or it cannot be\n"
                "; spawned).\npair_primary = %d\n"
                "; gun_round: the round used when one of hers cannot be spawned (7: the AX/AR-23 Guard Dog's). no_friendly_fire 1:\n"
                "; while a gun is out her shots spare her allies.\n"
@@ -197,7 +197,7 @@ static const float kGunAt[6][3] = {{-1.15f, 0.45f, 0.2f}, {1.15f, 0.45f, 0.2f}, 
 static const char* const kPriority[4] = {"the nearest", "the most heavily armoured", "whoever last hit her", "the weakest"};
 static double g_gunNext[6];
 static uint32_t g_gunTarget[6];
-static double g_gunPickAt[6], g_gunSince[6];
+static double g_gunPickAt[6], g_gunSince[6], g_gunFirst[6];
 static int32_t g_gunHp[6];
 /* her shots' marks (where they landed): S2's guns fire at the next ones on the game thread */
 typedef struct Shot { float p[3]; uint32_t target; } Shot;
@@ -372,7 +372,7 @@ static int Fire(int i, const float at[3])
             Log("her %s round (projectile %u) cannot be spawned here: that gun fires projectile %d (gun_round) instead", kRole[role], round, s_gunRound);
             return 0;
         }
-        if (!Act("a summoned gun's shot", r)) return 0;
+        if (!Act("a gun's shot", r)) return 0;
     }
     g_gunShotAt[i] = g_now;
     /* 0.2.5: its gun's firing sound, played by the HUD side (exusiai_sounds) */
@@ -624,6 +624,22 @@ static int RootPos(uint32_t e, uint64_t res, float out[3])
 }
 /* 0.2.15 (Yui: her guns sometimes shoot dead bodies): a target a gun has fired at for 2 s without its health changing
  * (a body whose dead state no kill has shown yet, or something her rounds cannot hurt) is left alone for 15 s */
+/* 0.3.1 (ElectroDasher: Overloading Mode would not shoot War Striders; his log: "took 2 s of a gun's fire with its health
+ * unchanged: left alone"): a walker's health sits in its parts, so its own number does not move while the guns take it
+ * apart. A gun's hit that deals damage on a target (the damage event) now counts as hurting it. */
+static struct { uint32_t e; double at; } g_hurt[32];
+static unsigned g_hurtN;
+static void Hurt(uint32_t e)
+{
+    for (int k = 0; k < 32; k++) if (g_hurt[k].e == e) { g_hurt[k].at = g_now; return; }
+    unsigned k = g_hurtN++ % 32;
+    g_hurt[k].e = e; g_hurt[k].at = g_now;
+}
+static int HurtLately(uint32_t e)
+{
+    for (int k = 0; k < 32; k++) if (g_hurt[k].e == e && g_now - g_hurt[k].at < 2.0) return 1;
+    return 0;
+}
 static struct { uint32_t e; double until; } g_shun[32];
 static unsigned g_shunN;
 static int Shunned(uint32_t e)
@@ -730,14 +746,15 @@ static void GunsFrame(void)
         if (t != g_gunTarget[i])
         {
             g_gunTarget[i] = t;
-            g_gunSince[i] = g_now;
+            g_gunSince[i] = g_gunFirst[i] = g_now;
             g_gunHp[i] = t && Living(t, &hp) ? hp : 0;
             static unsigned told;
             if (t && told++ < 8) Log("Overloading Mode: gun %d (%s) on entity %u", i - 1, kPriority[i - 2], t);
         }
         else if (t && Living(t, &hp))
         {
-            if (hp != g_gunHp[i]) { g_gunHp[i] = hp; g_gunSince[i] = g_now; }
+            if (hp != g_gunHp[i]) { g_gunHp[i] = hp; g_gunSince[i] = g_gunFirst[i] = g_now; }
+            else if (HurtLately(t) && g_now - g_gunFirst[i] < 20) g_gunSince[i] = g_now;   /* damage that never moves its health: 20 s at most (a body) */
             else if (g_now - g_gunSince[i] > 2.0) { Shun(t); g_gunTarget[i] = 0; continue; }
         }
         if (t) Fire(i, at);
@@ -787,6 +804,18 @@ HF_MOD_EXPORT int exusiai_ammo(unsigned version, uint32_t entity, int rounds)
     atomic_store(&g_ammoMs, GetTickCount64());
     return 1;
 }
+/* 0.3.1 (ElectroDasher's report: only the Railgun charged it): a gun that runs on heat (the Sickle, the Talon) has
+ * no rounds going down, so her bursts were never counted. The game's own shots counter (HF_ON_STAT) fills in: shots it
+ * reports that no magazine drop accounts for within 0.15 s are her rounds. */
+static atomic_int g_statShots;
+static double g_statAt, g_magAt = -100, g_shotAt = -100;
+static void OnStat(HfMod* mod, const HfEventInfo* info, void* user)
+{
+    const HfStatEvent* st = (const HfStatEvent*)info;
+    if (st->stat != HF_STAT_SHOTS || st->added <= 0 || !kb_kit_on || !g_alive) return;
+    if (!atomic_fetch_add(&g_statShots, (int)(st->added > 20 ? 20 : st->added))) g_statAt = g_now;
+    g_shotAt = g_now;
+}
 static int g_charge;                 /* bursts charged (0 .. ch_every) */
 static int g_groupShots;             /* rounds in the burst under way */
 static int g_groupFree;              /* the burst under way is the charged one */
@@ -823,40 +852,58 @@ static void NoSpawnAdd(uint32_t type)
 static uint32_t InfoProjectile(const GunInfo* g) { return g ? g->projectile : 0; }
 static void StartFree(const GunInfo* gi)
 {
-    if (!gi || !gi->projectile || s_chFree <= 0) { Log("Charging Mode: charged, but the gun in hand has no rounds to copy"); return; }
-    g_freeProjectile = NoSpawn(gi->projectile) ? (uint32_t)s_gunRound : gi->projectile;
-    g_freeBurstSize = gi->burst;
-    g_freeStep = 60.0f / (gi->rpm > 60 ? gi->rpm : 600);
-    g_freeLeft = s_chFree * (int)gi->burst;
+    if (s_chFree <= 0) return;
+    /* 0.3.1: a gun with no round to copy (a beam) fires the guns' round, three to a burst */
+    uint32_t round = gi && gi->projectile && !NoSpawn(gi->projectile) ? gi->projectile : (uint32_t)s_gunRound, burst = gi && gi->burst ? gi->burst : 3;
+    g_freeProjectile = round;
+    g_freeBurstSize = burst;
+    g_freeStep = 60.0f / (gi && gi->rpm > 60 ? gi->rpm : 600);
+    g_freeLeft = s_chFree * (int)burst;
     g_freeInBurst = 0;
     g_freeNext = g_now + 0.12;   /* right behind her own burst */
     g_freeBursts++;
     g_casts[0]++;
     static unsigned told;
-    if (told++ < 6) Log("Charging Mode: %d free bursts of %u (projectile %u)", s_chFree, gi->burst, gi->projectile);
+    if (told++ < 6) Log("Charging Mode: %d free bursts of %u (projectile %u)", s_chFree, burst, round);
 }
 static void BurstFrame(void)
 {
     /* her rounds, from the HUD's magazine report: the same gun, fewer rounds */
     unsigned long long ms = atomic_load(&g_ammoMs);
     uint32_t ent = atomic_load(&g_ammoEntity);
-    int rounds = atomic_load(&g_ammoRounds);
+    int rounds = atomic_load(&g_ammoRounds), fired = 0;
     const GunInfo* gi = g_heldEntity && ent == g_heldEntity ? InfoOf(g_heldRes) : NULL;
     if (!ms || GetTickCount64() - ms > 1000 || rounds < 0 || ent != g_lastEntity) { g_lastEntity = ent; g_lastRounds = rounds; }
     else if (rounds < g_lastRounds && g_lastRounds - rounds <= 20)
     {
-        int fired = g_lastRounds - rounds;
+        fired = g_lastRounds - rounds;
         g_lastRounds = rounds;
+        g_magAt = g_now;
+        atomic_store(&g_statShots, 0);   /* the magazine accounts for them */
+    }
+    else g_lastRounds = rounds;   /* a reload, a new magazine */
+    if (!fired && atomic_load(&g_statShots) > 0 && g_now - g_statAt >= 0.15)
+    {
+        int n = atomic_exchange(&g_statShots, 0);
+        if (g_now - g_magAt > 0.5)
+        {
+            fired = n;
+            static int told;
+            if (!told) { told = 1; Log("Charging Mode: this gun's magazine does not move: her shots are counted from the game's shot counter"); }
+        }
+    }
+    if (fired > 0)
+    {
+        int burst = gi && gi->burst ? (int)gi->burst : 3;
         if (g_groupShots > 0 && g_now - g_groupLast > s_chGap) CloseBurst();
         for (int k = 0; k < fired; k++)
         {
             if (g_groupShots == 0 && g_charge >= s_chEvery) { g_charge = 0; g_groupFree = 1; StartFree(gi); }
             g_groupShots++;
-            if (gi && g_groupShots >= (int)gi->burst) CloseBurst();   /* full auto: every burst-size rounds is one */
+            if (g_groupShots >= burst) CloseBurst();   /* full auto: every burst-size rounds is one */
         }
         g_groupLast = g_now;
     }
-    else g_lastRounds = rounds;   /* a reload, a new magazine */
     if (g_groupShots > 0 && g_now - g_groupLast > s_chGap) CloseBurst();
     /* the free rounds: from in front of her toward where her reticle points (0.2.10: the camera's ray, as Alva's aim;
      * her head's facing lagged behind the reticle), a little spread */
@@ -897,7 +944,7 @@ static void SummonGuns(void)
     g_s2Until = g_now + s_s2Seconds;
     g_gunNext[0] = g_gunNext[1] = 0;
     g_casts[1]++;
-    Log("the summoned guns: %.0f s at her shoulders", (double)s_s2Seconds);
+    Log("Shooting Mode: two guns for %.0f s at her shoulders", (double)s_s2Seconds);
 }
 static void OverloadingMode(void)
 {
@@ -947,7 +994,7 @@ static void OnWeaponExu(HfMod* mod, const HfEventInfo* info, void* user)
     {
         g_primaryRes = w->resource;
         static unsigned told;
-        if (told++ < 6) Log("her primary: weapon %016llx (the summoned pair fire its round)", (unsigned long long)w->resource);
+        if (told++ < 6) Log("her primary: weapon %016llx (Shooting Mode's pair fire its round)", (unsigned long long)w->resource);
     }
     FastCartridge(w->resource);
 }
@@ -970,11 +1017,22 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     if (d->amount <= 0 || !MineHit(d)) return;
     if (s_noFriendlyFire && AnyGun() && Friend(d->target)) { e->cancel = 1; g_spared++; return; }
-    if (!IsShot(d)) return;
+    if (!IsShot(d))
+    {
+        /* 0.3.1 (ElectroDasher: the pair did nothing with the Grenade Pistol): a blast of hers (kind 2) within 3 s of a
+         * shot of hers is her gun's round going off: the pair fire at whom it hurt. No Blessings, no charge. */
+        int32_t thp;
+        if (d->kind == 2 && g_now < g_s2Until && g_now - g_shotAt < 3 && !GunsHit(d->position) && !Friend(d->target) && Living(d->target, &thp))
+        {
+            g_pairTarget = d->target; memcpy(g_pairPos, d->position, 12); g_pairAt = g_now;
+            if (g_nassist < 8) { memcpy(g_assist[g_nassist].p, d->position, sizeof d->position); g_assist[g_nassist].target = d->target; g_nassist++; }
+        }
+        return;
+    }
     int gun = GunsHit(d->position);
     double mult = s_blessMult;                                                  /* Angel's Blessings */
     if (mult != 1) ScaleDamage(d, mult);
-    if (gun) return;
+    if (gun) { Hurt(d->target); return; }
     NoteTarget(d);
     { int32_t thp; if (g_now < g_s2Until && Living(d->target, &thp)) { g_pairTarget = d->target; memcpy(g_pairPos, d->position, 12); g_pairAt = g_now; } }
     if (g_now < g_s2Until && g_nassist < 8)
@@ -1246,14 +1304,14 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
     RoundsAdd();
-    api->log(mod, "Exusiai %s: keys %s / %s / %s (Charging Mode, the summoned guns, Overloading Mode)", VERSION, s_keys[0].label,
+    api->log(mod, "Exusiai %s: keys %s / %s / %s (Charging Mode, Shooting Mode, Overloading Mode)", VERSION, s_keys[0].label,
              s_keys[1].label, s_keys[2].label);
     if (s_badKey) api->log(mod, "exusiai.ini: a key could not be read (bits %d: charge, guns, overload); its default stays", s_badKey);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL) || api->on(mod, HF_EVENT_PROJECTILES_READY, ProjectilesReady, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
              api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_PLAYER_DOWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) &&
-             api->subscribe(mod, HF_ON_WEAPON, OnWeaponExu, NULL, 0) && api->on_game_thread(mod, Tick, NULL);
+             api->subscribe(mod, HF_ON_WEAPON, OnWeaponExu, NULL, 0) && api->subscribe(mod, HF_ON_STAT, OnStat, NULL, 0) && api->on_game_thread(mod, Tick, NULL);
     if (!ok) api->log(mod, "events or the game thread are unavailable: Exusiai stays off");
     return 0;
 }
