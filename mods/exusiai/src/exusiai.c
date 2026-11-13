@@ -820,7 +820,20 @@ static void OnStat(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfStatEvent* st = (const HfStatEvent*)info;
     if (st->stat != HF_STAT_SHOTS || st->added <= 0 || !kb_kit_on || !g_alive) return;
-    if (!atomic_fetch_add(&g_statShots, (int)(st->added > 20 ? 20 : st->added))) g_statAt = g_now;
+    /* only the shots the game credits to the gun in her hands: the rounds the mod spawns (her free bursts, her guns')
+     * grow the counter too, late and by their own count, and charged her again (Yui, twice) */
+    int mine = 0;
+    for (uint32_t k = 0; k < st->count && k < HF_STAT_SOURCES; k++)
+        if (g_heldRes && st->sources[k].resource == g_heldRes && st->sources[k].added > 0) mine += st->sources[k].added;
+    static unsigned told;
+    if (told < 6)
+    {
+        told++;
+        Log("shots +%d (%d with no source; %u sources, the first %016llx +%d): %d by the gun in her hands %016llx", st->added, st->unattributed, st->count,
+            (unsigned long long)(st->count ? st->sources[0].resource : 0), st->count ? st->sources[0].added : 0, mine, (unsigned long long)g_heldRes);
+    }
+    if (mine <= 0) return;
+    if (!atomic_fetch_add(&g_statShots, mine > 20 ? 20 : mine)) g_statAt = g_now;
     g_shotAt = g_now;
 }
 static int g_charge;                 /* bursts charged (0 .. ch_every) */
@@ -891,9 +904,8 @@ static void BurstFrame(void)
     else g_lastRounds = rounds;   /* a reload, a new magazine */
     if (!fired && atomic_load(&g_statShots) > 0 && g_now - g_statAt >= 0.15)
     {
-        /* her own shots only: less the rounds the mod spawned (her guns'), and none at all while her free rounds fly (or 0.3 s after) */
-        int n = atomic_exchange(&g_statShots, 0) - atomic_exchange(&g_ownRounds, 0);
-        if (g_freeLeft > 0 || g_now - g_ownAt < 0.3 || n < 0) n = 0;
+        int n = atomic_exchange(&g_statShots, 0);
+        atomic_store(&g_ownRounds, 0); (void)g_ownAt;
         if (n > 0 && g_now - g_magAt > 0.5)
         {
             fired = n;
