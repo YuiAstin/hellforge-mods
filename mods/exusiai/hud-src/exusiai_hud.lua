@@ -34,7 +34,7 @@ void *exuhud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAdd
 local k32 = ffi.load('kernel32')
 
 local ELECTRIC, YELLOW, INK, PANEL, TEXT, MUTED = {255, 92, 92}, {255, 232, 0}, {8, 9, 10}, {12, 14, 16}, {240, 243, 245}, {150, 156, 160}
-local NAMES = {'CHARGING MODE', 'SUMMONED GUNS', 'OVERLOADING MODE'}
+local NAMES = {'CHARGING MODE', 'SHOOTING MODE', 'OVERLOADING MODE'}
 
 -- the kit, for the shared parts below
 local KIT = {name = 'Exusiai', id = 'exusiai', module = k32.exuhud1_GetModuleHandleA, proc = k32.exuhud1_GetProcAddress}
@@ -424,9 +424,9 @@ local OPTIONS = {
     {'bless_mult', 'slider', "Angel's Blessings: Damage", 1, 2, 0.01, 'Her shots deal this times their damage.'},
     {'ch_every', 'slider', 'Charging Mode: Bursts To Charge', 1, 10, 1, 'Bursts she fires to charge it; the next one sets off the free bursts.', true},
     {'ch_free', 'slider', 'Charging Mode: Free Bursts', 0, 6, 1, 'Extra bursts of her gun\'s rounds the charged burst sets off.'},
-    {'s2_cooldown', 'slider', 'Summoned Guns: Cooldown', 0, 120, 5, 'Seconds before the guns can be summoned again.', true},
-    {'s2_seconds', 'slider', 'Summoned Guns: Duration', 5, 60, 1, 'Seconds the two guns stay at her shoulders.'},
-    {'gun_every', 'slider', 'Summoned Guns: Fire Interval', 0.05, 1, 0.05, 'Each gun fires at most once in this many seconds.'},
+    {'s2_cooldown', 'slider', 'Shooting Mode: Cooldown', 0, 120, 5, 'Seconds before the guns can be summoned again.', true},
+    {'s2_seconds', 'slider', 'Shooting Mode: Duration', 5, 60, 1, 'Seconds the two guns stay at her shoulders.'},
+    {'gun_every', 'slider', 'Shooting Mode: Fire Interval', 0.05, 1, 0.05, 'Each gun fires at most once in this many seconds.'},
     {'s3_cooldown', 'slider', 'Overloading Mode: Cooldown', 0, 180, 5, 'Seconds before Overloading Mode can be used again.', true},
     {'s3_seconds', 'slider', 'Overloading Mode: Duration', 5, 60, 1, 'Seconds the four extra guns stay.'},
     {'s3_every', 'slider', 'Overloading Mode: Fire Interval', 0.1, 2, 0.05, 'Each extra gun fires once in this many seconds.'},
