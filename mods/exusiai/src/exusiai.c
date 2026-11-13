@@ -39,6 +39,12 @@
 #include "hellforge_content.h"
 
 #define VERSION "0.3.1"
+
+#include <stdatomic.h>
+/* rounds the mod itself spawned since the shot counter was last read (her guns', her free bursts'): the game counts them
+ * as her shots too (0.3.1's first build: with the Sickle each free burst charged the next, 133 in one mission) */
+static atomic_int g_ownRounds;
+static double g_ownAt = -100;
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -359,6 +365,7 @@ static int Fire(int i, const float at[3])
             for (int k = 0; k < 3; k++) dir[k] /= m;
         }
         r = hf->spawn_projectile(self, round, from, dir);
+        atomic_fetch_add(&g_ownRounds, 1);
         if (r == HF_ACT_WAITING) return 0;
         if (!r && role == 0 && round == PrimaryRound())
         {
@@ -884,8 +891,10 @@ static void BurstFrame(void)
     else g_lastRounds = rounds;   /* a reload, a new magazine */
     if (!fired && atomic_load(&g_statShots) > 0 && g_now - g_statAt >= 0.15)
     {
-        int n = atomic_exchange(&g_statShots, 0);
-        if (g_now - g_magAt > 0.5)
+        /* her own shots only: less the rounds the mod spawned (her guns'), and none at all while her free rounds fly (or 0.3 s after) */
+        int n = atomic_exchange(&g_statShots, 0) - atomic_exchange(&g_ownRounds, 0);
+        if (g_freeLeft > 0 || g_now - g_ownAt < 0.3 || n < 0) n = 0;
+        if (n > 0 && g_now - g_magAt > 0.5)
         {
             fired = n;
             static int told;
@@ -923,6 +932,7 @@ static void BurstFrame(void)
         float n = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
         for (int k = 0; k < 3; k++) dir[k] /= n;
         int r = hf->spawn_projectile(self, g_freeProjectile, from, dir);
+        atomic_fetch_add(&g_ownRounds, 1); g_ownAt = g_now;
         if (r == HF_ACT_WAITING) { g_freeNext = g_now + 0.05; break; }
         if (!r && g_freeProjectile != (uint32_t)s_gunRound)
         {
