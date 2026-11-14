@@ -125,3 +125,14 @@ perception research (docs/research/perception.md, when written) come first.
   taunt (she is simply seen: the visibility cut and the forgetting are off while it lasts). Kills counted for both:
   any enemy that dies within 30 m of her. Keys X and C from the ini; no bindings menu or skill panel yet, a second
   status line shows both skills.
+- **Penumbral Image:** on hold. No animation or melee speed field is known (HellForge maps a melee weapon's stamina
+  cost and hit volume only; HD2Runtime's API has none). Candidates: the engine's Lua animation calls (a probe), the
+  unmapped part of MeleeWeaponComponentData. Yui chose the parry and the dash instead for now.
+- **0.4.0 (2026-11-14): the parry and the dash** (Yui: "give her her parry since she is a melee fighter too"; "while
+  she is moving and uses the melee button, F or, on a dedicated melee weapon only, LMB, she dashes a short distance
+  forward and deals melee damage to enemies on the path"). The parry is the Parry Probe 0.1.5's (right-click within
+  0.3 s before the hit, a CQC weapon in hand, 1 s with no hit after, behind the attacker, a medium stun), its counter
+  her own: an area volley of parry_damage 300 instead of the probe's APW-1 round; no slash look. The dash: 6 m the way
+  she moves (2 m/s or more over the last 0.15 to 0.5 s), Voymastina's SpotAt for the landing (nearer in 1 m steps, not
+  more than 1.5 m up), every living enemy within 2 m of the path struck for dash_damage 150 by a round spawned beside
+  it; 1.2 s between dashes. The game's own melee swing still plays and, when it lands, sets off the 15 m strikes.
