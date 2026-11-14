@@ -449,6 +449,9 @@ local OPTIONS = {
     {'dash_cooldown', 'slider', 'Dash: Cooldown', 0, 10, 0.1, 'Seconds between dashes.'},
     {'dodge', 'slider', 'Hidden: Dodge', 0, 1, 0.05, 'The share of hits that miss her while she is hidden.', true},
     {'visual_cut', 'slider', 'Hidden: Harder To See', 0, 100, 5, 'Per cent off how far enemies see her while she is hidden.'},
+    {'cloak_shimmer', 'toggle', 'Hidden: Shimmer (Experimental)', nil, nil, nil, 'Her body in a cloak material instead of not drawn. Turn it off if the game crashes when she hides.'},
+    {'shimmer_opacity', 'slider', 'Shimmer: Opacity', 0, 1, 0.02, 'The cloak material\'s opacity.'},
+    {'shimmer_stealth', 'slider', 'Shimmer: Stealth Opacity', 0, 1, 0.02, 'The cloak material\'s second opacity (opacity_stealth).'},
     {'cloak_visual', 'toggle', 'Hidden: Body Not Drawn', nil, nil, nil, 'Her body is not drawn while she is hidden.'},
     {'hide_gear', 'toggle', 'Hidden: Gear Not Drawn', nil, nil, nil, 'Her weapons and gear are not drawn either.'},
     {'numbers', 'toggle', 'Damage Numbers', nil, nil, nil, 'Numbers over the hits her skills raise.', true},
@@ -610,7 +613,7 @@ local function collect(s)
             log(('[Ascalon HUD] her units: %d of the %d the engine links to her are in the worlds (%d units in all)'):format(found, linked, total))
         end
         cl.ids = sig
-        if found > 0 then return out end
+        if found > 0 then return out, mx, my, mz end
     end
     local out, seen = {}, {}
     local body = sharing(U, rare, mx, my, mz, out, seen)
@@ -633,7 +636,7 @@ local function collect(s)
         log(('[Ascalon HUD] her units: the Helldiver by %s, %d units at its root, %d of her gear (%d units in all)'):format(how, body, gear, total))
     end
     cl.ids = sig
-    return out
+    return out, mx, my, mz
 end
 local function alive(U, u)
     local oka, a = pc(U.alive, u)
@@ -659,6 +662,12 @@ local function hide_units(units)
     end
     return hid
 end
+-- (the meshes shown again, the unit list kept)
+local function show_all_keep()
+    local U = lib('Unit')
+    for _, h in ipairs(cl.hidden) do if alive(U, h.unit) then pc(U.set_mesh_visibility, h.unit, h.mesh, true) end end
+    cl.hidden, cl.keys = {}, {}
+end
 local function show_all()
     local U = lib('Unit')
     local n = 0
@@ -666,8 +675,106 @@ local function show_all()
     cl.hidden, cl.keys, cl.units = {}, {}, nil
     return n
 end
+-- The shimmer (0.5.0, cloak_shimmer; experimental): hidden, her body's units wear the mod's cloak material instead of
+-- not being drawn. The material (yui/ascalon/cloak) is built by HellForge from the player's game copy
+-- (hellforge-data.json: one of the game's armour materials with plain textures). Each material slot of each visible
+-- mesh takes it (Unit.set_material(unit, slot id, material name), which returns what was there: put back when she is
+-- revealed), and its opacity and opacity_stealth are set from ascalon.ini (shimmer_opacity, shimmer_stealth: read
+-- through ascalon_option_get each second, so the MODS tab's sliders tune it live). Her gear is still not drawn: its
+-- meshes are not armour's, and an armour material on them is not known to be safe.
+local SH = {mat = 'yui/ascalon/cloak', on = false, op = 0, st = 0, poll = 0, get = nil, out = nil, ready = false, applied = {}, keys = {}, mine = nil, told = 0, live = false}
+local function shimmer_settings(dt)
+    SH.poll = SH.poll - dt
+    if SH.poll > 0 then return end
+    SH.poll = 1
+    if not SH.get then
+        local module = k32.aschud1_GetModuleHandleA('ascalon.dll')
+        local gp = module ~= nil and k32.aschud1_GetProcAddress(module, 'ascalon_option_get') or nil
+        if gp == nil then return end
+        SH.get = ffi.cast('ascopt_get', gp)
+        SH.out = ffi.new('double[1]')
+    end
+    local function opt(name, default)
+        if SH.get(name, SH.out) == 1 then return tonumber(SH.out[0]) end
+        return default
+    end
+    SH.on = opt('cloak_shimmer', 0) ~= 0
+    SH.op, SH.st = opt('shimmer_opacity', 0), opt('shimmer_stealth', 0)
+    local A = lib('Application')
+    local okc, has = pc(A and A.can_get, 'material', SH.mat)
+    local ready = okc and has == true
+    if ready ~= SH.ready and SH.on and SH.told < 6 then
+        SH.told = SH.told + 1
+        log('[Ascalon HUD] shimmer: the cloak material is ' .. (ready and 'loaded' or 'not loaded (her body is not drawn instead)'))
+    end
+    SH.ready = ready
+end
+local function shimmer_apply(units)
+    local U, M, Mat = lib('Unit'), lib('Mesh'), lib('Material')
+    local set, bound, errs = 0, 0, 0
+    for _, u in ipairs(units) do
+        if alive(U, u) then
+            local okn, n = pc(U.num_meshes, u)
+            for i = 1, (okn and type(n) == 'number' and n <= 512) and n or 0 do
+                local okm, mesh = pc(U.mesh, u, i)
+                local okv, vis = false, nil
+                if okm then okv, vis = pc(M.visibility, mesh) end
+                local okc, c = false, nil
+                if okm and okv and vis == true then okc, c = pc(M.num_materials, mesh) end
+                for j = 1, (okc and type(c) == 'number' and c <= 64) and c or 0 do
+                    local oksl, slot = pc(M.material_slot_id, mesh, j)
+                    if oksl and slot ~= nil then
+                        local key = tostring(u) .. ':' .. tostring(slot)
+                        local okt, mat = pc(M.material, mesh, j)
+                        local oki, id = false, nil
+                        if okt and mat then oki, id = pc(Mat.id, mat) end
+                        local is_mine = oki and SH.mine ~= nil and tostring(id) == SH.mine
+                        if not is_mine and not (SH.keys[key] and SH.mine == nil) then
+                            local okset, old = pc(U.set_material, u, slot, SH.mat)
+                            if okset then
+                                set = set + 1
+                                if not SH.keys[key] then
+                                    SH.keys[key] = true
+                                    SH.applied[#SH.applied + 1] = {unit = u, slot = slot, old = old}
+                                end
+                                okt, mat = pc(M.material, mesh, j)
+                                if okt and mat and SH.mine == nil then
+                                    local ok2, id2 = pc(Mat.id, mat)
+                                    if ok2 and id2 ~= nil then SH.mine = tostring(id2) end
+                                end
+                            else
+                                errs = errs + 1
+                                if SH.told < 12 then SH.told = SH.told + 1; log('[Ascalon HUD] shimmer: Unit.set_material failed: ' .. tostring(old)) end
+                            end
+                        end
+                        if okt and mat then
+                            pc(Mat.set_scalar, mat, 'opacity', SH.op)
+                            pc(Mat.set_scalar, mat, 'opacity_stealth', SH.st)
+                            bound = bound + 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if set > 0 and SH.told < 12 then
+        SH.told = SH.told + 1
+        log(('[Ascalon HUD] shimmer: the cloak material on %d slot(s) of %d unit(s), %d binding(s) at opacity %.2f / %.2f, %d refused'):format(set, #units, bound, SH.op, SH.st, errs))
+    end
+end
+local function shimmer_restore()
+    local U = lib('Unit')
+    local n = 0
+    for i = #SH.applied, 1, -1 do
+        local a = SH.applied[i]
+        if a.old ~= nil and type(a.old) ~= 'boolean' and alive(U, a.unit) and pc(U.set_material, a.unit, a.slot, a.old) then n = n + 1 end
+    end
+    if #SH.applied > 0 and SH.told < 12 then SH.told = SH.told + 1; log(('[Ascalon HUD] shimmer: %d of %d slot(s) given their own material back'):format(n, #SH.applied)) end
+    SH.applied, SH.keys, SH.live = {}, {}, false
+end
 local can_alive = nil
 local function cloak_frame(s, dt)
+    pcall(shimmer_settings, dt)
     local want = s ~= nil and s.in_mission ~= 0 and s.cloak_visual ~= 0 and (s.state == 0 or s.state == 3)
     if can_alive == nil then
         local U = lib('Unit')
@@ -678,6 +785,7 @@ local function cloak_frame(s, dt)
     if not want then
         if cl.on then
             cl.on = false
+            pcall(shimmer_restore)
             local n = show_all()
             if cl.told < 12 then log(('[Ascalon HUD] shown again: %d meshes'):format(n)) end
         end
@@ -691,10 +799,31 @@ local function cloak_frame(s, dt)
     pcall(function()
         if cl.scan_in <= 0 or not cl.units then
             cl.scan_in = 2
-            local units = collect(s)
-            if units then cl.units = units end
+            local units, mx, my, mz = collect(s)
+            if units then
+                cl.units = units
+                -- her body: the units at her Helldiver's own root (the avatar and its armour parts); the rest is gear
+                local U = lib('Unit')
+                cl.body, cl.gear = {}, {}
+                for _, u in ipairs(units) do
+                    local ux, uy, uz = root(U, u)
+                    if mx and ux and (ux - mx) ^ 2 + (uy - my) ^ 2 + (uz - mz) ^ 2 < 0.0004 then cl.body[#cl.body + 1] = u else cl.gear[#cl.gear + 1] = u end
+                end
+            end
         end
-        if cl.units then hide_units(cl.units) end
+        if not cl.units then return end
+        local shimmer = SH.on and SH.ready and cl.body ~= nil
+        if shimmer ~= SH.live then        -- from not drawn to the shimmer or back: everything as it was first
+            shimmer_restore()
+            show_all_keep()
+            SH.live = shimmer
+        end
+        if shimmer then
+            shimmer_apply(cl.body)
+            hide_units(cl.gear)
+        else
+            hide_units(cl.units)
+        end
     end)
 end
 

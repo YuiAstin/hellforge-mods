@@ -33,6 +33,13 @@
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
  * 0.3.0, her two keyed skills:
+ * 0.5.0 (Yui: "work on the cloak materials"): cloak_shimmer (off by default, experimental): hidden, her body wears a
+ *     cloak material instead of not being drawn. The material is the mod's own copy of the game's armour material
+ *     0x38362D65898C0DE3 with its armour-specific textures replaced by the game's plain ones (hellforge-data.json,
+ *     built by HellForge from the player's game copy; found with the game data's index, bundles.nxa). The HUD script
+ *     puts it on each material slot of her body's units (Unit.set_material with the slot's id and the material's
+ *     name, the call the Optical Cloak Pack makes) and sets its opacity and opacity_stealth; her gear is still not
+ *     drawn. shimmer_opacity / shimmer_stealth tune it live.
  * 0.4.15 (Yui: "her Descent was missing the expanded range"): while Descent runs her hits reach everyone within
  *     d_radius (25 m) instead of area_radius (15 m), as the skill widens her range in Arknights.
  * 0.4.14 (Yui: "found a spot that made me fly up again"; the log's look down): the sheet is an actor tagged
@@ -132,7 +139,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.19"
+#define VERSION "0.5.0"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -160,7 +167,8 @@ static float s_numbersAt = 1.5f;
 static float s_miBuildup = 100;
 static float s_visualCut = 95, s_revealHold = 1.5f, s_noiseWindow = 1.0f, s_heardHold = 5;
 static float s_dodge = 0.5f, s_forgetEvery = 0.5f, s_forgetRange = 150;
-static int s_cloakVisual = 1, s_hideGear = 1, s_gearRule = 1;
+static int s_cloakVisual = 1, s_hideGear = 1, s_gearRule = 1, s_cloakShimmer = 0;
+static float s_shimmerOpacity = 0, s_shimmerStealth = 0;
 
 static const KbSetting kSettings[] = {
     KB_I("parry", s_parry, 0, 1), KB_I("parry_sound", s_parrySound, 0, 1), KB_F("parry_volume", s_parryVolume, 0, 2), KB_I("game_fit", s_gameFit, 0, 1), KB_F("parry_window", s_parryWindow, 0.05, 2), KB_F("parry_invuln", s_parryInvuln, 0, 10), KB_F("parry_damage", s_parryDamage, 0, 100000),
@@ -176,7 +184,7 @@ static const KbSetting kSettings[] = {
     KB_F("pursuit_every", s_pursuitEvery, 0.5, 120), KB_F("pursuit_slow", s_pursuitSlow, 0, 1000), KB_I("pursuit_charges", s_pursuitCharges, 0, 9),
     KB_F("visual_cut", s_visualCut, 0, 99.9), KB_F("reveal_hold", s_revealHold, 0, 60), KB_F("noise_window", s_noiseWindow, 0, 10), KB_F("heard_hold", s_heardHold, 0, 60), KB_F("dodge", s_dodge, 0, 1),
     KB_F("forget_every", s_forgetEvery, 0.1, 5), KB_F("forget_range", s_forgetRange, 10, 500),
-    KB_I("cloak_visual", s_cloakVisual, 0, 1), KB_I("hide_gear", s_hideGear, 0, 1), KB_I("gear_rule", s_gearRule, 0, 1),
+    KB_I("cloak_visual", s_cloakVisual, 0, 1), KB_I("cloak_shimmer", s_cloakShimmer, 0, 1), KB_F("shimmer_opacity", s_shimmerOpacity, 0, 1), KB_F("shimmer_stealth", s_shimmerStealth, 0, 1), KB_I("hide_gear", s_hideGear, 0, 1), KB_I("gear_rule", s_gearRule, 0, 1),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
 };
@@ -240,6 +248,10 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Ambusher: while hidden, this share of the hits that still land on her miss (0.5: half).\ndodge = %g\n"
                "; cloak_visual 1: her body is not drawn while hidden (needs Bingus Shared Loader and HD2Runtime); hide_gear 1: nor\n"
                "; are her weapons and backpack.\ncloak_visual = %d\nhide_gear = %d\n"
+               "; cloak_shimmer 1 (experimental): her body is drawn in a cloak material of the mod's own (a copy of one of the game's\n"
+               "; armour materials, built from your game copy: hellforge-data.json) instead of not at all; her gear stays not\n"
+               "; drawn. shimmer_opacity and shimmer_stealth are that material's two opacities, 0 to 1. Turn it off if the game\n"
+               "; crashes when she hides.\ncloak_shimmer = %d\nshimmer_opacity = %g\nshimmer_stealth = %g\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint.\n"
                "hp_mult = 1\nstamina_mult = 1.2\nhellbomb_on_exhaustion = 0\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_areaRadius, (double)s_areaMult, s_areaMax, (double)s_areaEvery,
@@ -250,7 +262,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_dPerKill, (double)s_dCap, (double)s_dGrace, (double)s_dRadius, s_miStacks, (double)s_miSeconds,
             (double)s_miDamage, (double)s_miAp, (double)s_miSlow, s_miStatus, (double)s_miBuildup, s_numbers, (double)s_numbersAt, s_numbersTicks, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
             (double)s_revealHold, (double)s_noiseWindow, (double)s_heardHold, s_gearRule, (double)s_dodge, s_cloakVisual,
-            s_hideGear);
+            s_hideGear, s_cloakShimmer, (double)s_shimmerOpacity, (double)s_shimmerStealth);
 }
 
 static uint32_t UnitOf(uint32_t e)
@@ -1718,7 +1730,7 @@ static const KbOption kOptions[] = {
     {"mi_stacks", NULL, &s_miStacks}, {"mi_seconds", &s_miSeconds, NULL}, {"mi_damage", &s_miDamage, NULL}, {"mi_ap", &s_miAp, NULL}, {"mi_slow", &s_miSlow, NULL}, {"mi_status", NULL, &s_miStatus}, {"mi_status_buildup", &s_miBuildup, NULL},
     {"numbers", NULL, &s_numbers}, {"numbers_at", &s_numbersAt, NULL}, {"numbers_ticks", NULL, &s_numbersTicks},
     {"visual_cut", &s_visualCut, NULL}, {"reveal_hold", &s_revealHold, NULL}, {"noise_window", &s_noiseWindow, NULL}, {"heard_hold", &s_heardHold, NULL}, {"dodge", &s_dodge, NULL},
-    {"gear_rule", NULL, &s_gearRule}, {"cloak_visual", NULL, &s_cloakVisual}, {"hide_gear", NULL, &s_hideGear},
+    {"gear_rule", NULL, &s_gearRule}, {"cloak_visual", NULL, &s_cloakVisual}, {"cloak_shimmer", NULL, &s_cloakShimmer}, {"shimmer_opacity", &s_shimmerOpacity, NULL}, {"shimmer_stealth", &s_shimmerStealth, NULL}, {"hide_gear", NULL, &s_hideGear},
     {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
 };
 HF_MOD_EXPORT int ascalon_key(unsigned version, int skill, int* vk, int* mods)

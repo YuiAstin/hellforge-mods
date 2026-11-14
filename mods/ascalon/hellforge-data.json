@@ -1,0 +1,51 @@
+{
+  "format": 1,
+  "patches": [
+    {
+      "archives": [
+        "9ba626afa44a3aa3"
+      ],
+      "resources": [
+        {
+          "type": "material",
+          "copy": "0x38362D65898C0DE3",
+          "name": "yui/ascalon/cloak",
+          "replace": [
+            {
+              "from": "0x884DF56FA3E43586",
+              "to": "0xF4EF9BEF746C4944"
+            },
+            {
+              "from": "0x1BDCD0C472D24F7A",
+              "to": "0xDE89F01FC88B8287"
+            },
+            {
+              "from": "0x7FF06A2853AFF687",
+              "to": "0xF37A4E756300AB32"
+            },
+            {
+              "from": "0xFFA0B8753227D99B",
+              "to": "0xDE89F01FC88B8287"
+            },
+            {
+              "from": "0xE2BA8BC90DC05088",
+              "to": "0xF37A4E756300AB32"
+            },
+            {
+              "from": "0x3B8B0E32EDD7F7C9",
+              "to": "0xDE89F01FC88B8287"
+            }
+          ]
+        },
+        {
+          "type": "texture",
+          "include": [
+            "0xF4EF9BEF746C4944",
+            "0xF37A4E756300AB32",
+            "0xDE89F01FC88B8287"
+          ]
+        }
+      ]
+    }
+  ]
+}

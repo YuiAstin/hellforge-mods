@@ -205,3 +205,21 @@ perception research (docs/research/perception.md, when written) come first.
   `[game+0x3326388]` slots 0 and 0x60, query slot `[game+0x3326328]+0x80`). `game_fit = 0` turns it off.
 - Also found, unused: sync shape sweep `[[game+0x3326328]+0x80]`, first-hit ray `[[game+0x3326338]+0x128]`, the
   stratagem deploy navmesh check `game.dll+0x9305C0`. The exe on disk is packed; the dump has code only.
+
+### 0.5.0: the shimmer (experimental), and the game data's index
+
+- The game's data is DSAR-packed: `bundles.NN.nxa` hold the bytes (LZ4 chunks), `bundles.nxa` is the index (magic
+  `DSAA`; 24-byte entries: size, name offset, part count, parts offset; 16-byte parts: offset in the bundle, source
+  offset low, file index in the top byte with the source offset's high bits under it). With it every bundle's file
+  table can be read, so "which bundle holds resource X" has an answer.
+- Sound banks: `stratagems_shared` and `obj_hellbomb` are in bundle `e75f556a740e00c9`; the event metadata in
+  `9ba626afa44a3aa3`. That is why 0.4.3's metadata patch took and the banks in a `9ba626afa44a3aa3` patch did not: a
+  bank patch belongs to `e75f556a740e00c9.patch_N`. Not rebuilt yet.
+- The Optical Cloak Pack's cloak material is the game's armour material `0x38362D65898C0DE3` (bundle
+  `46e418dd4a6542c4`; parent material `0x49E1B409B8967ABC` in the Helldiver's core bundle `18235e0c9ec0e636`) with
+  eleven texture references changed and every parameter as the game's. Ours is HellForge's copy of the same material
+  with the six textures that live in armour bundles replaced by plain ones of the game's (`hellforge-data.json`).
+- Melee speed (for Penumbral Image; from the code dump): a swing is an ability whose record has a speed
+  (`[game+0x3326640]` records, +0x0C; StartAbility `game.dll+0x7CAF40` takes it as its fifth argument), and the
+  Helldiver's state machine has `attack_speed` (0x6E1390F5; AnimSetVariable `game.dll+0x808AD0`), which the chainsaw's
+  slowdown drives together with it. Not built yet.
