@@ -851,21 +851,21 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 }
 /* the GAME THREAD: each marked enemy's tick a second: a round of the mod's spawned 2.5 m from its body on her side (from
  * her, when she is nearer than that), flying into it; and its dose of the slow */
-/* One tick's round at a marked enemy's body, from 1.6 m out: from her side and above, then (a tick that missed,
- * the enemy knocked about under it) from straight above, then from the far side. 1 sent */
+/* One tick's round at a marked enemy's body. First from her, as an area strike's flies, when the way is clear (0.4.12:
+ * for one of two marked enemies every round missed, three a tick: sent from 1.6 m out, a round starts inside a large
+ * enemy and meets nothing; her strikes, flying in from outside, do land on it); else, and when that one misses, from
+ * 6 m straight above it, then from 1.6 m out on her side and above. 1 sent, 0 not, -1 the enemy is gone */
 static int TickRound(int i, int try, const float pos[3], int have)
 {
     uint8_t d[24];
-    float r[3], off[3], u[3] = {0, 0, 1.6f}, from[3];
+    float r[3], off[3], u[3] = {0, 0, 6.0f}, from[3];
     if (!Descriptor(g_mark[i].e, d) || !UnitNode(Word(d + 12), 0, r)) return -1;
     if (BodyOffset(Word(d + 12), r, off)) for (int t = 0; t < 3; t++) r[t] += off[t];
     else r[2] += 1.0f;
-    if (have && try != 1)
-    {
-        float v[3] = {pos[0] - r[0], pos[1] - r[1], pos[2] + 1.3f - r[2]}, vn = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-        float side = try == 0 ? 0.9f : -0.9f;
-        if (vn > 0.1f) { for (int k = 0; k < 3; k++) u[k] = v[k] / vn * side; u[2] = fabsf(u[2]) + 1.3f; }
-    }
+    float v[3] = {pos[0] - r[0], pos[1] - r[1], pos[2] + 1.3f - r[2]}, vn = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    float chest[3] = {pos[0], pos[1], pos[2] + 1.3f};
+    if (try == 0 && have && vn > 1.0f && vn < 60 && ClearShot(chest, r)) memcpy(u, v, sizeof u);
+    else if (try == 2 && have && vn > 0.1f) { for (int k = 0; k < 3; k++) u[k] = v[k] / vn * 0.9f; u[2] = fabsf(u[2]) + 1.3f; }
     for (int k = 0; k < 3; k++) from[k] = r[k] + u[k];
     float dir[3] = {-u[0], -u[1], -u[2]}, dn = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
     if (!(dn > 0.05f)) return 0;
@@ -887,7 +887,7 @@ static void MarkFrame(void)
         if (g_mark[i].until <= g_now || !Living(en)) { g_mark[i].e = 0; continue; }
         /* a tick that has not landed 0.15 s on missed (0.4.11: three in ten did, the enemy knocked about by her hits
          * between the look at where it is and the round getting there): again, up to three rounds a tick */
-        if (g_mark[i].pending && g_mark[i].tries < 3 && g_now - g_mark[i].sent >= 0.15 && g_now < g_mark[i].next)
+        if (g_mark[i].pending && g_mark[i].tries < 3 && g_now - g_mark[i].sent >= 0.25 && g_now < g_mark[i].next)
         {
             g_tickAgain++;
             if (TickRound(i, g_mark[i].tries, pos, have) > 0) spawned++;
