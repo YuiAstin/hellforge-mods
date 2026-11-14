@@ -33,6 +33,10 @@
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
  * 0.3.0, her two keyed skills:
+ * 0.4.10 (Yui: "feels like the bleed only applies to 3 targets max"): nothing caps the marks at three (64 marks, 8
+ *     ticks a frame); the likeliest loss is the tick's round, sent level from 2.5 m on her side, taken by another
+ *     enemy of the crowd. It is sent from 1.6 m out, above the marked enemy, and the log says every 10 s how many
+ *     enemies are marked and how many ticks were sent and landed.
  * 0.4.9 (Yui: "dashes still get refused and the parry sound is still just as loud with that default 0.6"): the look
  *     for something in the way met her own body and something else of hers (the log named their filters): bodies and
  *     that filter are no walls now. The clash's volume is squared (a loudness scale) and parry_volume is 0.4.
@@ -115,7 +119,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.9"
+#define VERSION "0.4.10"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -719,6 +723,8 @@ HF_MOD_EXPORT int ascalon_view(unsigned version, float* out)
 #define MARKS 64
 static struct { uint32_t e; int stacks, pending; double until, next; int32_t base; } g_mark[MARKS];
 static unsigned g_marked, g_ticks, g_bleeds;
+static unsigned g_tickSent, g_tickSentLine, g_tickLandLine, g_tickLate;   /* for the log's Mortal Interrogation line */
+static double g_tickLineAt;
 static int g_statusBad;   /* the game refused mi_status this session: the spawned-round tick instead */
 static int Marked(uint32_t e)
 {
@@ -850,6 +856,7 @@ static void MarkFrame(void)
         if (g_mark[i].until <= g_now || !Living(en)) { g_mark[i].e = 0; continue; }
         if (g_now < g_mark[i].next) continue;
         g_mark[i].next = g_now + 1;
+        if (g_mark[i].pending) g_tickLate++;           /* the last one never landed on it */
         g_mark[i].pending = 0;                         /* a tick that never landed is not owed */
         uint8_t d[24];
         float r[3], off[3];
@@ -870,7 +877,9 @@ static void MarkFrame(void)
         if (have)
         {
             float v[3] = {pos[0] - r[0], pos[1] - r[1], pos[2] + 1.3f - r[2]}, vn = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-            if (vn > 0.1f) { float back = vn < 2.5f ? vn : 2.5f; for (int k = 0; k < 3; k++) u[k] = v[k] / vn * back; }
+            /* from her side and above, 1.6 m out (0.4.10; 2.5 m level before: in a crowd the enemy standing between
+             * took the round, and the marked one behind it no tick) */
+            if (vn > 0.1f) { for (int k = 0; k < 3; k++) u[k] = v[k] / vn * 0.9f; u[2] += 1.3f; }
         }
         else u[2] = 2.5f;
         for (int k = 0; k < 3; k++) from[k] = r[k] + u[k];
@@ -880,7 +889,20 @@ static void MarkFrame(void)
         g_mark[i].pending = 1;
         int rr = hf->spawn_projectile(self, (uint32_t)s_areaRound, from, dir);
         if (rr == HF_ACT_WAITING || !Act("Mortal Interrogation's tick", rr)) g_mark[i].pending = 0;
-        else spawned++;
+        else { spawned++; g_tickSent++; }
+    }
+    /* every 10 s with marks about: how many, and how the ticks fared */
+    if (g_now - g_tickLineAt >= 10)
+    {
+        int alive = 0, stacks = 0;
+        for (int i = 0; i < MARKS; i++) if (g_mark[i].e && g_mark[i].until > g_now) { alive++; stacks += g_mark[i].stacks; }
+        if (alive || g_tickSent != g_tickSentLine)
+        {
+            static unsigned told;
+            if (told++ < 80) Log("Mortal Interrogation: %d enemies marked now (%d stacks); in the last 10 s %u ticks sent, %u landed; %u in all never landed", alive, stacks,
+                g_tickSent - g_tickSentLine, g_ticks - g_tickLandLine, g_tickLate);
+        }
+        g_tickSentLine = g_tickSent; g_tickLandLine = g_ticks; g_tickLineAt = g_now;
     }
 }
 /* the GAME THREAD: the volleys owed (one a frame), the slows owed, Pursuit's charges */
@@ -1401,7 +1423,7 @@ static void Reset(const char* why)
     g_sensing = 0;
     g_forgot = g_reveals = g_dodged = g_heard = g_shots = 0;
     g_volleys = g_strikes = g_pursuits = 0;
-    g_marked = g_ticks = g_bleeds = 0;
+    g_marked = g_ticks = g_bleeds = 0; g_tickSent = g_tickSentLine = g_tickLandLine = g_tickLate = 0;
     if (g_eCasts || g_dCasts) Log("%s: Endowment %u times (%u stacks spread), Descent %u times (%u kills, %u hits on her nulled)", why, g_eCasts, g_spread, g_dCasts, g_dKills, g_nulled);
     if (g_parries || g_dashes) Log("%s: %u parries (%u counters), %u dashes (%u enemies struck on the way)", why, g_parries, g_counters, g_dashes, g_dashHits);
     g_parries = g_counters = g_dashes = g_dashHits = 0;
