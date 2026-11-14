@@ -32,7 +32,14 @@
  * 0.2.2 (Yui: "there's a bleed damage DoT that should fit Ascalon nicely"): the mark's damage is the game's own bleed
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
- * Endowment and Descent are not in this build.
+ * 0.3.0, her two keyed skills:
+ *   - Endowment (S2, key_endowment, default X; e_seconds, then e_cooldown): her hits deal e_mult times their damage
+ *     (strikes with them); every enemy within e_radius m of her gets a dose of the slow (e_slow) twice a second; an
+ *     enemy that dies within 30 m of her leaves a Mortal Interrogation stack on every enemy within e_spread m of it.
+ *   - Descent (S3, key_descent, default C; d_seconds, then d_cooldown): she steps out of hiding on purpose. No hit on
+ *     her lands (the hit hook nulls each one), her hits deal d_mult times their damage, and each enemy that dies within
+ *     30 m of her adds d_per_kill s, up to d_cap s left. While it lasts she is drawn, enemies see her as anyone, and
+ *     nobody forgets her. It ends with her hidden again after d_grace s.
  *
  * Built on the kit base (src/kitbase). Solo or host. */
 #include <errno.h>
@@ -49,7 +56,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.2"
+#define VERSION "0.3.0"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -67,6 +74,8 @@ KB_ROSTER_EXPORTS(ascalon)
 static float s_areaRadius = 15, s_areaMult = 1, s_areaEvery = 0.25f, s_pursuitMult = 2.1f, s_pursuitEvery = 7, s_pursuitSlow = 100;
 static int s_areaMax = 12, s_areaRound = 7, s_pursuitCharges = 3;
 static float s_miSeconds = 25, s_miDamage = 0.10f, s_miSlow = 18;
+static float s_eSeconds = 35, s_eCooldown = 20, s_eMult = 2.3f, s_eRadius = 15, s_eSlow = 60, s_eSpread = 5;
+static float s_dSeconds = 5, s_dCooldown = 45, s_dMult = 1.5f, s_dPerKill = 2, s_dCap = 15, s_dGrace = 2;
 static int s_miStacks = 3, s_numbers = 1, s_miStatus = 2;
 static float s_miBuildup = 100;
 static float s_visualCut = 95, s_revealHold = 1.5f, s_noiseWindow = 1.0f, s_heardHold = 5;
@@ -74,6 +83,9 @@ static float s_dodge = 0.5f, s_forgetEvery = 0.5f, s_forgetRange = 150;
 static int s_cloakVisual = 1, s_hideGear = 1, s_gearRule = 1;
 
 static const KbSetting kSettings[] = {
+    KB_F("e_seconds", s_eSeconds, 1, 300), KB_F("e_cooldown", s_eCooldown, 0, 600), KB_F("e_mult", s_eMult, 1, 20), KB_F("e_radius", s_eRadius, 0, 60),
+    KB_F("e_slow", s_eSlow, 0, 1000), KB_F("e_spread", s_eSpread, 0, 30), KB_F("d_seconds", s_dSeconds, 1, 120), KB_F("d_cooldown", s_dCooldown, 0, 600),
+    KB_F("d_mult", s_dMult, 1, 20), KB_F("d_per_kill", s_dPerKill, 0, 30), KB_F("d_cap", s_dCap, 1, 120), KB_F("d_grace", s_dGrace, 0, 30),
     KB_F("mi_seconds", s_miSeconds, 0, 120), KB_F("mi_damage", s_miDamage, 0, 5), KB_F("mi_slow", s_miSlow, 0, 1000), KB_I("mi_stacks", s_miStacks, 0, 9),
     KB_I("numbers", s_numbers, 0, 1), KB_I("mi_status", s_miStatus, 0, 200), KB_F("mi_status_buildup", s_miBuildup, 0, 1000),
     KB_F("area_radius", s_areaRadius, 0, 60), KB_F("area_mult", s_areaMult, 0, 10), KB_F("area_every", s_areaEvery, 0.05, 5),
@@ -99,6 +111,14 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Pursuit (by itself): pursuit_charges charges, one back every pursuit_every s. A hit with a charge deals\n"
                "; pursuit_mult times its damage, lands twice on everyone in range and slows them (pursuit_slow: 100 a full dose).\n"
                "pursuit_charges = %d\npursuit_every = %g\npursuit_mult = %g\npursuit_slow = %g\n"
+               "; Endowment (key_endowment): for e_seconds her hits deal e_mult times their damage, every enemy within e_radius m\n"
+               "; of her is slowed (e_slow a dose, twice a second), and an enemy that dies near her leaves a Mortal Interrogation\n"
+               "; stack on every enemy within e_spread m of it. Then e_cooldown s before it can be cast again.\n"
+               "e_seconds = %g\ne_cooldown = %g\ne_mult = %g\ne_radius = %g\ne_slow = %g\ne_spread = %g\n"
+               "; Descent (key_descent): she steps out of hiding: for d_seconds no hit on her lands and her hits deal d_mult\n"
+               "; times their damage; each enemy that dies near her adds d_per_kill s (never more than d_cap s left). She is\n"
+               "; seen and drawn while it lasts, and hidden again d_grace s after. Then d_cooldown s.\n"
+               "d_seconds = %g\nd_cooldown = %g\nd_mult = %g\nd_per_kill = %g\nd_cap = %g\nd_grace = %g\n"
                "; Mortal Interrogation: each hit or strike of hers puts a stack on its target (mi_stacks at most) for mi_seconds\n"
                "; from the last one. A marked enemy takes mi_damage times the marking hit's damage a second for each stack, and\n"
                "; a dose of the slow (mi_slow a stack; 100 a full dose).\n"
@@ -125,7 +145,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint.\n"
                "hp_mult = 1\nstamina_mult = 1.2\nhellbomb_on_exhaustion = 0\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_areaRadius, (double)s_areaMult, s_areaMax, (double)s_areaEvery,
-            s_areaRound, s_pursuitCharges, (double)s_pursuitEvery, (double)s_pursuitMult, (double)s_pursuitSlow, s_miStacks, (double)s_miSeconds,
+            s_areaRound, s_pursuitCharges, (double)s_pursuitEvery, (double)s_pursuitMult, (double)s_pursuitSlow, (double)s_eSeconds, (double)s_eCooldown,
+            (double)s_eMult, (double)s_eRadius, (double)s_eSlow, (double)s_eSpread, (double)s_dSeconds, (double)s_dCooldown, (double)s_dMult,
+            (double)s_dPerKill, (double)s_dCap, (double)s_dGrace, s_miStacks, (double)s_miSeconds,
             (double)s_miDamage, (double)s_miSlow, s_miStatus, (double)s_miBuildup, s_numbers, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
             (double)s_revealHold, (double)s_noiseWindow, (double)s_heardHold, s_gearRule, (double)s_dodge, s_cloakVisual,
             s_hideGear);
@@ -139,7 +161,7 @@ static uint32_t UnitOf(uint32_t e)
 #include "as_world.h"
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
-enum { HIDDEN = 0, QUIET = 1 /* unused since 0.1.1 */, REVEALED = 2, GEAR = 3, AWAY = 4 };   /* AWAY: not on the ground */
+enum { HIDDEN = 0, QUIET = 1 /* unused since 0.1.1 */, REVEALED = 2, GEAR = 3, AWAY = 4, DESCENT = 5 };   /* AWAY: not on the ground */
 static atomic_int g_state = AWAY;
 static int g_linksOk;   /* the unit links are where the research has them */
 static double g_sensedUntil, g_forgetAt;
@@ -150,7 +172,9 @@ static unsigned g_heard, g_shots;
 static uint32_t g_heldSel;
 static uint64_t g_heldRes;
 static unsigned g_dodged, g_forgot, g_reveals;
-static const char* kStateName[] = {"hidden", "-", "revealed (an enemy sees or heard her)", "not hidden (backpack or support weapon)", "away"};
+static const char* kStateName[] = {"hidden", "-", "revealed (an enemy sees or heard her)", "not hidden (backpack or support weapon)", "away", "in Descent"};
+static double g_eUntil, g_eReady, g_dUntil, g_dReady, g_eSlowAt;
+static unsigned g_eCasts, g_dCasts, g_dKills, g_spread, g_nulled;
 
 /* ---- the visibility row (game.dll+0x3326540: map +0x20, rows +0x40, 20 bytes each: base +0, floor +12) ------------- */
 static float g_oldBase, g_wroteBase, g_wroteFloor, g_oldFloor;
@@ -356,6 +380,7 @@ static int Item(int k) { uint32_t e = atomic_load(&g_myItems[k]); return e && e 
 static int StateNow(void)
 {
     if (!g_alive || !atomic_load(&g_avatar)) return AWAY;
+    if (g_now < g_dUntil) return DESCENT;
     if (s_gearRule && (Item(3) || g_heldSel == 3)) return GEAR;
     if (g_now < g_sensedUntil) return REVEALED;
     return HIDDEN;
@@ -366,6 +391,7 @@ static int HitTaken(const uint8_t* h, void* result, unsigned long long now)
 {
     (void)h; (void)now;
     int st = atomic_load(&g_state);
+    if (st == DESCENT) { memset(result, 0, RESULT_SIZE); g_nulled++; return 1; }   /* Descent: nothing lands */
     if ((st != HIDDEN && st != QUIET) || s_dodge <= 0) return 0;
     static _Atomic unsigned seed = 0x9E3779B9u;
     unsigned x = atomic_load(&seed);
@@ -471,14 +497,14 @@ static void Mark(uint32_t e, int32_t damage)
         if (g_mark[i].e == e && g_mark[i].until > g_now)
         {
             if (g_mark[i].stacks < s_miStacks) g_mark[i].stacks++;
-            if (damage > g_mark[i].base) g_mark[i].base = damage;
+            if (damage > g_mark[i].base) g_mark[i].base = damage;   /* (0: a stack spread by Endowment keeps the mark's own) */
             g_mark[i].until = g_now + s_miSeconds;   /* a new hit starts the time again */
             return;
         }
         if (free < 0 && (!g_mark[i].e || g_mark[i].until <= g_now)) free = i;
     }
     if (free < 0) return;
-    g_mark[free].e = e; g_mark[free].stacks = 1; g_mark[free].pending = 0; g_mark[free].base = damage;
+    g_mark[free].e = e; g_mark[free].stacks = 1; g_mark[free].pending = 0; g_mark[free].base = damage > 0 ? damage : 60;
     g_mark[free].until = g_now + s_miSeconds; g_mark[free].next = g_now + 1;
     g_marked++;
 }
@@ -533,9 +559,17 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
      * its way would otherwise set off the next volley, and that one the next */
     if (shot && d->kind != 3 && g_now - g_noiseAt > 1.0) return;
     Mark(d->target, d->amount);
-    if (g_now - g_areaAt < s_areaEvery) { NoteHit(d, 0); return; }
+    if (g_now - g_areaAt < s_areaEvery)
+    {
+        double b = (double)d->amount * (g_now < g_eUntil ? s_eMult : 1) * (g_now < g_dUntil ? s_dMult : 1);
+        d->amount = b > 2000000 ? 2000000 : (int32_t)b;
+        NoteHit(d, 0);
+        return;
+    }
     g_areaAt = g_now;
     int pursuit = g_charges > 0;
+    double skill = (g_now < g_eUntil ? s_eMult : 1) * (g_now < g_dUntil ? s_dMult : 1);
+    { double b = (double)d->amount * skill; d->amount = b > 2000000 ? 2000000 : (int32_t)b; }
     g_volDamage = d->amount;
     g_volPrimary = d->target;
     g_volPursuit = pursuit;
@@ -667,7 +701,88 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     g_spawnNext++;
     LearnNet();
 }
-static void OnKill(HfMod* mod, const HfEventInfo* info, void* user) { DropFoe(((const HfKillEvent*)info)->victim); }
+static void OnKill(HfMod* mod, const HfEventInfo* info, void* user)
+{
+    uint32_t victim = ((const HfKillEvent*)info)->victim;
+    uint8_t d[24];
+    float vp[3], me[3], p[3];
+    int skill = kb_kit_on && g_alive && (g_now < g_eUntil || g_now < g_dUntil);
+    if (skill && !Friend(victim) && Descriptor(victim, d) && FoeKind(Quad(d)) && UnitNode(Word(d + 12), 0, vp) && PlayerPose(me, NULL) && Dist2(vp, me) < 30.0f * 30.0f)
+    {
+        if (g_now < g_dUntil && s_dPerKill > 0)
+        {
+            double until = g_dUntil + s_dPerKill;
+            g_dUntil = until > g_now + s_dCap ? g_now + s_dCap : until;
+            g_dKills++;
+        }
+        if (g_now < g_eUntil && s_eSpread > 0)
+            for (int j = 0; j < FOES; j++)
+            {
+                uint32_t id = g_foe[j];
+                if (!id || id == victim || !FoeRoot(id, g_foeRes[j], p) || Dist2(p, vp) > s_eSpread * s_eSpread || !Living(id)) continue;
+                Mark(id, 0);
+                g_spread++;
+            }
+    }
+    DropFoe(victim);
+}
+/* ---- her keyed skills ----------------------------------------------------------------------------------------------- */
+static void Endowment(void)
+{
+    if (g_now < g_eUntil || g_now < g_eReady) return;
+    g_eUntil = g_now + s_eSeconds;
+    g_eReady = g_eUntil + s_eCooldown;
+    g_eSlowAt = 0;
+    g_eCasts++;
+    Log("Endowment: %.0f s, her hits x%.2f, enemies within %.0f m slowed", (double)s_eSeconds, (double)s_eMult, (double)s_eRadius);
+}
+static void Descent(void)
+{
+    if (g_now < g_dUntil || g_now < g_dReady) return;
+    g_dUntil = g_now + s_dSeconds;
+    g_dCasts++;
+    Log("Descent: %.0f s out of hiding, no hit on her lands, her hits x%.2f; each kill near her adds %.0f s", (double)s_dSeconds, (double)s_dMult, (double)s_dPerKill);
+}
+static void SkillFrame(void)
+{
+    static int inDescent;
+    if (g_now < g_dUntil) inDescent = 1;
+    else if (inDescent)
+    {
+        inDescent = 0;
+        g_dReady = g_now + s_dCooldown;
+        g_sensedUntil = g_now + s_dGrace;      /* hidden again after the grace */
+        Log("Descent over (%u kills so far this mission): hidden again in %.0f s", g_dKills, (double)s_dGrace);
+    }
+    if (g_now < g_eUntil && s_eSlow > 0 && g_now >= g_eSlowAt && hf->apply_status)
+    {
+        g_eSlowAt = g_now + 0.5;
+        float me[3], p[3];
+        if (PlayerPose(me, NULL))
+            for (int j = 0; j < FOES; j++)
+            {
+                uint32_t id = g_foe[j];
+                if (!id || !FoeRoot(id, g_foeRes[j], p) || Dist2(p, me) > s_eRadius * s_eRadius) continue;
+                hf->apply_status(self, id, HF_STATUS_FLAMER_SLOWED, s_eSlow);
+            }
+    }
+    static int prev[3];
+    int focused = Focused();
+    int mods = focused ? ((GetAsyncKeyState(VK_SHIFT) & 0x8000) ? KM_SHIFT : 0) | ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? KM_CTRL : 0) |
+                         ((GetAsyncKeyState(VK_MENU) & 0x8000) ? KM_ALT : 0) : 0;
+    for (int i = 0; i < 3; i++)
+    {
+        int own = s_keys[i].vk == VK_SHIFT ? KM_SHIFT : s_keys[i].vk == VK_CONTROL ? KM_CTRL : s_keys[i].vk == VK_MENU ? KM_ALT : 0;
+        int down = focused && (GetAsyncKeyState(s_keys[i].vk) & 0x8000) != 0 && (mods & ~own) == s_keys[i].mods;
+        static unsigned long long fired[3];
+        if (down && !prev[i] && GetTickCount64() - fired[i] > 300 && g_alive && atomic_load(&g_avatar) && (fired[i] = GetTickCount64(), 1))
+        {
+            if (i == 1) Endowment();
+            else if (i == 2) Descent();
+        }
+        prev[i] = down;
+    }
+}
 static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfPlayerEvent* p = (const HfPlayerEvent*)info;
@@ -695,6 +810,9 @@ static void Reset(const char* why)
     g_forgot = g_reveals = g_dodged = g_heard = g_shots = 0;
     g_volleys = g_strikes = g_pursuits = 0;
     g_marked = g_ticks = g_bleeds = 0;
+    if (g_eCasts || g_dCasts) Log("%s: Endowment %u times (%u stacks spread), Descent %u times (%u kills, %u hits on her nulled)", why, g_eCasts, g_spread, g_dCasts, g_dKills, g_nulled);
+    g_eUntil = g_eReady = g_dUntil = g_dReady = 0;
+    g_eCasts = g_dCasts = g_dKills = g_spread = g_nulled = 0;
     memset(g_mark, 0, sizeof g_mark);
     g_volOwed = 0; g_nslow = 0; g_vol.n = 0;
     g_charges = s_pursuitCharges; g_chargeAt = g_now;
@@ -732,12 +850,15 @@ typedef struct AscalonHud
     uint32_t cloak_visual, hide_gear;
     uint32_t units[5];              /* scene units: her Helldiver, then her primary, secondary, support weapon, backpack (0: none) */
     uint32_t sensing;               /* enemies that sense her now */
+    float e_left, e_ready, d_left, d_ready;   /* 0.3.0: Endowment and Descent: seconds left of each, seconds until ready */
+    uint32_t keys[3];
+    char key_label[3][16];
     uint32_t charges, charges_max;  /* 0.2.0: Pursuit */
     float charge_left;              /* seconds until the next charge (0: full) */
     uint32_t nwanted;               /* 0.1.3: her scene units, by the engine's own links (0: not known, use units[]) */
     uint32_t wanted[256];
 } AscalonHud;
-static AscalonHud g_hud = {2};
+static AscalonHud g_hud = {3};
 /* 0.1.3: what she is made of, by the engine's own unit links (the Optical Cloak Pack's way): her Helldiver's unit and
  * every unit linked under it (first child at Unit +0x1D8, next sibling at +0x1E0), and the same from each item of her
  * equipment row (ten slots) that the attach manager (game+0x3326DC0: map +32, rows +64, 48 bytes, parent +4) says hangs
@@ -799,6 +920,9 @@ HF_MOD_EXPORT AscalonHud* ascalon_hud_state(void)
     g_hud.in_mission = (uint32_t)(g_inMission && g_alive && kb_kit_on);
     g_hud.state = (uint32_t)st;
     g_hud.reveal_left = st == REVEALED && !g_sensing ? (float)fmax(0, g_sensedUntil - g_now) : 0;
+    g_hud.e_left = (float)fmax(0, g_eUntil - g_now); g_hud.e_ready = (float)fmax(0, g_eReady - g_now);
+    g_hud.d_left = (float)fmax(0, g_dUntil - g_now); g_hud.d_ready = g_now < g_dUntil ? 0 : (float)fmax(0, g_dReady - g_now);
+    for (int i = 0; i < 3; i++) { g_hud.keys[i] = (uint32_t)s_keys[i].vk; snprintf(g_hud.key_label[i], sizeof g_hud.key_label[i], "%s", s_keys[i].label); }
     g_hud.sensing = (uint32_t)g_sensing;
     g_hud.charges = (uint32_t)g_charges;
     g_hud.charges_max = (uint32_t)s_pursuitCharges;
@@ -823,6 +947,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         if (told++ < 60) Log("she is %s", kStateName[st]);
         if (st == REVEALED) g_reveals++;
     }
+    SkillFrame();
     VisCut(st == HIDDEN || st == REVEALED);   /* the cut stays while revealed: sight alone must not hold her revealed */
     if ((st == HIDDEN || st == REVEALED) && g_now >= g_forgetAt)
     {
@@ -845,6 +970,9 @@ static void Tick(HfMod* mod, float dt, void* user)
 static const KbOption kOptions[] = {
     {"area_radius", &s_areaRadius, NULL}, {"area_mult", &s_areaMult, NULL}, {"area_max", NULL, &s_areaMax}, {"pursuit_mult", &s_pursuitMult, NULL},
     {"pursuit_every", &s_pursuitEvery, NULL}, {"pursuit_slow", &s_pursuitSlow, NULL}, {"pursuit_charges", NULL, &s_pursuitCharges},
+    {"e_seconds", &s_eSeconds, NULL}, {"e_cooldown", &s_eCooldown, NULL}, {"e_mult", &s_eMult, NULL}, {"e_radius", &s_eRadius, NULL},
+    {"e_slow", &s_eSlow, NULL}, {"e_spread", &s_eSpread, NULL}, {"d_seconds", &s_dSeconds, NULL}, {"d_cooldown", &s_dCooldown, NULL},
+    {"d_mult", &s_dMult, NULL}, {"d_per_kill", &s_dPerKill, NULL}, {"d_cap", &s_dCap, NULL},
     {"mi_stacks", NULL, &s_miStacks}, {"mi_seconds", &s_miSeconds, NULL}, {"mi_damage", &s_miDamage, NULL}, {"mi_slow", &s_miSlow, NULL}, {"mi_status", NULL, &s_miStatus}, {"mi_status_buildup", &s_miBuildup, NULL},
     {"numbers", NULL, &s_numbers},
     {"visual_cut", &s_visualCut, NULL}, {"reveal_hold", &s_revealHold, NULL}, {"noise_window", &s_noiseWindow, NULL}, {"heard_hold", &s_heardHold, NULL}, {"dodge", &s_dodge, NULL},
@@ -875,7 +1003,8 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
-    api->log(mod, "Ascalon %s: hidden until she makes noise; her hits strike everyone within %.0f m; Pursuit", VERSION, (double)s_areaRadius);
+    api->log(mod, "Ascalon %s: hidden until she makes noise; her hits strike everyone within %.0f m; Pursuit; Endowment %s, Descent %s", VERSION,
+             (double)s_areaRadius, s_keys[1].label, s_keys[2].label);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
              api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&

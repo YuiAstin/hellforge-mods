@@ -117,3 +117,11 @@ perception research (docs/research/perception.md, when written) come first.
   37-39 stuns, 42 gas, 67 flamer_slowed), 100 a stack a second. The catalogue also has 8 slowed, 9 rooted, 70 poison,
   36 hidden: candidates for the slow and for Endowment. Untested: whether enemies take bleed, what it deals, whether it
   is credited to her. The first ten bleed hits on marked enemies are logged; a refusal falls back to 0.2.1's tick.
+- **Correction to 0.2.2:** HellForge refused status 2 ("not a status HellForge applies (HF_STATUS_...)"): apply_status
+  takes only the ids its header names. What Yui saw working ("even for mechanical enemies") was the fallback, 0.2.1's
+  spawned-round tick. A real bleed would need the game's own add-status call (game.dll+0x699E40, Alva hooks it).
+- **0.3.0 (2026-11-14): Endowment and Descent**, as designed above with these changes: Endowment's slow reaches her
+  whole range (e_radius 15, not 8); Descent has no separate cleave (the trait already hits everyone within 15 m) and no
+  taunt (she is simply seen: the visibility cut and the forgetting are off while it lasts). Kills counted for both:
+  any enemy that dies within 30 m of her. Keys X and C from the ini; no bindings menu or skill panel yet, a second
+  status line shows both skills.

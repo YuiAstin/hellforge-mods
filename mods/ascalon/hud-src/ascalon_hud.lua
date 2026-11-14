@@ -5,7 +5,7 @@
 --     is the CAMO-EX01 Optical Cloak Pack's "compatibility" cloak (hide, remember, re-hide), found with the Cloak Probe.
 --   * A line at the bottom middle says what she is: hidden, revealed (how many enemies sense her, then the seconds
 --     left), or not hidden because of a backpack or support weapon.
--- Ascalon is a HellForge code mod; this reads ascalon.dll's state (ascalon_hud_state, layout version 2) through LuaJIT's
+-- Ascalon is a HellForge code mod; this reads ascalon.dll's state (ascalon_hud_state, layout version 3) through LuaJIT's
 -- ffi every frame. Requires Bingus Shared Loader and HD2Runtime; uses HD2Runtime by SkyeShade
 -- (https://github.com/SkyeShade/HD2Runtime) through its public API (hd2.ui.overlay).
 local OWNER = 'mods/yui/ascalon_hud'
@@ -31,7 +31,7 @@ end
 
 local ffi = require('ffi')
 pcall(ffi.cdef, [[
-typedef struct aschud2_state { uint32_t version, in_mission, state; float reveal_left; uint32_t cloak_visual, hide_gear; uint32_t units[5]; uint32_t sensing; uint32_t charges, charges_max; float charge_left; uint32_t nwanted; uint32_t wanted[256]; } aschud2_state;
+typedef struct aschud3_state { uint32_t version, in_mission, state; float reveal_left; uint32_t cloak_visual, hide_gear; uint32_t units[5]; uint32_t sensing; float e_left, e_ready, d_left, d_ready; uint32_t keys[3]; char key_label[3][16]; uint32_t charges, charges_max; float charge_left; uint32_t nwanted; uint32_t wanted[256]; } aschud3_state;
 void *aschud1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
 void *aschud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
 ]])
@@ -53,9 +53,9 @@ local function find(dt)
     if module == nil then return nil end
     local proc = k32.aschud1_GetProcAddress(module, 'ascalon_hud_state')
     if proc == nil then return nil end
-    fn = ffi.cast('aschud2_state *(*)(void)', proc)
+    fn = ffi.cast('aschud3_state *(*)(void)', proc)
     state = fn()
-    if state == nil or state.version < 2 then fn = nil return nil end
+    if state == nil or state.version < 3 then fn = nil return nil end
     log('[Ascalon HUD] connected to Ascalon')
     return state
 end
@@ -255,6 +255,7 @@ local LINES = {
     [0] = {'HIDDEN', TEAL},
     [2] = {'REVEALED', ORANGE},
     [3] = {'NOT HIDDEN: BACKPACK OR SUPPORT WEAPON', MUTED},
+    [5] = {'DESCENT', ORANGE},
 }
 -- ---- her damage numbers (0.2.1; the Executor's 0.2.4 block, itself Lemuen's): a number over every hit, strike and
 -- tick of hers (ascalon.dll's ascalon_hits: x, y, z, damage, Pursuit's). The view camera: the engine camera standing
@@ -443,6 +444,7 @@ overlay:draw(function(d, dt)
     local left = tonumber(s.reveal_left)
     local n = tonumber(s.sensing)
     if s.state == 2 and n > 0 then text = ('%s: %d %s'):format(text, n, n == 1 and 'ENEMY SENSES HER' or 'ENEMIES SENSE HER')
+    elseif s.state == 5 then text = ('%s  %.1fs'):format(text, tonumber(s.d_left))
     elseif left > 0 then text = ('%s  %.1fs'):format(text, left) end
     if tonumber(s.charges_max) > 0 then
         local c, m, cl = tonumber(s.charges), tonumber(s.charges_max), tonumber(s.charge_left)
@@ -455,6 +457,19 @@ overlay:draw(function(d, dt)
     d:rect(cx - w / 2, y + h - 2 * sc, w, 2 * sc, rgba(line[2], 0.9), 1)
     d:text(text, cx + math.max(1, sc), y + 4 * sc + math.max(1, sc), {size = size, font = 'title', colour = rgba(INK, 0.7), z = 4, align = 'center'})
     d:text(text, cx, y + 4 * sc, {size = size, font = 'title', colour = rgba(line[2], 1), z = 5, align = 'center'})
+    -- her keyed skills, on a second line: running (seconds left), cooling down (seconds), or ready (its key)
+    local function skill(name, key, left2, ready)
+        if left2 > 0 then return ('%s %.0fs'):format(name, left2), true end
+        if ready > 0 then return ('%s in %.0fs'):format(name, ready), false end
+        return ('[%s] %s'):format(key, name), false
+    end
+    local e_text, e_on = skill('ENDOWMENT', ffi.string(s.key_label[1]), tonumber(s.e_left), tonumber(s.e_ready))
+    local d_text, d_on = skill('DESCENT', ffi.string(s.key_label[2]), tonumber(s.d_left), tonumber(s.d_ready))
+    local t2 = e_text .. '   |   ' .. d_text
+    local y2, size2 = y + h + 4 * sc, 13 * sc
+    local w2 = (#t2 * 8 + 28) * sc
+    d:rect(cx - w2 / 2, y2, w2, 20 * sc, rgba(PANEL, 0.5), 0)
+    d:text(t2, cx, y2 + 3 * sc, {size = size2, font = 'title', colour = rgba((e_on or d_on) and ORANGE or TEXT, 0.95), z = 5, align = 'center'})
 end)
 
 log('[Ascalon HUD] ready (waiting for Ascalon)')
