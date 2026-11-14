@@ -657,8 +657,16 @@ local function hide_units(units)
     for _, u in ipairs(units) do
         if alive(U, u) then
             local uk = ukey(u)
+            -- the whole unit switched off (0.5.11), its meshes left as the game has them: showing every mesh that was
+            -- ever seen drawn brought back a cape a mod keeps hidden, with the shimmer off too. Each look again, as
+            -- the game may switch a unit back on.
+            local whole = pc(U.set_unit_visibility, u, false)
+            if whole then
+                if not cl.keys['w' .. uk] then cl.keys['w' .. uk] = true; cl.hidden[#cl.hidden + 1] = {unit = u, whole = true, show = true} end
+                hid = hid + 1
+            end
             local okn, n = pc(U.num_meshes, u)
-            for i = 1, (okn and type(n) == 'number' and n <= 512) and n or 0 do
+            for i = 1, (not whole and okn and type(n) == 'number' and n <= 512) and n or 0 do
                 local okm, mesh = pc(U.mesh, u, i)
                 local okv, vis = false, nil
                 if okm then okv, vis = pc(M.visibility, mesh) end
@@ -678,7 +686,11 @@ end
 -- (the meshes shown again, the unit list kept)
 local function show_all_keep()
     local U = lib('Unit')
-    for _, h in ipairs(cl.hidden) do if h.show and alive(U, h.unit) then pc(U.set_mesh_visibility, h.unit, h.mesh, true) end end
+    for _, h in ipairs(cl.hidden) do
+        if h.show and alive(U, h.unit) then
+            if h.whole then pc(U.set_unit_visibility, h.unit, true) else pc(U.set_mesh_visibility, h.unit, h.mesh, true) end
+        end
+    end
     cl.hidden, cl.keys, cl.base = {}, {}, {}
 end
 -- Everything hidden is shown again. For the log (0.5.6: a gun stayed hidden after she was revealed), each unit's tally:
@@ -695,14 +707,16 @@ local function show_all()
         t.noted = t.noted + 1
         if h.show then
             t.want = t.want + 1
-            if t.alive and pc(U.set_mesh_visibility, h.unit, h.mesh, true) then n = n + 1; t.ok = t.ok + 1; shown[#shown + 1] = h end
+            if t.alive and h.whole then
+                if pc(U.set_unit_visibility, h.unit, true) then n = n + 1; t.ok = t.ok + 1; t.whole = true end
+            elseif t.alive and pc(U.set_mesh_visibility, h.unit, h.mesh, true) then n = n + 1; t.ok = t.ok + 1; shown[#shown + 1] = h end
         end
     end
     if (cl.shows or 0) < 6 then
         cl.shows = (cl.shows or 0) + 1
         for k = 1, math.min(#order, 40) do
             local t = per[order[k]]
-            log(('[Ascalon HUD]   %s %s: %d mesh(es) noted, %d to show, %d shown%s'):format(order[k], t.name, t.noted, t.want, t.ok, t.alive and '' or ' (the unit is gone)'))
+            log(('[Ascalon HUD]   %s %s: %d noted, %d to show, %d shown%s%s'):format(order[k], t.name, t.noted, t.want, t.ok, t.whole and ' (the unit as a whole)' or '', t.alive and '' or ' (the unit is gone)'))
         end
     end
     cl.check = {wait = 1, items = shown}
@@ -808,7 +822,7 @@ end
 -- hides through see-through textures is drawn again. A slot wearing one keeps it; its mesh is not drawn instead, and
 -- shown again as her gear is. (0.5.8 left alone every material a mod's patch replaces: with a model mod that was her
 -- whole body, and the cape's material is not patched at all.) Keyed by the id's high half, as Material.id gives it.
-local PM = {['2092282895'] = true, ['2490864873'] = true}   -- 0x7cb5b40fe282c123, 0x947794e9f9ada372
+local PM = {}   -- (0.5.11: none; 0.5.9's two were not the cape's, and hiding their meshes meant showing meshes again)
 local function patched_materials() return PM end
 -- For the log, once a session (0.5.10: which unit and material are the cape's): each of her units with every mesh,
 -- whether it is drawn, and each slot's material; and what the engine offers for materials, textures and cloth.
@@ -1031,7 +1045,7 @@ local function cloak_frame(s, dt)
             cl.on = false
             pcall(shimmer_restore)
             local n = show_all()
-            if cl.told < 12 then log(('[Ascalon HUD] shown again: %d meshes'):format(n)) end
+            if cl.told < 12 then log(('[Ascalon HUD] shown again: %d units or meshes'):format(n)) end
         end
         return
     end
