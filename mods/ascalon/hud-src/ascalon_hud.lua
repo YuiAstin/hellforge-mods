@@ -40,7 +40,7 @@ local S = rawget(_G, 'stingray') or _G
 local function lib(name) local t = rawget(_G, name) or (type(S) == 'table' and S[name]) or nil; return type(t) == 'table' and t or nil end
 local function pc(f, ...) if type(f) ~= 'function' then return false, 'missing' end return pcall(f, ...) end
 
-local INK, PANEL, TEXT, TEAL, ORANGE, MUTED = {8, 9, 10}, {12, 14, 16}, {240, 243, 245}, {120, 220, 210}, {255, 138, 36}, {150, 156, 160}
+local INK, PANEL, TEXT, MAGENTA, ORANGE, MUTED = {8, 9, 10}, {12, 14, 16}, {240, 243, 245}, {224, 72, 160}, {255, 138, 36}, {150, 156, 160}
 local function rgba(c, a) return {c[1], c[2], c[3], math.floor(255 * (a or 1) + 0.5)} end
 
 -- the kit, for the shared parts below; NAMES are her three key bindings (Pursuit has no key: it lands by itself)
@@ -332,6 +332,13 @@ end
 -- Beside the stratagem list, as a stratagem shows (0.4.2; the other kits' panel): a tile with a short name, the
 -- skill's name, then its key or what it waits for. Pursuit is passive (its charges); Endowment and Descent show the
 -- time they still run, then their cooldown.
+-- her skills' icons (0.4.16; images/ of the HUD project: Arknights' skill icons as the game's two-layer icon masks, the
+-- art's colour drawn in her magenta, its white in white)
+local ICONS = {}
+for i, id in ipairs({'ascalon_pursuit', 'ascalon_endowment', 'ascalon_descent'}) do
+    local okI, handle = pcall(hd2.resources.image, id)
+    if okI and handle then ICONS[i] = handle end
+end
 local SKILLS = {
     {name = 'PURSUIT', short = 'PUR'},
     {name = 'ENDOWMENT', short = 'END', bind = 1, key = 1},
@@ -355,16 +362,26 @@ local function ability(d, i, x, y, size, alpha)
     local ready, run, wait, count, label = skill_now(i)
     local a = alpha
     local t = math.max(1, 2 * sc)
-    local frame = run > 0 and rgba(ORANGE, a) or ready and rgba(TEAL, a) or rgba(GREY, a * 0.8)
+    local frame = run > 0 and rgba(ORANGE, a) or ready and rgba(MAGENTA, a) or rgba(GREY, a * 0.8)
     d:rect(x, y, size, size, rgba(INK, a * 0.9), 1)
     d:rect(x, y, size, t, frame, 2); d:rect(x, y + size - t, size, t, frame, 2)
     d:rect(x, y, t, size, frame, 2); d:rect(x + size - t, y, t, size, frame, 2)
+    local icon = ICONS[i]
+    if icon then
+        local pad = size * 0.08
+        local lit = ready or run > 0
+        d:image(icon, x + pad, y + pad, size - 2 * pad, size - 2 * pad, {z = 3,
+            colours = lit and {r = rgba(run > 0 and ORANGE or MAGENTA, 1), g = {255, 255, 255, 255}} or {r = rgba(GREY, 1), g = {150, 154, 158, 255}},
+            colour = {255, 255, 255, math.floor(255 * a + 0.5)}})
+    end
     if count then
-        heavy(d, sk.short, x + size / 2, y + size * 0.12, math.max(17 * sc, size * 0.32), 'title', ready and rgba(TEXT, a) or rgba(MUTED, a), 'center')
-        heavy(d, count, x + size / 2, y + size * 0.55, math.max(17 * sc, size * 0.32), 'title', ready and rgba(YELLOW, a) or rgba(TEXT, a), 'center')
+        if not icon then heavy(d, sk.short, x + size / 2, y + size * 0.12, math.max(17 * sc, size * 0.32), 'title', ready and rgba(TEXT, a) or rgba(MUTED, a), 'center') end
+        heavy(d, count, x + size / 2, y + size * 0.58, math.max(17 * sc, size * 0.32), 'title', ready and rgba(YELLOW, a) or rgba(TEXT, a), 'center')
     elseif run > 0 or wait > 0 then
+        -- waiting: the icon darkened; running or waiting: the seconds over it
+        if icon and run <= 0 then d:rect(x + t, y + t, size - 2 * t, size - 2 * t, rgba(INK, a * 0.55), 4) end
         heavy(d, ('%.0f'):format(math.ceil(run > 0 and run or wait)), x + size / 2, y + size * 0.25, math.max(20 * sc, size * 0.42), 'title', run > 0 and rgba(ORANGE, a) or rgba(TEXT, a), 'center')
-    else
+    elseif not icon then
         heavy(d, sk.short, x + size / 2, y + size * 0.3, math.max(17 * sc, size * 0.34), 'title', rgba(TEXT, a), 'center')
     end
     local tx = x + size + 10 * sc
@@ -395,7 +412,7 @@ local function abilities(d, box, only)
     if #shown == 0 then return end
     local w = size + 10 * sc + math.max(230 * sc, size * 5)
     d:rect(x - 10 * sc, y - 10 * sc, w + 20 * sc, step * #shown + 20 * sc - (step - size), rgba(PANEL, a * 0.72), 0)
-    d:rect(x - 10 * sc, y - 10 * sc, 3 * sc, step * #shown + 20 * sc - (step - size), rgba(TEAL, a), 1)
+    d:rect(x - 10 * sc, y - 10 * sc, 3 * sc, step * #shown + 20 * sc - (step - size), rgba(MAGENTA, a), 1)
     for k, i in ipairs(shown) do ability(d, i, x, y + (k - 1) * step, size, a) end
 end
 
@@ -679,7 +696,7 @@ end
 
 ---------------------------------------------------------------------------------------------- the status line --
 local LINES = {
-    [0] = {'HIDDEN', TEAL},
+    [0] = {'HIDDEN', MAGENTA},
     [2] = {'REVEALED', ORANGE},
     [3] = {'NOT HIDDEN: BACKPACK OR SUPPORT WEAPON', MUTED},
     [5] = {'DESCENT', ORANGE},
