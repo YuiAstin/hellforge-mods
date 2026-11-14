@@ -33,6 +33,9 @@
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
  * 0.3.0, her two keyed skills:
+ * 0.4.11 (Yui: "the ticks just literally miss the target as they get knocked around"; the log: 10 of 43 never
+ *     landed): a tick whose round has not landed 0.15 s on is sent again, from straight above, then from the far
+ *     side: up to three rounds a tick.
  * 0.4.10 (Yui: "feels like the bleed only applies to 3 targets max"): nothing caps the marks at three (64 marks, 8
  *     ticks a frame); the likeliest loss is the tick's round, sent level from 2.5 m on her side, taken by another
  *     enemy of the crowd. It is sent from 1.6 m out, above the marked enemy, and the log says every 10 s how many
@@ -119,7 +122,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.10"
+#define VERSION "0.4.11"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -721,9 +724,9 @@ HF_MOD_EXPORT int ascalon_view(unsigned version, float* out)
 }
 /* ---- Mortal Interrogation: the marks -------------------------------------------------------------------------------- */
 #define MARKS 64
-static struct { uint32_t e; int stacks, pending; double until, next; int32_t base; } g_mark[MARKS];
+static struct { uint32_t e; int stacks, pending; double until, next; int32_t base; double sent; int tries; } g_mark[MARKS];
 static unsigned g_marked, g_ticks, g_bleeds;
-static unsigned g_tickSent, g_tickSentLine, g_tickLandLine, g_tickLate;   /* for the log's Mortal Interrogation line */
+static unsigned g_tickSent, g_tickSentLine, g_tickLandLine, g_tickLate, g_tickAgain;   /* for the log's Mortal Interrogation line */
 static double g_tickLineAt;
 static int g_statusBad;   /* the game refused mi_status this session: the spawned-round tick instead */
 static int Marked(uint32_t e)
@@ -747,7 +750,7 @@ static void Mark(uint32_t e, int32_t damage)
         if (free < 0 && (!g_mark[i].e || g_mark[i].until <= g_now)) free = i;
     }
     if (free < 0) return;
-    g_mark[free].e = e; g_mark[free].stacks = 1; g_mark[free].pending = 0; g_mark[free].base = damage > 0 ? damage : 60;
+    g_mark[free].e = e; g_mark[free].stacks = 1; g_mark[free].pending = 0; g_mark[free].tries = 0; g_mark[free].base = damage > 0 ? damage : 60;
     g_mark[free].until = g_now + s_miSeconds; g_mark[free].next = g_now + 1;
     g_marked++;
 }
@@ -845,6 +848,31 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 }
 /* the GAME THREAD: each marked enemy's tick a second: a round of the mod's spawned 2.5 m from its body on her side (from
  * her, when she is nearer than that), flying into it; and its dose of the slow */
+/* One tick's round at a marked enemy's body, from 1.6 m out: from her side and above, then (a tick that missed,
+ * the enemy knocked about under it) from straight above, then from the far side. 1 sent */
+static int TickRound(int i, int try, const float pos[3], int have)
+{
+    uint8_t d[24];
+    float r[3], off[3], u[3] = {0, 0, 1.6f}, from[3];
+    if (!Descriptor(g_mark[i].e, d) || !UnitNode(Word(d + 12), 0, r)) return -1;
+    if (BodyOffset(Word(d + 12), r, off)) for (int t = 0; t < 3; t++) r[t] += off[t];
+    else r[2] += 1.0f;
+    if (have && try != 1)
+    {
+        float v[3] = {pos[0] - r[0], pos[1] - r[1], pos[2] + 1.3f - r[2]}, vn = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        float side = try == 0 ? 0.9f : -0.9f;
+        if (vn > 0.1f) { for (int k = 0; k < 3; k++) u[k] = v[k] / vn * side; u[2] = fabsf(u[2]) + 1.3f; }
+    }
+    for (int k = 0; k < 3; k++) from[k] = r[k] + u[k];
+    float dir[3] = {-u[0], -u[1], -u[2]}, dn = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+    if (!(dn > 0.05f)) return 0;
+    for (int k = 0; k < 3; k++) dir[k] /= dn;
+    int rr = hf->spawn_projectile(self, (uint32_t)s_areaRound, from, dir);
+    if (rr == HF_ACT_WAITING || !Act("Mortal Interrogation's tick", rr)) return 0;
+    g_mark[i].pending = 1; g_mark[i].sent = g_now; g_mark[i].tries = try + 1;
+    g_tickSent++;
+    return 1;
+}
 static void MarkFrame(void)
 {
     float pos[3];
@@ -854,15 +882,20 @@ static void MarkFrame(void)
         uint32_t en = g_mark[i].e;
         if (!en) continue;
         if (g_mark[i].until <= g_now || !Living(en)) { g_mark[i].e = 0; continue; }
+        /* a tick that has not landed 0.15 s on missed (0.4.11: three in ten did, the enemy knocked about by her hits
+         * between the look at where it is and the round getting there): again, up to three rounds a tick */
+        if (g_mark[i].pending && g_mark[i].tries < 3 && g_now - g_mark[i].sent >= 0.15 && g_now < g_mark[i].next)
+        {
+            g_tickAgain++;
+            if (TickRound(i, g_mark[i].tries, pos, have) > 0) spawned++;
+            else g_mark[i].tries = 3;
+            continue;
+        }
         if (g_now < g_mark[i].next) continue;
         g_mark[i].next = g_now + 1;
-        if (g_mark[i].pending) g_tickLate++;           /* the last one never landed on it */
+        if (g_mark[i].pending) g_tickLate++;           /* none of its rounds landed */
         g_mark[i].pending = 0;                         /* a tick that never landed is not owed */
-        uint8_t d[24];
-        float r[3], off[3];
-        if (!Descriptor(en, d) || !UnitNode(Word(d + 12), 0, r)) { g_mark[i].e = 0; continue; }
-        if (BodyOffset(Word(d + 12), r, off)) for (int t = 0; t < 3; t++) r[t] += off[t];
-        else r[2] += 1.0f;
+        g_mark[i].tries = 0;
         if (s_miSlow > 0 && hf->apply_status) hf->apply_status(self, en, HF_STATUS_FLAMER_SLOWED, s_miSlow * g_mark[i].stacks);
         if (s_miStatus > 0 && !g_statusBad && hf->apply_status)
         {
@@ -873,23 +906,9 @@ static void MarkFrame(void)
             Log("Mortal Interrogation: the game refused status %d (%s): the mark's damage is the mod's own from here", s_miStatus, hf->last_log ? hf->last_log(self) : "");
         }
         if (s_miDamage <= 0) continue;
-        float u[3] = {0, 0, 1}, from[3];
-        if (have)
-        {
-            float v[3] = {pos[0] - r[0], pos[1] - r[1], pos[2] + 1.3f - r[2]}, vn = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-            /* from her side and above, 1.6 m out (0.4.10; 2.5 m level before: in a crowd the enemy standing between
-             * took the round, and the marked one behind it no tick) */
-            if (vn > 0.1f) { for (int k = 0; k < 3; k++) u[k] = v[k] / vn * 0.9f; u[2] += 1.3f; }
-        }
-        else u[2] = 2.5f;
-        for (int k = 0; k < 3; k++) from[k] = r[k] + u[k];
-        float dir[3] = {-u[0], -u[1], -u[2]}, dn = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
-        if (!(dn > 0.05f)) continue;
-        for (int k = 0; k < 3; k++) dir[k] /= dn;
-        g_mark[i].pending = 1;
-        int rr = hf->spawn_projectile(self, (uint32_t)s_areaRound, from, dir);
-        if (rr == HF_ACT_WAITING || !Act("Mortal Interrogation's tick", rr)) g_mark[i].pending = 0;
-        else { spawned++; g_tickSent++; }
+        int tr = TickRound(i, 0, pos, have);
+        if (tr < 0) { g_mark[i].e = 0; continue; }
+        if (tr > 0) spawned++;
     }
     /* every 10 s with marks about: how many, and how the ticks fared */
     if (g_now - g_tickLineAt >= 10)
@@ -899,8 +918,8 @@ static void MarkFrame(void)
         if (alive || g_tickSent != g_tickSentLine)
         {
             static unsigned told;
-            if (told++ < 80) Log("Mortal Interrogation: %d enemies marked now (%d stacks); in the last 10 s %u ticks sent, %u landed; %u in all never landed", alive, stacks,
-                g_tickSent - g_tickSentLine, g_ticks - g_tickLandLine, g_tickLate);
+            if (told++ < 80) Log("Mortal Interrogation: %d enemies marked now (%d stacks); in the last 10 s %u rounds sent, %u ticks landed; in all %u rounds sent again, %u ticks never landed", alive, stacks,
+                g_tickSent - g_tickSentLine, g_ticks - g_tickLandLine, g_tickAgain, g_tickLate);
         }
         g_tickSentLine = g_tickSent; g_tickLandLine = g_ticks; g_tickLineAt = g_now;
     }
@@ -1423,7 +1442,7 @@ static void Reset(const char* why)
     g_sensing = 0;
     g_forgot = g_reveals = g_dodged = g_heard = g_shots = 0;
     g_volleys = g_strikes = g_pursuits = 0;
-    g_marked = g_ticks = g_bleeds = 0; g_tickSent = g_tickSentLine = g_tickLandLine = g_tickLate = 0;
+    g_marked = g_ticks = g_bleeds = 0; g_tickSent = g_tickSentLine = g_tickLandLine = g_tickLate = g_tickAgain = 0;
     if (g_eCasts || g_dCasts) Log("%s: Endowment %u times (%u stacks spread), Descent %u times (%u kills, %u hits on her nulled)", why, g_eCasts, g_spread, g_dCasts, g_dKills, g_nulled);
     if (g_parries || g_dashes) Log("%s: %u parries (%u counters), %u dashes (%u enemies struck on the way)", why, g_parries, g_counters, g_dashes, g_dashHits);
     g_parries = g_counters = g_dashes = g_dashHits = 0;
