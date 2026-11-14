@@ -823,7 +823,7 @@ end
 -- hides through see-through textures is drawn again. A slot wearing one keeps it; its mesh is not drawn instead, and
 -- shown again as her gear is. (0.5.8 left alone every material a mod's patch replaces: with a model mod that was her
 -- whole body, and the cape's material is not patched at all.) Keyed by the id's high half, as Material.id gives it.
-local PM = {}   -- (0.5.11: none; 0.5.9's two were not the cape's, and hiding their meshes meant showing meshes again)
+local PM = {['1966202537'] = true}   -- 0x7531dea9b2a2b888: the one cape unit's material (0.5.13, from the survey: the only unit of her body in the game's core bundle, with a material found nowhere else)
 local function patched_materials() return PM end
 -- For the log, once a session (0.5.10: which unit and material are the cape's): each of her units with every mesh,
 -- whether it is drawn, and each slot's material; and what the engine offers for materials, textures and cloth.
