@@ -810,6 +810,46 @@ end
 -- whole body, and the cape's material is not patched at all.) Keyed by the id's high half, as Material.id gives it.
 local PM = {['2092282895'] = true, ['2490864873'] = true}   -- 0x7cb5b40fe282c123, 0x947794e9f9ada372
 local function patched_materials() return PM end
+-- For the log, once a session (0.5.10: which unit and material are the cape's): each of her units with every mesh,
+-- whether it is drawn, and each slot's material; and what the engine offers for materials, textures and cloth.
+local function shimmer_survey(units)
+    local U, M, Mat, Id64, Id32 = lib('Unit'), lib('Mesh'), lib('Material'), lib('IdString64'), lib('IdString32')
+    for _, name in ipairs({'Unit', 'Mesh', 'Material', 'Cloth'}) do
+        local L, f = lib(name), {}
+        if type(L) == 'table' then
+            for k, v in pairs(L) do
+                local kk = tostring(k):lower()
+                if type(v) == 'function' and (name ~= 'Unit' or kk:find('mater') or kk:find('textur') or kk:find('cloth') or kk:find('visib') or kk:find('lod')) then f[#f + 1] = tostring(k) end
+            end
+            table.sort(f)
+        end
+        log(('[Ascalon HUD] survey %s (%s): %s'):format(name, type(L), table.concat(f, ' ')))
+    end
+    for _, u in ipairs(units) do
+        if alive(U, u) then
+            local parts = {}
+            local okn, n = pc(U.num_meshes, u)
+            for i = 1, (okn and type(n) == 'number' and n <= 64) and n or 0 do
+                local okm, mesh = pc(U.mesh, u, i)
+                local okv, vis = false, nil
+                if okm then okv, vis = pc(M.visibility, mesh) end
+                local okc, c = false, nil
+                if okm then okc, c = pc(M.num_materials, mesh) end
+                local ms = {}
+                for j = 1, (okc and type(c) == 'number' and c <= 16) and c or 0 do
+                    local oksl, slot = pc(M.material_slot_id, mesh, j)
+                    local okt, mat = pc(M.material, mesh, j)
+                    local sh, mh = '?', '?'
+                    if oksl and slot ~= nil then local o, x = pc(Id32.to_hex, slot); if o then sh = tostring(x) end end
+                    if okt and mat then local o, id64 = pc(Mat.id64, mat); if o and id64 ~= nil then local o2, x = pc(Id64.to_hex, id64); if o2 then mh = tostring(x) end end end
+                    ms[#ms + 1] = sh .. '=' .. mh
+                end
+                parts[#parts + 1] = ('m%d %s [%s]'):format(i, okv and tostring(vis) or 'err', table.concat(ms, ' '))
+            end
+            log(('[Ascalon HUD] survey %s %s: %s'):format(ukey(u), tostring(u), table.concat(parts, '; ')))
+        end
+    end
+end
 local function shimmer_apply(units)
     local U, M, Mat, Id64, Id32 = lib('Unit'), lib('Mesh'), lib('Material'), lib('IdString64'), lib('IdString32')
     if not Id64 or type(Id64.to_hex) ~= 'function' or type(Id64.from_hex) ~= 'function' or not Id32 or type(Id32.to_hex) ~= 'function' or type(Id32.from_hex) ~= 'function' then
@@ -819,6 +859,7 @@ local function shimmer_apply(units)
     end
     local set, bound, errs, skipped = 0, 0, 0, 0
     local patched = patched_materials()
+    if not SH.surveyed then SH.surveyed = true; pc(shimmer_survey, units) end
     if SH.notes then keep_hidden(U, M, SH.notes); SH.notes = nil end   -- what the last look's changes showed since
     local notes = {}
     for _, u in ipairs(units) do
