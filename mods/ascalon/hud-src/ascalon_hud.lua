@@ -774,6 +774,35 @@ local function shimmer_settings(dt)
     end
     SH.ready = ready
 end
+-- A change of material shows a unit's hidden meshes again (0.5.6: a cape a model mod keeps hidden came back whenever she
+-- was cloaked or shown). So around each change the meshes that were hidden are noted and, where the change showed
+-- them, hidden again, then and once more at the next look.
+local function hidden_meshes(U, M, u)
+    local out = {}
+    local okn, n = pc(U.num_meshes, u)
+    for i = 1, (okn and type(n) == 'number' and n <= 512) and n or 0 do
+        local okm, mesh = pc(U.mesh, u, i)
+        local okv, vis = false, nil
+        if okm then okv, vis = pc(M.visibility, mesh) end
+        if okv and vis == false then out[#out + 1] = i end
+    end
+    return out
+end
+local function keep_hidden(U, M, notes)
+    local n = 0
+    for _, note in ipairs(notes) do
+        if alive(U, note.unit) then
+            for _, i in ipairs(note.meshes) do
+                local okm, mesh = pc(U.mesh, note.unit, i)
+                local okv, vis = false, nil
+                if okm then okv, vis = pc(M.visibility, mesh) end
+                if okv and vis == true and pc(U.set_mesh_visibility, note.unit, i, false) then n = n + 1 end
+            end
+        end
+    end
+    if n > 0 and (SH.kept or 0) < 8 then SH.kept = (SH.kept or 0) + 1; log(('[Ascalon HUD] shimmer: %d mesh(es) a change of material had shown are hidden again'):format(n)) end
+    return n
+end
 local function shimmer_apply(units)
     local U, M, Mat, Id64, Id32 = lib('Unit'), lib('Mesh'), lib('Material'), lib('IdString64'), lib('IdString32')
     if not Id64 or type(Id64.to_hex) ~= 'function' or type(Id64.from_hex) ~= 'function' or not Id32 or type(Id32.to_hex) ~= 'function' or type(Id32.from_hex) ~= 'function' then
@@ -782,8 +811,11 @@ local function shimmer_apply(units)
         return
     end
     local set, bound, errs = 0, 0, 0
+    if SH.notes then keep_hidden(U, M, SH.notes); SH.notes = nil end   -- what the last look's changes showed since
+    local notes = {}
     for _, u in ipairs(units) do
         if alive(U, u) then
+            notes[#notes + 1] = {unit = u, meshes = hidden_meshes(U, M, u)}
             local okn, n = pc(U.num_meshes, u)
             for i = 1, (okn and type(n) == 'number' and n <= 512) and n or 0 do
                 local okm, mesh = pc(U.mesh, u, i)
@@ -845,6 +877,7 @@ local function shimmer_apply(units)
             end
         end
     end
+    if set > 0 then keep_hidden(U, M, notes); SH.notes = notes end
     if set > 0 and SH.told < 12 then
         SH.told = SH.told + 1
         log(('[Ascalon HUD] shimmer: the cloak material on %d slot(s) of %d unit(s), %d binding(s) at opacity %.2f / %.2f, %d refused'):format(set, #units, bound, SH.op, SH.st, errs))
@@ -878,6 +911,7 @@ local function shimmer_restore_step(dt)
     if SH.wait > 0 then return end
     SH.wait = 0.25
     local U, M, Mat, Id64, Id32 = lib('Unit'), lib('Mesh'), lib('Material'), lib('IdString64'), lib('IdString32')
+    if SH.rnotes then keep_hidden(U, M, SH.rnotes); SH.rnotes = nil end
     -- what the last way did
     local left = {}
     for _, a in ipairs(SH.pending) do
@@ -900,6 +934,12 @@ local function shimmer_restore_step(dt)
         SH.pending, SH.broken = nil, true
         return
     end
+    local rnotes, noted = {}, {}
+    for _, a in ipairs(left) do
+        local uk = ukey(a.unit)
+        if not noted[uk] and alive(U, a.unit) then noted[uk] = true; rnotes[#rnotes + 1] = {unit = a.unit, meshes = hidden_meshes(U, M, a.unit)} end
+    end
+    SH.rnotes = rnotes
     for _, a in ipairs(left) do
         local what = nil
         if SH.stage == 1 and a.hex then local okf, id = pc(Id64.from_hex, a.hex); if okf then what = id end
@@ -913,6 +953,7 @@ local function shimmer_restore_step(dt)
             if SH.told2 < 12 then SH.told2 = SH.told2 + 1; log(('[Ascalon HUD] shimmer slot %s: set_material with %s (%s): %s %s'):format(tostring(a.slot), tostring(what), type(what), tostring(oks), tostring(res))) end
         end
     end
+    keep_hidden(U, M, rnotes)
 end
 local can_alive = nil
 local function cloak_frame(s, dt)
