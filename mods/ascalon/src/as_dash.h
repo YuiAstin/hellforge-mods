@@ -25,6 +25,8 @@ static float RayWith(uint32_t unit, const float from[3], const float dir[3], flo
         float d;
         memcpy(&d, hits + 44u * i + 24, 4);
         if (Word(hits + 44u * i + 28) == unit || !isfinite(d) || d < 0.02f) continue;
+        /* a zone, not a thing (Ascalon 0.4.14; ZONE_TAG below): nothing stands on it or is stopped by it */
+        if (ActorFilter(Word(hits + 44u * i + 32), Word(hits + 44u * i + 28)) == 0xEDC5EBE0u) continue;
         if (g_rayPrefer >= 0 ? fabsf(d - g_rayPrefer) < fabsf(best - g_rayPrefer) : d < best) best = d;
     }
     return best;
@@ -67,6 +69,11 @@ static int Surfaces(uint32_t unit, float x, float y, float ref, float* z, int ma
         if (hu == unit || !isfinite(d) || d < 0.02f || d > len) continue;
         uint32_t filt = ActorFilter(Word(hits + 44u * i + 32), hu); if (filt == FILTER_FOLIAGE || (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u))) continue;   /* leaves, canopies and bodies (enemies, corpses: filters seen in Voymastina 0.2.1's probe) are no floor */
         if (IsFoeUnit(hu)) { g_underFoe = 1; continue; }                              /* nor is an enemy's back */
+        /* Actors tagged 0xEDC5EBE0 are zones (0.4.14, from the log of a look down where she "flew up"): a level
+         * face 2 m over the ground across a whole area, around her wherever she stood in it, which a look meets from
+         * outside and which stops nothing. 0.4.12 told them by a look up from her own spot, which missed the zone
+         * she was about to dash into. */
+        if (filt == 0xEDC5EBE0u) continue;
         int phantom = 0;
         for (int q = 0; q < g_nPhantom; q++) if (fabsf(top[2] - d - g_phantom[q]) < 0.35f) phantom = 1;
         if (phantom) continue;

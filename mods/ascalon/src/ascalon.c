@@ -33,6 +33,11 @@
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
  * 0.3.0, her two keyed skills:
+ * 0.4.14 (Yui: "found a spot that made me fly up again"; the log's look down): the sheet is an actor tagged
+ *     0xEDC5EBE0, the tag 0.4.9 already left out of the way check as "something of hers": it is a zone's volume, around
+ *     her wherever she stands in it. No look counts it now (Surfaces, RayWith), which also ends the refusals for "no
+ *     surface she fits on" inside such a zone (its faces were walls to Fits). The Warp Pack's filter 0x48D6C53A given
+ *     to the mod's raycast meets nothing at all, so it is not that raycast's kind of filter; the tags decide.
  * 0.4.12 (Yui: "constantly teleporting upward even on flat road that has nothing in front"; the log: every dash on
  *     that road from 7.5 to 9.59): a level sheet 2 m over the road, met only from above, made the road read as buried
  *     and was taken as the spot. What is over her own spot and is not a roof is left out of the spots (g_phantom).
@@ -125,7 +130,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.13"
+#define VERSION "0.4.14"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
