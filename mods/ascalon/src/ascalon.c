@@ -33,6 +33,13 @@
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
  * 0.3.0, her two keyed skills:
+ * 0.4.2 (Yui: "fix the sound and add proper UI and mods options"):
+ *   - The parry's sound: 0.4.1's bank of its own was never loaded (no package lists it; Wwise.load_bank only takes a
+ *     resident resource), so the event and the recordings are now added to a bank the game always has loaded (the
+ *     Hellbomb objective's, obj_hellbomb: tools/build_bank.py), shipped as that bank's replacement in data/.
+ *   - Her skills beside the stratagem list as the other kits show theirs (Pursuit's charges, Endowment, Descent: key,
+ *     time left, cooldown), key bindings in the game's own binding pages (ascalon_input / ascalon_key: Endowment,
+ *     Descent, the dash), and her settings as rows on the MODS tab (ascalon_option_get / _set, as before).
  * 0.4.1 (Yui: "give the parry a sound"; "look at what other mods in HellForge do"): the parry plays a clash, one of
  *     nine of Yui's recordings, from a sound bank of the mod's own (data/007e093ca718ca1a.patch_0, built by
  *     tools/build_bank.py: the CQC-2 Saber bank's structure under new ids with the recordings as PCM media, the way
@@ -68,7 +75,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.1"
+#define VERSION "0.4.2"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -964,6 +971,16 @@ static void Descent(void)
     g_dCasts++;
     Log("Descent: %.0f s out of hiding, no hit on her lands, her hits x%.2f; each kill near her adds %.0f s", (double)s_dSeconds, (double)s_dMult, (double)s_dPerKill);
 }
+/* In-game key bindings (0.4.2): the HUD script registers Endowment, Descent and the dash with Mod Bindings Menu and
+ * passes each press here (skill 1 Endowment, 2 Descent, 3 the dash); ascalon_key gives the .ini keys as their defaults. */
+static atomic_int g_bindPress;
+HF_MOD_EXPORT int ascalon_input(unsigned version, int skill)
+{
+    if (version != 1) return 0;
+    if (skill >= 1 && skill <= 3) atomic_fetch_or(&g_bindPress, 1 << (skill - 1));
+    return 1;
+}
+
 static void SkillFrame(void)
 {
     static int inDescent;
@@ -995,6 +1012,7 @@ static void SkillFrame(void)
     int mdown = focused && ((GetAsyncKeyState(s_meleeVk) & 0x8000) != 0 || (atomic_load(&g_melee) && (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0));
     if (mdown && !prevM && g_alive) Dash();
     prevM = mdown;
+    int binds = atomic_exchange(&g_bindPress, 0);
     int mods = focused ? ((GetAsyncKeyState(VK_SHIFT) & 0x8000) ? KM_SHIFT : 0) | ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? KM_CTRL : 0) |
                          ((GetAsyncKeyState(VK_MENU) & 0x8000) ? KM_ALT : 0) : 0;
     for (int i = 0; i < 3; i++)
@@ -1002,13 +1020,15 @@ static void SkillFrame(void)
         int own = s_keys[i].vk == VK_SHIFT ? KM_SHIFT : s_keys[i].vk == VK_CONTROL ? KM_CTRL : s_keys[i].vk == VK_MENU ? KM_ALT : 0;
         int down = focused && (GetAsyncKeyState(s_keys[i].vk) & 0x8000) != 0 && (mods & ~own) == s_keys[i].mods;
         static unsigned long long fired[3];
-        if (down && !prev[i] && GetTickCount64() - fired[i] > 300 && g_alive && atomic_load(&g_avatar) && (fired[i] = GetTickCount64(), 1))
+        int bound = (i == 1 && (binds & 1)) || (i == 2 && (binds & 2));   /* the in-game binding's press (0.4.2) */
+        if (((down && !prev[i]) || bound) && GetTickCount64() - fired[i] > 300 && g_alive && atomic_load(&g_avatar) && (fired[i] = GetTickCount64(), 1))
         {
             if (i == 1) Endowment();
             else if (i == 2) Descent();
         }
         prev[i] = down;
     }
+    if ((binds & 4) && g_alive) Dash();
 }
 static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 {
@@ -1223,6 +1243,14 @@ static const KbOption kOptions[] = {
     {"gear_rule", NULL, &s_gearRule}, {"cloak_visual", NULL, &s_cloakVisual}, {"hide_gear", NULL, &s_hideGear},
     {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
 };
+HF_MOD_EXPORT int ascalon_key(unsigned version, int skill, int* vk, int* mods)
+{
+    if (version != 1 || skill < 1 || skill > 3 || !vk || !mods) return 0;
+    if (skill == 3) { *vk = s_meleeVk; *mods = 0; return 1; }
+    *vk = s_keys[skill].vk;
+    *mods = s_keys[skill].mods;
+    return 1;
+}
 HF_MOD_EXPORT int ascalon_option_get(const char* name, double* out) { return OptionGet(name, out); }
 HF_MOD_EXPORT int ascalon_option_set(const char* name, double value) { return OptionSet(name, value); }
 

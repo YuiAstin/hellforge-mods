@@ -148,5 +148,17 @@ perception research (docs/research/perception.md, when written) come first.
   action, event and bank new ids, and stores the recordings as PCM media (mono, with a `hash` chunk).
 - Found on the way: a bank's id in `BKHD` is FNV-1 of its name xor `0xA3107038`; the bank resource is
   `[magic][u32 size][u64 murmur64 of content/audio/<name>]` then the bank; the dep resource is the path string.
-- The recordings and the built patch are not in the repository (`.gitignore`): where the samples come from is not
-  settled. Untested in game as of this entry.
+- The recordings and the built patch are not in the repository (`.gitignore`): the samples are a YouTube channel's
+  recreation of Sekiro's clashes, with no permission asked yet. In game: the parry worked, the sound did not (the
+  engine never had the event: `Wwise.load_bank` only takes a resident resource and no package lists a bank of our own).
+
+### 0.4.2: the sound in a resident bank, the skill panel, MODS rows
+
+- Sound: the event, container, sounds and media are added to `obj_hellbomb` (`0xD2C617C603DE1B92`, resident in every
+  snapshot of HD2Runtime's catalogue), which the mod ships as `data/9ba626afa44a3aa3.patch_1`. `build_bank.py` takes
+  the Saber patch and the host patch; it carries the Saber's mixer chain, attenuations and effect the host lacks, in
+  the Saber bank's own order, and checks its patch writer against HellForge's own file byte for byte.
+- A patch entry's sixth field is the running total of the sizes before it, each rounded up to 256 (0 on the first).
+- Skill panel beside the stratagem list (the kits' shared list and bindings parts): Pursuit's charges, Endowment and
+  Descent with key, time running and cooldown. Bindings: Endowment, Descent, the dash.
+- 28 settings as rows on the MODS tab.
