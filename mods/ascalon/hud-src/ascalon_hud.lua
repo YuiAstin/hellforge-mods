@@ -660,16 +660,16 @@ local function hide_units(units)
             -- the whole unit switched off (0.5.11), its meshes left as the game has them: showing every mesh that was
             -- ever seen drawn brought back a cape a mod keeps hidden, with the shimmer off too. Each look again, as
             -- the game may switch a unit back on.
-            local whole = pc(U.set_unit_visibility, u, false)
-            if whole then
-                if not cl.keys['w' .. uk] then cl.keys['w' .. uk] = true; cl.hidden[#cl.hidden + 1] = {unit = u, whole = true, show = true} end
-                hid = hid + 1
-            end
+            -- (0.5.12: not so. Switching a unit on again drew every mesh it has: a grey armour over her.)
+            local whole = false
+            local first = not cl.base[uk] and (cl.firsts or 0) < 60
+            local seen = {}
             local okn, n = pc(U.num_meshes, u)
             for i = 1, (not whole and okn and type(n) == 'number' and n <= 512) and n or 0 do
                 local okm, mesh = pc(U.mesh, u, i)
                 local okv, vis = false, nil
                 if okm then okv, vis = pc(M.visibility, mesh) end
+                if first then seen[#seen + 1] = i .. (okv and (vis == true and '+' or '-') or '?') end
                 if okm and okv and vis == true and pc(U.set_mesh_visibility, u, i, false) then
                     local key = ukey(u) .. ':' .. i
                     -- every mesh hidden is shown again (0.5.7). 0.5.5 showed only those drawn the first time the unit was
@@ -678,6 +678,7 @@ local function hide_units(units)
                     hid = hid + 1
                 end
             end
+            if first then cl.firsts = (cl.firsts or 0) + 1; log(('[Ascalon HUD] first hidden %s %s: meshes %s'):format(uk, tostring(u), table.concat(seen, ' '))) end
             cl.base[uk] = true
         end
     end
@@ -1056,9 +1057,23 @@ local function cloak_frame(s, dt)
     cl.acc = 0
     pcall(function()
         if cl.scan_in <= 0 or not cl.units then
-            cl.scan_in = 2
+            cl.scan_in = cl.settled and 2 or 0.5
             local units, mx, my, mz = collect(s)
             if units then
+                -- Not hidden until she has landed (0.5.12): what is drawn in the pod is not what is drawn after it (a
+                -- cape that a mod keeps hidden is drawn there), and every mesh hidden is shown again when she is
+                -- revealed. Landed: her height still for 2.5 s, or 30 s since her Helldiver appeared.
+                local av = tonumber(s.units[0])
+                if cl.av ~= av then cl.av = av; cl.settled = false; cl.still = 0; cl.lastz = nil; cl.waited = 0 end
+                if not cl.settled then
+                    cl.waited = cl.waited + 0.5
+                    if cl.lastz and math.abs(mz - cl.lastz) < 0.25 then cl.still = cl.still + 1 else cl.still = 0 end
+                    cl.lastz = mz
+                    if cl.still >= 5 or cl.waited >= 30 then
+                        cl.settled = true
+                        if cl.told < 24 then log(('[Ascalon HUD] she has landed (%s after %.1f s): hidden from now'):format(cl.still >= 5 and 'still' or 'by the clock', cl.waited)) end
+                    end
+                end
                 cl.units = units
                 -- her body: the units at her Helldiver's own root (the avatar and its armour parts); the rest is gear
                 local U = lib('Unit')
@@ -1069,7 +1084,7 @@ local function cloak_frame(s, dt)
                 end
             end
         end
-        if not cl.units then return end
+        if not cl.units or not cl.settled then return end
         local shimmer = SH.on and SH.ready and cl.body ~= nil and not SH.broken and not SH.pending
         if shimmer ~= SH.live then        -- from not drawn to the shimmer or back: everything as it was first
             shimmer_restore()
