@@ -33,6 +33,8 @@
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
  * 0.3.0, her two keyed skills:
+ * 0.4.15 (Yui: "her Descent was missing the expanded range"): while Descent runs her hits reach everyone within
+ *     d_radius (25 m) instead of area_radius (15 m), as the skill widens her range in Arknights.
  * 0.4.14 (Yui: "found a spot that made me fly up again"; the log's look down): the sheet is an actor tagged
  *     0xEDC5EBE0, the tag 0.4.9 already left out of the way check as "something of hers": it is a zone's volume, around
  *     her wherever she stands in it. No look counts it now (Surfaces, RayWith), which also ends the refusals for "no
@@ -130,7 +132,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.14"
+#define VERSION "0.4.15"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -149,7 +151,7 @@ static float s_areaRadius = 15, s_areaMult = 1, s_areaEvery = 0.25f, s_pursuitMu
 static int s_areaMax = 12, s_areaRound = 7, s_pursuitCharges = 3;
 static float s_miSeconds = 25, s_miDamage = 0.10f, s_miSlow = 18;
 static float s_eSeconds = 35, s_eCooldown = 20, s_eMult = 2.3f, s_eRadius = 15, s_eSlow = 60, s_eSpread = 5;
-static float s_dSeconds = 5, s_dCooldown = 45, s_dMult = 1.5f, s_dPerKill = 2, s_dCap = 15, s_dGrace = 2;
+static float s_dSeconds = 5, s_dCooldown = 45, s_dMult = 1.5f, s_dPerKill = 2, s_dCap = 15, s_dGrace = 2, s_dRadius = 25;
 static float s_parryVolume = 0.4f, s_parryWindow = 0.3f, s_parryInvuln = 1, s_parryDamage = 300, s_parryBehind = 2.2f, s_parryStun = 300;
 static float s_dashDistance = 6, s_dashCooldown = 1.2f, s_dashDamage = 150, s_dashWidth = 2;
 static int s_parry = 1, s_dash = 1, s_meleeVk = 70, s_parrySound = 1, s_gameFit = 1;
@@ -165,7 +167,7 @@ static const KbSetting kSettings[] = {
     KB_F("dash_cooldown", s_dashCooldown, 0, 60), KB_F("dash_damage", s_dashDamage, 0, 100000), KB_F("dash_width", s_dashWidth, 0.5, 10), KB_I("melee_key_code", s_meleeVk, 1, 255),
     KB_F("e_seconds", s_eSeconds, 1, 300), KB_F("e_cooldown", s_eCooldown, 0, 600), KB_F("e_mult", s_eMult, 1, 20), KB_F("e_radius", s_eRadius, 0, 60),
     KB_F("e_slow", s_eSlow, 0, 1000), KB_F("e_spread", s_eSpread, 0, 30), KB_F("d_seconds", s_dSeconds, 1, 120), KB_F("d_cooldown", s_dCooldown, 0, 600),
-    KB_F("d_mult", s_dMult, 1, 20), KB_F("d_per_kill", s_dPerKill, 0, 30), KB_F("d_cap", s_dCap, 1, 120), KB_F("d_grace", s_dGrace, 0, 30),
+    KB_F("d_mult", s_dMult, 1, 20), KB_F("d_per_kill", s_dPerKill, 0, 30), KB_F("d_cap", s_dCap, 1, 120), KB_F("d_grace", s_dGrace, 0, 30), KB_F("d_radius", s_dRadius, 0, 60),
     KB_F("mi_seconds", s_miSeconds, 0, 120), KB_F("mi_damage", s_miDamage, 0, 5), KB_F("mi_slow", s_miSlow, 0, 1000), KB_I("mi_stacks", s_miStacks, 0, 9),
     KB_I("numbers", s_numbers, 0, 1), KB_I("mi_status", s_miStatus, 0, 200), KB_F("mi_status_buildup", s_miBuildup, 0, 1000),
     KB_F("area_radius", s_areaRadius, 0, 60), KB_F("area_mult", s_areaMult, 0, 10), KB_F("area_every", s_areaEvery, 0.05, 5),
@@ -210,7 +212,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Descent (key_descent): she steps out of hiding: for d_seconds no hit on her lands and her hits deal d_mult\n"
                "; times their damage; each enemy that dies near her adds d_per_kill s (never more than d_cap s left). She is\n"
                "; seen and drawn while it lasts, and hidden again d_grace s after. Then d_cooldown s.\n"
-               "d_seconds = %g\nd_cooldown = %g\nd_mult = %g\nd_per_kill = %g\nd_cap = %g\nd_grace = %g\n"
+               "d_seconds = %g\nd_cooldown = %g\nd_mult = %g\nd_per_kill = %g\nd_cap = %g\nd_grace = %g\nd_radius = %g\n"
                "; Mortal Interrogation: each hit or strike of hers puts a stack on its target (mi_stacks at most) for mi_seconds\n"
                "; from the last one. A marked enemy takes mi_damage times the marking hit's damage a second for each stack, and\n"
                "; a dose of the slow (mi_slow a stack; 100 a full dose).\n"
@@ -241,7 +243,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_parryDamage, (double)s_parryBehind, (double)s_parryStun, s_dash, s_meleeVk, (double)s_dashDistance, (double)s_dashCooldown,
             (double)s_dashDamage, (double)s_dashWidth, s_gameFit, (double)s_eSeconds, (double)s_eCooldown,
             (double)s_eMult, (double)s_eRadius, (double)s_eSlow, (double)s_eSpread, (double)s_dSeconds, (double)s_dCooldown, (double)s_dMult,
-            (double)s_dPerKill, (double)s_dCap, (double)s_dGrace, s_miStacks, (double)s_miSeconds,
+            (double)s_dPerKill, (double)s_dCap, (double)s_dGrace, (double)s_dRadius, s_miStacks, (double)s_miSeconds,
             (double)s_miDamage, (double)s_miSlow, s_miStatus, (double)s_miBuildup, s_numbers, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
             (double)s_revealHold, (double)s_noiseWindow, (double)s_heardHold, s_gearRule, (double)s_dodge, s_cloakVisual,
             s_hideGear);
@@ -393,6 +395,8 @@ static uint64_t g_heldRes;
 static unsigned g_dodged, g_forgot, g_reveals;
 static const char* kStateName[] = {"hidden", "-", "revealed (an enemy sees or heard her)", "not hidden (backpack or support weapon)", "away", "in Descent"};
 static double g_eUntil, g_eReady, g_dUntil, g_dReady, g_eSlowAt;
+/* how far her hits reach everyone: area_radius, and d_radius while Descent runs (0.4.15: its wider range) */
+static float Reach(void) { return g_now < g_dUntil && s_dRadius > s_areaRadius ? s_dRadius : s_areaRadius; }
 static unsigned g_eCasts, g_dCasts, g_dKills, g_spread, g_nulled;
 
 /* ---- the visibility row (game.dll+0x3326540: map +0x20, rows +0x40, 20 bytes each: base +0, floor +12) ------------- */
@@ -842,7 +846,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     g_volPursuit = pursuit;
     g_volOwed = pursuit ? 2 : 1;
     static unsigned told;
-    if (told < 12) { told++; Log("%s of hers (kind %u, %d damage) on entity %u: everyone within %.0f m is struck%s", melee ? "a melee hit" : "a shot", d->kind, d->amount, d->target, (double)s_areaRadius, pursuit ? " (Pursuit: twice, and slowed)" : ""); }
+    if (told < 12) { told++; Log("%s of hers (kind %u, %d damage) on entity %u: everyone within %.0f m is struck%s", melee ? "a melee hit" : "a shot", d->kind, d->amount, d->target, (double)Reach(), pursuit ? " (Pursuit: twice, and slowed)" : ""); }
     if (pursuit)
     {
         if (g_charges == s_pursuitCharges) g_chargeAt = g_now;
@@ -953,7 +957,7 @@ static void AreaFrame(void)
         float r[3];
         if (!en || (en == g_volPrimary && !second) || !Descriptor(en, d) || Quad(d) != g_foeRes[k] || !UnitNode(Word(d + 12), 0, r)) continue;
         float d2 = Dist2(r, pos);
-        if (d2 > s_areaRadius * s_areaRadius || (nc == cap && d2 >= c[cap - 1].d2) || !Living(en)) continue;
+        if (d2 > Reach() * Reach() || (nc == cap && d2 >= c[cap - 1].d2) || !Living(en)) continue;
         int j = nc < cap ? nc++ : cap - 1;
         while (j > 0 && c[j - 1].d2 > d2) { c[j] = c[j - 1]; j--; }
         c[j].e = en; c[j].d2 = d2;
@@ -985,7 +989,7 @@ static void AreaFrame(void)
     {
         g_volleys++;
         static unsigned told;
-        if (told++ < 10) Log("area strike: %d enem%s of the %d within %.0f m (projectile %d)%s", fired, fired == 1 ? "y" : "ies", nc, (double)s_areaRadius, s_areaRound, second ? ", Pursuit's second" : "");
+        if (told++ < 10) Log("area strike: %d enem%s of the %d within %.0f m (projectile %d)%s", fired, fired == 1 ? "y" : "ies", nc, (double)Reach(), s_areaRound, second ? ", Pursuit's second" : "");
     }
 }
 
@@ -1672,7 +1676,7 @@ static const KbOption kOptions[] = {
     {"pursuit_every", &s_pursuitEvery, NULL}, {"pursuit_slow", &s_pursuitSlow, NULL}, {"pursuit_charges", NULL, &s_pursuitCharges},
     {"e_seconds", &s_eSeconds, NULL}, {"e_cooldown", &s_eCooldown, NULL}, {"e_mult", &s_eMult, NULL}, {"e_radius", &s_eRadius, NULL},
     {"e_slow", &s_eSlow, NULL}, {"e_spread", &s_eSpread, NULL}, {"d_seconds", &s_dSeconds, NULL}, {"d_cooldown", &s_dCooldown, NULL},
-    {"d_mult", &s_dMult, NULL}, {"d_per_kill", &s_dPerKill, NULL}, {"d_cap", &s_dCap, NULL},
+    {"d_mult", &s_dMult, NULL}, {"d_per_kill", &s_dPerKill, NULL}, {"d_cap", &s_dCap, NULL}, {"d_radius", &s_dRadius, NULL},
     {"parry", NULL, &s_parry}, {"parry_sound", NULL, &s_parrySound}, {"parry_volume", &s_parryVolume, NULL}, {"parry_window", &s_parryWindow, NULL}, {"parry_damage", &s_parryDamage, NULL}, {"dash", NULL, &s_dash},
     {"dash_distance", &s_dashDistance, NULL}, {"dash_cooldown", &s_dashCooldown, NULL}, {"dash_damage", &s_dashDamage, NULL},
     {"mi_stacks", NULL, &s_miStacks}, {"mi_seconds", &s_miSeconds, NULL}, {"mi_damage", &s_miDamage, NULL}, {"mi_slow", &s_miSlow, NULL}, {"mi_status", NULL, &s_miStatus}, {"mi_status_buildup", &s_miBuildup, NULL},
