@@ -162,3 +162,14 @@ perception research (docs/research/perception.md, when written) come first.
 - Skill panel beside the stratagem list (the kits' shared list and bindings parts): Pursuit's charges, Endowment and
   Descent with key, time running and cooldown. Bindings: Endowment, Descent, the dash.
 - 28 settings as rows on the MODS tab.
+
+### 0.4.3: why the sound was "not loaded", the dash's damage, getting unstuck
+
+- `Wwise.has_event` is a lookup in the game's event metadata (`wwise_metadata` `0x11AB54001F79F739`, 28-byte records:
+  id, max attenuation, max and min duration, kind, 2D/3D, one more), not in the loaded banks; HD2Runtime's
+  `hd2.sounds.play` refuses an event it does not list. `build_bank.py` now also takes that resource and appends a
+  record for `ascalon_parry` (the Saber one-shot's, with our durations); the HUD script posts the event itself when
+  HD2Runtime still refuses. Whether 0.4.1's own bank was in fact loaded is therefore not known.
+- Dash: its strikes have their own list (the same press's melee hit wiped the shared one); wider path, reaching the
+  enemy she stops in front of.
+- Standing still, the melee press takes her out of a spot she is stuck in (underground, or wedged for 3 s).

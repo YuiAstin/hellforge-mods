@@ -848,7 +848,8 @@ end
 -- The parry's clash: ascalon.dll counts parries (ascalon_parry_seq); when the count rises, the event ascalon_parry is
 -- posted through HD2Runtime's hd2.sounds. The event and its recordings are in the mod's copy of a bank the game always
 -- has loaded (data/, the Hellbomb objective's bank: tools/build_bank.py), so nothing is loaded here (0.4.1 tried a bank
--- of its own with Wwise.load_bank: the engine never had it).
+-- of its own with Wwise.load_bank: the engine never had it). The same patch adds the event to the game's event
+-- metadata, which is what has_event (and so HD2Runtime) asks.
 pcall(ffi.cdef, [[ typedef unsigned int (*ascparry1)(unsigned int version); ]])
 local PS = {fn = nil, look = 0, seen = nil, known = nil, told = 0, event = 'ascalon_parry'}
 local function parry_sound(dt)
@@ -870,16 +871,27 @@ local function parry_sound(dt)
         if W and type(W.has_event) == 'function' then
             local okh, has = pcall(W.has_event, PS.event)
             has = okh and has == true
-            if has ~= PS.known then PS.known = has; log('[Ascalon HUD] the parry sound is ' .. (has and 'in the sound engine' or 'not in the sound engine (its bank is not loaded)')) end
+            if has ~= PS.known then PS.known = has; log('[Ascalon HUD] the parry sound is ' .. (has and 'known to the game (its event metadata)' or 'not in the game\'s event metadata')) end
         end
     end
     if seq == PS.seen then return end
     PS.seen = seq
-    if type(hd2.sounds) ~= 'table' or type(hd2.sounds.play) ~= 'function' then return end
-    local ok, handle, code, why = pcall(hd2.sounds.play, PS.event)
+    local ok, handle, code, why = false, nil, 'NO_API', nil
+    if type(hd2.sounds) == 'table' and type(hd2.sounds.play) == 'function' then ok, handle, code, why = pcall(hd2.sounds.play, PS.event) end
+    local direct = ''
+    if not (ok and handle ~= nil) then
+        -- HD2Runtime refused it (it asks has_event, which answers from the game's event metadata): posted here, the
+        -- plugin's own call on the main world's sound world (0.4.3)
+        local sr = SR()
+        local okd, res = pcall(function()
+            local w = sr.Application.main_world()
+            return sr.WwiseWorld.trigger_event(sr.Wwise.wwise_world(w), PS.event)
+        end)
+        direct = ('; posted directly: %s %s'):format(tostring(okd), tostring(res))
+    end
     if PS.told < 12 then
         PS.told = PS.told + 1
-        log(('[Ascalon HUD] parry %d: sound %s %s %s'):format(seq, tostring(ok and handle ~= nil), tostring(code), tostring(why or (not ok and handle) or '')))
+        log(('[Ascalon HUD] parry %d: sound %s %s %s%s'):format(seq, tostring(ok and handle ~= nil), tostring(code), tostring(why or (not ok and handle) or ''), direct))
     end
 end
 

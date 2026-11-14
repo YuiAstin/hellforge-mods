@@ -33,6 +33,17 @@
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
  * 0.3.0, her two keyed skills:
+ * 0.4.3 (Yui: "doesnt have the sound still", "the teleport doesnt do damage to enemies on the path", "she can get
+ *     stuck under building with no way to teleport back out since it needs velocity"):
+ *   - Sound: the bank was never the problem to see: the Wwise plugin's has_event answers from the game's event
+ *     metadata (wwise_metadata 0x11AB54001F79F739), not from the loaded banks, and hd2.sounds refuses an event it
+ *     does not list. The mod's data now also carries that resource with a record for ascalon_parry, and the HUD
+ *     script posts the event itself when HD2Runtime refuses it.
+ *   - Dash: its strikes have a list of their own (the melee hit of the same press set off an area strike that wiped
+ *     the shared one, so the dash's rounds landed with their own small amount); the path is a metre wider and reaches
+ *     the enemy she stops in front of.
+ *   - Stuck: standing still, the melee press dashes her out of a spot she cannot walk out of (under the ground, or no
+ *     room to stand where she has been for 3 s): towards where she looks, else any way, onto any height.
  * 0.4.2 (Yui: "fix the sound and add proper UI and mods options"):
  *   - The parry's sound: 0.4.1's bank of its own was never loaded (no package lists it; Wwise.load_bank only takes a
  *     resident resource), so the event and the recordings are now added to a bank the game always has loaded (the
@@ -75,7 +86,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.2"
+#define VERSION "0.4.3"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -488,6 +499,7 @@ static int Friend(uint32_t e)
 #define VOL 24
 static struct { double at; int n, pursuit; int32_t damage; uint32_t tgt[VOL]; uint8_t left[VOL]; } g_vol;
 static int g_volOwed, g_volPursuit, g_charges;
+static struct { double at; int n; int32_t damage; uint32_t tgt[VOL]; uint8_t left[VOL]; } g_dashVol;   /* the dash's strikes */
 static int32_t g_volDamage;
 static uint32_t g_volPrimary;
 static double g_areaAt = -100, g_chargeAt;
@@ -596,6 +608,19 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
         return;
     }
     if (!MineHit(d) || d->amount <= 0 || Friend(d->target) || s_areaMax < 1 || s_areaRadius <= 0) return;
+    /* one of the dash's strikes landing (its own list since 0.4.3: her melee hit of the same press set off an area
+     * strike that wiped the shared one, and the dash's rounds landed with their own small amount) */
+    if (d->kind == 0 && g_dashVol.n && g_now - g_dashVol.at <= 1.0)
+        for (int i = 0; i < g_dashVol.n; i++)
+            if (g_dashVol.tgt[i] == d->target && g_dashVol.left[i])
+            {
+                g_dashVol.left[i]--;
+                d->amount = g_dashVol.damage < 1 ? 1 : g_dashVol.damage;
+                g_strikes++;
+                Mark(d->target, g_dashVol.damage);
+                NoteHit(d, 0);
+                return;
+            }
     /* one of the last volley's strikes landing: its amount is the hit's that set it off */
     if (d->kind == 0 && g_vol.n && g_now - g_vol.at <= 1.0)
         for (int i = 0; i < g_vol.n; i++)
@@ -884,6 +909,8 @@ static void CounterFrame(void)
 static float g_moveP[16][3];
 static double g_moveT[16], g_dashReady;
 static unsigned g_moveN;
+static float g_anchor[3];
+static double g_anchorAt;   /* since when she has stayed within half a metre */
 static void MoveTrack(void)
 {
     float p[3];
@@ -891,6 +918,7 @@ static void MoveTrack(void)
     unsigned k = g_moveN++ % 16;
     memcpy(g_moveP[k], p, sizeof p);
     g_moveT[k] = g_now;
+    if (Dist2(p, g_anchor) > 0.25f) { memcpy(g_anchor, p, sizeof p); g_anchorAt = g_now; }   /* she got somewhere */
 }
 static int MoveDir(float dir[2])
 {
@@ -909,20 +937,54 @@ static int MoveDir(float dir[2])
     }
     return 0;
 }
+/* Whether she is in a spot she cannot walk out of: under the ground (a surface above her that looking up does not
+ * meet: terrain and rocks are solid only from above) or wedged (no room to stand where she has been for 3 s) */
+static int Stuck(uint32_t unit, const float pos[3])
+{
+    float z[16], climb = s_lpClimb;
+    s_lpClimb = 40;
+    int n = Surfaces(unit, pos[0], pos[1], pos[2], z, 16);
+    s_lpClimb = climb;
+    for (int i = 0; i < n; i++)
+        if (z[i] > pos[2] + 2.2f && !Roofed(unit, pos[0], pos[1], pos[2], z[i] - pos[2])) return 1;
+    return g_now - g_anchorAt >= 3 && !Fits(unit, pos[0], pos[1], pos[2]);   /* (3 s in place: beside a wall is not wedged) */
+}
 static void Dash(void)
 {
-    float dir[2], pos[3], dest[3], p[3];
+    float dir[2], pos[3], aim[3], dest[3], p[3];
     uint32_t me = atomic_load(&g_avatar), unit = UnitOf(me);
-    if (!s_dash || g_now < g_dashReady || !g_setPosition || !g_setVelocity || !g_raycast || !unit || !MoveDir(dir) || !PlayerPose(pos, NULL) || !QueryIdle()) return;
+    if (!s_dash || g_now < g_dashReady || !g_setPosition || !g_setVelocity || !g_raycast || !unit || !PlayerPose(pos, aim) || !QueryIdle()) return;
     NearFoeUnits(pos, s_dashDistance + 20);
     g_buried = 0;
     float dist = 0;
-    int found = 0;
-    for (float d = s_dashDistance; !found && d >= 1.5f; d -= 1.0f)
-        if (SpotAt(unit, pos, dir, d, dest, NULL, 0) && dest[2] - pos[2] <= 1.5f) { found = 1; dist = d; }
+    int found = 0, stuck = 0;
+    if (!MoveDir(dir))
+    {
+        /* standing still: only out of a spot she cannot walk out of (0.4.3: under a building she had no way out, the
+         * dash wanting her to move), towards where she looks, then any way, onto any height */
+        if (!Stuck(unit, pos)) return;
+        stuck = 1;
+        float h = sqrtf(aim[0] * aim[0] + aim[1] * aim[1]), climb = s_lpClimb;
+        if (h > 0.1f) { dir[0] = aim[0] / h; dir[1] = aim[1] / h; } else { dir[0] = 1; dir[1] = 0; }
+        s_lpClimb = 40;
+        for (float d = s_dashDistance; !found && d >= 1.5f; d -= 1.0f)
+            if (SpotAt(unit, pos, dir, d, dest, NULL, 1)) { found = 1; dist = d; }
+        for (int k = 1; k < 8 && !found; k++)
+        {
+            float a = 0.7854f * (float)k, c = cosf(a), sn = sinf(a), other[2] = {dir[0] * c - dir[1] * sn, dir[0] * sn + dir[1] * c};
+            for (float d = 3; !found && d <= 9; d += 3)
+                if (SpotAt(unit, pos, other, d, dest, NULL, 1)) { found = 1; dist = d; dir[0] = other[0]; dir[1] = other[1]; }
+        }
+        s_lpClimb = climb;
+        if (!found) { static unsigned told; if (told++ < 6) Log("dash: stuck, and no free spot within 9 m"); return; }
+    }
+    else
+        for (float d = s_dashDistance; !found && d >= 1.5f; d -= 1.0f)
+            if (SpotAt(unit, pos, dir, d, dest, NULL, 0) && dest[2] - pos[2] <= 1.5f) { found = 1; dist = d; }
     if (!found) { static unsigned told; if (told++ < 6) Log("dash: no room ahead"); return; }
     g_dashReady = g_now + s_dashCooldown;
-    /* who stands on the path, before she moves */
+    /* who stands on the path, before she moves: from a metre behind her to the enemy she stops in front of (a spot an
+     * enemy stands on is never taken, so the one that cut the dash short is 2 to 3 m past where she lands) */
     uint32_t hit[VOL];
     int nh = 0;
     for (int j = 0; j < FOES && nh < VOL; j++)
@@ -930,7 +992,7 @@ static void Dash(void)
         uint32_t id = g_foe[j];
         if (!id || !FoeRoot(id, g_foeRes[j], p)) continue;
         float rx = p[0] - pos[0], ry = p[1] - pos[1], along = rx * dir[0] + ry * dir[1], across = fabsf(ry * dir[0] - rx * dir[1]);
-        if (along < -0.5f || along > dist + 1.5f || across > s_dashWidth || fabsf(p[2] - pos[2]) > 3 || !Living(id)) continue;
+        if (along < -1.0f || along > dist + 3.0f || across > s_dashWidth + 1.0f || fabsf(p[2] - pos[2]) > 4 || !Living(id)) continue;
         hit[nh++] = id;
     }
     float zero[3] = {0, 0, 0};
@@ -941,18 +1003,18 @@ static void Dash(void)
     if (nh && s_dashDamage > 0)
     {
         double skill = (g_now < g_eUntil ? s_eMult : 1) * (g_now < g_dUntil ? s_dMult : 1);
-        memset(&g_vol, 0, sizeof g_vol);
-        g_vol.damage = (int32_t)(s_dashDamage * skill);
-        g_vol.at = g_now;
+        memset(&g_dashVol, 0, sizeof g_dashVol);
+        g_dashVol.damage = (int32_t)(s_dashDamage * skill);
+        g_dashVol.at = g_now;
         for (int i = 0; i < nh; i++)
         {
-            g_vol.tgt[g_vol.n] = hit[i]; g_vol.left[g_vol.n] = 1; g_vol.n++;
-            if (!StrikeBeside(hit[i], dest)) { g_vol.n--; continue; }
+            g_dashVol.tgt[g_dashVol.n] = hit[i]; g_dashVol.left[g_dashVol.n] = 1; g_dashVol.n++;
+            if (!StrikeBeside(hit[i], dest)) { g_dashVol.n--; continue; }
             g_dashHits++;
         }
     }
     static unsigned told;
-    if (told++ < 20) Log("dash: %.1f m, %d enem%s on the path", (double)dist, nh, nh == 1 ? "y" : "ies");
+    if (told++ < 40) Log("dash: %.1f m%s, %d enem%s on the path (%d struck for %d)", (double)dist, stuck ? " out of a spot she was stuck in" : "", nh, nh == 1 ? "y" : "ies", g_dashVol.n, nh ? g_dashVol.damage : 0);
 }
 /* ---- her keyed skills ----------------------------------------------------------------------------------------------- */
 static void Endowment(void)
@@ -1065,7 +1127,7 @@ static void Reset(const char* why)
     g_eUntil = g_eReady = g_dUntil = g_dReady = 0;
     g_eCasts = g_dCasts = g_dKills = g_spread = g_nulled = 0;
     memset(g_mark, 0, sizeof g_mark);
-    g_volOwed = 0; g_nslow = 0; g_vol.n = 0;
+    g_volOwed = 0; g_nslow = 0; g_vol.n = 0; g_dashVol.n = 0;
     g_charges = s_pursuitCharges; g_chargeAt = g_now;
     g_noiseAt = -100;
     memset(g_heardUntil, 0, sizeof g_heardUntil);

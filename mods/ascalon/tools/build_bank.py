@@ -3,8 +3,10 @@
 ascalon_parry, playing one of our recordings at random. Its structure is the CQC-2 Saber bank's (a 2D one-shot random
 container on the player bus, with its mixer chain) under new ids; the recordings are PCM media. The result replaces the
 host bank's resource (a bank of its own, 0.4.1, was never loaded: no package lists it). Usage:
-build_bank.py <Saber patch> <host patch> <out patch> <wav>...   (both patches: HellForge.Cli build-data --out, an
-include of the bank's wwise_bank and wwise_dep: Saber 0x550387E4C38E63B4, host 0xD2C617C603DE1B92)"""
+build_bank.py <Saber patch> <host patch> <metadata patch> <out patch> <wav>...   (the patches: HellForge.Cli build-data
+--out, an include of the bank's wwise_bank and wwise_dep: Saber 0x550387E4C38E63B4, host 0xD2C617C603DE1B92; and of
+wwise_metadata 0x11AB54001F79F739, the game's event records, which the result also replaces with ascalon_parry added:
+the Wwise plugin's has_event answers from them)"""
 import struct,sys,wave,hashlib,array
 BANK='ascalon_parry'; EVENT='ascalon_parry'; HOST='obj_hellbomb'
 SHELL_EVENT=0xFF783C88; XOR=0xA3107038; ARCHIVE_MAGIC=0xF0000011
@@ -39,7 +41,7 @@ def bank_of(path):
     for _ in range(n): s=u32(b,p+1); items.append((b[p],b[p+5:p+5+s])); p+=5+s
     return d,i,b,ch,items
 def main():
-    shell,host,out,wavs=sys.argv[1],sys.argv[2],sys.argv[3],sys.argv[4:]
+    shell,host,meta,out,wavs=sys.argv[1],sys.argv[2],sys.argv[3],sys.argv[4],sys.argv[5:]
     d,i,b,ch,items=bank_of(shell)
     byid={u32(x,0):(t,x) for t,x in items}
     t,ev=byid[SHELL_EVENT]; assert t==4 and ev[4]==1
@@ -104,18 +106,31 @@ def main():
     res=hd_[hi-16:hi-12]+struct.pack('<IQ',len(bank),rid)+bank
     name=PATH.encode()+b'\0'; dep=hd_[hi-16:hi-12]+struct.pack('<I',len(name))+name
     assert hd_.endswith(dep),'the host patch\'s dep resource'
+    # the event's record in the game's event metadata (the Wwise plugin's has_event answers from it, not from the banks)
+    md=open(meta,'rb').read(); T_META=0xD50A8B7E1C82B110; META=0x11AB54001F79F739
+    assert struct.unpack_from('<QQ',md,0x48+32)==(META,T_META)
+    mo=struct.unpack_from('<Q',md,0x48+32+16)[0]; ms=struct.unpack_from('<I',md,0x48+32+56)[0]; mraw=md[mo:mo+ms]
+    assert mraw[:4]==hd_[hi-16:hi-12] and u32(mraw,4)==ms-8 and (ms-8)%28==0
+    have_ev={u32(mraw,q) for q in range(8,ms,28)}; assert fnv(EVENT) not in have_ev
+    shell_rec=[mraw[q:q+28] for q in range(8,ms,28) if u32(mraw,q)==SHELL_EVENT][0]
+    longest=max(len(w) for _,w in media)/96000.0; shortest=min(len(w) for _,w in media)/96000.0
+    rec=struct.pack('<I',fnv(EVENT))+shell_rec[4:8]+struct.pack('<ff',longest,shortest)+shell_rec[16:]
+    mnew=mraw[:4]+struct.pack('<I',ms-8+28)+mraw[8:]+rec
     al=lambda v,a: (v+a-1)&~(a-1)
-    def patch(res):
-        off0=al(0x48+2*32+2*80,256); off1=al(off0+len(res),16)
-        hdr=bytearray(0x48); struct.pack_into('<III',hdr,0,ARCHIVE_MAGIC,2,2); struct.pack_into('<Q',hdr,0x20,al(len(res),256)+al(len(dep),256))
-        types=b''.join(struct.pack('<QQQII',0,t,1,0x10,0x40) for t in (T_BANK,T_DEP))
-        ent=lambda t,off,size,idx,cum: struct.pack('<QQQQQQQIIIIII',rid,t,off,0,0,cum,0,size,0,0,0x10,0x40,idx)
-        f=bytes(hdr)+types+ent(T_BANK,off0,len(res),0,0)+ent(T_DEP,off1,len(dep),1,al(len(res),256))
-        f+=b'\0'*(off0-len(f))+res; f+=b'\0'*(off1-len(f))+dep
-        return f
-    # the patch writer is right when the host's own resource comes out as HellForge built it, byte for byte
-    assert patch(hd_[hi-16:hi+len(hb)])==hd_,'the patch layout differs from HellForge\'s'
-    open(out,'wb').write(patch(res))
-    print('carried: %s; above them %08x (another bank\'s)'%(' '.join('%d:%08x'%(byid[k][0],k) for k in chain),top))
+    def patch(files):
+        n=len(files); off=al(0x48+n*32+n*80,256); cum=0; ents=b''; body=b''; start=off
+        for idx,(t,r,x) in enumerate(files):
+            if idx: off=al(off,16)
+            ents+=struct.pack('<QQQQQQQIIIIII',r,t,off,0,0,cum,0,len(x),0,0,0x10,0x40,idx)
+            body+=b'\0'*(off-start-len(body))+x; off+=len(x); cum+=al(len(x),256)
+        hdr=bytearray(0x48); struct.pack_into('<III',hdr,0,ARCHIVE_MAGIC,n,n); struct.pack_into('<Q',hdr,0x20,cum)
+        types=b''.join(struct.pack('<QQQII',0,t,1,0x10,0x40) for t,_,_ in files)
+        f=bytes(hdr)+types+ents
+        return f+b'\0'*(start-len(f))+body
+    # the patch writer is right when the inputs come out as HellForge built them, byte for byte
+    assert patch([(T_BANK,rid,hd_[hi-16:hi+len(hb)]),(T_DEP,rid,dep)])==hd_,'the patch layout differs from HellForge\'s'
+    assert patch([(T_META,META,mraw)])==md,'the patch layout differs from HellForge\'s (metadata)'
+    open(out,'wb').write(patch([(T_BANK,rid,res),(T_DEP,rid,dep),(T_META,META,mnew)]))
+    print('metadata: %d + 1 events; ascalon_parry %s'%(len(have_ev),struct.unpack('<IfffIII',rec)[1:]))
     print('host %s %016x: %d + %d objects, %d + %d media; event %s %08x; bank %d -> %d bytes'%(HOST,rid,len(hitems),len(add),len(have),len(media),EVENT,fnv(EVENT),len(hb),len(bank)))
 main()
