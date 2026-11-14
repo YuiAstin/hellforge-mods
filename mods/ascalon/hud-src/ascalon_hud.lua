@@ -420,6 +420,7 @@ local OPTIONS = {
     {'d_cooldown', 'slider', 'Descent: Cooldown', 0, 180, 5, 'Seconds before it can be used again.'},
     {'parry', 'toggle', 'Parry', nil, nil, nil, 'A right-click just before a hit, a melee weapon in hand: the hit does nothing and she counters.', true},
     {'parry_sound', 'toggle', 'Parry: Clash Sound', nil, nil, nil, 'A clash on a parry, from the .wav files in the mod\'s sounds folder.'},
+    {'parry_volume', 'slider', 'Parry: Clash Volume', 0, 2, 0.05, 'How loud the clash is, times the game\'s Master and SFX volume.'},
     {'parry_window', 'slider', 'Parry: Window', 0.05, 1, 0.05, 'Seconds before the hit the right-click still counts.'},
     {'parry_damage', 'slider', 'Parry: Counter Damage', 0, 2000, 50, 'What her counter deals to everyone in range.'},
     {'dash', 'toggle', 'Dash', nil, nil, nil, 'Melee while moving dashes her forward through the enemies in the way.', true},

@@ -111,7 +111,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.7"
+#define VERSION "0.4.8"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -131,7 +131,7 @@ static int s_areaMax = 12, s_areaRound = 7, s_pursuitCharges = 3;
 static float s_miSeconds = 25, s_miDamage = 0.10f, s_miSlow = 18;
 static float s_eSeconds = 35, s_eCooldown = 20, s_eMult = 2.3f, s_eRadius = 15, s_eSlow = 60, s_eSpread = 5;
 static float s_dSeconds = 5, s_dCooldown = 45, s_dMult = 1.5f, s_dPerKill = 2, s_dCap = 15, s_dGrace = 2;
-static float s_parryWindow = 0.3f, s_parryInvuln = 1, s_parryDamage = 300, s_parryBehind = 2.2f, s_parryStun = 300;
+static float s_parryVolume = 0.6f, s_parryWindow = 0.3f, s_parryInvuln = 1, s_parryDamage = 300, s_parryBehind = 2.2f, s_parryStun = 300;
 static float s_dashDistance = 6, s_dashCooldown = 1.2f, s_dashDamage = 150, s_dashWidth = 2;
 static int s_parry = 1, s_dash = 1, s_meleeVk = 70, s_parrySound = 1, s_gameFit = 1;
 static int s_miStacks = 3, s_numbers = 1, s_miStatus = 2;
@@ -141,7 +141,7 @@ static float s_dodge = 0.5f, s_forgetEvery = 0.5f, s_forgetRange = 150;
 static int s_cloakVisual = 1, s_hideGear = 1, s_gearRule = 1;
 
 static const KbSetting kSettings[] = {
-    KB_I("parry", s_parry, 0, 1), KB_I("parry_sound", s_parrySound, 0, 1), KB_I("game_fit", s_gameFit, 0, 1), KB_F("parry_window", s_parryWindow, 0.05, 2), KB_F("parry_invuln", s_parryInvuln, 0, 10), KB_F("parry_damage", s_parryDamage, 0, 100000),
+    KB_I("parry", s_parry, 0, 1), KB_I("parry_sound", s_parrySound, 0, 1), KB_F("parry_volume", s_parryVolume, 0, 2), KB_I("game_fit", s_gameFit, 0, 1), KB_F("parry_window", s_parryWindow, 0.05, 2), KB_F("parry_invuln", s_parryInvuln, 0, 10), KB_F("parry_damage", s_parryDamage, 0, 100000),
     KB_F("parry_behind", s_parryBehind, 0, 10), KB_F("parry_stun", s_parryStun, 0, 1000), KB_I("dash", s_dash, 0, 1), KB_F("dash_distance", s_dashDistance, 1, 20),
     KB_F("dash_cooldown", s_dashCooldown, 0, 60), KB_F("dash_damage", s_dashDamage, 0, 100000), KB_F("dash_width", s_dashWidth, 0.5, 10), KB_I("melee_key_code", s_meleeVk, 1, 255),
     KB_F("e_seconds", s_eSeconds, 1, 300), KB_F("e_cooldown", s_eCooldown, 0, 600), KB_F("e_mult", s_eMult, 1, 20), KB_F("e_radius", s_eRadius, 0, 60),
@@ -176,8 +176,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; hit lands: the hit does nothing, nothing hits her for parry_invuln s, she is set parry_behind m behind the\n"
                "; attacker, it is stunned (parry_stun), and her counter strikes everyone in range for parry_damage.\n"
                "; parry_sound 1 plays a clash on a parry: a .wav of the mod's sounds folder (parry_clash_01.wav to _09.wav; put\n"
-               "; your own there), through Windows, beside the game's sound.\n"
-               "parry = %d\nparry_sound = %d\nparry_window = %g\nparry_invuln = %g\nparry_damage = %g\nparry_behind = %g\nparry_stun = %g\n"
+               "; your own there, 16-bit PCM), through Windows, at the game's Master x SFX volume times parry_volume.\n"
+               "parry = %d\nparry_sound = %d\nparry_volume = %g\nparry_window = %g\nparry_invuln = %g\nparry_damage = %g\nparry_behind = %g\nparry_stun = %g\n"
                "; Dash (dash 1): while she is moving, the melee key (melee_key_code: its Windows key code; 70 is F), or a left\n"
                "; click with a dedicated melee weapon in hand, dashes her dash_distance m the way she moves and strikes every\n"
                "; enemy within dash_width m of the path for dash_damage. Once every dash_cooldown s.\n"
@@ -218,7 +218,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint.\n"
                "hp_mult = 1\nstamina_mult = 1.2\nhellbomb_on_exhaustion = 0\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_areaRadius, (double)s_areaMult, s_areaMax, (double)s_areaEvery,
-            s_areaRound, s_pursuitCharges, (double)s_pursuitEvery, (double)s_pursuitMult, (double)s_pursuitSlow, s_parry, s_parrySound, (double)s_parryWindow, (double)s_parryInvuln,
+            s_areaRound, s_pursuitCharges, (double)s_pursuitEvery, (double)s_pursuitMult, (double)s_pursuitSlow, s_parry, s_parrySound, (double)s_parryVolume, (double)s_parryWindow, (double)s_parryInvuln,
             (double)s_parryDamage, (double)s_parryBehind, (double)s_parryStun, s_dash, s_meleeVk, (double)s_dashDistance, (double)s_dashCooldown,
             (double)s_dashDamage, (double)s_dashWidth, s_gameFit, (double)s_eSeconds, (double)s_eCooldown,
             (double)s_eMult, (double)s_eRadius, (double)s_eSlow, (double)s_eSpread, (double)s_dSeconds, (double)s_dCooldown, (double)s_dMult,
@@ -251,9 +251,54 @@ static unsigned g_parries, g_counters, g_dashes, g_dashHits;
  * tries at a Wwise bank of the mod's own did not get the event into the sound engine (0.4.1 to 0.4.4: a patch on
  * 9ba626afa44a3aa3 replaces the game's event metadata but not a bank, which the game takes from the archive of the
  * package that loads it; which archives hold a bank is not known yet: tools/build_bank.py keeps what was learned). */
+/* 0.4.8 (Yui: "kinda jarring that it doesn't obey the sound settings"): the recordings are read into memory and each
+ * play is scaled by the game's own Master and SFX volumes (audio_volume, sfx_volume of the profile's
+ * user_settings.config, read at each parry: what the game last saved) times parry_volume. */
 static BOOL (WINAPI* g_playSound)(LPCSTR, HMODULE, DWORD);
-static char g_clash[9][MAX_PATH];
+static struct { uint8_t* file; uint8_t* play; uint32_t size, data, bytes; } g_clash[9];
 static int g_nClash;
+static char g_userSettings[MAX_PATH];
+/* the newest user_settings.config of HellForge's profiles (<installation>\userdata\profiles\<profile>\) */
+static void FindUserSettings(void)
+{
+    char pattern[MAX_PATH], best[MAX_PATH] = "";
+    FILETIME newest = {0, 0};
+    WIN32_FIND_DATAA fd;
+    snprintf(pattern, sizeof pattern, "%s\\..\\..\\userdata\\profiles\\*", hf->mod_folder(self));
+    HANDLE h = FindFirstFileA(pattern, &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do
+    {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || fd.cFileName[0] == '.') continue;
+        char path[MAX_PATH];
+        WIN32_FILE_ATTRIBUTE_DATA a;
+        snprintf(path, sizeof path, "%s\\..\\..\\userdata\\profiles\\%s\\user_settings.config", hf->mod_folder(self), fd.cFileName);
+        if (GetFileAttributesExA(path, GetFileExInfoStandard, &a) && CompareFileTime(&a.ftLastWriteTime, &newest) > 0) { newest = a.ftLastWriteTime; memcpy(best, path, sizeof best); }
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    memcpy(g_userSettings, best, sizeof best);
+}
+/* the game's Master times SFX volume as last saved, 0 to 1; 1 when it cannot be read */
+static float GameVolume(void)
+{
+    static char text[16384];
+    float master = 1, sfx = 1;
+    FILE* f = g_userSettings[0] ? fopen(g_userSettings, "rb") : NULL;
+    if (!f) return 1;
+    size_t n = fread(text, 1, sizeof text - 1, f);
+    fclose(f);
+    text[n] = 0;
+    for (char* line = text; line && *line; line = strchr(line, '\n'), line = line ? line + 1 : NULL)
+    {
+        float v;
+        if (sscanf(line, "audio_volume = %f", &v) == 1) master = v;
+        else if (sscanf(line, "sfx_volume = %f", &v) == 1) sfx = v;
+    }
+    if (master > 1.5f) master /= 100;   /* (should the game save per cent) */
+    if (sfx > 1.5f) sfx /= 100;
+    float v = master * sfx;
+    return v < 0 ? 0 : v > 1 ? 1 : v;
+}
 static void ParrySoundInit(void)
 {
     HMODULE winmm = LoadLibraryA("winmm.dll");
@@ -263,18 +308,58 @@ static void ParrySoundInit(void)
     {
         char path[MAX_PATH];
         snprintf(path, sizeof path, "%s\\sounds\\parry_clash_%02d.wav", hf->mod_folder(self), i);
-        if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) memcpy(g_clash[g_nClash++], path, sizeof path);
+        FILE* f = fopen(path, "rb");
+        if (!f) continue;
+        fseek(f, 0, SEEK_END);
+        long size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        uint8_t* buf = size > 44 && size < (16 << 20) ? malloc((size_t)size) : NULL;
+        uint8_t* play = buf ? malloc((size_t)size) : NULL;
+        if (play && fread(buf, 1, (size_t)size, f) == (size_t)size && !memcmp(buf, "RIFF", 4) && !memcmp(buf + 8, "WAVE", 4))
+        {
+            /* its samples: the data chunk of a 16-bit PCM file */
+            uint32_t at = 12, data = 0, bytes = 0, pcm16 = 0;
+            while (at + 8 <= (uint32_t)size)
+            {
+                uint32_t len = Word(buf + at + 4);
+                if (!memcmp(buf + at, "fmt ", 4) && len >= 16) pcm16 = buf[at + 8] == 1 && buf[at + 9] == 0 && buf[at + 22] == 16;
+                if (!memcmp(buf + at, "data", 4)) { data = at + 8; bytes = len <= (uint32_t)size - data ? len : (uint32_t)size - data; break; }
+                at += 8 + len + (len & 1);
+            }
+            if (pcm16 && bytes)
+            {
+                g_clash[g_nClash].file = buf; g_clash[g_nClash].play = play; g_clash[g_nClash].size = (uint32_t)size;
+                g_clash[g_nClash].data = data; g_clash[g_nClash].bytes = bytes;
+                g_nClash++;
+                buf = play = NULL;
+            }
+        }
+        free(buf); free(play);
+        fclose(f);
     }
-    Log("parry sound: %d recording(s) in the mod's sounds folder, %s", g_nClash, g_playSound ? "played through Windows" : "winmm's PlaySound not found: no sound");
+    FindUserSettings();
+    Log("parry sound: %d recording(s) of the mod's sounds folder, %s; the game's volume (Master x SFX) reads %.2f from %s", g_nClash,
+        g_playSound ? "played through Windows" : "winmm's PlaySound not found: no sound", (double)GameVolume(), g_userSettings[0] ? g_userSettings : "nowhere (its settings file was not found: full volume)");
 }
 static void ParrySound(void)
 {
-    static unsigned last = 99;
+    static unsigned last = 99, told;
     if (!s_parrySound || !g_playSound || !g_nClash) return;
     unsigned k = (unsigned)rand() % (unsigned)g_nClash;
     if (k == last && g_nClash > 1) k = (k + 1) % (unsigned)g_nClash;   /* never the same twice in a row */
     last = k;
-    g_playSound(g_clash[k], NULL, 0x00020000 | 0x0001 | 0x0002);       /* SND_FILENAME | SND_ASYNC | SND_NODEFAULT */
+    float game = GameVolume(), vol = game * s_parryVolume;
+    if (told++ < 6) Log("parry sound: recording %u at %.2f (the game's %.2f x parry_volume %.2f)", k + 1, (double)vol, (double)game, (double)s_parryVolume);
+    if (vol <= 0.001f) return;
+    memcpy(g_clash[k].play, g_clash[k].file, g_clash[k].size);
+    int16_t* smp = (int16_t*)(void*)(g_clash[k].play + g_clash[k].data);
+    int scale = (int)(vol * 4096.0f + 0.5f);
+    for (uint32_t i = 0, n = g_clash[k].bytes / 2; i < n; i++)
+    {
+        int v = smp[i] * scale / 4096;
+        smp[i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+    }
+    g_playSound((LPCSTR)g_clash[k].play, NULL, 0x0004 | 0x0001 | 0x0002);   /* SND_MEMORY | SND_ASYNC | SND_NODEFAULT */
 }
 static atomic_uint g_parrySeq;   /* every parry since the DLL loaded: the HUD script plays the clash when it rises (0.4.1) */
 static int g_linksOk;   /* the unit links are where the research has them */
@@ -1491,7 +1576,7 @@ static const KbOption kOptions[] = {
     {"e_seconds", &s_eSeconds, NULL}, {"e_cooldown", &s_eCooldown, NULL}, {"e_mult", &s_eMult, NULL}, {"e_radius", &s_eRadius, NULL},
     {"e_slow", &s_eSlow, NULL}, {"e_spread", &s_eSpread, NULL}, {"d_seconds", &s_dSeconds, NULL}, {"d_cooldown", &s_dCooldown, NULL},
     {"d_mult", &s_dMult, NULL}, {"d_per_kill", &s_dPerKill, NULL}, {"d_cap", &s_dCap, NULL},
-    {"parry", NULL, &s_parry}, {"parry_sound", NULL, &s_parrySound}, {"parry_window", &s_parryWindow, NULL}, {"parry_damage", &s_parryDamage, NULL}, {"dash", NULL, &s_dash},
+    {"parry", NULL, &s_parry}, {"parry_sound", NULL, &s_parrySound}, {"parry_volume", &s_parryVolume, NULL}, {"parry_window", &s_parryWindow, NULL}, {"parry_damage", &s_parryDamage, NULL}, {"dash", NULL, &s_dash},
     {"dash_distance", &s_dashDistance, NULL}, {"dash_cooldown", &s_dashCooldown, NULL}, {"dash_damage", &s_dashDamage, NULL},
     {"mi_stacks", NULL, &s_miStacks}, {"mi_seconds", &s_miSeconds, NULL}, {"mi_damage", &s_miDamage, NULL}, {"mi_slow", &s_miSlow, NULL}, {"mi_status", NULL, &s_miStatus}, {"mi_status_buildup", &s_miBuildup, NULL},
     {"numbers", NULL, &s_numbers},
