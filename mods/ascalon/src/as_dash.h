@@ -42,6 +42,11 @@ static int IsFoeUnit(uint32_t u)
 
 /* Every surface under (x, y) from lp_climb m above `ref` down to lp_drop m below it (terrain, rocks, floors, roofs),
  * highest first; how many */
+/* Heights that are not ground though a look down meets them (Ascalon 0.4.12): where she stands, something above her
+ * that a look up does not meet. One map had such a level sheet 2 m over a flat road, everywhere: the road under it read
+ * as buried and she was set on the sheet. The caller fills these from her own spot; Surfaces leaves them out. */
+static float g_phantom[8];
+static int g_nPhantom;
 static int Surfaces(uint32_t unit, float x, float y, float ref, float* z, int max)
 {
     float top[3] = {x, y, ref + s_lpClimb}, down[3] = {0, 0, -1}, len = s_lpClimb + s_lpDrop;
@@ -62,6 +67,9 @@ static int Surfaces(uint32_t unit, float x, float y, float ref, float* z, int ma
         if (hu == unit || !isfinite(d) || d < 0.02f || d > len) continue;
         uint32_t filt = ActorFilter(Word(hits + 44u * i + 32), hu); if (filt == FILTER_FOLIAGE || (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u))) continue;   /* leaves, canopies and bodies (enemies, corpses: filters seen in Voymastina 0.2.1's probe) are no floor */
         if (IsFoeUnit(hu)) { g_underFoe = 1; continue; }                              /* nor is an enemy's back */
+        int phantom = 0;
+        for (int q = 0; q < g_nPhantom; q++) if (fabsf(top[2] - d - g_phantom[q]) < 0.35f) phantom = 1;
+        if (phantom) continue;
         z[k++] = top[2] - d;
     }
     for (int i = 1; i < k; i++)        /* highest first */

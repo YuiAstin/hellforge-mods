@@ -33,6 +33,9 @@
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
  * 0.3.0, her two keyed skills:
+ * 0.4.12 (Yui: "constantly teleporting upward even on flat road that has nothing in front"; the log: every dash on
+ *     that road from 7.5 to 9.59): a level sheet 2 m over the road, met only from above, made the road read as buried
+ *     and was taken as the spot. What is over her own spot and is not a roof is left out of the spots (g_phantom).
  * 0.4.11 (Yui: "the ticks just literally miss the target as they get knocked around"; the log: 10 of 43 never
  *     landed): a tick whose round has not landed 0.15 s on is sent again, from straight above, then from the far
  *     side: up to three rounds a tick.
@@ -122,7 +125,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.11"
+#define VERSION "0.4.12"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -1172,6 +1175,21 @@ static int Clear(uint32_t unit, const float a[3], const float b[3], float skipA,
 }
 static int SafeSpot(uint32_t unit, const float pos[3], const float dir[2], float dist, float rise, float out[3], int* why)
 {
+    /* what is over her where she stands (on real ground) and is not a roof is no ground anywhere on this look */
+    {
+        float zs[16], keepC = s_lpClimb;
+        g_nPhantom = 0;
+        s_lpClimb = 12;
+        int n = Surfaces(unit, pos[0], pos[1], pos[2], zs, 16);
+        s_lpClimb = keepC;
+        for (int i = 0; i < n && g_nPhantom < 8; i++)
+            if (zs[i] > pos[2] + 1.0f && !Roofed(unit, pos[0], pos[1], pos[2], zs[i] - pos[2]))
+            {
+                static unsigned told;
+                if (told++ < 6) Log("not ground: something %.2f m over her (at %.2f) that a look up does not meet; left out of the spots", (double)(zs[i] - pos[2]), (double)zs[i]);
+                g_phantom[g_nPhantom++] = zs[i];
+            }
+    }
     float keep = s_lpClimb;
     s_lpClimb = 12;   /* (40 in 0.4.5: something high over open ground, met only from above, made the ground under it read as buried) */
     int r = SpotAt(unit, pos, dir, dist, out, NULL, 0);
