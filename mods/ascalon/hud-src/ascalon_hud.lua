@@ -542,6 +542,13 @@ local function unit_id(u)
     local v = okc and tonumber(h) or nil
     return v and math.floor(v / 4) or nil
 end
+-- A unit's own key (0.5.5). tostring(unit) names its type, not the unit: with two units of one type on her (the Dual
+-- Wield Probe's copy of her gun, and the gun) the second one hidden was taken for already noted, so it was hidden and
+-- never shown again. The key is the unit's id; its text only when the id cannot be read.
+local function ukey(u)
+    local id = unit_id(u)
+    return id and ('u' .. tostring(id)) or tostring(u)
+end
 -- every unit of a type with at most TYPE_LIMIT copies, in every world; also the ones whose id is asked for
 local function scan(want)
     local App, W, U = lib('Application'), lib('World'), lib('Unit')
@@ -574,7 +581,7 @@ end
 local function sharing(U, rare, x, y, z, out, seen)
     local n = 0
     for _, u in ipairs(rare) do
-        local key = tostring(u)
+        local key = ukey(u)
         if not seen[key] then
             local ux, uy, uz = root(U, u)
             if ux and (ux - x) ^ 2 + (uy - y) ^ 2 + (uz - z) ^ 2 < 0.0004 then seen[key] = true; out[#out + 1] = u; n = n + 1 end
@@ -583,7 +590,7 @@ local function sharing(U, rare, x, y, z, out, seen)
     return n
 end
 
-local cl = {on = false, units = nil, hidden = {}, keys = {}, acc = 0, scan_in = 0, ids = '', told = 0}
+local cl = {base = {}, on = false, units = nil, hidden = {}, keys = {}, acc = 0, scan_in = 0, ids = '', told = 0}
 -- her units now: the avatar's root and everything sharing it, then (hide_gear) each of her items' roots likewise
 local function collect(s)
     local U = lib('Unit')
@@ -626,7 +633,7 @@ local function collect(s)
             if g then
                 local gx, gy, gz = root(U, g)
                 if gx and (gx - mx) ^ 2 + (gy - my) ^ 2 + (gz - mz) ^ 2 < 16 then
-                    if not seen[tostring(g)] then seen[tostring(g)] = true; out[#out + 1] = g; gear = gear + 1 end
+                    if not seen[ukey(g)] then seen[ukey(g)] = true; out[#out + 1] = g; gear = gear + 1 end
                     gear = gear + sharing(U, rare, gx, gy, gz, out, seen)
                 end
             end
@@ -649,17 +656,22 @@ local function hide_units(units)
     local hid = 0
     for _, u in ipairs(units) do
         if alive(U, u) then
+            local uk = ukey(u)
             local okn, n = pc(U.num_meshes, u)
             for i = 1, (okn and type(n) == 'number' and n <= 512) and n or 0 do
                 local okm, mesh = pc(U.mesh, u, i)
                 local okv, vis = false, nil
                 if okm then okv, vis = pc(M.visibility, mesh) end
                 if okm and okv and vis == true and pc(U.set_mesh_visibility, u, i, false) then
-                    local key = tostring(u) .. ':' .. i
-                    if not cl.keys[key] then cl.keys[key] = true; cl.hidden[#cl.hidden + 1] = {unit = u, mesh = i} end
+                    local key = ukey(u) .. ':' .. i
+                    -- shown again later only when it was drawn the first time this unit was hidden (0.5.5): a mesh that
+                    -- turns up afterwards is the game's or another mod's doing (a cape a model mod keeps hidden came
+                    -- back), and is only kept hidden meanwhile
+                    if not cl.keys[key] then cl.keys[key] = true; cl.hidden[#cl.hidden + 1] = {unit = u, mesh = i, show = not cl.base[uk]} end
                     hid = hid + 1
                 end
             end
+            cl.base[uk] = true
         end
     end
     return hid
@@ -667,14 +679,14 @@ end
 -- (the meshes shown again, the unit list kept)
 local function show_all_keep()
     local U = lib('Unit')
-    for _, h in ipairs(cl.hidden) do if alive(U, h.unit) then pc(U.set_mesh_visibility, h.unit, h.mesh, true) end end
-    cl.hidden, cl.keys = {}, {}
+    for _, h in ipairs(cl.hidden) do if h.show and alive(U, h.unit) then pc(U.set_mesh_visibility, h.unit, h.mesh, true) end end
+    cl.hidden, cl.keys, cl.base = {}, {}, {}
 end
 local function show_all()
     local U = lib('Unit')
     local n = 0
-    for _, h in ipairs(cl.hidden) do if alive(U, h.unit) and pc(U.set_mesh_visibility, h.unit, h.mesh, true) then n = n + 1 end end
-    cl.hidden, cl.keys, cl.units = {}, {}, nil
+    for _, h in ipairs(cl.hidden) do if h.show and alive(U, h.unit) and pc(U.set_mesh_visibility, h.unit, h.mesh, true) then n = n + 1 end end
+    cl.hidden, cl.keys, cl.units, cl.base = {}, {}, nil, {}
     return n
 end
 -- The shimmer (0.5.0, cloak_shimmer; experimental): hidden, her body's units wear the mod's cloak material instead of
@@ -731,7 +743,7 @@ local function shimmer_apply(units)
                 for j = 1, (okc and type(c) == 'number' and c <= 64) and c or 0 do
                     local oksl, slot = pc(M.material_slot_id, mesh, j)
                     if oksl and slot ~= nil then
-                        local key = tostring(u) .. ':' .. tostring(slot)
+                        local key = ukey(u) .. ':' .. tostring(slot)
                         local okt, mat = pc(M.material, mesh, j)
                         local oki, id = false, nil
                         if okt and mat then oki, id = pc(Mat.id, mat) end

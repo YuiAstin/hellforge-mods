@@ -141,7 +141,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.5.4"
+#define VERSION "0.5.5"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
