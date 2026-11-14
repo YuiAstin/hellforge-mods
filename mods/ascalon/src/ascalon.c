@@ -33,6 +33,10 @@
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
  * 0.3.0, her two keyed skills:
+ * 0.4.9 (Yui: "dashes still get refused and the parry sound is still just as loud with that default 0.6"): the look
+ *     for something in the way met her own body and something else of hers (the log named their filters): bodies and
+ *     that filter are no walls now. The clash's volume is squared (a loudness scale) and parry_volume is 0.4.
+ *     In game the Warp Pack's fit test answered (two parries, both "fits"), without trouble.
  * 0.4.7 (Yui: "0.4.5 refuses to do any dashes even on open flat ground"): two of 0.4.5's checks were wrong. The look
  *     for something in the way started inside her and met her own gear: it starts 0.7 m ahead of her now, and logs
  *     what it meets. The look for the spot from 40 m up met something high over open ground and read the ground
@@ -111,7 +115,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.8"
+#define VERSION "0.4.9"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -131,7 +135,7 @@ static int s_areaMax = 12, s_areaRound = 7, s_pursuitCharges = 3;
 static float s_miSeconds = 25, s_miDamage = 0.10f, s_miSlow = 18;
 static float s_eSeconds = 35, s_eCooldown = 20, s_eMult = 2.3f, s_eRadius = 15, s_eSlow = 60, s_eSpread = 5;
 static float s_dSeconds = 5, s_dCooldown = 45, s_dMult = 1.5f, s_dPerKill = 2, s_dCap = 15, s_dGrace = 2;
-static float s_parryVolume = 0.6f, s_parryWindow = 0.3f, s_parryInvuln = 1, s_parryDamage = 300, s_parryBehind = 2.2f, s_parryStun = 300;
+static float s_parryVolume = 0.4f, s_parryWindow = 0.3f, s_parryInvuln = 1, s_parryDamage = 300, s_parryBehind = 2.2f, s_parryStun = 300;
 static float s_dashDistance = 6, s_dashCooldown = 1.2f, s_dashDamage = 150, s_dashWidth = 2;
 static int s_parry = 1, s_dash = 1, s_meleeVk = 70, s_parrySound = 1, s_gameFit = 1;
 static int s_miStacks = 3, s_numbers = 1, s_miStatus = 2;
@@ -349,7 +353,8 @@ static void ParrySound(void)
     if (k == last && g_nClash > 1) k = (k + 1) % (unsigned)g_nClash;   /* never the same twice in a row */
     last = k;
     float game = GameVolume(), vol = game * s_parryVolume;
-    if (told++ < 6) Log("parry sound: recording %u at %.2f (the game's %.2f x parry_volume %.2f)", k + 1, (double)vol, (double)game, (double)s_parryVolume);
+    vol *= vol;   /* loudness, not amplitude (0.4.9: 0.6 of the amplitude is 4 dB down, which nobody hears; squared it is 9) */
+    if (told++ < 6) Log("parry sound: recording %u at amplitude %.2f (the game's %.2f x parry_volume %.2f, squared)", k + 1, (double)vol, (double)game, (double)s_parryVolume);
     if (vol <= 0.001f) return;
     memcpy(g_clash[k].play, g_clash[k].file, g_clash[k].size);
     int16_t* smp = (int16_t*)(void*)(g_clash[k].play + g_clash[k].data);
@@ -1114,9 +1119,12 @@ static int Clear(uint32_t unit, const float a[3], const float b[3], float skipA,
         uint32_t hu = Word(hits + 44u * i + 28);
         if (hu == unit || !isfinite(d) || d < 0.02f || d > len || IsFoeUnit(hu)) continue;
         uint32_t filt = ActorFilter(Word(hits + 44u * i + 32), hu);
-        if (filt == FILTER_FOLIAGE) continue;
+        /* not walls: leaves; bodies (0x236122F0, 0xD5B33D56: enemies, corpses, and her own, which 0.4.7's look back
+         * at her met a metre before her); and 0xEDC5EBE0, which every look forward met 0.7 m in, wherever she stood
+         * (something of hers that moves with her). The ground has no unit and always counts. */
+        if (filt == FILTER_FOLIAGE || (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u || filt == 0xEDC5EBE0u))) continue;
         static unsigned told;
-        if (told++ < 12) Log("in the way: %.2f m along a %.1f m look from %.1f %.1f %.1f: unit %u, filter %08x (%u hits)", (double)d, (double)len, (double)from[0], (double)from[1], (double)from[2], hu, filt, n);
+        if (told++ < 24) Log("in the way: %.2f m along a %.1f m look from %.1f %.1f %.1f: unit %u, filter %08x (%u hits)", (double)d, (double)len, (double)from[0], (double)from[1], (double)from[2], hu, filt, n);
         return 0;
     }
     return 1;
