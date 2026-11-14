@@ -29,6 +29,9 @@
  *     stack, and a dose of the slow (mi_slow a stack). The damage is a round of the mod's spawned beside the enemy (no
  *     line from her needed), its amount set in the damage event.
  *   - Damage numbers (the HUD, as the Executor's and Lemuen's): every hit, strike and tick of hers, Pursuit's in orange.
+ * 0.2.2 (Yui: "there's a bleed damage DoT that should fit Ascalon nicely"): the mark's damage is the game's own bleed
+ * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
+ * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
  * Endowment and Descent are not in this build.
  *
  * Built on the kit base (src/kitbase). Solo or host. */
@@ -46,7 +49,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.1"
+#define VERSION "0.2.2"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -64,14 +67,15 @@ KB_ROSTER_EXPORTS(ascalon)
 static float s_areaRadius = 15, s_areaMult = 1, s_areaEvery = 0.25f, s_pursuitMult = 2.1f, s_pursuitEvery = 7, s_pursuitSlow = 100;
 static int s_areaMax = 12, s_areaRound = 7, s_pursuitCharges = 3;
 static float s_miSeconds = 25, s_miDamage = 0.10f, s_miSlow = 18;
-static int s_miStacks = 3, s_numbers = 1;
+static int s_miStacks = 3, s_numbers = 1, s_miStatus = 2;
+static float s_miBuildup = 100;
 static float s_visualCut = 95, s_revealHold = 1.5f, s_noiseWindow = 1.0f, s_heardHold = 5;
 static float s_dodge = 0.5f, s_forgetEvery = 0.5f, s_forgetRange = 150;
 static int s_cloakVisual = 1, s_hideGear = 1, s_gearRule = 1;
 
 static const KbSetting kSettings[] = {
     KB_F("mi_seconds", s_miSeconds, 0, 120), KB_F("mi_damage", s_miDamage, 0, 5), KB_F("mi_slow", s_miSlow, 0, 1000), KB_I("mi_stacks", s_miStacks, 0, 9),
-    KB_I("numbers", s_numbers, 0, 1),
+    KB_I("numbers", s_numbers, 0, 1), KB_I("mi_status", s_miStatus, 0, 200), KB_F("mi_status_buildup", s_miBuildup, 0, 1000),
     KB_F("area_radius", s_areaRadius, 0, 60), KB_F("area_mult", s_areaMult, 0, 10), KB_F("area_every", s_areaEvery, 0.05, 5),
     KB_I("area_max", s_areaMax, 0, 24), KB_I("area_round", s_areaRound, 1, 100000), KB_F("pursuit_mult", s_pursuitMult, 1, 20),
     KB_F("pursuit_every", s_pursuitEvery, 0.5, 120), KB_F("pursuit_slow", s_pursuitSlow, 0, 1000), KB_I("pursuit_charges", s_pursuitCharges, 0, 9),
@@ -99,6 +103,10 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; from the last one. A marked enemy takes mi_damage times the marking hit's damage a second for each stack, and\n"
                "; a dose of the slow (mi_slow a stack; 100 a full dose).\n"
                "mi_stacks = %d\nmi_seconds = %g\nmi_damage = %g\nmi_slow = %g\n"
+               "; mi_status: the game status that does the mark's damage (2: bleed), a dose of mi_status_buildup a stack every\n"
+               "; second (100 a full dose). 0: no status; the mark's damage is mi_damage, above, dealt by the mod itself (as it\n"
+               "; is when the game refuses the status).\n"
+               "mi_status = %d\nmi_status_buildup = %g\n"
                "; numbers 1: the HUD shows a number over every hit, strike and tick of hers.\nnumbers = %d\n"
                "; Hidden: while she makes no noise, enemies see her visual_cut percent less far, and whoever within forget_range m\n"
                "; still targets her forgets her every forget_every s.\n"
@@ -118,7 +126,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "hp_mult = 1\nstamina_mult = 1.2\nhellbomb_on_exhaustion = 0\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_areaRadius, (double)s_areaMult, s_areaMax, (double)s_areaEvery,
             s_areaRound, s_pursuitCharges, (double)s_pursuitEvery, (double)s_pursuitMult, (double)s_pursuitSlow, s_miStacks, (double)s_miSeconds,
-            (double)s_miDamage, (double)s_miSlow, s_numbers, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
+            (double)s_miDamage, (double)s_miSlow, s_miStatus, (double)s_miBuildup, s_numbers, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
             (double)s_revealHold, (double)s_noiseWindow, (double)s_heardHold, s_gearRule, (double)s_dodge, s_cloakVisual,
             s_hideGear);
 }
@@ -447,7 +455,13 @@ HF_MOD_EXPORT int ascalon_view(unsigned version, float* out)
 /* ---- Mortal Interrogation: the marks -------------------------------------------------------------------------------- */
 #define MARKS 64
 static struct { uint32_t e; int stacks, pending; double until, next; int32_t base; } g_mark[MARKS];
-static unsigned g_marked, g_ticks;
+static unsigned g_marked, g_ticks, g_bleeds;
+static int g_statusBad;   /* the game refused mi_status this session: the spawned-round tick instead */
+static int Marked(uint32_t e)
+{
+    for (int i = 0; i < MARKS; i++) if (g_mark[i].e == e && g_mark[i].until > g_now) return 1;
+    return 0;
+}
 static void Mark(uint32_t e, int32_t damage)
 {
     if (s_miStacks < 1 || s_miSeconds <= 0) return;
@@ -471,6 +485,15 @@ static void Mark(uint32_t e, int32_t damage)
 static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     (void)e; (void)me;
+    /* damage over time on an enemy she has marked: the bleed at work (a number for it; the first ones in the log) */
+    if (d->kind == 2 && s_miStatus > 0 && !g_statusBad && d->amount > 0 && Marked(d->target))
+    {
+        static unsigned told;
+        if (told < 10) { told++; Log("damage over time on marked entity %u: %d (element %u, dealer %u, owner %u, %s)", d->target, d->amount, d->element, d->dealer, d->owner, MineHit(d) ? "hers" : "not credited to her"); }
+        g_bleeds++;
+        NoteHit(d, 0);
+        return;
+    }
     if (!MineHit(d) || d->amount <= 0 || Friend(d->target) || s_areaMax < 1 || s_areaRadius <= 0) return;
     /* one of the last volley's strikes landing: its amount is the hit's that set it off */
     if (d->kind == 0 && g_vol.n && g_now - g_vol.at <= 1.0)
@@ -550,6 +573,14 @@ static void MarkFrame(void)
         if (BodyOffset(Word(d + 12), r, off)) for (int t = 0; t < 3; t++) r[t] += off[t];
         else r[2] += 1.0f;
         if (s_miSlow > 0 && hf->apply_status) hf->apply_status(self, en, HF_STATUS_FLAMER_SLOWED, s_miSlow * g_mark[i].stacks);
+        if (s_miStatus > 0 && !g_statusBad && hf->apply_status)
+        {
+            float dose = s_miBuildup * g_mark[i].stacks;
+            int ar = hf->apply_status(self, en, (uint32_t)s_miStatus, dose > 1000 ? 1000 : dose);
+            if (ar == HF_ACT_DONE || ar == HF_ACT_REQUESTED || ar == HF_ACT_QUEUED) continue;
+            g_statusBad = 1;
+            Log("Mortal Interrogation: the game refused status %d (%s): the mark's damage is the mod's own from here", s_miStatus, hf->last_log ? hf->last_log(self) : "");
+        }
         if (s_miDamage <= 0) continue;
         float u[3] = {0, 0, 1}, from[3];
         if (have)
@@ -653,8 +684,8 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 static void Reset(const char* why)
 {
     if (g_forgot || g_reveals || g_dodged)
-        Log("%s: %u shots, heard %u times, revealed %u times, %u times an enemy forgot her, %u hits dodged; %u area volleys (%u strikes landed), Pursuit %u times; %u enemies marked, %u ticks landed",
-            why, g_shots, g_heard, g_reveals, g_forgot, g_dodged, g_volleys, g_strikes, g_pursuits, g_marked, g_ticks);
+        Log("%s: %u shots, heard %u times, revealed %u times, %u times an enemy forgot her, %u hits dodged; %u area volleys (%u strikes landed), Pursuit %u times; %u enemies marked, %u ticks landed, %u bleed hits",
+            why, g_shots, g_heard, g_reveals, g_forgot, g_dodged, g_volleys, g_strikes, g_pursuits, g_marked, g_ticks, g_bleeds);
     int start = !strcmp(why, "mission start");
     if (start) KitDecide();
     Body(start);
@@ -663,7 +694,7 @@ static void Reset(const char* why)
     g_sensing = 0;
     g_forgot = g_reveals = g_dodged = g_heard = g_shots = 0;
     g_volleys = g_strikes = g_pursuits = 0;
-    g_marked = g_ticks = 0;
+    g_marked = g_ticks = g_bleeds = 0;
     memset(g_mark, 0, sizeof g_mark);
     g_volOwed = 0; g_nslow = 0; g_vol.n = 0;
     g_charges = s_pursuitCharges; g_chargeAt = g_now;
@@ -814,7 +845,7 @@ static void Tick(HfMod* mod, float dt, void* user)
 static const KbOption kOptions[] = {
     {"area_radius", &s_areaRadius, NULL}, {"area_mult", &s_areaMult, NULL}, {"area_max", NULL, &s_areaMax}, {"pursuit_mult", &s_pursuitMult, NULL},
     {"pursuit_every", &s_pursuitEvery, NULL}, {"pursuit_slow", &s_pursuitSlow, NULL}, {"pursuit_charges", NULL, &s_pursuitCharges},
-    {"mi_stacks", NULL, &s_miStacks}, {"mi_seconds", &s_miSeconds, NULL}, {"mi_damage", &s_miDamage, NULL}, {"mi_slow", &s_miSlow, NULL},
+    {"mi_stacks", NULL, &s_miStacks}, {"mi_seconds", &s_miSeconds, NULL}, {"mi_damage", &s_miDamage, NULL}, {"mi_slow", &s_miSlow, NULL}, {"mi_status", NULL, &s_miStatus}, {"mi_status_buildup", &s_miBuildup, NULL},
     {"numbers", NULL, &s_numbers},
     {"visual_cut", &s_visualCut, NULL}, {"reveal_hold", &s_revealHold, NULL}, {"noise_window", &s_noiseWindow, NULL}, {"heard_hold", &s_heardHold, NULL}, {"dodge", &s_dodge, NULL},
     {"gear_rule", NULL, &s_gearRule}, {"cloak_visual", NULL, &s_cloakVisual}, {"hide_gear", NULL, &s_hideGear},

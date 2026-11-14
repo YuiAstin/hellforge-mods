@@ -112,3 +112,8 @@ perception research (docs/research/perception.md, when written) come first.
   from the last, a tick a second of 10% of the marking hit a stack, the flamer slow 18 a stack. HellForge has no
   "damage this entity" action: a tick is a spawned round set 2.5 m from the enemy's body on her side, flying into it,
   its amount set in the damage event (no line from her needed). Numbers: the Executor's block (ring, view, projection).
+- **0.2.2 (2026-11-14): the mark's damage is the game's bleed** (Yui's idea). apply_status with status 2 (bleed in
+  HD2Runtime's status catalogue, domains/status_catalog.lua; our SDK's ids agree with it where both name one: 5 fire,
+  37-39 stuns, 42 gas, 67 flamer_slowed), 100 a stack a second. The catalogue also has 8 slowed, 9 rooted, 70 poison,
+  36 hidden: candidates for the slow and for Endowment. Untested: whether enemies take bleed, what it deals, whether it
+  is credited to her. The first ten bleed hits on marked enemies are logged; a refusal falls back to 0.2.1's tick.
