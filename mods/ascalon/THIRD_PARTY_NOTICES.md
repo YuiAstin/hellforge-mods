@@ -22,5 +22,5 @@ The damage numbers are the Executor's and Lemuen's: finding the view camera and 
 from **Chef Shared Loader** by Th3chef (github.com/Th3chef/Chef-Shared-Loader, src/loader.lua), with Th3chef's permission.
 
 Ascalon is a character of Arknights (Hypergryph / Yostar). This is an unofficial fan mod; no character model is included.
-The mod's icon (`icon.png`, from her operator art) and her three skill icons (`hud-src/images/`, redrawn as the game's
-two-layer icon masks) are Arknights art, © Hypergryph, used here as fan content.
+The mod's icon (`icon.png`, from her operator art) and her three skill icons (`hud-src/images/`, split into the game's
+two icon mask layers and drawn in their own colours) are Arknights art, © Hypergryph, used here as fan content.

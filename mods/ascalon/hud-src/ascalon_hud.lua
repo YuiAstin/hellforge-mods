@@ -332,8 +332,10 @@ end
 -- Beside the stratagem list, as a stratagem shows (0.4.2; the other kits' panel): a tile with a short name, the
 -- skill's name, then its key or what it waits for. Pursuit is passive (its charges); Endowment and Descent show the
 -- time they still run, then their cooldown.
--- her skills' icons (0.4.16; images/ of the HUD project: Arknights' skill icons as the game's two-layer icon masks, the
--- art's colour drawn in her magenta, its white in white)
+-- her skills' icons (0.4.17; images/ of the HUD project): Arknights' skill icons in their own colours. The game's icon
+-- material draws masks, not pictures, so each icon is split into its white (the G mask) and its one colour (the R
+-- mask), and the R mask is drawn in that colour (ICON_COLOUR, taken from the picture): the picture again, near enough.
+local ICON_COLOUR = {{187, 9, 0, 255}, {168, 7, 2, 255}, {128, 128, 128, 255}}
 local ICONS = {}
 for i, id in ipairs({'ascalon_pursuit', 'ascalon_endowment', 'ascalon_descent'}) do
     local okI, handle = pcall(hd2.resources.image, id)
@@ -369,9 +371,8 @@ local function ability(d, i, x, y, size, alpha)
     local icon = ICONS[i]
     if icon then
         local pad = size * 0.08
-        local lit = ready or run > 0
         d:image(icon, x + pad, y + pad, size - 2 * pad, size - 2 * pad, {z = 3,
-            colours = lit and {r = rgba(run > 0 and ORANGE or MAGENTA, 1), g = {255, 255, 255, 255}} or {r = rgba(GREY, 1), g = {150, 154, 158, 255}},
+            colours = {r = ICON_COLOUR[i], g = {255, 255, 255, 255}},
             colour = {255, 255, 255, math.floor(255 * a + 0.5)}})
     end
     if count then
