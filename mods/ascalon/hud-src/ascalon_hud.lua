@@ -712,9 +712,9 @@ local function shimmer_settings(dt)
     SH.ready = ready
 end
 local function shimmer_apply(units)
-    local U, M, Mat, Id64 = lib('Unit'), lib('Mesh'), lib('Material'), lib('IdString64')
-    if not Id64 or type(Id64.to_hex) ~= 'function' or type(Id64.from_hex) ~= 'function' then
-        if SH.told < 12 then SH.told = SH.told + 1; log('[Ascalon HUD] shimmer: IdString64 is missing (a material could not be given back): her body is not drawn instead') end
+    local U, M, Mat, Id64, Id32 = lib('Unit'), lib('Mesh'), lib('Material'), lib('IdString64'), lib('IdString32')
+    if not Id64 or type(Id64.to_hex) ~= 'function' or type(Id64.from_hex) ~= 'function' or not Id32 or type(Id32.to_hex) ~= 'function' or type(Id32.from_hex) ~= 'function' then
+        if SH.told < 12 then SH.told = SH.told + 1; log('[Ascalon HUD] shimmer: IdString64 or IdString32 is missing (a material could not be given back): her body is not drawn instead') end
         SH.on = false
         return
     end
@@ -743,7 +743,11 @@ local function shimmer_apply(units)
                             if ok64 then pre64 = id64 end
                             if ok64 and id64 ~= nil then local okx, hx = pc(Id64.to_hex, id64); if okx and type(hx) == 'string' then prehex = hx end end
                         end
-                        if not is_mine and not (SH.keys[key] and SH.mine == nil) and (prehex or SH.keys[key]) then
+                        -- the slot's id as text too: the engine's id values are the frame's own (0.5.4: the one kept for
+                        -- giving the material back had gone stale by then, and no way of handing it back found the slot)
+                        local slothex = nil
+                        do local oksh, sh = pc(Id32.to_hex, slot); if oksh and type(sh) == 'string' then slothex = sh end end
+                        if not is_mine and not (SH.keys[key] and SH.mine == nil) and ((prehex and slothex) or SH.keys[key]) then
                             local okset, old = pc(U.set_material, u, slot, SH.mat)
                             if okset then
                                 set = set + 1
@@ -752,7 +756,7 @@ local function shimmer_apply(units)
                                     -- what was there, kept as its id's text: given back by id (0.5.2: handing the
                                     -- returned value itself back changed nothing, and she stayed cloaked)
                                     local okh, hex = pc(Id64.to_hex, old)
-                                    SH.applied[#SH.applied + 1] = {unit = u, slot = slot, mesh = i, index = j, hex = (okh and type(hex) == 'string') and hex or prehex, prehex = prehex, pre64 = pre64, old = old, before = before}
+                                    SH.applied[#SH.applied + 1] = {unit = u, slot = slothex, mesh = i, index = j, hex = (okh and type(hex) == 'string') and hex or prehex, prehex = prehex, pre64 = pre64, old = old, before = before}
                                     if SH.told2 < 4 then
                                         SH.told2 = SH.told2 + 1
                                         log(('[Ascalon HUD] shimmer slot %s: before id %s; set_material returned %s (%s), as hex %s; its id64 before %s (%s), as hex %s'):format(tostring(slot), tostring(before), tostring(old), type(old), tostring(okh and hex), tostring(pre64), type(pre64), tostring(prehex)))
@@ -810,7 +814,7 @@ local function shimmer_restore_step(dt)
     SH.wait = SH.wait - dt
     if SH.wait > 0 then return end
     SH.wait = 0.25
-    local U, M, Mat, Id64 = lib('Unit'), lib('Mesh'), lib('Material'), lib('IdString64')
+    local U, M, Mat, Id64, Id32 = lib('Unit'), lib('Mesh'), lib('Material'), lib('IdString64'), lib('IdString32')
     -- what the last way did
     local left = {}
     for _, a in ipairs(SH.pending) do
@@ -836,13 +840,13 @@ local function shimmer_restore_step(dt)
     for _, a in ipairs(left) do
         local what = nil
         if SH.stage == 1 and a.hex then local okf, id = pc(Id64.from_hex, a.hex); if okf then what = id end
-        elseif SH.stage == 2 then what = a.old
-        elseif SH.stage == 3 then what = a.pre64
+        elseif SH.stage == 2 or SH.stage == 3 then what = nil      -- (the values kept from the swap's frame are stale: not handed back)
         elseif SH.stage == 4 and a.prehex then local okf, id = pc(Id64.from_hex, a.prehex); if okf then what = id end
         elseif SH.stage == 5 then what = a.hex
         elseif SH.stage == 6 then what = a.prehex end
-        if what ~= nil and type(what) ~= 'boolean' then
-            local oks, res = pc(U.set_material, a.unit, a.slot, what)
+        local okslot, slot = pc(Id32.from_hex, a.slot)
+        if okslot and slot ~= nil and what ~= nil and type(what) ~= 'boolean' then
+            local oks, res = pc(U.set_material, a.unit, slot, what)
             if SH.told2 < 12 then SH.told2 = SH.told2 + 1; log(('[Ascalon HUD] shimmer slot %s: set_material with %s (%s): %s %s'):format(tostring(a.slot), tostring(what), type(what), tostring(oks), tostring(res))) end
         end
     end
