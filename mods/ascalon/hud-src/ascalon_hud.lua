@@ -815,7 +815,8 @@ local function patched_materials()
     local buf = ffi.new('uint64_t[8192]')
     local n = ffi.cast('ascpatched1', proc)(1, buf, 8192)
     PM = {}
-    for i = 0, n - 1 do PM[tostring(tonumber(buf[i] / 4294967296ULL))] = true end   -- by the id's high half, as Material.id gives it
+    local two32 = ffi.new('uint64_t', 4294967296)
+    for i = 0, n - 1 do PM[tostring(tonumber(buf[i] / two32))] = true end   -- by the id's high half, as Material.id gives it
     log(('[Ascalon HUD] shimmer: %d material(s) that mods\' patches replace are left alone'):format(n))
     return PM
 end
