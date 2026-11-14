@@ -193,3 +193,15 @@ perception research (docs/research/perception.md, when written) come first.
   of a bank sit in the archives of the packages that load it; game data is DSAR-packed (`bundles.NN.nxa`, LZ4 chunks;
   the 15 loose files are DSAR-wrapped archives), and which archives hold a bank is not mapped yet.
 - Until then `ParrySound` plays a `.wav` of `sounds/` through winmm's PlaySound (`parry_sound`).
+
+### 0.4.6: the game's own fit test (from the code dump)
+
+- The Warp Pack (Displacement component; update `game.dll+0x88A700`, candidates `0x88CBA0`): candidates along the
+  direction, furthest first; a sweep of the wearer's mover shape from 1.4 m above to 4 m below each; the hit position
+  is accepted when `0x68C340` (mover-shape overlap at a position, tolerance 0.1) says it fits and a ray down from
+  500 m above meets nothing more than a set height above it; no candidate: a warp in place. No navmesh involved.
+- `GameFits` calls `0x68C340` as SafeSpot's fifth check, after replicating its unchecked lookups read-only (manager
+  `game+0x3326598` hash, descriptor, the 44-bucket mover table at `[game+0x346BF98]+0xF12840`, mover and shape through
+  `[game+0x3326388]` slots 0 and 0x60, query slot `[game+0x3326328]+0x80`). `game_fit = 0` turns it off.
+- Also found, unused: sync shape sweep `[[game+0x3326328]+0x80]`, first-hit ray `[[game+0x3326338]+0x128]`, the
+  stratagem deploy navmesh check `game.dll+0x9305C0`. The exe on disk is packed; the dump has code only.

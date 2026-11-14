@@ -33,6 +33,10 @@
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
  * 0.3.0, her two keyed skills:
+ * 0.4.6 (Yui: "have an agent look at the dump for you"): a fifth check before she is set anywhere, the game's own:
+ *     the Warp Pack takes a destination only when game.dll+0x68C340 says the wearer's mover shape overlaps nothing
+ *     there (and nothing is above it, looking down from 500 m, as SafeSpot's first check does from 40). GameFits calls
+ *     it, after reading everything it would read (it checks nothing itself); game_fit 0 turns it off.
  * 0.4.5 (Yui: "the dash now feels incredibly random because standing still dashes you as well even while not stuck,
  *     can't we just do multiple checks before teleporting so the player doesn't get stuck in the first place"):
  *     the dash is only while she moves again (the way out of a stuck spot is gone), and a spot is taken only after
@@ -103,7 +107,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.5"
+#define VERSION "0.4.6"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -125,7 +129,7 @@ static float s_eSeconds = 35, s_eCooldown = 20, s_eMult = 2.3f, s_eRadius = 15, 
 static float s_dSeconds = 5, s_dCooldown = 45, s_dMult = 1.5f, s_dPerKill = 2, s_dCap = 15, s_dGrace = 2;
 static float s_parryWindow = 0.3f, s_parryInvuln = 1, s_parryDamage = 300, s_parryBehind = 2.2f, s_parryStun = 300;
 static float s_dashDistance = 6, s_dashCooldown = 1.2f, s_dashDamage = 150, s_dashWidth = 2;
-static int s_parry = 1, s_dash = 1, s_meleeVk = 70, s_parrySound = 1;
+static int s_parry = 1, s_dash = 1, s_meleeVk = 70, s_parrySound = 1, s_gameFit = 1;
 static int s_miStacks = 3, s_numbers = 1, s_miStatus = 2;
 static float s_miBuildup = 100;
 static float s_visualCut = 95, s_revealHold = 1.5f, s_noiseWindow = 1.0f, s_heardHold = 5;
@@ -133,7 +137,7 @@ static float s_dodge = 0.5f, s_forgetEvery = 0.5f, s_forgetRange = 150;
 static int s_cloakVisual = 1, s_hideGear = 1, s_gearRule = 1;
 
 static const KbSetting kSettings[] = {
-    KB_I("parry", s_parry, 0, 1), KB_I("parry_sound", s_parrySound, 0, 1), KB_F("parry_window", s_parryWindow, 0.05, 2), KB_F("parry_invuln", s_parryInvuln, 0, 10), KB_F("parry_damage", s_parryDamage, 0, 100000),
+    KB_I("parry", s_parry, 0, 1), KB_I("parry_sound", s_parrySound, 0, 1), KB_I("game_fit", s_gameFit, 0, 1), KB_F("parry_window", s_parryWindow, 0.05, 2), KB_F("parry_invuln", s_parryInvuln, 0, 10), KB_F("parry_damage", s_parryDamage, 0, 100000),
     KB_F("parry_behind", s_parryBehind, 0, 10), KB_F("parry_stun", s_parryStun, 0, 1000), KB_I("dash", s_dash, 0, 1), KB_F("dash_distance", s_dashDistance, 1, 20),
     KB_F("dash_cooldown", s_dashCooldown, 0, 60), KB_F("dash_damage", s_dashDamage, 0, 100000), KB_F("dash_width", s_dashWidth, 0.5, 10), KB_I("melee_key_code", s_meleeVk, 1, 255),
     KB_F("e_seconds", s_eSeconds, 1, 300), KB_F("e_cooldown", s_eCooldown, 0, 600), KB_F("e_mult", s_eMult, 1, 20), KB_F("e_radius", s_eRadius, 0, 60),
@@ -173,7 +177,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Dash (dash 1): while she is moving, the melee key (melee_key_code: its Windows key code; 70 is F), or a left\n"
                "; click with a dedicated melee weapon in hand, dashes her dash_distance m the way she moves and strikes every\n"
                "; enemy within dash_width m of the path for dash_damage. Once every dash_cooldown s.\n"
-               "dash = %d\nmelee_key_code = %d\ndash_distance = %g\ndash_cooldown = %g\ndash_damage = %g\ndash_width = %g\n"
+               "; game_fit 1 also asks the game's own fit test (the Warp Pack's) before she is set anywhere; 0 leaves it to\n"
+               "; the mod's own checks (set it to 0 if the game crashes on a dash or a parry).\n"
+               "dash = %d\nmelee_key_code = %d\ndash_distance = %g\ndash_cooldown = %g\ndash_damage = %g\ndash_width = %g\ngame_fit = %d\n"
                "; Endowment (key_endowment): for e_seconds her hits deal e_mult times their damage, every enemy within e_radius m\n"
                "; of her is slowed (e_slow a dose, twice a second), and an enemy that dies near her leaves a Mortal Interrogation\n"
                "; stack on every enemy within e_spread m of it. Then e_cooldown s before it can be cast again.\n"
@@ -210,7 +216,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_areaRadius, (double)s_areaMult, s_areaMax, (double)s_areaEvery,
             s_areaRound, s_pursuitCharges, (double)s_pursuitEvery, (double)s_pursuitMult, (double)s_pursuitSlow, s_parry, s_parrySound, (double)s_parryWindow, (double)s_parryInvuln,
             (double)s_parryDamage, (double)s_parryBehind, (double)s_parryStun, s_dash, s_meleeVk, (double)s_dashDistance, (double)s_dashCooldown,
-            (double)s_dashDamage, (double)s_dashWidth, (double)s_eSeconds, (double)s_eCooldown,
+            (double)s_dashDamage, (double)s_dashWidth, s_gameFit, (double)s_eSeconds, (double)s_eCooldown,
             (double)s_eMult, (double)s_eRadius, (double)s_eSlow, (double)s_eSpread, (double)s_dSeconds, (double)s_dCooldown, (double)s_dMult,
             (double)s_dPerKill, (double)s_dCap, (double)s_dGrace, s_miStacks, (double)s_miSeconds,
             (double)s_miDamage, (double)s_miSlow, s_miStatus, (double)s_miBuildup, s_numbers, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
@@ -913,6 +919,79 @@ static void NearFoeUnits(const float pos[3], float reach)
         g_foeUnits[g_nFoeUnits++] = Word(fid + 12);
     }
 }
+/* The game's own fit test (0.4.6; the LIFT-182 Warp Pack's, from the code dump: its update takes a candidate only when
+ * game.dll+0x68C340 says the wearer's mover shape overlaps nothing there): FitsAt(manager [game+0x3326598], out
+ * {u32 ok; float pos[3]}, an entity record of which only the id at +8 and the unit at +0xC are read, mode 0, filter
+ * 0x48D6C53A, the feet position, tolerance 0.1). It looks the entity's mover up without a check (a missing entity
+ * indexes -1), so everything it reads is read here first and the call is skipped unless all of it is there:
+ * the entity in the manager's hash, its descriptor (whose unit must be her unit), the descriptor's resource in the
+ * mover table, the mover and its shape (the physics table's own two calls), and the query slot.
+ * 1 fits, 0 does not, -1 not asked (the caller keeps its own checks) */
+typedef struct { uint32_t ok; float pos[3]; } GameFit;
+typedef GameFit* (*FitsAtFn)(void*, GameFit*, const void*, uint32_t, uint32_t, const float*, float);
+typedef uint32_t (*MoverFn)(uint32_t, uint32_t);
+typedef void* (*ShapeFn)(uint32_t);
+static FitsAtFn g_fitsAt;
+static unsigned g_fitAsked, g_fitNo, g_fitSkipped;
+static int GameFits(uint32_t entity, uint32_t unit, const float pos[3])
+{
+    static unsigned told;
+    const char* miss = NULL;
+    uintptr_t mgr, ents, descs, desc, em, tab, phys, f0, f60, qt;
+    uint32_t invalid = 0, cap = 0, empty = 0, mult = 0, idx = 0xFFFFFFFFu, name = 0, dunit = 0;
+    uint64_t res = 0;
+    if (!s_gameFit || !g_fitsAt) return -1;
+    if (!(mgr = Pointer(game + 0x3326598)) || !ReadAt(game + 0x3483C20, &invalid, 4) || entity == invalid) miss = "the manager";
+    else if (!(ents = Pointer(mgr + 0x18)) || !ReadAt(mgr + 0x20, &cap, 4) || !ReadAt(mgr + 0x24, &empty, 4) || !ReadAt(mgr + 0x28, &mult, 4) ||
+             !cap || (cap & (cap - 1)) || cap > (1u << 20)) miss = "the manager's hash";
+    else
+    {
+        for (uint32_t i = 0; i < cap; i++)
+        {
+            uint32_t e[2];
+            if (!ReadAt(ents + 8ull * ((i + entity * mult) & (cap - 1)), e, 8)) break;
+            if (e[0] == entity) { idx = e[1]; break; }
+            if (e[0] == empty) break;
+        }
+        if (idx == 0xFFFFFFFFu || idx > (1u << 20)) miss = "her entity in the manager";
+        else if (!(descs = Pointer(mgr + 0x30)) || !(desc = Pointer(descs + 8ull * idx)) || !ReadAt(desc, &res, 8) || !res ||
+                 !ReadAt(desc + 0xC, &dunit, 4) || dunit != unit) miss = "her descriptor";
+        else if (!(em = Pointer(game + 0x346BF98)) || !(tab = Pointer(em + 0xF12840))) miss = "the mover table";
+        else
+        {
+            int found = 0;
+            for (uint32_t k = 0, b = (uint32_t)(res % 44); k < 44 && !found; k++, b = (b + 1) % 44)
+            {
+                uint8_t bucket[16];
+                uint64_t key;
+                if (!ReadAt(tab + 16ull * b, bucket, 16)) break;
+                memcpy(&key, bucket, 8);
+                if (!key) break;
+                if (key == res) { found = ReadAt(tab + 0x2C0 + 0xF0ull * Word(bucket + 8) + 0x48, &name, 4); break; }
+            }
+            if (!found) miss = "her mover's record";
+            else if (!(phys = Pointer(game + 0x3326388)) || !(f0 = Pointer(phys)) || !(f60 = Pointer(phys + 0x60)) ||
+                     !(qt = Pointer(game + 0x3326328)) || !Pointer(qt + 0x80)) miss = "the physics tables";
+            else
+            {
+                uint32_t mover = ((MoverFn)f0)(unit, name);
+                if (!mover || mover == 0xFFFFFFFFu || !((ShapeFn)f60)(mover)) miss = "her mover or its shape";
+            }
+        }
+    }
+    if (miss)
+    {
+        g_fitSkipped++;
+        if (told++ < 6) Log("the game's fit test is not asked: %s is not there (her own checks decide)", miss);
+        return -1;
+    }
+    struct { uint64_t unused; uint32_t id, unit; } ent = {0, entity, unit};
+    GameFit out = {0};
+    g_fitsAt((void*)mgr, &out, &ent, 0, 0x48D6C53Au, pos, 0.1f);
+    g_fitAsked++;
+    if (!out.ok) g_fitNo++;
+    return out.ok ? 1 : 0;
+}
 /* A spot she can be put on without ending up in or under anything (0.4.5: every check before the move, none after):
  *   1. the spot: as SpotAt finds it, looking down from 40 m above her (a look from 2.5 m started under a hill's
  *      surface, terrain being solid only from above, and took what lies under it); a surface with another above it
@@ -946,7 +1025,20 @@ static int SafeSpot(uint32_t unit, const float pos[3], const float dir[2], float
     float head[3] = {out[0], out[1], out[2] + 1.7f}, down[3] = {0, 0, -1};
     float g = RayWith(unit, head, down, 2.2f, 0, 0x80000009u, NULL);
     if (g < 0 || fabsf(g - 1.7f) > 0.35f) { *why = 4; return 0; }
-    return 1;
+    /* 5. the game's own answer: her mover shape overlaps nothing there. On a slope the shape set exactly on the surface
+     * touches the uphill side, so a little above it is tried too (she is set where it fits) */
+    static unsigned told;
+    uint32_t me = atomic_load(&g_avatar);
+    for (int k = 0; k < 3; k++)
+    {
+        float at[3] = {out[0], out[1], out[2] + (k == 0 ? 0.05f : k == 1 ? 0.2f : 0.4f)};
+        int fit = GameFits(me, unit, at);
+        if (fit < 0) return 1;                       /* not asked: the four above decide */
+        if (fit) { if (told++ < 12) Log("the game's fit test: fits at %.1f %.1f %.2f (%.2f above the surface)", (double)at[0], (double)at[1], (double)at[2], (double)(at[2] - out[2])); out[2] = at[2] - 0.05f; return 1; }
+    }
+    if (told++ < 12) Log("the game's fit test: does not fit at %.1f %.1f %.2f", (double)out[0], (double)out[1], (double)out[2]);
+    *why = 5;
+    return 0;
 }
 static void CounterFrame(void)
 {
@@ -1039,7 +1131,7 @@ static void Dash(void)
     NearFoeUnits(pos, s_dashDistance + 20);
     g_buried = 0;
     float dist = 0;
-    int found = 0, stuck = 0, why = 0, whys[5] = {0};
+    int found = 0, stuck = 0, why = 0, whys[6] = {0};
     for (float d = s_dashDistance; !found && d >= 1.5f; d -= 0.75f)
     {
         if (SafeSpot(unit, pos, dir, d, d * 0.6f > 1.0f ? d * 0.6f : 1.0f, dest, &why)) { found = 1; dist = d; }
@@ -1048,7 +1140,7 @@ static void Dash(void)
     if (!found)
     {
         static unsigned told;
-        if (told++ < 20) Log("dash: no safe spot ahead (refused: %d no surface she fits on, %d too high or too low, %d something in the way, %d not the ground she would stand on)", whys[1], whys[2], whys[3], whys[4]);
+        if (told++ < 20) Log("dash: no safe spot ahead (refused: %d no surface she fits on, %d too high or too low, %d something in the way, %d not the ground she would stand on, %d the game's fit test)", whys[1], whys[2], whys[3], whys[4], whys[5]);
         return;
     }
     g_dashReady = g_now + s_dashCooldown;
@@ -1227,6 +1319,10 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         g_setVelocity = (SetVecFn)(game + 0x4A7550);
     }
     else Log("the position setter is not the reviewed code: no dash, and the parry does not set her behind the attacker");
+    if (hf->code_matches(game + 0x68C340, "40 55 53 56 57 41 56 48 8d ac 24 e0 fe ff ff 48 81 ec 20 02 00 00 0f 29") &&
+        hf->code_matches(game + 0x68C230, "40 53 48 83 ec 30 3b 15 e4 79 df 02 4c 8b d1 48 89 7c 24 50"))
+        g_fitsAt = (FitsAtFn)(game + 0x68C340);
+    else Log("the game's fit test is not the reviewed code: her own checks decide where she may land");
     g_linksOk = hf->code_matches(exe + 0x2BEB9A, "48 8d b9 d8 01 00 00") && hf->code_matches(exe + 0x2BEBFA, "48 81 c7 e0 01 00 00");
     if (!g_linksOk) Log("the engine's unit links are not where the research has them: her gear is found by position (it may stay drawn)");
     g_staminaOk = hf->code_matches(game + 0xA50E2D, "f3 42 0f 11 8c 11 54 78 54 00");
