@@ -136,3 +136,17 @@ perception research (docs/research/perception.md, when written) come first.
   she moves (2 m/s or more over the last 0.15 to 0.5 s), Voymastina's SpotAt for the landing (nearer in 1 m steps, not
   more than 1.5 m up), every living enemy within 2 m of the path struck for dash_damage 150 by a round spawned beside
   it; 1.2 s between dashes. The game's own melee swing still plays and, when it lands, sets off the 15 m strikes.
+
+### 0.4.1: the parry's clash
+
+- The parry plays one of nine clash recordings (Yui's samples) from a sound bank of the mod's own.
+- How other HellForge mods ship sound: Wwise banks as patch files in `data/`, played by event id. Scope of Authority's
+  Nova bank is the Quasar's structure with new ids and the Nova's recordings; this is the same idea.
+- `tools/build_bank.py <shell patch> <out patch> <wav>...`: the shell is the CQC-2 Saber's bank
+  (`wwise_bank`/`wwise_dep` include of `0x550387E4C38E63B4`, built with `HellForge.Cli build-data --out`). It keeps the
+  2D one-shot random container of event `FF783C88` (player bus) and its mixer chain, gives the container, sounds,
+  action, event and bank new ids, and stores the recordings as PCM media (mono, with a `hash` chunk).
+- Found on the way: a bank's id in `BKHD` is FNV-1 of its name xor `0xA3107038`; the bank resource is
+  `[magic][u32 size][u64 murmur64 of content/audio/<name>]` then the bank; the dep resource is the path string.
+- The recordings and the built patch are not in the repository (`.gitignore`): where the samples come from is not
+  settled. Untested in game as of this entry.

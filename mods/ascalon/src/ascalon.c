@@ -33,6 +33,11 @@
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
  * 0.3.0, her two keyed skills:
+ * 0.4.1 (Yui: "give the parry a sound"; "look at what other mods in HellForge do"): the parry plays a clash, one of
+ *     nine of Yui's recordings, from a sound bank of the mod's own (data/007e093ca718ca1a.patch_0, built by
+ *     tools/build_bank.py: the CQC-2 Saber bank's structure under new ids with the recordings as PCM media, the way
+ *     Scope of Authority's Nova bank is the Quasar's with the Nova's recordings). ascalon_parry_seq counts parries;
+ *     the HUD script loads the bank (Wwise.load_bank) and posts the event (ascalon_parry) when the count rises.
  * 0.4.0 (Yui: "give her her parry since she is a melee fighter too", and the dash):
  *   - Parry (Texas's, from the Parry Probe 0.1.5): with a dedicated melee weapon in hand, a right-click press within
  *     parry_window s before a hit lands is a perfect parry: the hit is nulled, she takes no hit for parry_invuln s, she is
@@ -63,7 +68,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.0"
+#define VERSION "0.4.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -194,6 +199,7 @@ typedef struct Counter { uint32_t dealer, owner; float origin[3]; } Counter;
 static Counter g_counter;
 static atomic_int g_counterReady;
 static unsigned g_parries, g_counters, g_dashes, g_dashHits;
+static atomic_uint g_parrySeq;   /* every parry since the DLL loaded: the HUD script plays the clash when it rises (0.4.1) */
 static int g_linksOk;   /* the unit links are where the research has them */
 static double g_sensedUntil, g_forgetAt;
 static int g_sensing;   /* enemies that see or have heard her, at the last pass */
@@ -439,6 +445,7 @@ static int HitTaken(const uint8_t* h, void* result, unsigned long long now)
         {
             memset(result, 0, RESULT_SIZE);
             g_parries++;
+            atomic_fetch_add(&g_parrySeq, 1);
             atomic_store(&g_invulnUntilMs, now + (unsigned long long)(s_parryInvuln * 1000));
             if (!atomic_load(&g_counterReady))
             {
@@ -1145,6 +1152,8 @@ static void HerUnits(void)
     static int told = -1;
     if (n != told) { static unsigned times; if (times++ < 12) Log("her units by the engine's links: %d (her Helldiver's, its parts and %s)", n, s_hideGear ? "her gear" : "no gear"); told = n; }
 }
+/* How many parries so far (version 1): the HUD script plays the parry's clash (data/, ascalon_parry) when it rises. */
+HF_MOD_EXPORT unsigned ascalon_parry_seq(unsigned version) { return version == 1 ? atomic_load(&g_parrySeq) : 0; }
 HF_MOD_EXPORT AscalonHud* ascalon_hud_state(void)
 {
     int st = atomic_load(&g_state);

@@ -421,11 +421,53 @@ local function numbers_draw(d, dt, v)
 end
 
 
+-- The parry's clash (0.4.1): ascalon.dll counts parries (ascalon_parry_seq); when the count rises, the event
+-- ascalon_parry of the mod's own bank (data/, content/audio/ascalon_parry) is posted through HD2Runtime's hd2.sounds.
+-- The bank's resource is resident with the mod's patch; the Wwise plugin's own Wwise.load_bank puts it in the sound
+-- engine, once, when the engine does not know the event yet.
+pcall(ffi.cdef, [[ typedef unsigned int (*ascparry1)(unsigned int version); ]])
+local PS = {fn = nil, look = 0, seen = nil, loaded = false, told = 0, bank = 'content/audio/ascalon_parry', event = 'ascalon_parry'}
+local function parry_sound(dt)
+    PS.look = PS.look - dt
+    if not PS.fn then
+        if PS.look > 0 then return end
+        PS.look = 2
+        local module = k32.aschud1_GetModuleHandleA('ascalon.dll')
+        local proc = module ~= nil and k32.aschud1_GetProcAddress(module, 'ascalon_parry_seq') or nil
+        if proc == nil then return end
+        PS.fn = ffi.cast('ascparry1', proc)
+    end
+    local seq = tonumber(PS.fn(1))
+    if PS.seen == nil then PS.seen = seq end
+    local s = SR()
+    local W = s and s.Wwise
+    if not PS.loaded and W and type(W.has_event) == 'function' and PS.look <= 0 then
+        PS.look = 2
+        local okh, has = pcall(W.has_event, PS.event)
+        if okh and has == true then
+            PS.loaded = true
+            log('[Ascalon HUD] the parry sound is in the sound engine')
+        elseif type(W.load_bank) == 'function' then
+            local okl, err = pcall(W.load_bank, PS.bank)
+            if PS.told < 3 then PS.told = PS.told + 1; log(('[Ascalon HUD] loading the parry bank: %s %s'):format(tostring(okl), tostring(err))) end
+        end
+    end
+    if seq == PS.seen then return end
+    PS.seen = seq
+    if type(hd2.sounds) ~= 'table' or type(hd2.sounds.play) ~= 'function' then return end
+    local ok, handle, code, why = pcall(hd2.sounds.play, PS.event)
+    if PS.told < 12 then
+        PS.told = PS.told + 1
+        log(('[Ascalon HUD] parry %d: sound %s %s %s'):format(seq, tostring(ok and handle ~= nil), tostring(code), tostring(why or (not ok and handle) or '')))
+    end
+end
+
 local overlay = hd2.ui.overlay({id = 'ascalon', owner = OWNER})
 overlay:draw(function(d, dt)
     dt = tonumber(dt) or 0
     local s = find(dt)
     cloak_frame(s, dt)
+    if not PS.failed then local okP, errP = pcall(parry_sound, dt); if not okP then PS.failed = true; log('[Ascalon HUD] parry sound failed, off for this session: ' .. tostring(errP)) end end
     if s == nil or s.in_mission == 0 then return end
     mk_t = mk_t + dt
     local okV, v = pcall(view, d)
