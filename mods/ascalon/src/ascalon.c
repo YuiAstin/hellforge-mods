@@ -132,7 +132,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.18"
+#define VERSION "0.4.19"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -155,7 +155,8 @@ static float s_dSeconds = 5, s_dCooldown = 45, s_dMult = 1.5f, s_dPerKill = 2, s
 static float s_parryVolume = 0.4f, s_parryWindow = 0.3f, s_parryInvuln = 1, s_parryDamage = 300, s_parryBehind = 2.2f, s_parryStun = 300;
 static float s_dashDistance = 6, s_dashCooldown = 1.2f, s_dashDamage = 150, s_dashWidth = 2;
 static int s_parry = 1, s_dash = 1, s_meleeVk = 70, s_parrySound = 1, s_gameFit = 1;
-static int s_miStacks = 3, s_numbers = 1, s_miStatus = 2;
+static int s_miStacks = 3, s_numbers = 1, s_miStatus = 2, s_numbersTicks = 0;
+static float s_numbersAt = 1.5f;
 static float s_miBuildup = 100;
 static float s_visualCut = 95, s_revealHold = 1.5f, s_noiseWindow = 1.0f, s_heardHold = 5;
 static float s_dodge = 0.5f, s_forgetEvery = 0.5f, s_forgetRange = 150;
@@ -169,7 +170,7 @@ static const KbSetting kSettings[] = {
     KB_F("e_slow", s_eSlow, 0, 1000), KB_F("e_spread", s_eSpread, 0, 30), KB_F("d_seconds", s_dSeconds, 1, 120), KB_F("d_cooldown", s_dCooldown, 0, 600),
     KB_F("d_mult", s_dMult, 1, 20), KB_F("d_per_kill", s_dPerKill, 0, 30), KB_F("d_cap", s_dCap, 1, 120), KB_F("d_grace", s_dGrace, 0, 30), KB_F("d_radius", s_dRadius, 0, 60),
     KB_F("mi_seconds", s_miSeconds, 0, 120), KB_F("mi_damage", s_miDamage, 0, 5), KB_F("mi_ap", s_miAp, 0, 12), KB_F("mi_slow", s_miSlow, 0, 1000), KB_I("mi_stacks", s_miStacks, 0, 9),
-    KB_I("numbers", s_numbers, 0, 1), KB_I("mi_status", s_miStatus, 0, 200), KB_F("mi_status_buildup", s_miBuildup, 0, 1000),
+    KB_I("numbers", s_numbers, 0, 1), KB_F("numbers_at", s_numbersAt, 0, 20), KB_I("numbers_ticks", s_numbersTicks, 0, 1), KB_I("mi_status", s_miStatus, 0, 200), KB_F("mi_status_buildup", s_miBuildup, 0, 1000),
     KB_F("area_radius", s_areaRadius, 0, 60), KB_F("area_mult", s_areaMult, 0, 10), KB_F("area_every", s_areaEvery, 0.05, 5),
     KB_I("area_max", s_areaMax, 0, 24), KB_I("area_round", s_areaRound, 1, 100000), KB_F("pursuit_mult", s_pursuitMult, 1, 20),
     KB_F("pursuit_every", s_pursuitEvery, 0.5, 120), KB_F("pursuit_slow", s_pursuitSlow, 0, 1000), KB_I("pursuit_charges", s_pursuitCharges, 0, 9),
@@ -222,7 +223,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; second (100 a full dose). 0: no status; the mark's damage is mi_damage, above, dealt by the mod itself (as it\n"
                "; is when the game refuses the status).\n"
                "mi_status = %d\nmi_status_buildup = %g\n"
-               "; numbers 1: the HUD shows a number over every hit, strike and tick of hers.\nnumbers = %d\n"
+               "; Damage numbers (the HUD, as the other kits'): numbers 1 shows a number over each hit her skills raised to numbers_at\n"
+               "; times its damage or more (Pursuit, Endowment, Descent, the parry's counter; 0: every hit); numbers_ticks 1 also\n"
+               "; over each tick of a mark.\nnumbers = %d\nnumbers_at = %g\nnumbers_ticks = %d\n"
                "; Hidden: while she makes no noise, enemies see her visual_cut percent less far, and whoever within forget_range m\n"
                "; still targets her forgets her every forget_every s.\n"
                "visual_cut = %g\nforget_every = %g\nforget_range = %g\n"
@@ -245,7 +248,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_dashDamage, (double)s_dashWidth, s_gameFit, (double)s_eSeconds, (double)s_eCooldown,
             (double)s_eMult, (double)s_eRadius, (double)s_eSlow, (double)s_eSpread, (double)s_dSeconds, (double)s_dCooldown, (double)s_dMult,
             (double)s_dPerKill, (double)s_dCap, (double)s_dGrace, (double)s_dRadius, s_miStacks, (double)s_miSeconds,
-            (double)s_miDamage, (double)s_miAp, (double)s_miSlow, s_miStatus, (double)s_miBuildup, s_numbers, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
+            (double)s_miDamage, (double)s_miAp, (double)s_miSlow, s_miStatus, (double)s_miBuildup, s_numbers, (double)s_numbersAt, s_numbersTicks, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
             (double)s_revealHold, (double)s_noiseWindow, (double)s_heardHold, s_gearRule, (double)s_dodge, s_cloakVisual,
             s_hideGear);
 }
@@ -667,10 +670,11 @@ static int Friend(uint32_t e)
     return Descriptor(e, d) && (Quad(d) == AVATAR || FriendRes(Quad(d)));
 }
 #define VOL 24
-static struct { double at; int n, pursuit; int32_t damage; uint32_t tgt[VOL]; uint8_t left[VOL]; } g_vol;
+static struct { double at, mult; int n, pursuit; int32_t damage; uint32_t tgt[VOL]; uint8_t left[VOL]; } g_vol;
 static int g_volOwed, g_volPursuit, g_charges;
 static struct { double at; int n; int32_t damage; uint32_t tgt[VOL]; uint8_t left[VOL]; } g_dashVol;   /* the dash's strikes */
 static int32_t g_volDamage;
+static double g_volMult = 1;   /* what her skills raised the volley's hit by (for its numbers); the parry's counter: 99 */
 static uint32_t g_volPrimary;
 static double g_areaAt = -100, g_chargeAt;
 static uint32_t g_slowQ[32];
@@ -682,9 +686,13 @@ static void SlowLater(uint32_t e) { if (s_pursuitSlow > 0 && g_nslow < 32) g_slo
 typedef struct { float x, y, z, amount; uint32_t boosted, seq; } HitNote;
 static HitNote g_ring[HITRING];
 static volatile uint32_t g_ringSeq;
-static void NoteHit(const HfDamageEvent* d, int boosted)
+/* 0.4.19: when a number shows, as the other kits': for a hit her skills raised to numbers_at times its damage or more
+ * (Pursuit, Endowment, Descent, the parry's counter; 0: every hit). mult is what raised it; below 0 it is a tick of a
+ * mark, which gets a number only with numbers_ticks. */
+static void NoteHit(const HfDamageEvent* d, int boosted, double mult)
 {
     if (!s_numbers || !kb_kit_on || !g_inMission) return;
+    if (mult < 0 ? !s_numbersTicks : mult < s_numbersAt - 0.0001) return;
     uint32_t q = g_ringSeq + 1;
     HitNote* h = &g_ring[q % HITRING];
     h->x = d->position[0]; h->y = d->position[1]; h->z = d->position[2];
@@ -776,7 +784,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
         static unsigned told;
         if (told < 10) { told++; Log("damage over time on marked entity %u: %d (element %u, dealer %u, owner %u, %s)", d->target, d->amount, d->element, d->dealer, d->owner, MineHit(d) ? "hers" : "not credited to her"); }
         g_bleeds++;
-        NoteHit(d, 0);
+        NoteHit(d, 0, -1);
         return;
     }
     if (!MineHit(d) || d->amount <= 0 || Friend(d->target) || s_areaMax < 1 || s_areaRadius <= 0) return;
@@ -790,7 +798,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
                 d->amount = g_dashVol.damage < 1 ? 1 : g_dashVol.damage;
                 g_strikes++;
                 Mark(d->target, g_dashVol.damage);
-                NoteHit(d, 0);
+                NoteHit(d, 0, s_dashDamage > 0 ? g_dashVol.damage / (double)s_dashDamage : 1);
                 return;
             }
     /* one of the last volley's strikes landing: its amount is the hit's that set it off */
@@ -804,7 +812,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
                 if (g_vol.pursuit) SlowLater(d->target);
                 g_strikes++;
                 Mark(d->target, g_vol.damage);
-                NoteHit(d, g_vol.pursuit);
+                NoteHit(d, g_vol.pursuit, g_vol.mult * (g_vol.pursuit ? s_pursuitMult : 1));
                 return;
             }
     /* a tick of Mortal Interrogation landing: its amount is the mark's */
@@ -816,7 +824,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
                 double a = (double)g_mark[i].base * s_miDamage * g_mark[i].stacks;
                 d->amount = a < 1 ? 1 : a > 2000000 ? 2000000 : (int32_t)a;
                 g_ticks++;
-                NoteHit(d, 0);
+                NoteHit(d, 0, -1);
                 return;
             }
     /* a hit of her own, told as Voymastina tells them: a shot (IsShot: a projectile, a ricochet, a beam), or melee: a hit
@@ -835,7 +843,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     {
         double b = (double)d->amount * (g_now < g_eUntil ? s_eMult : 1) * (g_now < g_dUntil ? s_dMult : 1);
         d->amount = b > 2000000 ? 2000000 : (int32_t)b;
-        NoteHit(d, 0);
+        NoteHit(d, 0, (g_now < g_eUntil ? s_eMult : 1) * (g_now < g_dUntil ? s_dMult : 1));
         return;
     }
     g_areaAt = g_now;
@@ -843,6 +851,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     double skill = (g_now < g_eUntil ? s_eMult : 1) * (g_now < g_dUntil ? s_dMult : 1);
     { double b = (double)d->amount * skill; d->amount = b > 2000000 ? 2000000 : (int32_t)b; }
     g_volDamage = d->amount;
+    g_volMult = skill;
     g_volPrimary = d->target;
     g_volPursuit = pursuit;
     g_volOwed = pursuit ? 2 : 1;
@@ -857,7 +866,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
         d->amount = a > 2000000 ? 2000000 : (int32_t)a;
         SlowLater(d->target);
     }
-    NoteHit(d, pursuit);
+    NoteHit(d, pursuit, skill * (pursuit ? s_pursuitMult : 1));
 }
 /* the GAME THREAD: each marked enemy's tick a second: a round of the mod's spawned 2.5 m from its body on her side (from
  * her, when she is nearer than that), flying into it; and its dose of the slow */
@@ -992,7 +1001,7 @@ static void AreaFrame(void)
         memcpy(c[j].q, r, 12);
     }
     if (!nc) return;
-    if (!second) { memset(&g_vol, 0, sizeof g_vol); g_vol.damage = g_volDamage; g_vol.pursuit = g_volPursuit; }
+    if (!second) { memset(&g_vol, 0, sizeof g_vol); g_vol.damage = g_volDamage; g_vol.pursuit = g_volPursuit; g_vol.mult = g_volMult; }
     g_vol.at = g_now;
     int fired = 0;
     for (int j = 0; j < nc; j++)
@@ -1296,6 +1305,7 @@ static void CounterFrame(void)
     /* the counter strikes whoever is in range, wherever she ends up */
     double skill = (g_now < g_eUntil ? s_eMult : 1) * (g_now < g_dUntil ? s_dMult : 1);
     g_volDamage = (int32_t)(s_parryDamage * skill);
+    g_volMult = 99;   /* her counter always shows its numbers */
     g_volPrimary = 0;
     g_volPursuit = 0;
     g_volOwed = s_parryDamage > 0 ? 1 : 0;
@@ -1706,7 +1716,7 @@ static const KbOption kOptions[] = {
     {"parry", NULL, &s_parry}, {"parry_sound", NULL, &s_parrySound}, {"parry_volume", &s_parryVolume, NULL}, {"parry_window", &s_parryWindow, NULL}, {"parry_damage", &s_parryDamage, NULL}, {"dash", NULL, &s_dash},
     {"dash_distance", &s_dashDistance, NULL}, {"dash_cooldown", &s_dashCooldown, NULL}, {"dash_damage", &s_dashDamage, NULL},
     {"mi_stacks", NULL, &s_miStacks}, {"mi_seconds", &s_miSeconds, NULL}, {"mi_damage", &s_miDamage, NULL}, {"mi_ap", &s_miAp, NULL}, {"mi_slow", &s_miSlow, NULL}, {"mi_status", NULL, &s_miStatus}, {"mi_status_buildup", &s_miBuildup, NULL},
-    {"numbers", NULL, &s_numbers},
+    {"numbers", NULL, &s_numbers}, {"numbers_at", &s_numbersAt, NULL}, {"numbers_ticks", NULL, &s_numbersTicks},
     {"visual_cut", &s_visualCut, NULL}, {"reveal_hold", &s_revealHold, NULL}, {"noise_window", &s_noiseWindow, NULL}, {"heard_hold", &s_heardHold, NULL}, {"dodge", &s_dodge, NULL},
     {"gear_rule", NULL, &s_gearRule}, {"cloak_visual", NULL, &s_cloakVisual}, {"hide_gear", NULL, &s_hideGear},
     {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},

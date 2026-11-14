@@ -451,7 +451,9 @@ local OPTIONS = {
     {'visual_cut', 'slider', 'Hidden: Harder To See', 0, 100, 5, 'Per cent off how far enemies see her while she is hidden.'},
     {'cloak_visual', 'toggle', 'Hidden: Body Not Drawn', nil, nil, nil, 'Her body is not drawn while she is hidden.'},
     {'hide_gear', 'toggle', 'Hidden: Gear Not Drawn', nil, nil, nil, 'Her weapons and gear are not drawn either.'},
-    {'numbers', 'toggle', 'Damage Numbers', nil, nil, nil, 'Numbers over the enemies her hits and marks damage.', true},
+    {'numbers', 'toggle', 'Damage Numbers', nil, nil, nil, 'Numbers over the hits her skills raise.', true},
+    {'numbers_at', 'slider', 'Damage Numbers: From', 0, 5, 0.1, 'A number shows for a hit her skills raised this many times or more (0: every hit).'},
+    {'numbers_ticks', 'toggle', 'Damage Numbers: Mark Ticks', nil, nil, nil, 'Also a number over each tick of a mark.'},
     {'hp_mult', 'slider', 'Body: Health', 0.5, 4, 0.05, 'Her health, times a Helldiver\'s.', true},
     {'stamina_mult', 'slider', 'Body: Stamina', 0.5, 6, 0.1, 'How long she sprints before the bar empties, times a Helldiver\'s.'},
 }
