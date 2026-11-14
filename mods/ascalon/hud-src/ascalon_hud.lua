@@ -425,6 +425,7 @@ local OPTIONS = {
     {'area_radius', 'slider', 'Ambusher: Radius', 5, 30, 1, 'Metres around her each of her hits also strikes every enemy in.'},
     {'area_mult', 'slider', 'Ambusher: Damage', 0.1, 2, 0.05, 'What the enemies around her take, times the hit.'},
     {'mi_damage', 'slider', 'Mortal Interrogation: Damage', 0, 0.5, 0.01, 'Each second a marked enemy takes this times her hit, per stack.', true},
+    {'mi_ap', 'slider', 'Mortal Interrogation: Penetration', 0, 10, 1, 'Armour penetration of the mark\'s damage (10: no armour turns it; 0: light).'},
     {'mi_seconds', 'slider', 'Mortal Interrogation: Duration', 5, 60, 1, 'Seconds a mark lasts.'},
     {'mi_stacks', 'slider', 'Mortal Interrogation: Stacks', 1, 6, 1, 'The most marks on one enemy.'},
     {'pursuit_mult', 'slider', 'Pursuit: Damage', 1, 4, 0.05, 'A Pursuit hit deals this times its damage, and lands twice.', true},
@@ -855,7 +856,7 @@ local function numbers_draw(d, dt, v)
                 local pop = h.t < 0.12 and (1.35 - h.t / 0.12 * 0.35) or 1
                 local a = h.t > HN_LIFE - 0.45 and (HN_LIFE - h.t) / 0.45 or 1
                 local size = (h.boosted and 24 or 18) * sc * pop
-                local col = h.boosted and {255, 138, 36} or {150, 235, 225}
+                local col = h.boosted and {255, 120, 40} or {255, 95, 60}   -- the other kits' (0.4.18; teal before)
                 local str = tostring(math.floor(h.amount + 0.5))
                 local px, py = sx + h.jx * sc, sy - (rise + 6) * sc
                 d:text(str, px + 2 * sc, py + 2 * sc, {size = size, colour = {20, 10, 5, math.floor(200 * a)}, z = 7, align = 'center'})

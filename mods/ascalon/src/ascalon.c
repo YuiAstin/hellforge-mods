@@ -132,7 +132,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.17"
+#define VERSION "0.4.18"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -149,7 +149,7 @@ KB_ROSTER_EXPORTS(ascalon)
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static float s_areaRadius = 15, s_areaMult = 1, s_areaEvery = 0.25f, s_pursuitMult = 2.1f, s_pursuitEvery = 7, s_pursuitSlow = 100;
 static int s_areaMax = 12, s_areaRound = 7, s_pursuitCharges = 3;
-static float s_miSeconds = 25, s_miDamage = 0.10f, s_miSlow = 18;
+static float s_miSeconds = 25, s_miDamage = 0.10f, s_miSlow = 18, s_miAp = 10;
 static float s_eSeconds = 35, s_eCooldown = 20, s_eMult = 2.3f, s_eRadius = 15, s_eSlow = 60, s_eSpread = 5;
 static float s_dSeconds = 5, s_dCooldown = 45, s_dMult = 1.5f, s_dPerKill = 2, s_dCap = 15, s_dGrace = 2, s_dRadius = 25;
 static float s_parryVolume = 0.4f, s_parryWindow = 0.3f, s_parryInvuln = 1, s_parryDamage = 300, s_parryBehind = 2.2f, s_parryStun = 300;
@@ -168,7 +168,7 @@ static const KbSetting kSettings[] = {
     KB_F("e_seconds", s_eSeconds, 1, 300), KB_F("e_cooldown", s_eCooldown, 0, 600), KB_F("e_mult", s_eMult, 1, 20), KB_F("e_radius", s_eRadius, 0, 60),
     KB_F("e_slow", s_eSlow, 0, 1000), KB_F("e_spread", s_eSpread, 0, 30), KB_F("d_seconds", s_dSeconds, 1, 120), KB_F("d_cooldown", s_dCooldown, 0, 600),
     KB_F("d_mult", s_dMult, 1, 20), KB_F("d_per_kill", s_dPerKill, 0, 30), KB_F("d_cap", s_dCap, 1, 120), KB_F("d_grace", s_dGrace, 0, 30), KB_F("d_radius", s_dRadius, 0, 60),
-    KB_F("mi_seconds", s_miSeconds, 0, 120), KB_F("mi_damage", s_miDamage, 0, 5), KB_F("mi_slow", s_miSlow, 0, 1000), KB_I("mi_stacks", s_miStacks, 0, 9),
+    KB_F("mi_seconds", s_miSeconds, 0, 120), KB_F("mi_damage", s_miDamage, 0, 5), KB_F("mi_ap", s_miAp, 0, 12), KB_F("mi_slow", s_miSlow, 0, 1000), KB_I("mi_stacks", s_miStacks, 0, 9),
     KB_I("numbers", s_numbers, 0, 1), KB_I("mi_status", s_miStatus, 0, 200), KB_F("mi_status_buildup", s_miBuildup, 0, 1000),
     KB_F("area_radius", s_areaRadius, 0, 60), KB_F("area_mult", s_areaMult, 0, 10), KB_F("area_every", s_areaEvery, 0.05, 5),
     KB_I("area_max", s_areaMax, 0, 24), KB_I("area_round", s_areaRound, 1, 100000), KB_F("pursuit_mult", s_pursuitMult, 1, 20),
@@ -216,7 +216,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Mortal Interrogation: each hit or strike of hers puts a stack on its target (mi_stacks at most) for mi_seconds\n"
                "; from the last one. A marked enemy takes mi_damage times the marking hit's damage a second for each stack, and\n"
                "; a dose of the slow (mi_slow a stack; 100 a full dose).\n"
-               "mi_stacks = %d\nmi_seconds = %g\nmi_damage = %g\nmi_slow = %g\n"
+               "; mi_ap: the armour penetration of the mark's damage (10: no armour turns it; 0: its round's own, light).\n"
+               "mi_stacks = %d\nmi_seconds = %g\nmi_damage = %g\nmi_ap = %g\nmi_slow = %g\n"
                "; mi_status: the game status that does the mark's damage (2: bleed), a dose of mi_status_buildup a stack every\n"
                "; second (100 a full dose). 0: no status; the mark's damage is mi_damage, above, dealt by the mod itself (as it\n"
                "; is when the game refuses the status).\n"
@@ -244,7 +245,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_dashDamage, (double)s_dashWidth, s_gameFit, (double)s_eSeconds, (double)s_eCooldown,
             (double)s_eMult, (double)s_eRadius, (double)s_eSlow, (double)s_eSpread, (double)s_dSeconds, (double)s_dCooldown, (double)s_dMult,
             (double)s_dPerKill, (double)s_dCap, (double)s_dGrace, (double)s_dRadius, s_miStacks, (double)s_miSeconds,
-            (double)s_miDamage, (double)s_miSlow, s_miStatus, (double)s_miBuildup, s_numbers, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
+            (double)s_miDamage, (double)s_miAp, (double)s_miSlow, s_miStatus, (double)s_miBuildup, s_numbers, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
             (double)s_revealHold, (double)s_noiseWindow, (double)s_heardHold, s_gearRule, (double)s_dodge, s_cloakVisual,
             s_hideGear);
 }
@@ -738,7 +739,7 @@ HF_MOD_EXPORT int ascalon_view(unsigned version, float* out)
 #define MARKS 64
 static struct { uint32_t e; int stacks, pending; double until, next; int32_t base; double sent; int tries; } g_mark[MARKS];
 static unsigned g_marked, g_ticks, g_bleeds;
-static unsigned g_tickSent, g_tickSentLine, g_tickLandLine, g_tickLate, g_tickAgain;   /* for the log's Mortal Interrogation line */
+static unsigned g_tickSent, g_tickSentLine, g_tickLandLine, g_tickLate, g_tickAgain, g_tickPierced;   /* for the log's Mortal Interrogation line */
 static double g_tickLineAt;
 static int g_statusBad;   /* the game refused mi_status this session: the spawned-round tick instead */
 static int Marked(uint32_t e)
@@ -860,6 +861,30 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 }
 /* the GAME THREAD: each marked enemy's tick a second: a round of the mod's spawned 2.5 m from its body on her side (from
  * her, when she is nearer than that), flying into it; and its dose of the slow */
+/* The mark's damage is no bullet (0.4.18, Yui: "armor shouldn't be bouncing internal bleeding"): a tick's round has the
+ * penetration mi_ap (10: through any armour) for the game's calculation of its hit, put back after (the kit base
+ * restores it): the hit's penetration by impact angle (+0x9C, +0xA0, +0xA4), as the Executor's skill raises his. The
+ * hit hooks run on another thread: the marks are only read here. */
+static void HitBefore(KbHitCall* c)
+{
+    if (c->kind != KB_HIT_CALC || s_miAp <= 0) return;
+    uint32_t me = atomic_load(&g_avatar);
+    uint8_t h[HIT_SIZE];
+    if (!me || !ReadAt((uintptr_t)c->hit, h, sizeof h)) return;
+    uint32_t kind = Word(h), target = Word(h + 0x20), dealer = Word(h + 0x80), owner = Word(h + 0x100);
+    if (kind != 0 || !target || target == me) return;
+    if (!(dealer == me || (owner == me && (!dealer || Mine(dealer))))) return;
+    int owed = 0;
+    for (int i = 0; i < MARKS && !owed; i++) owed = g_mark[i].e == target && g_mark[i].pending > 0;
+    if (!owed) return;
+    memcpy(c->saved, h + 0x9C, 12);
+    for (int k = 0; k < 3; k++) if (!(c->saved[k] >= 0 && c->saved[k] <= 12)) return;   /* not the reviewed layout */
+    float up[3];
+    for (int k = 0; k < 3; k++) up[k] = c->saved[k] > s_miAp ? c->saved[k] : s_miAp;
+    memcpy((uint8_t*)c->hit + 0x9C, up, 12);
+    c->restore = 1;
+    g_tickPierced++;
+}
 /* One tick's round at a marked enemy's body. First from her, as an area strike's flies, when the way is clear (0.4.12:
  * for one of two marked enemies every round missed, three a tick: sent from 1.6 m out, a round starts inside a large
  * enemy and meets nothing; her strikes, flying in from outside, do land on it); else, and when that one misses, from
@@ -930,8 +955,8 @@ static void MarkFrame(void)
         if (alive || g_tickSent != g_tickSentLine)
         {
             static unsigned told;
-            if (told++ < 80) Log("Mortal Interrogation: %d enemies marked now (%d stacks); in the last 10 s %u rounds sent, %u ticks landed; in all %u rounds sent again, %u ticks never landed", alive, stacks,
-                g_tickSent - g_tickSentLine, g_ticks - g_tickLandLine, g_tickAgain, g_tickLate);
+            if (told++ < 80) Log("Mortal Interrogation: %d enemies marked now (%d stacks); in the last 10 s %u rounds sent, %u ticks landed; in all %u rounds sent again, %u ticks never landed, %u given penetration %.0f", alive, stacks,
+                g_tickSent - g_tickSentLine, g_ticks - g_tickLandLine, g_tickAgain, g_tickLate, g_tickPierced, (double)s_miAp);
         }
         g_tickSentLine = g_tickSent; g_tickLandLine = g_ticks; g_tickLineAt = g_now;
     }
@@ -1517,7 +1542,8 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     if (!g || !x || gameSize != 74727424u || exeSize != 60719104u) { Log("REFUSED: the game's modules are not build " BUILD "'s: her kit stays off"); return; }
     game = g;
     exe = x;
-    HitsInstall("the dodge");
+    kb_hit_before = HitBefore;
+    HitsInstall("the dodge and the mark's armour penetration");
     if (hf->code_matches(exe + 0x79F860, "33 c0 4c 8d 05 c7 b2 01 02 0f 1f 80 00 00 00 00 49 39 0c c0 74 0c ff c0 83 f8 04 75 f3") &&
         hf->code_matches(exe + 0x7F4590, "48 8b c4 f3 0f 11 58 20 89 48 08 55 53 56 57 41 54 41 55 41 56 41 57 48"))
     {
@@ -1679,7 +1705,7 @@ static const KbOption kOptions[] = {
     {"d_mult", &s_dMult, NULL}, {"d_per_kill", &s_dPerKill, NULL}, {"d_cap", &s_dCap, NULL}, {"d_radius", &s_dRadius, NULL},
     {"parry", NULL, &s_parry}, {"parry_sound", NULL, &s_parrySound}, {"parry_volume", &s_parryVolume, NULL}, {"parry_window", &s_parryWindow, NULL}, {"parry_damage", &s_parryDamage, NULL}, {"dash", NULL, &s_dash},
     {"dash_distance", &s_dashDistance, NULL}, {"dash_cooldown", &s_dashCooldown, NULL}, {"dash_damage", &s_dashDamage, NULL},
-    {"mi_stacks", NULL, &s_miStacks}, {"mi_seconds", &s_miSeconds, NULL}, {"mi_damage", &s_miDamage, NULL}, {"mi_slow", &s_miSlow, NULL}, {"mi_status", NULL, &s_miStatus}, {"mi_status_buildup", &s_miBuildup, NULL},
+    {"mi_stacks", NULL, &s_miStacks}, {"mi_seconds", &s_miSeconds, NULL}, {"mi_damage", &s_miDamage, NULL}, {"mi_ap", &s_miAp, NULL}, {"mi_slow", &s_miSlow, NULL}, {"mi_status", NULL, &s_miStatus}, {"mi_status_buildup", &s_miBuildup, NULL},
     {"numbers", NULL, &s_numbers},
     {"visual_cut", &s_visualCut, NULL}, {"reveal_hold", &s_revealHold, NULL}, {"noise_window", &s_noiseWindow, NULL}, {"heard_hold", &s_heardHold, NULL}, {"dodge", &s_dodge, NULL},
     {"gear_rule", NULL, &s_gearRule}, {"cloak_visual", NULL, &s_cloakVisual}, {"hide_gear", NULL, &s_hideGear},
