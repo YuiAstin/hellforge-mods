@@ -141,7 +141,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.5.7"
+#define VERSION "0.5.8"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -1738,6 +1738,67 @@ static void HerUnits(void)
     g_hud.nwanted = (uint32_t)n;
     static int told = -1;
     if (n != told) { static unsigned times; if (times++ < 12) Log("her units by the engine's links: %d (her Helldiver's, its parts and %s)", n, s_hideGear ? "her gear" : "no gear"); told = n; }
+}
+/* The materials that mods' patch files replace (0.5.8), for the shimmer: a slot wearing one of them is not given the
+ * cloak material (given back by its id afterwards it came back as the game's own: a cape that a "hidden items" pack
+ * makes invisible through its material was drawn again), its mesh is not drawn instead. Read once from the patch
+ * files in the game's data folder (each one's file table: 80-byte entries from 0x48 + 32 x types; type
+ * 0xEAC0B497876ADEDF is a material), the mod's own cloak material left out. */
+#define PATCHED_MAX 8192
+static uint64_t g_patched[PATCHED_MAX];
+static int g_nPatched = -1;
+static void PatchedMaterials(void)
+{
+    char exePath[MAX_PATH], pattern[MAX_PATH], dir[MAX_PATH];
+    g_nPatched = 0;
+    if (!GetModuleFileNameA(GetModuleHandleA("helldivers2.exe"), exePath, sizeof exePath)) return;
+    char* slash = strrchr(exePath, '\\');
+    if (!slash) return;
+    *slash = 0;
+    snprintf(dir, sizeof dir, "%s\\..\\data", exePath);
+    snprintf(pattern, sizeof pattern, "%s\\*.patch_*", dir);
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern, &fd);
+    if (h == INVALID_HANDLE_VALUE) { Log("patched materials: no patch files found in %s", dir); return; }
+    int files = 0;
+    do
+    {
+        if (strstr(fd.cFileName, ".gpu_resources") || strstr(fd.cFileName, ".stream")) continue;
+        char path[MAX_PATH];
+        snprintf(path, sizeof path, "%s\\%s", dir, fd.cFileName);
+        FILE* f = fopen(path, "rb");
+        if (!f) continue;
+        uint8_t head[0x48];
+        if (fread(head, 1, sizeof head, f) == sizeof head && Word(head) == 0xF0000011u)
+        {
+            uint32_t nt = Word(head + 4), nf = Word(head + 8);
+            if (nt <= 256 && nf <= 200000 && !fseek(f, (long)(0x48 + nt * 32u), SEEK_SET))
+            {
+                files++;
+                uint8_t e[80];
+                for (uint32_t i = 0; i < nf && g_nPatched < PATCHED_MAX && fread(e, 1, sizeof e, f) == sizeof e; i++)
+                {
+                    uint64_t id, type;
+                    memcpy(&id, e, 8); memcpy(&type, e + 8, 8);
+                    if (type != UINT64_C(0xEAC0B497876ADEDF) || id == UINT64_C(0x7C8D05562574CAD3)) continue;   /* (ours: yui/ascalon/cloak) */
+                    int have = 0;
+                    for (int k = 0; k < g_nPatched && !have; k++) have = g_patched[k] == id;
+                    if (!have) g_patched[g_nPatched++] = id;
+                }
+            }
+        }
+        fclose(f);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    Log("patched materials: %d in %d patch file(s) (the shimmer leaves those alone)", g_nPatched, files);
+}
+HF_MOD_EXPORT int ascalon_patched_materials(unsigned version, uint64_t* out, int max)
+{
+    if (version != 1 || !out || max <= 0) return 0;
+    if (g_nPatched < 0) PatchedMaterials();
+    int n = g_nPatched < max ? g_nPatched : max;
+    memcpy(out, g_patched, 8u * (unsigned)n);
+    return n;
 }
 /* How many parries so far (version 1): the HUD script plays the parry's clash (data/, ascalon_parry) when it rises. */
 HF_MOD_EXPORT unsigned ascalon_parry_seq(unsigned version) { return version == 1 ? atomic_load(&g_parrySeq) : 0; }

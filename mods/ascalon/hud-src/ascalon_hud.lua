@@ -802,6 +802,23 @@ local function keep_hidden(U, M, notes)
     if n > 0 and (SH.kept or 0) < 8 then SH.kept = (SH.kept or 0) + 1; log(('[Ascalon HUD] shimmer: %d mesh(es) a change of material had shown are hidden again'):format(n)) end
     return n
 end
+-- The materials mods' patches replace (0.5.8; ascalon.dll reads the patch files' tables): a slot wearing one is not
+-- given the cloak material. Given back by its id it came back as the game's own, so a cape that a "hidden items" pack
+-- makes invisible through its material was drawn again. Its mesh is not drawn instead, and shown again as her gear is.
+pcall(ffi.cdef, [[ typedef int (*ascpatched1)(unsigned int version, uint64_t *out, int max); ]])
+local PM = nil
+local function patched_materials()
+    if PM then return PM end
+    local module = k32.aschud1_GetModuleHandleA('ascalon.dll')
+    local proc = module ~= nil and k32.aschud1_GetProcAddress(module, 'ascalon_patched_materials') or nil
+    if proc == nil then return {} end
+    local buf = ffi.new('uint64_t[8192]')
+    local n = ffi.cast('ascpatched1', proc)(1, buf, 8192)
+    PM = {}
+    for i = 0, n - 1 do PM[tostring(tonumber(buf[i] / 4294967296ULL))] = true end   -- by the id's high half, as Material.id gives it
+    log(('[Ascalon HUD] shimmer: %d material(s) that mods\' patches replace are left alone'):format(n))
+    return PM
+end
 local function shimmer_apply(units)
     local U, M, Mat, Id64, Id32 = lib('Unit'), lib('Mesh'), lib('Material'), lib('IdString64'), lib('IdString32')
     if not Id64 or type(Id64.to_hex) ~= 'function' or type(Id64.from_hex) ~= 'function' or not Id32 or type(Id32.to_hex) ~= 'function' or type(Id32.from_hex) ~= 'function' then
@@ -809,7 +826,8 @@ local function shimmer_apply(units)
         SH.on = false
         return
     end
-    local set, bound, errs = 0, 0, 0
+    local set, bound, errs, skipped = 0, 0, 0, 0
+    local patched = patched_materials()
     if SH.notes then keep_hidden(U, M, SH.notes); SH.notes = nil end   -- what the last look's changes showed since
     local notes = {}
     for _, u in ipairs(units) do
@@ -830,6 +848,15 @@ local function shimmer_apply(units)
                         local oki, id = false, nil
                         if okt and mat then oki, id = pc(Mat.id, mat) end
                         local is_mine = oki and SH.mine ~= nil and tostring(id) == SH.mine
+                        if oki and id ~= nil and patched[tostring(id)] then
+                            -- a mod's material: the mesh is not drawn instead (noted, so it is shown again with her gear)
+                            if pc(U.set_mesh_visibility, u, i, false) then
+                                local hk = ukey(u) .. ':' .. i
+                                if not cl.keys[hk] then cl.keys[hk] = true; cl.hidden[#cl.hidden + 1] = {unit = u, mesh = i, show = true} end
+                                skipped = skipped + 1
+                            end
+                            break
+                        end
                         -- its own material's id, read before it goes: without it the slot is left alone
                         local prehex, pre64, before = nil, nil, (oki and id ~= nil) and tostring(id) or nil
                         if not is_mine and okt and mat then
@@ -879,7 +906,7 @@ local function shimmer_apply(units)
     if set > 0 then keep_hidden(U, M, notes); SH.notes = notes end
     if set > 0 and SH.told < 12 then
         SH.told = SH.told + 1
-        log(('[Ascalon HUD] shimmer: the cloak material on %d slot(s) of %d unit(s), %d binding(s) at opacity %.2f / %.2f, %d refused'):format(set, #units, bound, SH.op, SH.st, errs))
+        log(('[Ascalon HUD] shimmer: the cloak material on %d slot(s) of %d unit(s), %d binding(s) at opacity %.2f / %.2f, %d refused; %d mesh(es) of mods\' materials not drawn instead'):format(set, #units, bound, SH.op, SH.st, errs, skipped))
     end
 end
 -- Giving her own materials back (0.5.3). 0.5.1 handed back what set_material had returned and 0.5.2 that material's
