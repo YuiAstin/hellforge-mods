@@ -15,4 +15,7 @@ of that mod is included. Forgetting her uses the behaviour and perception record
 The HUD uses HD2Runtime's
 public overlay API and the engine's Lua API.
 
+The damage numbers are the Executor's and Lemuen's: finding the view camera and projecting a world point are adapted
+from **Chef Shared Loader** by Th3chef (github.com/Th3chef/Chef-Shared-Loader, src/loader.lua), with Th3chef's permission.
+
 Ascalon is a character of Arknights (Hypergryph / Yostar). This is an unofficial fan mod; no character model is included.

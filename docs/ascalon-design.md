@@ -107,3 +107,8 @@ perception research (docs/research/perception.md, when written) come first.
   struck; 3 charges, one every 7 s. Correction to "Source kit" above: in Arknights she is not invisible; "always
   hidden" is this port's own idea. Not built: Mortal Interrogation's stacks and damage a second, Penumbral Image,
   Endowment, Descent.
+- **0.2.1 (2026-11-14): Mortal Interrogation and damage numbers** (Yui: the trait, melee and damage work; "without the
+  damage popup it is hard to know if she hit twice", and the DoT was missing). Marks: a stack a hit or strike (3), 25 s
+  from the last, a tick a second of 10% of the marking hit a stack, the flamer slow 18 a stack. HellForge has no
+  "damage this entity" action: a tick is a spawned round set 2.5 m from the enemy's body on her side, flying into it,
+  its amount set in the damage event (no line from her needed). Numbers: the Executor's block (ring, view, projection).

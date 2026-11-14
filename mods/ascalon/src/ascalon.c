@@ -23,7 +23,13 @@
  *   - Pursuit (S1, by itself, pursuit_charges charges, one back every pursuit_every s): her next hit deals pursuit_mult
  *     times its damage and lands twice (a second volley that takes in the enemy she hit), on everyone in range, and
  *     slows each one it strikes (the flamer slow, pursuit_slow build-up).
- * Endowment, Descent and Mortal Interrogation are not in this build.
+ * 0.2.1:
+ *   - Mortal Interrogation (passive): each hit of hers, and each strike, puts a stack on its target (mi_stacks at most),
+ *     for mi_seconds from the last one. A marked enemy takes mi_damage times the marking hit's damage a second for each
+ *     stack, and a dose of the slow (mi_slow a stack). The damage is a round of the mod's spawned beside the enemy (no
+ *     line from her needed), its amount set in the damage event.
+ *   - Damage numbers (the HUD, as the Executor's and Lemuen's): every hit, strike and tick of hers, Pursuit's in orange.
+ * Endowment and Descent are not in this build.
  *
  * Built on the kit base (src/kitbase). Solo or host. */
 #include <errno.h>
@@ -40,7 +46,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -57,11 +63,15 @@ KB_ROSTER_EXPORTS(ascalon)
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static float s_areaRadius = 15, s_areaMult = 1, s_areaEvery = 0.25f, s_pursuitMult = 2.1f, s_pursuitEvery = 7, s_pursuitSlow = 100;
 static int s_areaMax = 12, s_areaRound = 7, s_pursuitCharges = 3;
+static float s_miSeconds = 25, s_miDamage = 0.10f, s_miSlow = 18;
+static int s_miStacks = 3, s_numbers = 1;
 static float s_visualCut = 95, s_revealHold = 1.5f, s_noiseWindow = 1.0f, s_heardHold = 5;
 static float s_dodge = 0.5f, s_forgetEvery = 0.5f, s_forgetRange = 150;
 static int s_cloakVisual = 1, s_hideGear = 1, s_gearRule = 1;
 
 static const KbSetting kSettings[] = {
+    KB_F("mi_seconds", s_miSeconds, 0, 120), KB_F("mi_damage", s_miDamage, 0, 5), KB_F("mi_slow", s_miSlow, 0, 1000), KB_I("mi_stacks", s_miStacks, 0, 9),
+    KB_I("numbers", s_numbers, 0, 1),
     KB_F("area_radius", s_areaRadius, 0, 60), KB_F("area_mult", s_areaMult, 0, 10), KB_F("area_every", s_areaEvery, 0.05, 5),
     KB_I("area_max", s_areaMax, 0, 24), KB_I("area_round", s_areaRound, 1, 100000), KB_F("pursuit_mult", s_pursuitMult, 1, 20),
     KB_F("pursuit_every", s_pursuitEvery, 0.5, 120), KB_F("pursuit_slow", s_pursuitSlow, 0, 1000), KB_I("pursuit_charges", s_pursuitCharges, 0, 9),
@@ -85,6 +95,11 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Pursuit (by itself): pursuit_charges charges, one back every pursuit_every s. A hit with a charge deals\n"
                "; pursuit_mult times its damage, lands twice on everyone in range and slows them (pursuit_slow: 100 a full dose).\n"
                "pursuit_charges = %d\npursuit_every = %g\npursuit_mult = %g\npursuit_slow = %g\n"
+               "; Mortal Interrogation: each hit or strike of hers puts a stack on its target (mi_stacks at most) for mi_seconds\n"
+               "; from the last one. A marked enemy takes mi_damage times the marking hit's damage a second for each stack, and\n"
+               "; a dose of the slow (mi_slow a stack; 100 a full dose).\n"
+               "mi_stacks = %d\nmi_seconds = %g\nmi_damage = %g\nmi_slow = %g\n"
+               "; numbers 1: the HUD shows a number over every hit, strike and tick of hers.\nnumbers = %d\n"
                "; Hidden: while she makes no noise, enemies see her visual_cut percent less far, and whoever within forget_range m\n"
                "; still targets her forgets her every forget_every s.\n"
                "visual_cut = %g\nforget_every = %g\nforget_range = %g\n"
@@ -102,7 +117,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint.\n"
                "hp_mult = 1\nstamina_mult = 1.2\nhellbomb_on_exhaustion = 0\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_areaRadius, (double)s_areaMult, s_areaMax, (double)s_areaEvery,
-            s_areaRound, s_pursuitCharges, (double)s_pursuitEvery, (double)s_pursuitMult, (double)s_pursuitSlow, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
+            s_areaRound, s_pursuitCharges, (double)s_pursuitEvery, (double)s_pursuitMult, (double)s_pursuitSlow, s_miStacks, (double)s_miSeconds,
+            (double)s_miDamage, (double)s_miSlow, s_numbers, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
             (double)s_revealHold, (double)s_noiseWindow, (double)s_heardHold, s_gearRule, (double)s_dodge, s_cloakVisual,
             s_hideGear);
 }
@@ -370,6 +386,88 @@ static uint32_t g_slowQ[32];
 static int g_nslow;
 static unsigned g_volleys, g_strikes, g_pursuits;
 static void SlowLater(uint32_t e) { if (s_pursuitSlow > 0 && g_nslow < 32) g_slowQ[g_nslow++] = e; }
+/* her hits for the HUD's damage numbers (ascalon_hits; the Executor's ring): the damage event writes, the HUD reads */
+#define HITRING 64
+typedef struct { float x, y, z, amount; uint32_t boosted, seq; } HitNote;
+static HitNote g_ring[HITRING];
+static volatile uint32_t g_ringSeq;
+static void NoteHit(const HfDamageEvent* d, int boosted)
+{
+    if (!s_numbers || !kb_kit_on || !g_inMission) return;
+    uint32_t q = g_ringSeq + 1;
+    HitNote* h = &g_ring[q % HITRING];
+    h->x = d->position[0]; h->y = d->position[1]; h->z = d->position[2];
+    h->amount = (float)d->amount; h->boosted = (uint32_t)boosted;
+    h->seq = q;
+    g_ringSeq = q;
+}
+HF_MOD_EXPORT int ascalon_hits(unsigned version, float* out, int max, uint32_t* seq)
+{
+    if (version != 1 || !out || !seq || max <= 0) return 0;
+    uint32_t now = g_ringSeq, from = *seq;
+    if (now - from > HITRING) from = now - HITRING;
+    int n = 0;
+    for (uint32_t q = from + 1; q - 1 != now && n < max; q++)
+    {
+        HitNote h = g_ring[q % HITRING];
+        if (h.seq != q) continue;
+        out[n * 5] = h.x; out[n * 5 + 1] = h.y; out[n * 5 + 2] = h.z; out[n * 5 + 3] = h.amount; out[n * 5 + 4] = (float)h.boosted;
+        n++;
+    }
+    *seq = now;
+    return n;
+}
+/* her view for the HUD (ascalon_view; the Executor's CamView: her unit's world, its camera matrix at +0x230920) */
+static float g_viewOut[6];
+static volatile int g_viewOk;
+static void ViewFrame(void)
+{
+    uint8_t d[24];
+    g_viewOk = 0;
+    if (!Descriptor(atomic_load(&g_avatar), d)) return;
+    uint32_t unit = Word(d + 12), slot = unit & 0x3FFFFF, id = 0;
+    uintptr_t registry = Pointer(exe + 0x1A100F0), objects, object, w;
+    float m[16];
+    if (!registry || !(objects = Pointer(registry + 0x88)) || !(object = Pointer(objects + 8u * slot)) || !ReadAt(object + 8, &id, 4) || id != unit ||
+        !(w = Pointer(object + 0x18)) || !ReadAt(w + 0x230920, m, 64)) return;
+    for (int k = 0; k < 16; k++) if (!isfinite(m[k])) return;
+    if (fabsf(m[15] - 1) > 1e-3f) return;
+    float n = sqrtf(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+    if (!(n > 0.5f)) return;
+    memcpy(g_viewOut, m + 12, 12);
+    for (int k = 0; k < 3; k++) g_viewOut[3 + k] = m[4 + k] / n;
+    g_viewOk = 1;
+}
+HF_MOD_EXPORT int ascalon_view(unsigned version, float* out)
+{
+    if (version != 1 || !out || !g_viewOk || !g_inMission) return 0;
+    memcpy(out, g_viewOut, 24);
+    return 1;
+}
+/* ---- Mortal Interrogation: the marks -------------------------------------------------------------------------------- */
+#define MARKS 64
+static struct { uint32_t e; int stacks, pending; double until, next; int32_t base; } g_mark[MARKS];
+static unsigned g_marked, g_ticks;
+static void Mark(uint32_t e, int32_t damage)
+{
+    if (s_miStacks < 1 || s_miSeconds <= 0) return;
+    int free = -1;
+    for (int i = 0; i < MARKS; i++)
+    {
+        if (g_mark[i].e == e && g_mark[i].until > g_now)
+        {
+            if (g_mark[i].stacks < s_miStacks) g_mark[i].stacks++;
+            if (damage > g_mark[i].base) g_mark[i].base = damage;
+            g_mark[i].until = g_now + s_miSeconds;   /* a new hit starts the time again */
+            return;
+        }
+        if (free < 0 && (!g_mark[i].e || g_mark[i].until <= g_now)) free = i;
+    }
+    if (free < 0) return;
+    g_mark[free].e = e; g_mark[free].stacks = 1; g_mark[free].pending = 0; g_mark[free].base = damage;
+    g_mark[free].until = g_now + s_miSeconds; g_mark[free].next = g_now + 1;
+    g_marked++;
+}
 static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     (void)e; (void)me;
@@ -384,6 +482,20 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
                 d->amount = a < 1 ? 1 : a > 2000000 ? 2000000 : (int32_t)a;
                 if (g_vol.pursuit) SlowLater(d->target);
                 g_strikes++;
+                Mark(d->target, g_vol.damage);
+                NoteHit(d, g_vol.pursuit);
+                return;
+            }
+    /* a tick of Mortal Interrogation landing: its amount is the mark's */
+    if (d->kind == 0)
+        for (int i = 0; i < MARKS; i++)
+            if (g_mark[i].e == d->target && g_mark[i].pending > 0)
+            {
+                g_mark[i].pending--;
+                double a = (double)g_mark[i].base * s_miDamage * g_mark[i].stacks;
+                d->amount = a < 1 ? 1 : a > 2000000 ? 2000000 : (int32_t)a;
+                g_ticks++;
+                NoteHit(d, 0);
                 return;
             }
     /* a hit of her own, told as Voymastina tells them: a shot (IsShot: a projectile, a ricochet, a beam), or melee: a hit
@@ -397,7 +509,8 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     /* a bullet's hit counts only when her gun has just fired (the shot counter): a strike round that hits a bystander on
      * its way would otherwise set off the next volley, and that one the next */
     if (shot && d->kind != 3 && g_now - g_noiseAt > 1.0) return;
-    if (g_now - g_areaAt < s_areaEvery) return;
+    Mark(d->target, d->amount);
+    if (g_now - g_areaAt < s_areaEvery) { NoteHit(d, 0); return; }
     g_areaAt = g_now;
     int pursuit = g_charges > 0;
     g_volDamage = d->amount;
@@ -414,6 +527,45 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
         double a = (double)d->amount * s_pursuitMult;
         d->amount = a > 2000000 ? 2000000 : (int32_t)a;
         SlowLater(d->target);
+    }
+    NoteHit(d, pursuit);
+}
+/* the GAME THREAD: each marked enemy's tick a second: a round of the mod's spawned 2.5 m from its body on her side (from
+ * her, when she is nearer than that), flying into it; and its dose of the slow */
+static void MarkFrame(void)
+{
+    float pos[3];
+    int have = PlayerPose(pos, NULL), spawned = 0;
+    for (int i = 0; i < MARKS && spawned < 8; i++)
+    {
+        uint32_t en = g_mark[i].e;
+        if (!en) continue;
+        if (g_mark[i].until <= g_now || !Living(en)) { g_mark[i].e = 0; continue; }
+        if (g_now < g_mark[i].next) continue;
+        g_mark[i].next = g_now + 1;
+        g_mark[i].pending = 0;                         /* a tick that never landed is not owed */
+        uint8_t d[24];
+        float r[3], off[3];
+        if (!Descriptor(en, d) || !UnitNode(Word(d + 12), 0, r)) { g_mark[i].e = 0; continue; }
+        if (BodyOffset(Word(d + 12), r, off)) for (int t = 0; t < 3; t++) r[t] += off[t];
+        else r[2] += 1.0f;
+        if (s_miSlow > 0 && hf->apply_status) hf->apply_status(self, en, HF_STATUS_FLAMER_SLOWED, s_miSlow * g_mark[i].stacks);
+        if (s_miDamage <= 0) continue;
+        float u[3] = {0, 0, 1}, from[3];
+        if (have)
+        {
+            float v[3] = {pos[0] - r[0], pos[1] - r[1], pos[2] + 1.3f - r[2]}, vn = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            if (vn > 0.1f) { float back = vn < 2.5f ? vn : 2.5f; for (int k = 0; k < 3; k++) u[k] = v[k] / vn * back; }
+        }
+        else u[2] = 2.5f;
+        for (int k = 0; k < 3; k++) from[k] = r[k] + u[k];
+        float dir[3] = {-u[0], -u[1], -u[2]}, dn = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+        if (!(dn > 0.05f)) continue;
+        for (int k = 0; k < 3; k++) dir[k] /= dn;
+        g_mark[i].pending = 1;
+        int rr = hf->spawn_projectile(self, (uint32_t)s_areaRound, from, dir);
+        if (rr == HF_ACT_WAITING || !Act("Mortal Interrogation's tick", rr)) g_mark[i].pending = 0;
+        else spawned++;
     }
 }
 /* the GAME THREAD: the volleys owed (one a frame), the slows owed, Pursuit's charges */
@@ -501,8 +653,8 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 static void Reset(const char* why)
 {
     if (g_forgot || g_reveals || g_dodged)
-        Log("%s: %u shots, heard %u times, revealed %u times, %u times an enemy forgot her, %u hits dodged; %u area volleys (%u strikes landed), Pursuit %u times",
-            why, g_shots, g_heard, g_reveals, g_forgot, g_dodged, g_volleys, g_strikes, g_pursuits);
+        Log("%s: %u shots, heard %u times, revealed %u times, %u times an enemy forgot her, %u hits dodged; %u area volleys (%u strikes landed), Pursuit %u times; %u enemies marked, %u ticks landed",
+            why, g_shots, g_heard, g_reveals, g_forgot, g_dodged, g_volleys, g_strikes, g_pursuits, g_marked, g_ticks);
     int start = !strcmp(why, "mission start");
     if (start) KitDecide();
     Body(start);
@@ -511,6 +663,8 @@ static void Reset(const char* why)
     g_sensing = 0;
     g_forgot = g_reveals = g_dodged = g_heard = g_shots = 0;
     g_volleys = g_strikes = g_pursuits = 0;
+    g_marked = g_ticks = 0;
+    memset(g_mark, 0, sizeof g_mark);
     g_volOwed = 0; g_nslow = 0; g_vol.n = 0;
     g_charges = s_pursuitCharges; g_chargeAt = g_now;
     g_noiseAt = -100;
@@ -649,6 +803,8 @@ static void Tick(HfMod* mod, float dt, void* user)
     g_hud.units[0] = UnitOf(atomic_load(&g_avatar));
     for (int k = 0; k < 4; k++) g_hud.units[1 + k] = UnitOf(atomic_load(&g_myItems[k]));
     AreaFrame();
+    MarkFrame();
+    ViewFrame();
     Exhaustion();
     atomic_exchange(&g_ownStopped, 0);
     atomic_exchange(&g_kdStopped, 0);
@@ -658,6 +814,8 @@ static void Tick(HfMod* mod, float dt, void* user)
 static const KbOption kOptions[] = {
     {"area_radius", &s_areaRadius, NULL}, {"area_mult", &s_areaMult, NULL}, {"area_max", NULL, &s_areaMax}, {"pursuit_mult", &s_pursuitMult, NULL},
     {"pursuit_every", &s_pursuitEvery, NULL}, {"pursuit_slow", &s_pursuitSlow, NULL}, {"pursuit_charges", NULL, &s_pursuitCharges},
+    {"mi_stacks", NULL, &s_miStacks}, {"mi_seconds", &s_miSeconds, NULL}, {"mi_damage", &s_miDamage, NULL}, {"mi_slow", &s_miSlow, NULL},
+    {"numbers", NULL, &s_numbers},
     {"visual_cut", &s_visualCut, NULL}, {"reveal_hold", &s_revealHold, NULL}, {"noise_window", &s_noiseWindow, NULL}, {"heard_hold", &s_heardHold, NULL}, {"dodge", &s_dodge, NULL},
     {"gear_rule", NULL, &s_gearRule}, {"cloak_visual", NULL, &s_cloakVisual}, {"hide_gear", NULL, &s_hideGear},
     {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
