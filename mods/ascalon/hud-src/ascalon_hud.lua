@@ -712,7 +712,12 @@ local function shimmer_settings(dt)
     SH.ready = ready
 end
 local function shimmer_apply(units)
-    local U, M, Mat = lib('Unit'), lib('Mesh'), lib('Material')
+    local U, M, Mat, Id64 = lib('Unit'), lib('Mesh'), lib('Material'), lib('IdString64')
+    if not Id64 or type(Id64.to_hex) ~= 'function' or type(Id64.from_hex) ~= 'function' then
+        if SH.told < 12 then SH.told = SH.told + 1; log('[Ascalon HUD] shimmer: IdString64 is missing (a material could not be given back): her body is not drawn instead') end
+        SH.on = false
+        return
+    end
     local set, bound, errs = 0, 0, 0
     for _, u in ipairs(units) do
         if alive(U, u) then
@@ -731,13 +736,22 @@ local function shimmer_apply(units)
                         local oki, id = false, nil
                         if okt and mat then oki, id = pc(Mat.id, mat) end
                         local is_mine = oki and SH.mine ~= nil and tostring(id) == SH.mine
-                        if not is_mine and not (SH.keys[key] and SH.mine == nil) then
+                        -- its own material's id, read before it goes: without it the slot is left alone
+                        local prehex = nil
+                        if not is_mine and okt and mat then
+                            local ok64, id64 = pc(Mat.id64, mat)
+                            if ok64 and id64 ~= nil then local okx, hx = pc(Id64.to_hex, id64); if okx and type(hx) == 'string' then prehex = hx end end
+                        end
+                        if not is_mine and not (SH.keys[key] and SH.mine == nil) and (prehex or SH.keys[key]) then
                             local okset, old = pc(U.set_material, u, slot, SH.mat)
                             if okset then
                                 set = set + 1
                                 if not SH.keys[key] then
                                     SH.keys[key] = true
-                                    SH.applied[#SH.applied + 1] = {unit = u, slot = slot, old = old}
+                                    -- what was there, kept as its id's text: given back by id (0.5.2: handing the
+                                    -- returned value itself back changed nothing, and she stayed cloaked)
+                                    local okh, hex = pc(Id64.to_hex, old)
+                                    SH.applied[#SH.applied + 1] = {unit = u, slot = slot, mesh = i, index = j, hex = (okh and type(hex) == 'string') and hex or prehex}
                                 end
                                 okt, mat = pc(M.material, mesh, j)
                                 if okt and mat and SH.mine == nil then
@@ -765,13 +779,28 @@ local function shimmer_apply(units)
     end
 end
 local function shimmer_restore()
-    local U = lib('Unit')
-    local n = 0
+    local U, M, Mat, Id64 = lib('Unit'), lib('Mesh'), lib('Material'), lib('IdString64')
+    local n, back = 0, 0
     for i = #SH.applied, 1, -1 do
         local a = SH.applied[i]
-        if a.old ~= nil and type(a.old) ~= 'boolean' and alive(U, a.unit) and pc(U.set_material, a.unit, a.slot, a.old) then n = n + 1 end
+        if a.hex and alive(U, a.unit) then
+            local okf, id = pc(Id64.from_hex, a.hex)
+            if okf and id ~= nil and pc(U.set_material, a.unit, a.slot, id) then
+                n = n + 1
+                -- is it hers again: the slot's material is no longer the cloak's
+                local okm, mesh = pc(U.mesh, a.unit, a.mesh)
+                local okt, mat = false, nil
+                if okm then okt, mat = pc(M.material, mesh, a.index) end
+                local oki, mid = false, nil
+                if okt and mat then oki, mid = pc(Mat.id, mat) end
+                if oki and tostring(mid) ~= SH.mine then back = back + 1 end
+            end
+        end
     end
-    if #SH.applied > 0 and SH.told < 12 then SH.told = SH.told + 1; log(('[Ascalon HUD] shimmer: %d of %d slot(s) given their own material back'):format(n, #SH.applied)) end
+    if #SH.applied > 0 and SH.told < 16 then
+        SH.told = SH.told + 1
+        log(('[Ascalon HUD] shimmer: %d of %d slot(s) given their own material back (%d read as no longer the cloak\'s)'):format(n, #SH.applied, back))
+    end
     SH.applied, SH.keys, SH.live = {}, {}, false
 end
 local can_alive = nil
