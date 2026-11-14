@@ -682,12 +682,63 @@ local function show_all_keep()
     for _, h in ipairs(cl.hidden) do if h.show and alive(U, h.unit) then pc(U.set_mesh_visibility, h.unit, h.mesh, true) end end
     cl.hidden, cl.keys, cl.base = {}, {}, {}
 end
+-- Everything hidden is shown again. For the log (0.5.6: a gun stayed hidden after she was revealed), each unit's tally:
+-- meshes noted, those to show, those the engine took, and whether the unit is still there. A second later the meshes
+-- shown are looked at again (show_check): one that is hidden again is shown once more and said.
 local function show_all()
     local U = lib('Unit')
     local n = 0
-    for _, h in ipairs(cl.hidden) do if h.show and alive(U, h.unit) and pc(U.set_mesh_visibility, h.unit, h.mesh, true) then n = n + 1 end end
+    local per, order, shown = {}, {}, {}
+    for _, h in ipairs(cl.hidden) do
+        local uk = ukey(h.unit)
+        local t = per[uk]
+        if not t then t = {name = tostring(h.unit), noted = 0, want = 0, ok = 0, alive = alive(U, h.unit)}; per[uk] = t; order[#order + 1] = uk end
+        t.noted = t.noted + 1
+        if h.show then
+            t.want = t.want + 1
+            if t.alive and pc(U.set_mesh_visibility, h.unit, h.mesh, true) then n = n + 1; t.ok = t.ok + 1; shown[#shown + 1] = h end
+        end
+    end
+    if (cl.shows or 0) < 6 then
+        cl.shows = (cl.shows or 0) + 1
+        for k = 1, math.min(#order, 40) do
+            local t = per[order[k]]
+            log(('[Ascalon HUD]   %s %s: %d mesh(es) noted, %d to show, %d shown%s'):format(order[k], t.name, t.noted, t.want, t.ok, t.alive and '' or ' (the unit is gone)'))
+        end
+    end
+    cl.check = {wait = 1, items = shown}
     cl.hidden, cl.keys, cl.units, cl.base = {}, {}, nil, {}
     return n
+end
+local function show_check(dt)
+    local c = cl.check
+    if not c then return end
+    c.wait = c.wait - dt
+    if c.wait > 0 then return end
+    cl.check = nil
+    local U, M = lib('Unit'), lib('Mesh')
+    local again, gone, per = 0, 0, {}
+    for _, h in ipairs(c.items) do
+        if alive(U, h.unit) then
+            local okm, mesh = pc(U.mesh, h.unit, h.mesh)
+            local okv, vis = false, nil
+            if okm then okv, vis = pc(M.visibility, mesh) end
+            if okv and vis == false then
+                again = again + 1
+                local uk = ukey(h.unit)
+                per[uk] = (per[uk] or 0) + 1
+                pc(U.set_mesh_visibility, h.unit, h.mesh, true)
+            end
+        else
+            gone = gone + 1
+        end
+    end
+    if (again > 0 or gone > 0) and (cl.checks or 0) < 8 then
+        cl.checks = (cl.checks or 0) + 1
+        local parts = {}
+        for uk, k in pairs(per) do parts[#parts + 1] = uk .. ' x' .. k end
+        log(('[Ascalon HUD] a second after she was shown: %d mesh(es) were hidden again and are shown once more (%s), %d on units that are gone'):format(again, table.concat(parts, ', '), gone))
+    end
 end
 -- The shimmer (0.5.0, cloak_shimmer; experimental): hidden, her body's units wear the mod's cloak material instead of
 -- not being drawn. The material (yui/ascalon/cloak) is built by HellForge from the player's game copy
@@ -876,6 +927,7 @@ local function cloak_frame(s, dt)
     end
     if not can_alive then return end
     if not want then
+        pcall(show_check, dt)
         if cl.on then
             cl.on = false
             pcall(shimmer_restore)
@@ -886,7 +938,7 @@ local function cloak_frame(s, dt)
     end
     cl.acc = cl.acc + dt
     cl.scan_in = cl.scan_in - dt
-    if not cl.on then cl.on = true; cl.acc = 1; cl.scan_in = 0 end
+    if not cl.on then cl.on = true; cl.acc = 1; cl.scan_in = 0; cl.check = nil end
     if cl.acc < 0.25 then return end
     cl.acc = 0
     pcall(function()
