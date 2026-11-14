@@ -125,7 +125,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.12"
+#define VERSION "0.4.13"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -1130,6 +1130,30 @@ static int GameFits(uint32_t entity, uint32_t unit, const float pos[3])
     if (!out.ok) g_fitNo++;
     return out.ok ? 1 : 0;
 }
+/* For the log (0.4.13): what a look down at a spot meets, hit by hit (height, unit, the actor's filter tag), asked
+ * with no filter as the mod asks and with the Warp Pack's own filter (0x48D6C53A, from the code dump), to learn the
+ * tag of a sheet that is no ground and whether the game's filter leaves it out. */
+static void LookDownNote(uint32_t unit, const float at[3], uint32_t filter)
+{
+    uintptr_t world = Pointer(game + 0x346BFA0);
+    if (!world || !g_raycast || !g_worldId) return;
+    uint32_t id = g_worldId((const void*)world);
+    if (id >= 4) return;
+    float top[3] = {at[0], at[1], at[2] + 12}, down[3] = {0, 0, -1};
+    uint8_t hits[16 * 44];
+    char line[400] = "";
+    size_t used = 0;
+    memset(hits, 0, sizeof hits);
+    uint32_t n = g_raycast(id, top, down, 20, 2, 1, filter, 0x80000009u, unit, hits, 16);
+    for (uint32_t i = 0; i < n && i < 16 && used < sizeof line - 48; i++)
+    {
+        float d;
+        memcpy(&d, hits + 44u * i + 24, 4);
+        uint32_t hu = Word(hits + 44u * i + 28);
+        used += (size_t)snprintf(line + used, sizeof line - used, " %.2f(unit %u, tag %08x)", (double)(top[2] - d), hu, ActorFilter(Word(hits + 44u * i + 32), hu));
+    }
+    Log("a look down at her spot (feet at %.2f) with filter %08x meets %u:%s", (double)at[2], filter, n, line);
+}
 /* A spot she can be put on without ending up in or under anything (0.4.5: every check before the move, none after):
  *   1. the spot: as SpotAt finds it, looking down from 12 m above her (a look from 2.5 m started under a hill's
  *      surface, terrain being solid only from above, and took what lies under it); a surface with another above it
@@ -1186,6 +1210,7 @@ static int SafeSpot(uint32_t unit, const float pos[3], const float dir[2], float
             if (zs[i] > pos[2] + 1.0f && !Roofed(unit, pos[0], pos[1], pos[2], zs[i] - pos[2]))
             {
                 static unsigned told;
+                if (told < 3) { LookDownNote(unit, pos, 0); LookDownNote(unit, pos, 0x48D6C53Au); }
                 if (told++ < 6) Log("not ground: something %.2f m over her (at %.2f) that a look up does not meet; left out of the spots", (double)(zs[i] - pos[2]), (double)zs[i]);
                 g_phantom[g_nPhantom++] = zs[i];
             }
