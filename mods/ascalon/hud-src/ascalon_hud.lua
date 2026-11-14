@@ -664,10 +664,9 @@ local function hide_units(units)
                 if okm then okv, vis = pc(M.visibility, mesh) end
                 if okm and okv and vis == true and pc(U.set_mesh_visibility, u, i, false) then
                     local key = ukey(u) .. ':' .. i
-                    -- shown again later only when it was drawn the first time this unit was hidden (0.5.5): a mesh that
-                    -- turns up afterwards is the game's or another mod's doing (a cape a model mod keeps hidden came
-                    -- back), and is only kept hidden meanwhile
-                    if not cl.keys[key] then cl.keys[key] = true; cl.hidden[#cl.hidden + 1] = {unit = u, mesh = i, show = not cl.base[uk]} end
+                    -- every mesh hidden is shown again (0.5.7). 0.5.5 showed only those drawn the first time the unit was
+                    -- hidden: she is hidden from the drop, when her gear is not drawn yet, so all of it stayed hidden
+                    if not cl.keys[key] then cl.keys[key] = true; cl.hidden[#cl.hidden + 1] = {unit = u, mesh = i, show = true} end
                     hid = hid + 1
                 end
             end
