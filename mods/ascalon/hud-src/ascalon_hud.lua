@@ -889,6 +889,26 @@ local function parry_sound(dt)
         end)
         direct = ('; posted directly: %s %s'):format(tostring(okd), tostring(res))
     end
+    if not PS.checked then
+        -- once: what the same two ways answer for sounds of the game's own (0.4.4: to tell a bank that is not loaded
+        -- from an event the loaded bank does not have): a menu click, and a Hellbomb bank event with nothing to hear
+        PS.checked = true
+        local function try(label, event)
+            local o, h, c, w = pcall(hd2.sounds.play, event)
+            log(('[Ascalon HUD] sound check, %s: %s %s %s'):format(label, tostring(o and h ~= nil), tostring(c), tostring(w or (not o and h) or '')))
+        end
+        if type(hd2.sounds) == 'table' and type(hd2.sounds.play) == 'function' then
+            try('a menu click', 'ui/generic_select')
+            try('the Hellbomb bank (2EA0C3F5)', {id = 0x2EA0C3F5})
+            try('the Hellbomb bank (AA0B6425)', {id = 0xAA0B6425})
+        end
+        local sr = SR()
+        local okd, res = pcall(function()
+            local w = sr.Application.main_world()
+            return sr.WwiseWorld.trigger_event(sr.Wwise.wwise_world(w), 'ui_generic_select')
+        end)
+        log(('[Ascalon HUD] sound check, posted directly (an unknown name): %s %s'):format(tostring(okd), tostring(res)))
+    end
     if PS.told < 12 then
         PS.told = PS.told + 1
         log(('[Ascalon HUD] parry %d: sound %s %s %s%s'):format(seq, tostring(ok and handle ~= nil), tostring(code), tostring(why or (not ok and handle) or ''), direct))

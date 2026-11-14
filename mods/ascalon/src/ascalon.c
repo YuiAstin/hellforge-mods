@@ -33,6 +33,15 @@
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
  * 0.3.0, her two keyed skills:
+ * 0.4.4 (Yui: "more prone to teleport me underground while walking up hill and no audio still"):
+ *   - Underground: a dash uphill looked for its spot from 2.5 m above her, under the hill's surface 6 m ahead (terrain
+ *     is solid only from above), and took a buried surface; walking uphill slower than 2 m/s the melee press ran
+ *     0.4.3's way out of a stuck spot instead, onto whatever was highest within 40 m. Spots are now looked for from
+ *     12 m up (the parry's too), a dash rises at most as far as it goes, the way out wants her in place for a second,
+ *     and from under the ground it goes straight up onto the ground above her first.
+ *   - Sound: the event is known to the game now, but the sound engine still did not post it, so the bank it was added
+ *     to was not loaded or not taken. The event is now in two banks (the Hellbomb's and the shared stratagem bank),
+ *     and the first parry logs what the same two ways answer for sounds of the game's own.
  * 0.4.3 (Yui: "doesnt have the sound still", "the teleport doesnt do damage to enemies on the path", "she can get
  *     stuck under building with no way to teleport back out since it needs velocity"):
  *   - Sound: the bank was never the problem to see: the Wwise plugin's has_event answers from the game's event
@@ -86,7 +95,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.3"
+#define VERSION "0.4.4"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -863,6 +872,17 @@ static void NearFoeUnits(const float pos[3], float reach)
         g_foeUnits[g_nFoeUnits++] = Word(fid + 12);
     }
 }
+/* A spot as SpotAt finds it, looking from 12 m above her instead of 2.5 (0.4.4: uphill the ground 6 m ahead is more
+ * than 2.5 m higher, the look down started under it, terrain being solid only from above, and the "spot" was a buried
+ * surface under the hill; from 12 m the hill's own surface is seen, and what lies under it is skipped as buried) */
+static int SpotFrom(uint32_t unit, const float pos[3], const float dir[2], float dist, float out[3], float climb, int upFirst)
+{
+    float keep = s_lpClimb;
+    s_lpClimb = climb;
+    int r = SpotAt(unit, pos, dir, dist, out, NULL, upFirst);
+    s_lpClimb = keep;
+    return r;
+}
 static void CounterFrame(void)
 {
     if (!atomic_load(&g_counterReady)) return;
@@ -896,7 +916,7 @@ static void CounterFrame(void)
     float back[2] = {-fwd[0] / h, -fwd[1] / h}, dest[3];
     NearFoeUnits(at, 20);
     g_buried = 0;
-    if (!SpotAt(myUnit, at, back, s_parryBehind, dest, NULL, 0) && !SpotAt(myUnit, at, back, s_parryBehind + 1.5f, dest, NULL, 0))
+    if (!SpotFrom(myUnit, at, back, s_parryBehind, dest, 12, 0) && !SpotFrom(myUnit, at, back, s_parryBehind + 1.5f, dest, 12, 0))
     { Log("PARRY: entity %u stunned; no room behind it", foe); return; }
     float zero[3] = {0, 0, 0};
     dest[2] += 0.05f;
@@ -937,17 +957,20 @@ static int MoveDir(float dir[2])
     }
     return 0;
 }
-/* Whether she is in a spot she cannot walk out of: under the ground (a surface above her that looking up does not
- * meet: terrain and rocks are solid only from above) or wedged (no room to stand where she has been for 3 s) */
-static int Stuck(uint32_t unit, const float pos[3])
+/* Whether she is in a spot she cannot walk out of, having stayed within half a metre for a second: 1 under the ground
+ * (a surface above her that looking up does not meet: terrain and rocks are solid only from above; *top the lowest
+ * such), 2 wedged for 3 s (no room to stand where she is) */
+static int Stuck(uint32_t unit, const float pos[3], float* top)
 {
-    float z[16], climb = s_lpClimb;
+    if (g_now - g_anchorAt < 1) return 0;
+    float z[16], climb = s_lpClimb, best = 1e9f;
     s_lpClimb = 40;
     int n = Surfaces(unit, pos[0], pos[1], pos[2], z, 16);
     s_lpClimb = climb;
     for (int i = 0; i < n; i++)
-        if (z[i] > pos[2] + 2.2f && !Roofed(unit, pos[0], pos[1], pos[2], z[i] - pos[2])) return 1;
-    return g_now - g_anchorAt >= 3 && !Fits(unit, pos[0], pos[1], pos[2]);   /* (3 s in place: beside a wall is not wedged) */
+        if (z[i] > pos[2] + 2.2f && z[i] < best && !Roofed(unit, pos[0], pos[1], pos[2], z[i] - pos[2])) best = z[i];
+    if (best < 1e8f) { *top = best; return 1; }
+    return g_now - g_anchorAt >= 3 && !Fits(unit, pos[0], pos[1], pos[2]) ? 2 : 0;
 }
 static void Dash(void)
 {
@@ -956,31 +979,28 @@ static void Dash(void)
     if (!s_dash || g_now < g_dashReady || !g_setPosition || !g_setVelocity || !g_raycast || !unit || !PlayerPose(pos, aim) || !QueryIdle()) return;
     NearFoeUnits(pos, s_dashDistance + 20);
     g_buried = 0;
-    float dist = 0;
+    float dist = 0, top = 0;
     int found = 0, stuck = 0;
     if (!MoveDir(dir))
     {
-        /* standing still: only out of a spot she cannot walk out of (0.4.3: under a building she had no way out, the
-         * dash wanting her to move), towards where she looks, then any way, onto any height */
-        if (!Stuck(unit, pos)) return;
-        stuck = 1;
-        float h = sqrtf(aim[0] * aim[0] + aim[1] * aim[1]), climb = s_lpClimb;
+        /* standing still: only out of a spot she cannot walk out of. Under the ground: straight up onto the ground
+         * above her, else the highest free spot around; wedged: the nearest free spot, towards where she looks first */
+        stuck = Stuck(unit, pos, &top);
+        if (!stuck) return;
+        float h = sqrtf(aim[0] * aim[0] + aim[1] * aim[1]);
         if (h > 0.1f) { dir[0] = aim[0] / h; dir[1] = aim[1] / h; } else { dir[0] = 1; dir[1] = 0; }
-        s_lpClimb = 40;
-        for (float d = s_dashDistance; !found && d >= 1.5f; d -= 1.0f)
-            if (SpotAt(unit, pos, dir, d, dest, NULL, 1)) { found = 1; dist = d; }
-        for (int k = 1; k < 8 && !found; k++)
+        if (stuck == 1 && Fits(unit, pos[0], pos[1], top)) { dest[0] = pos[0]; dest[1] = pos[1]; dest[2] = top; found = 1; }
+        for (int k = 0; k < 8 && !found; k++)
         {
             float a = 0.7854f * (float)k, c = cosf(a), sn = sinf(a), other[2] = {dir[0] * c - dir[1] * sn, dir[0] * sn + dir[1] * c};
-            for (float d = 3; !found && d <= 9; d += 3)
-                if (SpotAt(unit, pos, other, d, dest, NULL, 1)) { found = 1; dist = d; dir[0] = other[0]; dir[1] = other[1]; }
+            for (float d = 2; !found && d <= 8; d += 2)
+                if (SpotFrom(unit, pos, other, d, dest, stuck == 1 ? 40 : 4, stuck == 1)) { found = 1; dist = d; dir[0] = other[0]; dir[1] = other[1]; }
         }
-        s_lpClimb = climb;
-        if (!found) { static unsigned told; if (told++ < 6) Log("dash: stuck, and no free spot within 9 m"); return; }
+        if (!found) { static unsigned told; if (told++ < 6) Log("dash: stuck (%s), and no free spot within 8 m", stuck == 1 ? "under the ground" : "wedged"); return; }
     }
     else
         for (float d = s_dashDistance; !found && d >= 1.5f; d -= 1.0f)
-            if (SpotAt(unit, pos, dir, d, dest, NULL, 0) && dest[2] - pos[2] <= 1.5f) { found = 1; dist = d; }
+            if (SpotFrom(unit, pos, dir, d, dest, 12, 0) && dest[2] - pos[2] <= (d > 1.5f ? d : 1.5f)) { found = 1; dist = d; }
     if (!found) { static unsigned told; if (told++ < 6) Log("dash: no room ahead"); return; }
     g_dashReady = g_now + s_dashCooldown;
     /* who stands on the path, before she moves: from a metre behind her to the enemy she stops in front of (a spot an
@@ -1014,7 +1034,9 @@ static void Dash(void)
         }
     }
     static unsigned told;
-    if (told++ < 40) Log("dash: %.1f m%s, %d enem%s on the path (%d struck for %d)", (double)dist, stuck ? " out of a spot she was stuck in" : "", nh, nh == 1 ? "y" : "ies", g_dashVol.n, nh ? g_dashVol.damage : 0);
+    if (told++ < 60) Log("dash: %.1f m%s, from %.1f %.1f %.1f to %.1f %.1f %.1f, %d enem%s on the path", (double)dist,
+        stuck == 1 ? " out from under the ground" : stuck == 2 ? " out of a spot she was wedged in" : "", (double)pos[0], (double)pos[1], (double)pos[2],
+        (double)dest[0], (double)dest[1], (double)dest[2], nh, nh == 1 ? "y" : "ies");
 }
 /* ---- her keyed skills ----------------------------------------------------------------------------------------------- */
 static void Endowment(void)

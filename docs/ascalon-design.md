@@ -173,3 +173,12 @@ perception research (docs/research/perception.md, when written) come first.
 - Dash: its strikes have their own list (the same press's melee hit wiped the shared one); wider path, reaching the
   enemy she stops in front of.
 - Standing still, the melee press takes her out of a spot she is stuck in (underground, or wedged for 3 s).
+
+### 0.4.4: spots looked for from above, the event in two banks
+
+- In game (0.4.3): `has_event` true; `hd2.sounds.play` NOT_PLAYED; the plugin's `trigger_event` on the main world
+  returned 0. So the sound engine does not have the event: the Hellbomb bank was not loaded, or not taken from the
+  patch. The event is now added to `stratagems_shared` too (`build_bank.py` takes any number of hosts), and the first
+  parry logs a menu click and two Hellbomb bank events posted the same ways, as a baseline.
+- Underground teleports: `Surfaces` looked down from 2.5 m above her; uphill that starts under the terrain ahead.
+  `SpotFrom` looks from 12 m (dash, parry); the stuck way out needs a second in place and goes straight up first.
