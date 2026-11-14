@@ -435,6 +435,8 @@ local OPTIONS = {
     {'e_seconds', 'slider', 'Endowment: Duration', 5, 90, 1, 'Seconds it runs.'},
     {'e_cooldown', 'slider', 'Endowment: Cooldown', 0, 180, 5, 'Seconds before it can be used again.'},
     {'d_mult', 'slider', 'Descent: Damage', 1, 4, 0.05, 'Her hits deal this times their damage while it runs.', true},
+    {'pi_speed', 'slider', 'Penumbral Image: Melee Speed', 1, 3, 0.05, 'Her melee swings run this many times as fast while she is hidden.', true},
+    {'d_speed', 'slider', 'Descent: Melee Speed', 1, 3, 0.05, 'Her melee swings run this many times as fast while Descent runs.'},
     {'d_radius', 'slider', 'Descent: Radius', 5, 60, 1, 'Metres her hits reach everyone in while Descent runs (Ambusher\'s radius otherwise).'},
     {'d_seconds', 'slider', 'Descent: Duration', 2, 30, 1, 'Seconds it runs; each kill adds more.'},
     {'d_cooldown', 'slider', 'Descent: Cooldown', 0, 180, 5, 'Seconds before it can be used again.'},

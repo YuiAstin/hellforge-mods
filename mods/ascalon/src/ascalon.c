@@ -33,6 +33,8 @@
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
  * 0.3.0, her two keyed skills:
+ * 0.5.1 (Yui: "do the attack speed first and switch the cloak shimmer on by default"): Penumbral Image (her melee
+ *     swings x pi_speed 1.25 while hidden, x d_speed 1.4 during Descent; PenumbraFrame), cloak_shimmer 1 by default.
  * 0.5.0 (Yui: "work on the cloak materials"): cloak_shimmer (off by default, experimental): hidden, her body wears a
  *     cloak material instead of not being drawn. The material is the mod's own copy of the game's armour material
  *     0x38362D65898C0DE3 with its armour-specific textures replaced by the game's plain ones (hellforge-data.json,
@@ -139,7 +141,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.5.0"
+#define VERSION "0.5.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -158,7 +160,7 @@ static float s_areaRadius = 15, s_areaMult = 1, s_areaEvery = 0.25f, s_pursuitMu
 static int s_areaMax = 12, s_areaRound = 7, s_pursuitCharges = 3;
 static float s_miSeconds = 25, s_miDamage = 0.10f, s_miSlow = 18, s_miAp = 10;
 static float s_eSeconds = 35, s_eCooldown = 20, s_eMult = 2.3f, s_eRadius = 15, s_eSlow = 60, s_eSpread = 5;
-static float s_dSeconds = 5, s_dCooldown = 45, s_dMult = 1.5f, s_dPerKill = 2, s_dCap = 15, s_dGrace = 2, s_dRadius = 25;
+static float s_dSeconds = 5, s_dCooldown = 45, s_dMult = 1.5f, s_dPerKill = 2, s_dCap = 15, s_dGrace = 2, s_dRadius = 25, s_piSpeed = 1.25f, s_dSpeed = 1.4f;
 static float s_parryVolume = 0.4f, s_parryWindow = 0.3f, s_parryInvuln = 1, s_parryDamage = 300, s_parryBehind = 2.2f, s_parryStun = 300;
 static float s_dashDistance = 6, s_dashCooldown = 1.2f, s_dashDamage = 150, s_dashWidth = 2;
 static int s_parry = 1, s_dash = 1, s_meleeVk = 70, s_parrySound = 1, s_gameFit = 1;
@@ -167,7 +169,7 @@ static float s_numbersAt = 1.5f;
 static float s_miBuildup = 100;
 static float s_visualCut = 95, s_revealHold = 1.5f, s_noiseWindow = 1.0f, s_heardHold = 5;
 static float s_dodge = 0.5f, s_forgetEvery = 0.5f, s_forgetRange = 150;
-static int s_cloakVisual = 1, s_hideGear = 1, s_gearRule = 1, s_cloakShimmer = 0;
+static int s_cloakVisual = 1, s_hideGear = 1, s_gearRule = 1, s_cloakShimmer = 1;
 static float s_shimmerOpacity = 0, s_shimmerStealth = 0;
 
 static const KbSetting kSettings[] = {
@@ -176,7 +178,7 @@ static const KbSetting kSettings[] = {
     KB_F("dash_cooldown", s_dashCooldown, 0, 60), KB_F("dash_damage", s_dashDamage, 0, 100000), KB_F("dash_width", s_dashWidth, 0.5, 10), KB_I("melee_key_code", s_meleeVk, 1, 255),
     KB_F("e_seconds", s_eSeconds, 1, 300), KB_F("e_cooldown", s_eCooldown, 0, 600), KB_F("e_mult", s_eMult, 1, 20), KB_F("e_radius", s_eRadius, 0, 60),
     KB_F("e_slow", s_eSlow, 0, 1000), KB_F("e_spread", s_eSpread, 0, 30), KB_F("d_seconds", s_dSeconds, 1, 120), KB_F("d_cooldown", s_dCooldown, 0, 600),
-    KB_F("d_mult", s_dMult, 1, 20), KB_F("d_per_kill", s_dPerKill, 0, 30), KB_F("d_cap", s_dCap, 1, 120), KB_F("d_grace", s_dGrace, 0, 30), KB_F("d_radius", s_dRadius, 0, 60),
+    KB_F("d_mult", s_dMult, 1, 20), KB_F("d_per_kill", s_dPerKill, 0, 30), KB_F("d_cap", s_dCap, 1, 120), KB_F("d_grace", s_dGrace, 0, 30), KB_F("d_radius", s_dRadius, 0, 60), KB_F("d_speed", s_dSpeed, 1, 3), KB_F("pi_speed", s_piSpeed, 1, 3),
     KB_F("mi_seconds", s_miSeconds, 0, 120), KB_F("mi_damage", s_miDamage, 0, 5), KB_F("mi_ap", s_miAp, 0, 12), KB_F("mi_slow", s_miSlow, 0, 1000), KB_I("mi_stacks", s_miStacks, 0, 9),
     KB_I("numbers", s_numbers, 0, 1), KB_F("numbers_at", s_numbersAt, 0, 20), KB_I("numbers_ticks", s_numbersTicks, 0, 1), KB_I("mi_status", s_miStatus, 0, 200), KB_F("mi_status_buildup", s_miBuildup, 0, 1000),
     KB_F("area_radius", s_areaRadius, 0, 60), KB_F("area_mult", s_areaMult, 0, 10), KB_F("area_every", s_areaEvery, 0.05, 5),
@@ -222,6 +224,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; times their damage; each enemy that dies near her adds d_per_kill s (never more than d_cap s left). She is\n"
                "; seen and drawn while it lasts, and hidden again d_grace s after. Then d_cooldown s.\n"
                "d_seconds = %g\nd_cooldown = %g\nd_mult = %g\nd_per_kill = %g\nd_cap = %g\nd_grace = %g\nd_radius = %g\n"
+               "; Penumbral Image: her melee swings run pi_speed times as fast while she is hidden, and d_speed times while Descent\n"
+               "; runs (1: as the game's).\npi_speed = %g\nd_speed = %g\n"
                "; Mortal Interrogation: each hit or strike of hers puts a stack on its target (mi_stacks at most) for mi_seconds\n"
                "; from the last one. A marked enemy takes mi_damage times the marking hit's damage a second for each stack, and\n"
                "; a dose of the slow (mi_slow a stack; 100 a full dose).\n"
@@ -259,7 +263,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_parryDamage, (double)s_parryBehind, (double)s_parryStun, s_dash, s_meleeVk, (double)s_dashDistance, (double)s_dashCooldown,
             (double)s_dashDamage, (double)s_dashWidth, s_gameFit, (double)s_eSeconds, (double)s_eCooldown,
             (double)s_eMult, (double)s_eRadius, (double)s_eSlow, (double)s_eSpread, (double)s_dSeconds, (double)s_dCooldown, (double)s_dMult,
-            (double)s_dPerKill, (double)s_dCap, (double)s_dGrace, (double)s_dRadius, s_miStacks, (double)s_miSeconds,
+            (double)s_dPerKill, (double)s_dCap, (double)s_dGrace, (double)s_dRadius, (double)s_piSpeed, (double)s_dSpeed, s_miStacks, (double)s_miSeconds,
             (double)s_miDamage, (double)s_miAp, (double)s_miSlow, s_miStatus, (double)s_miBuildup, s_numbers, (double)s_numbersAt, s_numbersTicks, (double)s_visualCut, (double)s_forgetEvery, (double)s_forgetRange,
             (double)s_revealHold, (double)s_noiseWindow, (double)s_heardHold, s_gearRule, (double)s_dodge, s_cloakVisual,
             s_hideGear, s_cloakShimmer, (double)s_shimmerOpacity, (double)s_shimmerStealth);
@@ -882,6 +886,77 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 }
 /* the GAME THREAD: each marked enemy's tick a second: a round of the mod's spawned 2.5 m from its body on her side (from
  * her, when she is nearer than that), flying into it; and its dose of the slow */
+/* ---- Penumbral Image: faster melee (0.5.1) ----------------------------------------------------------------------- */
+/* Her talent's attack speed, as melee speed: while she is hidden her swings run pi_speed times as fast, and d_speed
+ * times while Descent runs (the skill's faster attacks). From the code dump (the reload-speed passives work this way,
+ * and the chainsaw's bite slows a swing with the same two things):
+ *   - a swing is an ability: its record ([game+0x3326640]: hash +0x18 {entity, index} of +0x20 slots, empty key +0x24,
+ *     multiplier +0x28; records +0x38, 0xE0 each: +0x00 the ability, +0x0C its speed, +0x10 active) advances by
+ *     dt x speed, so the speed written here, each frame a melee ability of hers runs, ends the swing sooner and frees
+ *     the next (the record is found and written by the mod itself: nothing of the game's is called for it);
+ *   - the animation follows through her state machine's variable attack_speed (0x6E1390F5), set with the game's own
+ *     AnimSetVariable (game.dll+0x808AD0: entity, variable, value, 1 = tell the others, 1 = only when it changes),
+ *     called only while her entity is in the animation manager's hash ([game+0x3326DE8], the same layout).
+ * The chainsaw (abilities 7 to 11) is left alone: its bite sets both itself. Whether attack_speed moves the other
+ * weapons' animations is not known yet: if not, a swing still lands and recovers sooner and its animation is cut. */
+typedef void (*AnimSetVariableFn)(void*, uint32_t, uint32_t, float, int, uint8_t);
+static AnimSetVariableFn g_animSet;
+static float g_animSpeedSet = 1;
+static unsigned g_fastSwings;
+static int InManager(uintptr_t mgr, uint32_t entity, uint32_t* index)
+{
+    uintptr_t ents;
+    uint32_t cap = 0, empty = 0, mult = 0;
+    if (!mgr || !(ents = Pointer(mgr + 0x18)) || !ReadAt(mgr + 0x20, &cap, 4) || !ReadAt(mgr + 0x24, &empty, 4) || !ReadAt(mgr + 0x28, &mult, 4) ||
+        !cap || (cap & (cap - 1)) || cap > (1u << 20) || entity == empty) return 0;
+    for (uint32_t i = 0; i < cap; i++)
+    {
+        uint32_t e[2];
+        if (!ReadAt(ents + 8ull * ((i + entity * mult) & (cap - 1)), e, 8)) return 0;
+        if (e[0] == entity) { if (index) *index = e[1]; return e[1] < (1u << 20); }
+        if (e[0] == empty) return 0;
+    }
+    return 0;
+}
+static int MeleeAbility(uint32_t a)
+{
+    return (a >= 1 && a <= 6) || a == 12 || a == 13 || a == 16 || a == 17 || a == 18 || a == 19 || (a >= 22 && a <= 31) || (a >= 39 && a <= 49) ||
+           a == 74 || (a >= 81 && a <= 84);
+}
+static void PenumbraFrame(int st)
+{
+    uint32_t me = atomic_load(&g_avatar);
+    float want = 1;
+    if (g_alive && me)
+    {
+        if (st == HIDDEN && s_piSpeed > 1) want *= s_piSpeed;
+        if (g_now < g_dUntil && s_dSpeed > 1) want *= s_dSpeed;
+    }
+    if (want > 3) want = 3;
+    /* the animation's speed, when it changes */
+    if (g_animSet && me && g_alive && fabsf(want - g_animSpeedSet) > 0.001f && InManager(Pointer(game + 0x3326DE8), me, NULL))
+    {
+        g_animSet(NULL, me, 0x6E1390F5u, want, 1, 1);
+        static unsigned told;
+        if (told++ < 12) Log("Penumbral Image: her attack speed x%.2f (%s)", (double)want, want > 1 ? (g_now < g_dUntil ? "Descent" : "hidden") : "as it was");
+        g_animSpeedSet = want;
+    }
+    if (!g_alive || !me) { g_animSpeedSet = 1; return; }
+    if (want <= 1.001f) return;
+    /* the swing's own speed: her ability record, while a melee ability runs at the game's 1.0 */
+    uintptr_t mgr = Pointer(game + 0x3326640), recs;
+    uint32_t idx = 0, ability = 0;
+    uint8_t active = 0;
+    float speed = 0;
+    if (!InManager(mgr, me, &idx) || !(recs = Pointer(mgr + 0x38))) return;
+    uintptr_t rec = recs + 0xE0ull * idx;
+    if (!ReadAt(rec, &ability, 4) || !ReadAt(rec + 0x0C, &speed, 4) || !ReadAt(rec + 0x10, &active, 1)) return;
+    if (!active || !MeleeAbility(ability) || fabsf(speed - 1.0f) > 0.001f) return;
+    if (hf->write(rec + 0x0C, &want, 4)) return;
+    g_fastSwings++;
+    static unsigned told;
+    if (told++ < 12) Log("Penumbral Image: melee ability %u runs x%.2f", ability, (double)want);
+}
 /* The mark's damage is no bullet (0.4.18, Yui: "armor shouldn't be bouncing internal bleeding"): a tick's round has the
  * penetration mi_ap (10: through any armour) for the game's calculation of its hit, put back after (the kit base
  * restores it): the hit's penetration by impact angle (+0x9C, +0xA0, +0xA4), as the Executor's skill raises his. The
@@ -1584,6 +1659,8 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         hf->code_matches(game + 0x68C230, "40 53 48 83 ec 30 3b 15 e4 79 df 02 4c 8b d1 48 89 7c 24 50"))
         g_fitsAt = (FitsAtFn)(game + 0x68C340);
     else Log("the game's fit test is not the reviewed code: her own checks decide where she may land");
+    if (hf->code_matches(game + 0x808AD0, "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 18 57 48 83 ec 30")) g_animSet = (AnimSetVariableFn)(game + 0x808AD0);
+    else Log("the animation variable setter is not the reviewed code: Penumbral Image speeds her swings without their animation");
     g_linksOk = hf->code_matches(exe + 0x2BEB9A, "48 8d b9 d8 01 00 00") && hf->code_matches(exe + 0x2BEBFA, "48 81 c7 e0 01 00 00");
     if (!g_linksOk) Log("the engine's unit links are not where the research has them: her gear is found by position (it may stay drawn)");
     g_staminaOk = hf->code_matches(game + 0xA50E2D, "f3 42 0f 11 8c 11 54 78 54 00");
@@ -1712,6 +1789,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     for (int k = 0; k < 4; k++) g_hud.units[1 + k] = UnitOf(atomic_load(&g_myItems[k]));
     AreaFrame();
     MarkFrame();
+    PenumbraFrame(st);
     ViewFrame();
     Exhaustion();
     atomic_exchange(&g_ownStopped, 0);
@@ -1724,7 +1802,7 @@ static const KbOption kOptions[] = {
     {"pursuit_every", &s_pursuitEvery, NULL}, {"pursuit_slow", &s_pursuitSlow, NULL}, {"pursuit_charges", NULL, &s_pursuitCharges},
     {"e_seconds", &s_eSeconds, NULL}, {"e_cooldown", &s_eCooldown, NULL}, {"e_mult", &s_eMult, NULL}, {"e_radius", &s_eRadius, NULL},
     {"e_slow", &s_eSlow, NULL}, {"e_spread", &s_eSpread, NULL}, {"d_seconds", &s_dSeconds, NULL}, {"d_cooldown", &s_dCooldown, NULL},
-    {"d_mult", &s_dMult, NULL}, {"d_per_kill", &s_dPerKill, NULL}, {"d_cap", &s_dCap, NULL}, {"d_radius", &s_dRadius, NULL},
+    {"d_mult", &s_dMult, NULL}, {"d_per_kill", &s_dPerKill, NULL}, {"d_cap", &s_dCap, NULL}, {"d_radius", &s_dRadius, NULL}, {"d_speed", &s_dSpeed, NULL}, {"pi_speed", &s_piSpeed, NULL},
     {"parry", NULL, &s_parry}, {"parry_sound", NULL, &s_parrySound}, {"parry_volume", &s_parryVolume, NULL}, {"parry_window", &s_parryWindow, NULL}, {"parry_damage", &s_parryDamage, NULL}, {"dash", NULL, &s_dash},
     {"dash_distance", &s_dashDistance, NULL}, {"dash_cooldown", &s_dashCooldown, NULL}, {"dash_damage", &s_dashDamage, NULL},
     {"mi_stacks", NULL, &s_miStacks}, {"mi_seconds", &s_miSeconds, NULL}, {"mi_damage", &s_miDamage, NULL}, {"mi_ap", &s_miAp, NULL}, {"mi_slow", &s_miSlow, NULL}, {"mi_status", NULL, &s_miStatus}, {"mi_status_buildup", &s_miBuildup, NULL},
