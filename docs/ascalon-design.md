@@ -182,3 +182,14 @@ perception research (docs/research/perception.md, when written) come first.
   parry logs a menu click and two Hellbomb bank events posted the same ways, as a baseline.
 - Underground teleports: `Surfaces` looked down from 2.5 m above her; uphill that starts under the terrain ahead.
   `SpotFrom` looks from 12 m (dash, parry); the stuck way out needs a second in place and goes straight up first.
+
+### 0.4.5: checks before the move, the clash through Windows
+
+- Dash only while moving; `SafeSpot` before any teleport (dash, parry): a real surface she fits on seen from 40 m up,
+  height limits, nothing solid on the way at two heights both ways, the spot's ground under her feet.
+- Sound, what 0.4.4's log showed: a menu click through `hd2.sounds` plays; the plugin's `trigger_event` returns a
+  non-zero id for a name the engine has and 0 for `ascalon_parry`, with the event in both host banks. So a bank in a
+  `9ba626afa44a3aa3` patch does not replace the game's copy (the metadata in the same patch does). The game's copies
+  of a bank sit in the archives of the packages that load it; game data is DSAR-packed (`bundles.NN.nxa`, LZ4 chunks;
+  the 15 loose files are DSAR-wrapped archives), and which archives hold a bank is not mapped yet.
+- Until then `ParrySound` plays a `.wav` of `sounds/` through winmm's PlaySound (`parry_sound`).

@@ -33,6 +33,14 @@
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
  * 0.3.0, her two keyed skills:
+ * 0.4.5 (Yui: "the dash now feels incredibly random because standing still dashes you as well even while not stuck,
+ *     can't we just do multiple checks before teleporting so the player doesn't get stuck in the first place"):
+ *     the dash is only while she moves again (the way out of a stuck spot is gone), and a spot is taken only after
+ *     four checks (SafeSpot): a real surface she fits on, seen from 40 m above; at most 0.6 m up per metre and 3 m
+ *     down; nothing solid between her and it at hip and head height, both ways; and its ground under her feet there.
+ *     The parry's step behind the attacker takes the same checks.
+ *     Sound: the parry's clash is played through Windows from the mod's sounds folder (parry_sound, ParrySound); the
+ *     bank patch is out of data/ (it never played, and it replaced two of the game's banks and its event metadata).
  * 0.4.4 (Yui: "more prone to teleport me underground while walking up hill and no audio still"):
  *   - Underground: a dash uphill looked for its spot from 2.5 m above her, under the hill's surface 6 m ahead (terrain
  *     is solid only from above), and took a buried surface; walking uphill slower than 2 m/s the melee press ran
@@ -95,7 +103,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.4"
+#define VERSION "0.4.5"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -117,7 +125,7 @@ static float s_eSeconds = 35, s_eCooldown = 20, s_eMult = 2.3f, s_eRadius = 15, 
 static float s_dSeconds = 5, s_dCooldown = 45, s_dMult = 1.5f, s_dPerKill = 2, s_dCap = 15, s_dGrace = 2;
 static float s_parryWindow = 0.3f, s_parryInvuln = 1, s_parryDamage = 300, s_parryBehind = 2.2f, s_parryStun = 300;
 static float s_dashDistance = 6, s_dashCooldown = 1.2f, s_dashDamage = 150, s_dashWidth = 2;
-static int s_parry = 1, s_dash = 1, s_meleeVk = 70;
+static int s_parry = 1, s_dash = 1, s_meleeVk = 70, s_parrySound = 1;
 static int s_miStacks = 3, s_numbers = 1, s_miStatus = 2;
 static float s_miBuildup = 100;
 static float s_visualCut = 95, s_revealHold = 1.5f, s_noiseWindow = 1.0f, s_heardHold = 5;
@@ -125,7 +133,7 @@ static float s_dodge = 0.5f, s_forgetEvery = 0.5f, s_forgetRange = 150;
 static int s_cloakVisual = 1, s_hideGear = 1, s_gearRule = 1;
 
 static const KbSetting kSettings[] = {
-    KB_I("parry", s_parry, 0, 1), KB_F("parry_window", s_parryWindow, 0.05, 2), KB_F("parry_invuln", s_parryInvuln, 0, 10), KB_F("parry_damage", s_parryDamage, 0, 100000),
+    KB_I("parry", s_parry, 0, 1), KB_I("parry_sound", s_parrySound, 0, 1), KB_F("parry_window", s_parryWindow, 0.05, 2), KB_F("parry_invuln", s_parryInvuln, 0, 10), KB_F("parry_damage", s_parryDamage, 0, 100000),
     KB_F("parry_behind", s_parryBehind, 0, 10), KB_F("parry_stun", s_parryStun, 0, 1000), KB_I("dash", s_dash, 0, 1), KB_F("dash_distance", s_dashDistance, 1, 20),
     KB_F("dash_cooldown", s_dashCooldown, 0, 60), KB_F("dash_damage", s_dashDamage, 0, 100000), KB_F("dash_width", s_dashWidth, 0.5, 10), KB_I("melee_key_code", s_meleeVk, 1, 255),
     KB_F("e_seconds", s_eSeconds, 1, 300), KB_F("e_cooldown", s_eCooldown, 0, 600), KB_F("e_mult", s_eMult, 1, 20), KB_F("e_radius", s_eRadius, 0, 60),
@@ -159,7 +167,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Parry (parry 1): with a dedicated melee weapon in hand (a CQC weapon), right-click within parry_window s before a\n"
                "; hit lands: the hit does nothing, nothing hits her for parry_invuln s, she is set parry_behind m behind the\n"
                "; attacker, it is stunned (parry_stun), and her counter strikes everyone in range for parry_damage.\n"
-               "parry = %d\nparry_window = %g\nparry_invuln = %g\nparry_damage = %g\nparry_behind = %g\nparry_stun = %g\n"
+               "; parry_sound 1 plays a clash on a parry: a .wav of the mod's sounds folder (parry_clash_01.wav to _09.wav; put\n"
+               "; your own there), through Windows, beside the game's sound.\n"
+               "parry = %d\nparry_sound = %d\nparry_window = %g\nparry_invuln = %g\nparry_damage = %g\nparry_behind = %g\nparry_stun = %g\n"
                "; Dash (dash 1): while she is moving, the melee key (melee_key_code: its Windows key code; 70 is F), or a left\n"
                "; click with a dedicated melee weapon in hand, dashes her dash_distance m the way she moves and strikes every\n"
                "; enemy within dash_width m of the path for dash_damage. Once every dash_cooldown s.\n"
@@ -198,7 +208,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint.\n"
                "hp_mult = 1\nstamina_mult = 1.2\nhellbomb_on_exhaustion = 0\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_areaRadius, (double)s_areaMult, s_areaMax, (double)s_areaEvery,
-            s_areaRound, s_pursuitCharges, (double)s_pursuitEvery, (double)s_pursuitMult, (double)s_pursuitSlow, s_parry, (double)s_parryWindow, (double)s_parryInvuln,
+            s_areaRound, s_pursuitCharges, (double)s_pursuitEvery, (double)s_pursuitMult, (double)s_pursuitSlow, s_parry, s_parrySound, (double)s_parryWindow, (double)s_parryInvuln,
             (double)s_parryDamage, (double)s_parryBehind, (double)s_parryStun, s_dash, s_meleeVk, (double)s_dashDistance, (double)s_dashCooldown,
             (double)s_dashDamage, (double)s_dashWidth, (double)s_eSeconds, (double)s_eCooldown,
             (double)s_eMult, (double)s_eRadius, (double)s_eSlow, (double)s_eSpread, (double)s_dSeconds, (double)s_dCooldown, (double)s_dMult,
@@ -226,6 +236,36 @@ typedef struct Counter { uint32_t dealer, owner; float origin[3]; } Counter;
 static Counter g_counter;
 static atomic_int g_counterReady;
 static unsigned g_parries, g_counters, g_dashes, g_dashHits;
+/* The parry's clash (0.4.5): one of the .wav files in the mod's sounds folder (parry_clash_01.wav to _09.wav), played
+ * through Windows (winmm's PlaySound, found at run time so nothing new is linked), beside the game's own sound. Four
+ * tries at a Wwise bank of the mod's own did not get the event into the sound engine (0.4.1 to 0.4.4: a patch on
+ * 9ba626afa44a3aa3 replaces the game's event metadata but not a bank, which the game takes from the archive of the
+ * package that loads it; which archives hold a bank is not known yet: tools/build_bank.py keeps what was learned). */
+static BOOL (WINAPI* g_playSound)(LPCSTR, HMODULE, DWORD);
+static char g_clash[9][MAX_PATH];
+static int g_nClash;
+static void ParrySoundInit(void)
+{
+    HMODULE winmm = LoadLibraryA("winmm.dll");
+    g_playSound = winmm ? (BOOL (WINAPI*)(LPCSTR, HMODULE, DWORD))(void*)GetProcAddress(winmm, "PlaySoundA") : NULL;
+    g_nClash = 0;
+    for (int i = 1; i <= 9; i++)
+    {
+        char path[MAX_PATH];
+        snprintf(path, sizeof path, "%s\\sounds\\parry_clash_%02d.wav", hf->mod_folder(self), i);
+        if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) memcpy(g_clash[g_nClash++], path, sizeof path);
+    }
+    Log("parry sound: %d recording(s) in the mod's sounds folder, %s", g_nClash, g_playSound ? "played through Windows" : "winmm's PlaySound not found: no sound");
+}
+static void ParrySound(void)
+{
+    static unsigned last = 99;
+    if (!s_parrySound || !g_playSound || !g_nClash) return;
+    unsigned k = (unsigned)rand() % (unsigned)g_nClash;
+    if (k == last && g_nClash > 1) k = (k + 1) % (unsigned)g_nClash;   /* never the same twice in a row */
+    last = k;
+    g_playSound(g_clash[k], NULL, 0x00020000 | 0x0001 | 0x0002);       /* SND_FILENAME | SND_ASYNC | SND_NODEFAULT */
+}
 static atomic_uint g_parrySeq;   /* every parry since the DLL loaded: the HUD script plays the clash when it rises (0.4.1) */
 static int g_linksOk;   /* the unit links are where the research has them */
 static double g_sensedUntil, g_forgetAt;
@@ -473,6 +513,7 @@ static int HitTaken(const uint8_t* h, void* result, unsigned long long now)
             memset(result, 0, RESULT_SIZE);
             g_parries++;
             atomic_fetch_add(&g_parrySeq, 1);
+            ParrySound();
             atomic_store(&g_invulnUntilMs, now + (unsigned long long)(s_parryInvuln * 1000));
             if (!atomic_load(&g_counterReady))
             {
@@ -872,16 +913,40 @@ static void NearFoeUnits(const float pos[3], float reach)
         g_foeUnits[g_nFoeUnits++] = Word(fid + 12);
     }
 }
-/* A spot as SpotAt finds it, looking from 12 m above her instead of 2.5 (0.4.4: uphill the ground 6 m ahead is more
- * than 2.5 m higher, the look down started under it, terrain being solid only from above, and the "spot" was a buried
- * surface under the hill; from 12 m the hill's own surface is seen, and what lies under it is skipped as buried) */
-static int SpotFrom(uint32_t unit, const float pos[3], const float dir[2], float dist, float out[3], float climb, int upFirst)
+/* A spot she can be put on without ending up in or under anything (0.4.5: every check before the move, none after):
+ *   1. the spot: as SpotAt finds it, looking down from 40 m above her (a look from 2.5 m started under a hill's
+ *      surface, terrain being solid only from above, and took what lies under it); a surface with another above it
+ *      counts only when looking up from it meets that one (a real roof), and she must fit standing on it;
+ *   2. the height: at most `rise` m up and 3 m down;
+ *   3. the way: nothing solid between where she stands and the spot, at hip and at head height, both ways (a wall, a
+ *      hillside, a rock, a building's shell are met from outside; enemies are not walls);
+ *   4. the ground: looking down from her head at the spot meets its surface, not something else first.
+ * *why says which check refused (for the log). 1 found */
+static int Clear(uint32_t unit, const float a[3], const float b[3])
+{
+    float v[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, len = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    if (len < 0.05f) return 1;
+    for (int k = 0; k < 3; k++) v[k] /= len;
+    float r = RayWith(unit, a, v, len, 0, 0x80000009u, NULL);
+    return r > len;
+}
+static int SafeSpot(uint32_t unit, const float pos[3], const float dir[2], float dist, float rise, float out[3], int* why)
 {
     float keep = s_lpClimb;
-    s_lpClimb = climb;
-    int r = SpotAt(unit, pos, dir, dist, out, NULL, upFirst);
+    s_lpClimb = 40;
+    int r = SpotAt(unit, pos, dir, dist, out, NULL, 0);
     s_lpClimb = keep;
-    return r;
+    if (!r) { *why = 1; return 0; }
+    if (out[2] - pos[2] > rise || pos[2] - out[2] > 3) { *why = 2; return 0; }
+    for (int h = 0; h < 2; h++)
+    {
+        float up = h ? 1.6f : 0.9f, a[3] = {pos[0], pos[1], pos[2] + up}, b[3] = {out[0], out[1], out[2] + up};
+        if (!Clear(unit, a, b) || !Clear(unit, b, a)) { *why = 3; return 0; }
+    }
+    float head[3] = {out[0], out[1], out[2] + 1.7f}, down[3] = {0, 0, -1};
+    float g = RayWith(unit, head, down, 2.2f, 0, 0x80000009u, NULL);
+    if (g < 0 || fabsf(g - 1.7f) > 0.35f) { *why = 4; return 0; }
+    return 1;
 }
 static void CounterFrame(void)
 {
@@ -916,8 +981,15 @@ static void CounterFrame(void)
     float back[2] = {-fwd[0] / h, -fwd[1] / h}, dest[3];
     NearFoeUnits(at, 20);
     g_buried = 0;
-    if (!SpotFrom(myUnit, at, back, s_parryBehind, dest, 12, 0) && !SpotFrom(myUnit, at, back, s_parryBehind + 1.5f, dest, 12, 0))
-    { Log("PARRY: entity %u stunned; no room behind it", foe); return; }
+    /* behind it, as its spot is seen from where it stands; and nothing solid between her and that spot */
+    int why = 0, okSpot = SafeSpot(myUnit, at, back, s_parryBehind, 2.0f, dest, &why) || SafeSpot(myUnit, at, back, s_parryBehind + 1.5f, 2.0f, dest, &why);
+    if (okSpot)
+        for (int hh = 0; hh < 2 && okSpot; hh++)
+        {
+            float up = hh ? 1.6f : 0.9f, a[3] = {mine[0], mine[1], mine[2] + up}, b[3] = {dest[0], dest[1], dest[2] + up};
+            if (!Clear(myUnit, a, b)) { okSpot = 0; why = 3; }
+        }
+    if (!okSpot) { Log("PARRY: entity %u stunned; no safe spot behind it (check %d)", foe, why); return; }
     float zero[3] = {0, 0, 0};
     dest[2] += 0.05f;
     g_setPosition(NULL, me, dest);
@@ -957,51 +1029,28 @@ static int MoveDir(float dir[2])
     }
     return 0;
 }
-/* Whether she is in a spot she cannot walk out of, having stayed within half a metre for a second: 1 under the ground
- * (a surface above her that looking up does not meet: terrain and rocks are solid only from above; *top the lowest
- * such), 2 wedged for 3 s (no room to stand where she is) */
-static int Stuck(uint32_t unit, const float pos[3], float* top)
-{
-    if (g_now - g_anchorAt < 1) return 0;
-    float z[16], climb = s_lpClimb, best = 1e9f;
-    s_lpClimb = 40;
-    int n = Surfaces(unit, pos[0], pos[1], pos[2], z, 16);
-    s_lpClimb = climb;
-    for (int i = 0; i < n; i++)
-        if (z[i] > pos[2] + 2.2f && z[i] < best && !Roofed(unit, pos[0], pos[1], pos[2], z[i] - pos[2])) best = z[i];
-    if (best < 1e8f) { *top = best; return 1; }
-    return g_now - g_anchorAt >= 3 && !Fits(unit, pos[0], pos[1], pos[2]) ? 2 : 0;
-}
 static void Dash(void)
 {
-    float dir[2], pos[3], aim[3], dest[3], p[3];
+    float dir[2], pos[3], dest[3], p[3];
     uint32_t me = atomic_load(&g_avatar), unit = UnitOf(me);
-    if (!s_dash || g_now < g_dashReady || !g_setPosition || !g_setVelocity || !g_raycast || !unit || !PlayerPose(pos, aim) || !QueryIdle()) return;
+    /* only while she moves (0.4.5: 0.4.3's way out of a stuck spot, a dash while standing still, fired where she was
+     * not stuck; the spot is checked before the move instead, so there is nothing to get out of) */
+    if (!s_dash || g_now < g_dashReady || !g_setPosition || !g_setVelocity || !g_raycast || !unit || !MoveDir(dir) || !PlayerPose(pos, NULL) || !QueryIdle()) return;
     NearFoeUnits(pos, s_dashDistance + 20);
     g_buried = 0;
-    float dist = 0, top = 0;
-    int found = 0, stuck = 0;
-    if (!MoveDir(dir))
+    float dist = 0;
+    int found = 0, stuck = 0, why = 0, whys[5] = {0};
+    for (float d = s_dashDistance; !found && d >= 1.5f; d -= 0.75f)
     {
-        /* standing still: only out of a spot she cannot walk out of. Under the ground: straight up onto the ground
-         * above her, else the highest free spot around; wedged: the nearest free spot, towards where she looks first */
-        stuck = Stuck(unit, pos, &top);
-        if (!stuck) return;
-        float h = sqrtf(aim[0] * aim[0] + aim[1] * aim[1]);
-        if (h > 0.1f) { dir[0] = aim[0] / h; dir[1] = aim[1] / h; } else { dir[0] = 1; dir[1] = 0; }
-        if (stuck == 1 && Fits(unit, pos[0], pos[1], top)) { dest[0] = pos[0]; dest[1] = pos[1]; dest[2] = top; found = 1; }
-        for (int k = 0; k < 8 && !found; k++)
-        {
-            float a = 0.7854f * (float)k, c = cosf(a), sn = sinf(a), other[2] = {dir[0] * c - dir[1] * sn, dir[0] * sn + dir[1] * c};
-            for (float d = 2; !found && d <= 8; d += 2)
-                if (SpotFrom(unit, pos, other, d, dest, stuck == 1 ? 40 : 4, stuck == 1)) { found = 1; dist = d; dir[0] = other[0]; dir[1] = other[1]; }
-        }
-        if (!found) { static unsigned told; if (told++ < 6) Log("dash: stuck (%s), and no free spot within 8 m", stuck == 1 ? "under the ground" : "wedged"); return; }
+        if (SafeSpot(unit, pos, dir, d, d * 0.6f > 1.0f ? d * 0.6f : 1.0f, dest, &why)) { found = 1; dist = d; }
+        else whys[why]++;
     }
-    else
-        for (float d = s_dashDistance; !found && d >= 1.5f; d -= 1.0f)
-            if (SpotFrom(unit, pos, dir, d, dest, 12, 0) && dest[2] - pos[2] <= (d > 1.5f ? d : 1.5f)) { found = 1; dist = d; }
-    if (!found) { static unsigned told; if (told++ < 6) Log("dash: no room ahead"); return; }
+    if (!found)
+    {
+        static unsigned told;
+        if (told++ < 20) Log("dash: no safe spot ahead (refused: %d no surface she fits on, %d too high or too low, %d something in the way, %d not the ground she would stand on)", whys[1], whys[2], whys[3], whys[4]);
+        return;
+    }
     g_dashReady = g_now + s_dashCooldown;
     /* who stands on the path, before she moves: from a metre behind her to the enemy she stops in front of (a spot an
      * enemy stands on is never taken, so the one that cut the dash short is 2 to 3 m past where she lands) */
@@ -1319,7 +1368,7 @@ static const KbOption kOptions[] = {
     {"e_seconds", &s_eSeconds, NULL}, {"e_cooldown", &s_eCooldown, NULL}, {"e_mult", &s_eMult, NULL}, {"e_radius", &s_eRadius, NULL},
     {"e_slow", &s_eSlow, NULL}, {"e_spread", &s_eSpread, NULL}, {"d_seconds", &s_dSeconds, NULL}, {"d_cooldown", &s_dCooldown, NULL},
     {"d_mult", &s_dMult, NULL}, {"d_per_kill", &s_dPerKill, NULL}, {"d_cap", &s_dCap, NULL},
-    {"parry", NULL, &s_parry}, {"parry_window", &s_parryWindow, NULL}, {"parry_damage", &s_parryDamage, NULL}, {"dash", NULL, &s_dash},
+    {"parry", NULL, &s_parry}, {"parry_sound", NULL, &s_parrySound}, {"parry_window", &s_parryWindow, NULL}, {"parry_damage", &s_parryDamage, NULL}, {"dash", NULL, &s_dash},
     {"dash_distance", &s_dashDistance, NULL}, {"dash_cooldown", &s_dashCooldown, NULL}, {"dash_damage", &s_dashDamage, NULL},
     {"mi_stacks", NULL, &s_miStacks}, {"mi_seconds", &s_miSeconds, NULL}, {"mi_damage", &s_miDamage, NULL}, {"mi_slow", &s_miSlow, NULL}, {"mi_status", NULL, &s_miStatus}, {"mi_status_buildup", &s_miBuildup, NULL},
     {"numbers", NULL, &s_numbers},
@@ -1359,6 +1408,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
+    ParrySoundInit();
     api->log(mod, "Ascalon %s: hidden until she makes noise; her hits strike everyone within %.0f m; Pursuit; Endowment %s, Descent %s", VERSION,
              (double)s_areaRadius, s_keys[1].label, s_keys[2].label);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;

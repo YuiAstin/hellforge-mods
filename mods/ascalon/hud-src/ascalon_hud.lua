@@ -419,6 +419,7 @@ local OPTIONS = {
     {'d_seconds', 'slider', 'Descent: Duration', 2, 30, 1, 'Seconds it runs; each kill adds more.'},
     {'d_cooldown', 'slider', 'Descent: Cooldown', 0, 180, 5, 'Seconds before it can be used again.'},
     {'parry', 'toggle', 'Parry', nil, nil, nil, 'A right-click just before a hit, a melee weapon in hand: the hit does nothing and she counters.', true},
+    {'parry_sound', 'toggle', 'Parry: Clash Sound', nil, nil, nil, 'A clash on a parry, from the .wav files in the mod\'s sounds folder.'},
     {'parry_window', 'slider', 'Parry: Window', 0.05, 1, 0.05, 'Seconds before the hit the right-click still counts.'},
     {'parry_damage', 'slider', 'Parry: Counter Damage', 0, 2000, 50, 'What her counter deals to everyone in range.'},
     {'dash', 'toggle', 'Dash', nil, nil, nil, 'Melee while moving dashes her forward through the enemies in the way.', true},
@@ -925,7 +926,8 @@ overlay:draw(function(d, dt)
     end
     local s = find(dt)
     cloak_frame(s, dt)
-    if not PS.failed then local okP, errP = pcall(parry_sound, dt); if not okP then PS.failed = true; log('[Ascalon HUD] parry sound failed, off for this session: ' .. tostring(errP)) end end
+    -- (the Wwise way, parry_sound above, is not run: the event never reached the sound engine, 0.4.1 to 0.4.4;
+    -- ascalon.dll plays the clash through Windows since 0.4.5)
     if s == nil or s.in_mission == 0 then return end
     mk_t = mk_t + dt
     local okV, v = pcall(view, d)
