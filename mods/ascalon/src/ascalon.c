@@ -33,6 +33,10 @@
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
  * 0.3.0, her two keyed skills:
+ * 0.4.7 (Yui: "0.4.5 refuses to do any dashes even on open flat ground"): two of 0.4.5's checks were wrong. The look
+ *     for something in the way started inside her and met her own gear: it starts 0.7 m ahead of her now, and logs
+ *     what it meets. The look for the spot from 40 m up met something high over open ground and read the ground
+ *     under it as buried: from 12 m again, as 0.4.4 did.
  * 0.4.6 (Yui: "have an agent look at the dump for you"): a fifth check before she is set anywhere, the game's own:
  *     the Warp Pack takes a destination only when game.dll+0x68C340 says the wearer's mover shape overlaps nothing
  *     there (and nothing is above it, looking down from 500 m, as SafeSpot's first check does from 40). GameFits calls
@@ -107,7 +111,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.6"
+#define VERSION "0.4.7"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -993,7 +997,7 @@ static int GameFits(uint32_t entity, uint32_t unit, const float pos[3])
     return out.ok ? 1 : 0;
 }
 /* A spot she can be put on without ending up in or under anything (0.4.5: every check before the move, none after):
- *   1. the spot: as SpotAt finds it, looking down from 40 m above her (a look from 2.5 m started under a hill's
+ *   1. the spot: as SpotAt finds it, looking down from 12 m above her (a look from 2.5 m started under a hill's
  *      surface, terrain being solid only from above, and took what lies under it); a surface with another above it
  *      counts only when looking up from it meets that one (a real roof), and she must fit standing on it;
  *   2. the height: at most `rise` m up and 3 m down;
@@ -1001,18 +1005,41 @@ static int GameFits(uint32_t entity, uint32_t unit, const float pos[3])
  *      hillside, a rock, a building's shell are met from outside; enemies are not walls);
  *   4. the ground: looking down from her head at the spot meets its surface, not something else first.
  * *why says which check refused (for the log). 1 found */
-static int Clear(uint32_t unit, const float a[3], const float b[3])
+/* Nothing solid between two points. The stretch within `skip` m of `a` is left out when `a` is where she stands: a
+ * ray that starts inside her meets her own gear (0.4.5 refused every dash on open flat ground at this check). The
+ * first refusals are logged with what was met. */
+static int Clear(uint32_t unit, const float a[3], const float b[3], float skipA, float skipB)
 {
     float v[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, len = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-    if (len < 0.05f) return 1;
+    if (len < skipA + skipB + 0.1f) return 1;
     for (int k = 0; k < 3; k++) v[k] /= len;
-    float r = RayWith(unit, a, v, len, 0, 0x80000009u, NULL);
-    return r > len;
+    float from[3] = {a[0] + v[0] * skipA, a[1] + v[1] * skipA, a[2] + v[2] * skipA};
+    len -= skipA + skipB;
+    uintptr_t world = Pointer(game + 0x346BFA0);
+    if (!world || !g_raycast || !g_worldId) return 0;
+    uint32_t id = g_worldId((const void*)world);
+    if (id >= 4) return 0;
+    uint8_t hits[16 * 44];
+    memset(hits, 0, sizeof hits);
+    uint32_t n = g_raycast(id, from, v, len, 2, 1, 0, 0x80000009u, unit, hits, 16);
+    for (uint32_t i = 0; i < n && i < 16; i++)
+    {
+        float d;
+        memcpy(&d, hits + 44u * i + 24, 4);
+        uint32_t hu = Word(hits + 44u * i + 28);
+        if (hu == unit || !isfinite(d) || d < 0.02f || d > len || IsFoeUnit(hu)) continue;
+        uint32_t filt = ActorFilter(Word(hits + 44u * i + 32), hu);
+        if (filt == FILTER_FOLIAGE) continue;
+        static unsigned told;
+        if (told++ < 12) Log("in the way: %.2f m along a %.1f m look from %.1f %.1f %.1f: unit %u, filter %08x (%u hits)", (double)d, (double)len, (double)from[0], (double)from[1], (double)from[2], hu, filt, n);
+        return 0;
+    }
+    return 1;
 }
 static int SafeSpot(uint32_t unit, const float pos[3], const float dir[2], float dist, float rise, float out[3], int* why)
 {
     float keep = s_lpClimb;
-    s_lpClimb = 40;
+    s_lpClimb = 12;   /* (40 in 0.4.5: something high over open ground, met only from above, made the ground under it read as buried) */
     int r = SpotAt(unit, pos, dir, dist, out, NULL, 0);
     s_lpClimb = keep;
     if (!r) { *why = 1; return 0; }
@@ -1020,7 +1047,7 @@ static int SafeSpot(uint32_t unit, const float pos[3], const float dir[2], float
     for (int h = 0; h < 2; h++)
     {
         float up = h ? 1.6f : 0.9f, a[3] = {pos[0], pos[1], pos[2] + up}, b[3] = {out[0], out[1], out[2] + up};
-        if (!Clear(unit, a, b) || !Clear(unit, b, a)) { *why = 3; return 0; }
+        if (!Clear(unit, a, b, 0.7f, 0) || !Clear(unit, b, a, 0, 0.7f)) { *why = 3; return 0; }
     }
     float head[3] = {out[0], out[1], out[2] + 1.7f}, down[3] = {0, 0, -1};
     float g = RayWith(unit, head, down, 2.2f, 0, 0x80000009u, NULL);
@@ -1079,7 +1106,7 @@ static void CounterFrame(void)
         for (int hh = 0; hh < 2 && okSpot; hh++)
         {
             float up = hh ? 1.6f : 0.9f, a[3] = {mine[0], mine[1], mine[2] + up}, b[3] = {dest[0], dest[1], dest[2] + up};
-            if (!Clear(myUnit, a, b)) { okSpot = 0; why = 3; }
+            if (!Clear(myUnit, a, b, 0.7f, 0)) { okSpot = 0; why = 3; }
         }
     if (!okSpot) { Log("PARRY: entity %u stunned; no safe spot behind it (check %d)", foe, why); return; }
     float zero[3] = {0, 0, 0};
