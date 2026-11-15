@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.0"
+#define VERSION "0.3.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -48,6 +48,7 @@
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
 #include "kitbase/kb_roster.h"
+#include "kitbase/kb_fit.h"
 
 /* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
 KB_ROSTER_EXPORTS(lenna)
@@ -282,6 +283,28 @@ typedef uint32_t (*RayFn)(uint32_t, const void*, const void*, float, uint32_t, u
 static SetVecFn g_setPosition, g_setVelocity;
 static WorldFn g_worldId;
 static RayFn g_raycast;
+/* An actor's collision filter name (as Helldiver Survival Rework's cover check reads it: the actor's generation-tagged
+ * pool entry, its physics body, the filter table's names); 0 when it cannot be identified */
+static uint32_t ActorFilter(uint32_t id, uint32_t unit)
+{
+    uint32_t world = id >> 30, layout, stride, key_offset, data_offset, key, index, name = 0;
+    uintptr_t pool = exe + 0x2369B00 + 64u * ((id >> 28 & 3) + 10 * world);
+    uint8_t header[56], record[40], body[160];
+    if (!ReadAt(pool, header, 56)) return 0;
+    layout = Word(header + 28); stride = layout & 65535; key_offset = layout >> 16 & 255; data_offset = layout >> 24;
+    index = id & Word(header + 40);
+    if (index >= Word(header + 36) || !(id & Word(header + 52)) || stride < 40 || stride > 512 || key_offset + 4 > stride || data_offset + 40 > stride) return 0;
+    uintptr_t entry = (uintptr_t)Quad(header) + (uintptr_t)index * stride;
+    if (!ReadAt(entry + key_offset, &key, 4) || key != id || !ReadAt(entry + data_offset, record, 40) || Word(record + 12) != unit || !(Word(record + 16) & 1)) return 0;
+    uintptr_t physics = Pointer(exe + 0x27BA8A8 + 176u * world), bodies = physics ? Pointer(physics + 24) : 0;
+    uint32_t body_index = Word(record + 20) & 0xFFFFFF;
+    if (!bodies || body_index >= 262144 || !ReadAt(bodies + 160u * body_index, body, 160) || Word(body + 144) != id || Word(body + 148) != unit) return 0;
+    uintptr_t filters = Pointer(exe + 0x27C5E48), names;
+    uint32_t count, filter = Word(body + 108) & 127;
+    if (!filters || !ReadAt(filters + 248, &count, 4) || count > 128 || filter >= count || !(names = Pointer(filters + 256)) || !ReadAt(names + 4u * filter, &name, 4)) return 0;
+    return name;
+}
+#define FILTER_FOLIAGE 0x04A8FBF9u
 /* The nearest static obstruction along a ray (static actors only, so enemies are not walls): its distance, len + 1
  * when clear, or -1 when the query cannot be made */
 static float RayWith(uint32_t unit, const float from[3], const float dir[3], float len, uint32_t filter, uint32_t flags, unsigned* count);
@@ -304,6 +327,9 @@ static float RayWith(uint32_t unit, const float from[3], const float dir[3], flo
         float d;
         memcpy(&d, hits + 44u * i + 24, 4);
         if (Word(hits + 44u * i + 28) == unit || !isfinite(d) || d < 0.02f) continue;
+        /* a zone, not a thing (from Ascalon 0.4.14): actors tagged 0xEDC5EBE0 are level faces some 2 m over the ground
+         * across a whole area, which a look meets from outside and which stop nothing */
+        if (ActorFilter(Word(hits + 44u * i + 32), Word(hits + 44u * i + 28)) == 0xEDC5EBE0u) continue;
         if (g_rayPrefer >= 0 ? fabsf(d - g_rayPrefer) < fabsf(best - g_rayPrefer) : d < best) best = d;
     }
     return best;
@@ -329,7 +355,12 @@ static int GroundAt(uint32_t unit, float x, float y, float ref, float* z)
     {
         float d;
         memcpy(&d, hits + 44u * i + 24, 4);
-        if (Word(hits + 44u * i + 28) == unit || !isfinite(d) || d < 0.02f || d > len) continue;
+        uint32_t hu = Word(hits + 44u * i + 28);
+        if (hu == unit || !isfinite(d) || d < 0.02f || d > len) continue;
+        /* no ground (as Voymastina's and Ascalon's landing checks have it): leaves and canopies, bodies (enemies,
+         * corpses), and a zone's face */
+        uint32_t filt = ActorFilter(Word(hits + 44u * i + 32), hu);
+        if (filt == FILTER_FOLIAGE || filt == 0xEDC5EBE0u || (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u))) continue;
         h[k++] = top[2] - d;
     }
     if (!k) return 0;
@@ -427,7 +458,9 @@ static void LeapFrame(void)
     {
         dest[0] = pos[0] + dir[0] * dist;
         dest[1] = pos[1] + dir[1] * dist;
-        if (GroundAt(unit, dest[0], dest[1], pos[2], &dest[2])) found = 1;
+        /* the ground there, and room for her on it: the game's own fit test where it can be asked (kb_fit.h, the
+         * Warp Pack's; from Ascalon 0.6.8). No room: closer */
+        if (GroundAt(unit, dest[0], dest[1], pos[2], &dest[2]) && KbFitsOn(me, unit, dest) != 0) found = 1;
         else dist *= 0.7f;
     }
     /* no ground ahead: to whatever she is looking at (terrain, a wall, a rock), stopped short of it */
@@ -1054,6 +1087,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         hf->code_matches(exe + 0x7F4590, "48 8b c4 f3 0f 11 58 20 89 48 08 55 53 56 57 41 54 41 55 41 56 41 57 48"))
     {
         g_setPosition = (SetVecFn)(game + 0x5A2BB0);
+        KbFitInit();
         g_setVelocity = (SetVecFn)(game + 0x4A7550);
         g_worldId = (WorldFn)(exe + 0x79F860);
         g_raycast = (RayFn)(exe + 0x7F4590);
