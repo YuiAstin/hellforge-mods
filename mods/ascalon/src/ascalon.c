@@ -146,7 +146,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.6.3"
+#define VERSION "0.6.4"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -807,8 +807,11 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
         for (int i = 0; i < MARKS; i++)
             if (g_mark[i].e == d->target && g_mark[i].until > g_now && g_mark[i].stOk)
             {
-                double dt = g_mark[i].dotAt > 0 ? g_now - g_mark[i].dotAt : 0.25;
-                dt = dt < 0.02 ? 0.02 : dt > 1.0 ? 1.0 : dt;
+                /* one hit a second (0.6.4: four a second read as hits of 1 and 2), the status's other ticks dropped */
+                double since = g_mark[i].dotAt > 0 ? g_mark[i].dotAt : g_mark[i].stSince;
+                double dt = g_now - since;
+                if (dt < 0.95) { e->cancel = 1; return; }
+                dt = dt > 1.5 ? 1.5 : dt;
                 g_mark[i].dotAt = g_now;
                 double a = (double)g_mark[i].base * s_miDamage * g_mark[i].stacks * dt + g_mark[i].carry;
                 int32_t whole = a > 2000000 ? 2000000 : (int32_t)a;
