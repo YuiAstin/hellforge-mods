@@ -8,6 +8,9 @@ static float s_lpClimb = 2.5f, s_lpDrop = 8;
  * when clear, or -1 when the query cannot be made */
 static float RayWith(uint32_t unit, const float from[3], const float dir[3], float len, uint32_t filter, uint32_t flags, unsigned* count);
 static float g_rayPrefer = -1;
+/* 1: bodies are nothing to the ray (0.6.6, for whether she fits: an enemy beside the spot is no wall) */
+static int g_rayBodies;
+static int IsFoeUnit(uint32_t u);
 static float RayWith(uint32_t unit, const float from[3], const float dir[3], float len, uint32_t filter, uint32_t flags, unsigned* count)
 {
     uintptr_t world = Pointer(game + 0x346BFA0);
@@ -26,7 +29,9 @@ static float RayWith(uint32_t unit, const float from[3], const float dir[3], flo
         memcpy(&d, hits + 44u * i + 24, 4);
         if (Word(hits + 44u * i + 28) == unit || !isfinite(d) || d < 0.02f) continue;
         /* a zone, not a thing (Ascalon 0.4.14; ZONE_TAG below): nothing stands on it or is stopped by it */
-        if (ActorFilter(Word(hits + 44u * i + 32), Word(hits + 44u * i + 28)) == 0xEDC5EBE0u) continue;
+        uint32_t rf = ActorFilter(Word(hits + 44u * i + 32), Word(hits + 44u * i + 28));
+        if (rf == 0xEDC5EBE0u) continue;
+        if (g_rayBodies && (rf == 0x236122F0u || rf == 0xD5B33D56u || IsFoeUnit(Word(hits + 44u * i + 28)))) continue;
         if (g_rayPrefer >= 0 ? fabsf(d - g_rayPrefer) < fabsf(best - g_rayPrefer) : d < best) best = d;
     }
     return best;
@@ -98,12 +103,11 @@ static int FoeAbove(uint32_t unit, const float from[3], float len)
     for (uint32_t i = 0; i < n && i < 16; i++) if (IsFoeUnit(Word(hits + 44u * i + 28))) return 1;
     return 0;
 }
-static int Fits(uint32_t unit, float x, float y, float z)
+static int FitsStatic(uint32_t unit, float x, float y, float z)
 {
     float up[3] = {0, 0, 1}, foot[3] = {x, y, z + 0.1f};
     float r = RayWith(unit, foot, up, 1.8f, 0, 0x80000009u, NULL);
     if (r < 0 || r <= 1.8f) return 0;
-    if (g_nFoeUnits && FoeAbove(unit, foot, 12.0f)) return 0;   /* under a Bile Titan, a Charger, a hulk: taken */
     for (int h = 0; h < 2; h++)
         for (int k = 0; k < 4; k++)
         {
@@ -114,6 +118,18 @@ static int Fits(uint32_t unit, float x, float y, float z)
         }
     return 1;
 }
+/* (0.6.6: an enemy standing by the spot is no wall. Into a group every spot was refused, "no surface she fits on": the
+ * looks around her knee and chest met the enemies' bodies, and a spot within 1.5 m of any enemy was taken. Bodies are
+ * nothing to these looks now, and a spot is taken only with an enemy on it, within 0.8 m, or over it.) */
+static int Fits(uint32_t unit, float x, float y, float z)
+{
+    float foot[3] = {x, y, z + 0.1f};
+    if (g_nFoeUnits && FoeAbove(unit, foot, 12.0f)) return 0;   /* under a Bile Titan, a Charger, a hulk: taken */
+    g_rayBodies = 1;
+    int fits = FitsStatic(unit, x, y, z);
+    g_rayBodies = 0;
+    return fits;
+}
 
 static int Occupied(const float at[3])
 {
@@ -123,7 +139,7 @@ static int Occupied(const float at[3])
     {
         if (!g_foe[i] || !Descriptor(g_foe[i], d) || Quad(d) != g_foeRes[i] || !UnitNode(Word(d + 12), 0, p)) continue;
         float dx = p[0] - at[0], dy = p[1] - at[1], dz = p[2] - at[2];
-        if (dx * dx + dy * dy <= 1.5f * 1.5f && dz > -2 && dz < 2.5f) return 1;
+        if (dx * dx + dy * dy <= 0.8f * 0.8f && dz > -2 && dz < 2.5f) return 1;
     }
     return 0;
 }
