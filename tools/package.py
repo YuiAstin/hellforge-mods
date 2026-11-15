@@ -10,7 +10,7 @@ import argparse, json, os, sys, zipfile
 import kitbase_sync
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-REPO_ONLY = {'FUTURE.md'}
+REPO_ONLY = {'FUTURE.md', '.gitignore'}
 SKIP_EXT = ('.dll', '.lib', '.pdb', '.bak')
 
 def package(mod, out):
