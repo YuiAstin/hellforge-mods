@@ -27,14 +27,14 @@ end
 
 local ffi = require('ffi')
 pcall(ffi.cdef, [[
-typedef struct kolhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t upshift, upshift_max, gear, sinner; float sinner_hp, sinner_max; uint32_t leash, drive, winner, piloted; float kr_left; uint32_t keys[3]; char key_label[3][24]; uint32_t sinner_kind, frv; float sprint_left, sprint_cd, upshift_pct, kr_mult, share_pct; uint32_t share_on, ems_immune, release_on; float sprint_ram; int32_t frv_pkg; } kolhud1_state;
+typedef struct kolhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t upshift, upshift_max, gear, sinner; float sinner_hp, sinner_max; uint32_t leash, drive, winner, piloted; float kr_left; uint32_t keys[3]; char key_label[3][24]; uint32_t sinner_kind, frv; float sprint_left, sprint_cd, upshift_pct, kr_mult, share_pct; uint32_t share_on, ems_immune, release_on; float sprint_ram; int32_t frv_pkg; float turbo_left, turbo_mult, post_move, gear_left, winner_cd, upshift_guard; } kolhud1_state;
 void *kolhud1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
 void *kolhud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
 ]])
 local k32 = ffi.load('kernel32')
 
 local ELECTRIC, YELLOW, INK, PANEL, TEXT, MUTED = {255, 70, 90}, {255, 210, 120}, {8, 9, 10}, {12, 14, 16}, {240, 243, 245}, {150, 156, 160}
-local NAMES = {'EYE OF THE SNOW WOLF', 'TACTICAL PLAYBOOK', 'HALLUCINATION'}
+local NAMES = {"SNOW WOLF'S EYE", 'TACTICAL ROUTEBOOK', 'SPECTRE'}
 
 -- the kit, for the shared parts below
 local KIT = {name = 'Koleda', id = 'koleda', module = k32.kolhud1_GetModuleHandleA, proc = k32.kolhud1_GetProcAddress}
@@ -372,7 +372,7 @@ local function ability(d, i, x, y, size, alpha)
     -- the name, and the key where a stratagem shows its code
     local tx = x + size + 10 * s
     local nsize = math.max(17 * s, size * 0.36)
-    heavy(d, winner and 'WINNER!' or NAMES[i], tx, y + size * 0.02, nsize, 'title', ready and rgba(TEXT, a) or rgba(MUTED, a))
+    heavy(d, winner and 'THE WINNER' or NAMES[i], tx, y + size * 0.02, nsize, 'title', ready and rgba(TEXT, a) or rgba(MUTED, a))
     local label = on and 'KINETIC RECOVERY' or X.labels[i] or ffi.string(state.key_label[i - 1])
     local ksize = math.max(18 * s, size * 0.4)
     heavy(d, label, tx, y + size * 0.5, ksize, 'title', ready and rgba(YELLOW, a) or rgba(MUTED, a))
@@ -404,7 +404,7 @@ local function abilities(d, box, only)
 end
 
 ----------------------------------------------------- Upshift, the Sinner's gear and health, bottom middle --
-local GEARS = {[0] = 'N', [1] = 'S', [2] = 'S+'}
+local GEARS = {[0] = 'N', [1] = 'S', [2] = 'S+', [3] = 'D', [4] = 'P'}
 local LEASH = {[0] = '', [1] = 'FOLLOWING', [2] = 'WARPED', [3] = 'CANNOT MOVE', [4] = 'PUSHING THROUGH'}
 local GREEN = {120, 230, 140}
 -- 0.2.6: her active buffs as chips over the Upshift line (koleda_hud_state's 0.2.6 fields; an older koleda.dll: none)
@@ -414,14 +414,21 @@ local function buff_row(d, cx, y)
     local chips = {}
     local function add(text, colour) chips[#chips + 1] = {text, colour} end
     local up = tonumber(state.upshift)
-    if up > 0 then add(('UPSHIFT +%.0f%% DMG'):format(tonumber(state.upshift_pct)), up >= tonumber(state.upshift_max) and YELLOW or ELECTRIC) end
+    if up > 0 then
+        local g = tonumber(state.upshift_guard)
+        add(('UPSHIFT +%.0f%% DMG'):format(tonumber(state.upshift_pct)) .. (g > 0 and ('  -%.0f%% TAKEN'):format(g) or ''), up >= tonumber(state.upshift_max) and YELLOW or ELECTRIC)
+    end
+    local tb = tonumber(state.turbo_left)
+    if tb > 0.05 then add(('TURBO BOOST x%.2g  %ds'):format(tonumber(state.turbo_mult), math.ceil(tb)), YELLOW) end
+    local pm = tonumber(state.post_move)
+    if pm > 0 then add(('POST-MOVE SUPPORT x%.2g'):format(pm), GREEN) end
     local kr = tonumber(state.kr_left)
     if kr > 0.05 then add(('KINETIC RECOVERY x%.2g  %ds'):format(tonumber(state.kr_mult), math.ceil(kr)), YELLOW) end
     local sp = tonumber(state.sprint_left)
-    if sp > 0.05 then add(('FULL SPEED SPRINT  INVINCIBLE  RAMS x%.2g  %ds'):format(tonumber(state.sprint_ram), math.ceil(sp)), YELLOW)
+    if sp > 0.05 then add(('FULL SPEED  INVINCIBLE  RAMS x%.2g  %ds'):format(tonumber(state.sprint_ram), math.ceil(sp)), YELLOW)
     elseif state.frv ~= 0 and state.piloted ~= 0 then
         local cd = tonumber(state.sprint_cd)
-        if cd > 0.05 then add(('SPRINT IN %ds'):format(math.ceil(cd)), MUTED) else add('SPRINT READY', GREEN) end
+        if cd > 0.05 then add(('FULL SPEED IN %ds'):format(math.ceil(cd)), MUTED) else add('FULL SPEED READY', GREEN) end
     end
     if state.release_on ~= 0 then add('KINETIC RELEASE', ELECTRIC) end
     if state.share_on ~= 0 then add(('SINNER GUARD %.0f%%'):format(tonumber(state.share_pct)), GREEN) end
@@ -457,7 +464,8 @@ local function status_bar(d)
     local bits = {('UPSHIFT %d'):format(n)}
     local sin = tonumber(state.sinner)
     if sin == 2 then
-        bits[#bits + 1] = 'GEAR ' .. (GEARS[tonumber(state.gear)] or '?')
+        local gl = tonumber(state.gear_left)
+        bits[#bits + 1] = 'GEAR ' .. (GEARS[tonumber(state.gear)] or '?') .. (gl > 0.05 and (' %ds'):format(math.ceil(gl)) or '')
         local leash = LEASH[tonumber(state.leash)]
         if state.piloted ~= 0 then bits[#bits + 1] = 'PILOTED'
         elseif leash and leash ~= '' then bits[#bits + 1] = leash end
@@ -484,17 +492,22 @@ end
 -- from and written to koleda.dll (koleda_option_get / koleda_option_set, the koleda.ini names). The menu keeps what
 -- the player applies; until then a row starts from koleda.ini. Keys stay in koleda.ini.
 local OPTIONS = {
-    {'sinner_kind', 'choice', 'Sinner: Patriot or FRV', {'Patriot (EXO-45)', 'FRV (M-103 Supply FRV)'}, nil, nil, 'Which Sinner Hallucination calls: the Patriot exosuit (RRLLD), or the M-103 Supply FRV from her loadout, which she can ride (without one in her loadout: the Patriot). From her next Hallucination.', true},
-    {'s1_cooldown', 'slider', 'Eye of the Snow Wolf: Cooldown', 0, 120, 1, 'Seconds before Eye of the Snow Wolf can be used again.', true},
-    {'s1_rounds', 'slider', 'Eye of the Snow Wolf: Rounds', 1, 10, 1, 'Heavy rounds fired at her target.'},
-    {'s2_cooldown', 'slider', 'Tactical Playbook: Cooldown', 0, 120, 1, 'Seconds before Tactical Playbook can be used again.', true},
+    {'sinner_kind', 'choice', 'Sinner: Patriot or FRV', {'Patriot (EXO-45)', 'FRV (M-103 Supply FRV)'}, nil, nil, 'Which Sinner Spectre calls: the Patriot exosuit (RRLLD), or the M-103 Supply FRV from her loadout, which she can ride (without one in her loadout: the Patriot). From her next Spectre.', true},
+    {'s1_cooldown', 'slider', "Snow Wolf's Eye: Cooldown", 0, 120, 1, "Seconds before Snow Wolf's Eye can be used again.", true},
+    {'s1_rounds', 'slider', "Snow Wolf's Eye: Rounds", 1, 10, 1, 'Heavy rounds fired at her target.'},
+    {'s2_cooldown', 'slider', 'Tactical Routebook: Cooldown', 0, 120, 1, 'Seconds before Tactical Routebook can be used again.', true},
     {'kr_seconds', 'slider', 'Kinetic Recovery: Duration', 0, 60, 1, 'Seconds Kinetic Recovery lasts.'},
-    {'kr_mult', 'slider', 'Kinetic Recovery: Damage', 1, 3, 0.05, "Her damage and the Sinner's fire rate, times this."},
-    {'s3_cooldown', 'slider', 'Hallucination: Cooldown', 0, 600, 5, 'Seconds before another Sinner call.', true},
+    {'kr_mult', 'slider', 'Kinetic Recovery: Damage', 1, 3, 0.05, "Her damage and the Sinner's, times this."},
+    {'s3_cooldown', 'slider', 'Spectre: Cooldown', 0, 600, 5, 'Seconds before another Sinner call.', true},
+    {'winner_cooldown', 'slider', 'The Winner: Cooldown', 0, 300, 5, 'Seconds between The Winner (Spectre while the Sinner stands: full health, gear N).'},
     {'share_pct', 'slider', 'Sinner: Damage Taken For Her', 0, 100, 5, 'Percent of each hit on her the Sinner takes instead.'},
     {'upshift_max', 'slider', 'Upshift: Most', 1, 10, 1, 'The most Upshift stacks she holds.', true},
-    {'upshift_damage', 'slider', 'Upshift: Damage Per Stack', 0, 0.3, 0.01, 'Her damage bonus per stack (0.06: 6%).'},
+    {'upshift_damage', 'slider', 'Upshift: Damage Per Stack', 0, 0.3, 0.01, 'Her damage bonus per stack (0.15: 15%).'},
     {'upshift_decay', 'slider', 'Upshift: Decay', 1, 60, 1, 'Seconds without a gain before a stack is lost.'},
+    {'gear_seconds', 'slider', 'Gears: Duration', 3, 60, 1, 'Seconds N, S and S+ last before the Sinner goes back to D.', true},
+    {'release_every', 'slider', 'Kinetic Release: Interval', 2, 30, 1, 'Seconds between its EMS waves while it fights in S or S+.'},
+    {'drift_on', 'toggle', "Sinner: Let's Go for a Drift!", 0, 1, 1, 'Rockets from the Sinner into the enemies around it, then along its path ahead (Full Speed).'},
+    {'drift_every', 'slider', 'Drift: Interval', 3, 60, 1, 'Seconds between Drifts.'},
     {'leash_start', 'slider', 'Sinner: Follow From', 2, 40, 1, 'It walks to her beyond this many metres.', true},
     {'leash_stop', 'slider', 'Sinner: Stop Within', 1, 30, 1, 'It stops this close to her.'},
     {'leash_warp', 'slider', 'Sinner: Warp Beyond', 10, 200, 5, 'Farther than this from her, it is warped beside her.'},
@@ -504,7 +517,6 @@ local OPTIONS = {
     {'fire_range', 'slider', 'Sinner: Range', 10, 150, 5, 'Metres it looks for enemies.'},
     {'guard_range', 'slider', 'Sinner: N Gear Range', 5, 80, 1, 'In N gear, the enemies this close to her.'},
     {'sinner_fire', 'toggle', 'Sinner: Fires', 0, 1, 1, 'Whether the Sinner shoots at all.'},
-    {'pull_on', 'toggle', 'Sinner: KANSEI DORIFTO (Test)', 0, 1, 1, 'Untested: in S+ it drags nearby enemies to itself.'},
     {'hp_mult', 'slider', 'Body: Health', 0.5, 4, 0.05, "Her health, times a Helldiver's.", true},
     {'stamina_mult', 'slider', 'Body: Stamina', 0.5, 6, 0.1, "How long she sprints before the bar empties, times a Helldiver's."},
 }
