@@ -120,8 +120,9 @@
  *   - Parry (Texas's, from the Parry Probe 0.1.5): with a dedicated melee weapon in hand, a right-click press within
  *     parry_window s before a hit lands is a perfect parry: the hit is nulled, she takes no hit for parry_invuln s, she is
  *     set behind the attacker, it is stunned, and her counter strikes everyone in range for parry_damage.
- *   - Dash: while she is moving, the melee key (melee_key_code, 70: F), or a left click with a dedicated melee weapon in
- *     hand, dashes her dash_distance m the way she moves (Voymastina's landing checks) and strikes every enemy within
+ *   - Dash (0.7.0: its own key, key_dash, default Z; before, any melee swing while moving, which took her out of every
+ *     fight she swung in. dash_swing 1 has the swing dash as well: the melee key, melee_key_code, or a left click with
+ *     a dedicated melee weapon in hand, while she moves): dashes her dash_distance m the way she moves (Voymastina's landing checks) and strikes every enemy within
  *     dash_width m of the path for dash_damage. Once every dash_cooldown s.
  *   - Endowment (S2, key_endowment, default X; e_seconds, then e_cooldown): her hits deal e_mult times their damage
  *     (strikes with them); every enemy within e_radius m of her gets a dose of the slow (e_slow) twice a second; an
@@ -146,7 +147,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.6.9"
+#define VERSION "0.7.0"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -168,6 +169,7 @@ static float s_eSeconds = 35, s_eCooldown = 20, s_eMult = 2.3f, s_eRadius = 15, 
 static float s_dSeconds = 5, s_dCooldown = 45, s_dMult = 1.5f, s_dPerKill = 2, s_dCap = 15, s_dGrace = 2, s_dRadius = 25, s_piSpeed = 1.25f, s_dSpeed = 1.4f;
 static float s_parryVolume = 0.4f, s_parryWindow = 0.3f, s_parryInvuln = 1, s_parryDamage = 300, s_parryBehind = 2.2f, s_parryStun = 300;
 static float s_dashDistance = 6, s_dashCooldown = 1.2f, s_dashDamage = 150, s_dashWidth = 2;
+static int s_dashSwing = 0;
 static int s_parry = 1, s_dash = 1, s_meleeVk = 70, s_parrySound = 1, s_gameFit = 1;
 static int s_miStacks = 3, s_numbers = 1, s_miStatus = 12, s_numbersTicks = 0;
 static float s_numbersAt = 1.5f;
@@ -179,7 +181,7 @@ static float s_shimmerOpacity = 0, s_shimmerStealth = 0;
 
 static const KbSetting kSettings[] = {
     KB_I("parry", s_parry, 0, 1), KB_I("parry_sound", s_parrySound, 0, 1), KB_F("parry_volume", s_parryVolume, 0, 2), KB_I("game_fit", s_gameFit, 0, 1), KB_F("parry_window", s_parryWindow, 0.05, 2), KB_F("parry_invuln", s_parryInvuln, 0, 10), KB_F("parry_damage", s_parryDamage, 0, 100000),
-    KB_F("parry_behind", s_parryBehind, 0, 10), KB_F("parry_stun", s_parryStun, 0, 1000), KB_I("dash", s_dash, 0, 1), KB_F("dash_distance", s_dashDistance, 1, 20),
+    KB_F("parry_behind", s_parryBehind, 0, 10), KB_F("parry_stun", s_parryStun, 0, 1000), KB_I("dash", s_dash, 0, 1), KB_I("dash_swing", s_dashSwing, 0, 1), KB_F("dash_distance", s_dashDistance, 1, 20),
     KB_F("dash_cooldown", s_dashCooldown, 0, 60), KB_F("dash_damage", s_dashDamage, 0, 100000), KB_F("dash_width", s_dashWidth, 0.5, 10), KB_I("melee_key_code", s_meleeVk, 1, 255),
     KB_F("e_seconds", s_eSeconds, 1, 300), KB_F("e_cooldown", s_eCooldown, 0, 600), KB_F("e_mult", s_eMult, 1, 20), KB_F("e_radius", s_eRadius, 0, 60),
     KB_F("e_slow", s_eSlow, 0, 1000), KB_F("e_spread", s_eSpread, 0, 30), KB_F("d_seconds", s_dSeconds, 1, 120), KB_F("d_cooldown", s_dCooldown, 0, 600),
@@ -201,7 +203,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
 {
     fprintf(f, "; Ascalon %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for a\n"
                "; combo (Shift+Q). (Her skills are not in this build: the keys are kept for them.)\n"
-               "key_spare = %s\nkey_endowment = %s\nkey_descent = %s\n"
+               "key_dash = %s\nkey_endowment = %s\nkey_descent = %s\n"
                "; Ambusher (always on): every hit of hers also strikes every enemy within area_radius m of her that she has a\n"
                "; clear line to, for area_mult times that hit's damage: at most area_max enemies, one volley every area_every s.\n"
                "; area_round: the vanilla projectile the strikes fly as (7: a rifle round).\n"
@@ -215,12 +217,14 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; parry_sound 1 plays a clash on a parry: a .wav of the mod's sounds folder (parry_clash_01.wav to _09.wav; put\n"
                "; your own there, 16-bit PCM), through Windows, at the game's Master x SFX volume times parry_volume.\n"
                "parry = %d\nparry_sound = %d\nparry_volume = %g\nparry_window = %g\nparry_invuln = %g\nparry_damage = %g\nparry_behind = %g\nparry_stun = %g\n"
-               "; Dash (dash 1): while she is moving, the melee key (melee_key_code: its Windows key code; 70 is F), or a left\n"
-               "; click with a dedicated melee weapon in hand, dashes her dash_distance m the way she moves and strikes every\n"
+               "; Dash (dash 1): key_dash, above, dashes her dash_distance m the way she moves (the way she faces when she\n"
+               "; stands still) and strikes every\n"
                "; enemy within dash_width m of the path for dash_damage. Once every dash_cooldown s.\n"
                "; game_fit 1 also asks the game's own fit test (the Warp Pack's) before she is set anywhere; 0 leaves it to\n"
                "; the mod's own checks (set it to 0 if the game crashes on a dash or a parry).\n"
-               "dash = %d\nmelee_key_code = %d\ndash_distance = %g\ndash_cooldown = %g\ndash_damage = %g\ndash_width = %g\ngame_fit = %d\n"
+               "; dash_swing 1: a melee swing while she moves dashes too (the melee key, melee_key_code: its Windows key code,\n"
+               "; 70 is F; or a left click with a dedicated melee weapon in hand), as before 0.7.0.\n"
+               "dash = %d\ndash_swing = %d\nmelee_key_code = %d\ndash_distance = %g\ndash_cooldown = %g\ndash_damage = %g\ndash_width = %g\ngame_fit = %d\n"
                "; Endowment (key_endowment): for e_seconds her hits deal e_mult times their damage, every enemy within e_radius m\n"
                "; of her is slowed (e_slow a dose, twice a second), and an enemy that dies near her leaves a Mortal Interrogation\n"
                "; stack on every enemy within e_spread m of it. Then e_cooldown s before it can be cast again.\n"
@@ -265,7 +269,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "hp_mult = 1\nstamina_mult = 1.2\nhellbomb_on_exhaustion = 0\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_areaRadius, (double)s_areaMult, s_areaMax, (double)s_areaEvery,
             s_areaRound, s_pursuitCharges, (double)s_pursuitEvery, (double)s_pursuitMult, (double)s_pursuitSlow, s_parry, s_parrySound, (double)s_parryVolume, (double)s_parryWindow, (double)s_parryInvuln,
-            (double)s_parryDamage, (double)s_parryBehind, (double)s_parryStun, s_dash, s_meleeVk, (double)s_dashDistance, (double)s_dashCooldown,
+            (double)s_parryDamage, (double)s_parryBehind, (double)s_parryStun, s_dash, s_dashSwing, s_meleeVk, (double)s_dashDistance, (double)s_dashCooldown,
             (double)s_dashDamage, (double)s_dashWidth, s_gameFit, (double)s_eSeconds, (double)s_eCooldown,
             (double)s_eMult, (double)s_eRadius, (double)s_eSlow, (double)s_eSpread, (double)s_dSeconds, (double)s_dCooldown, (double)s_dMult,
             (double)s_dPerKill, (double)s_dCap, (double)s_dGrace, (double)s_dRadius, (double)s_piSpeed, (double)s_dSpeed, s_miStacks, (double)s_miSeconds,
@@ -628,7 +632,7 @@ static void OnWeaponAsc(HfMod* mod, const HfEventInfo* info, void* user)
                                       HF_ENTITY_CQC42_MACHETE, HF_ENTITY_CQC5_COMBAT_HATCHET};
     int melee = 0;
     for (unsigned i = 0; i < sizeof kMelee / sizeof kMelee[0]; i++) if (w->resource == kMelee[i]) melee = 1;
-    if (melee != atomic_exchange(&g_melee, melee)) { static unsigned told; if (told++ < 12) Log("she holds %016llx: %s", (unsigned long long)w->resource, melee ? "a melee weapon (the parry is armed; left click dashes)" : "not a melee weapon"); }
+    if (melee != atomic_exchange(&g_melee, melee)) { static unsigned told; if (told++ < 12) Log("she holds %016llx: %s", (unsigned long long)w->resource, melee ? "a melee weapon (the parry is armed)" : "not a melee weapon"); }
 }
 static int Item(int k) { uint32_t e = atomic_load(&g_myItems[k]); return e && e != UINT32_MAX ? (int)e : 0; }
 static int StateNow(void)
@@ -1559,13 +1563,20 @@ static int MoveDir(float dir[2])
     }
     return 0;
 }
-static void Dash(void)
+static void Dash(int swing)
 {
     float dir[2], pos[3], dest[3], p[3];
     uint32_t me = atomic_load(&g_avatar), unit = UnitOf(me);
     /* only while she moves (0.4.5: 0.4.3's way out of a stuck spot, a dash while standing still, fired where she was
      * not stuck; the spot is checked before the move instead, so there is nothing to get out of) */
-    if (!s_dash || g_now < g_dashReady || !g_setPosition || !g_setVelocity || !g_raycast || !unit || !MoveDir(dir) || !PlayerPose(pos, NULL) || !QueryIdle()) return;
+    if (!s_dash || g_now < g_dashReady || !g_setPosition || !g_setVelocity || !g_raycast || !unit || !PlayerPose(pos, p) || !QueryIdle()) return;
+    if (!MoveDir(dir))
+    {
+        /* standing still: nothing for a swing; the key dashes the way she faces */
+        float n = sqrtf(p[0] * p[0] + p[1] * p[1]);
+        if (swing || n < 0.2f) return;
+        dir[0] = p[0] / n; dir[1] = p[1] / n;
+    }
     NearFoeUnits(pos, s_dashDistance + 20);
     g_buried = 0;
     g_spNone = g_spHead = g_spSide = g_spUnder = g_spTaken = 0;
@@ -1674,8 +1685,8 @@ static void SkillFrame(void)
     int rdown = focused && (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
     if (rdown && !prevR) atomic_store(&g_pressMs, GetTickCount64());
     prevR = rdown;
-    int mdown = focused && ((GetAsyncKeyState(s_meleeVk) & 0x8000) != 0 || (atomic_load(&g_melee) && (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0));
-    if (mdown && !prevM && g_alive) Dash();
+    int mdown = s_dashSwing && focused && ((GetAsyncKeyState(s_meleeVk) & 0x8000) != 0 || (atomic_load(&g_melee) && (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0));
+    if (mdown && !prevM && g_alive) Dash(1);
     prevM = mdown;
     int binds = atomic_exchange(&g_bindPress, 0);
     int mods = focused ? ((GetAsyncKeyState(VK_SHIFT) & 0x8000) ? KM_SHIFT : 0) | ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? KM_CTRL : 0) |
@@ -1685,15 +1696,15 @@ static void SkillFrame(void)
         int own = s_keys[i].vk == VK_SHIFT ? KM_SHIFT : s_keys[i].vk == VK_CONTROL ? KM_CTRL : s_keys[i].vk == VK_MENU ? KM_ALT : 0;
         int down = focused && (GetAsyncKeyState(s_keys[i].vk) & 0x8000) != 0 && (mods & ~own) == s_keys[i].mods;
         static unsigned long long fired[3];
-        int bound = (i == 1 && (binds & 1)) || (i == 2 && (binds & 2));   /* the in-game binding's press (0.4.2) */
-        if (((down && !prev[i]) || bound) && GetTickCount64() - fired[i] > 300 && g_alive && atomic_load(&g_avatar) && (fired[i] = GetTickCount64(), 1))
+        int bound = (i == 1 && (binds & 1)) || (i == 2 && (binds & 2)) || (i == 0 && (binds & 4));   /* the in-game binding's press (0.4.2) */
+        if (((down && !prev[i]) || bound) && GetTickCount64() - fired[i] > (i == 0 ? 80u : 300u) && g_alive && atomic_load(&g_avatar) && (fired[i] = GetTickCount64(), 1))
         {
-            if (i == 1) Endowment();
+            if (i == 0) Dash(0);
+            else if (i == 1) Endowment();
             else if (i == 2) Descent();
         }
         prev[i] = down;
     }
-    if ((binds & 4) && g_alive) Dash();
 }
 static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 {
@@ -1969,7 +1980,7 @@ static const KbOption kOptions[] = {
     {"e_seconds", &s_eSeconds, NULL}, {"e_cooldown", &s_eCooldown, NULL}, {"e_mult", &s_eMult, NULL}, {"e_radius", &s_eRadius, NULL},
     {"e_slow", &s_eSlow, NULL}, {"e_spread", &s_eSpread, NULL}, {"d_seconds", &s_dSeconds, NULL}, {"d_cooldown", &s_dCooldown, NULL},
     {"d_mult", &s_dMult, NULL}, {"d_per_kill", &s_dPerKill, NULL}, {"d_cap", &s_dCap, NULL}, {"d_radius", &s_dRadius, NULL}, {"d_speed", &s_dSpeed, NULL}, {"pi_speed", &s_piSpeed, NULL},
-    {"parry", NULL, &s_parry}, {"parry_sound", NULL, &s_parrySound}, {"parry_volume", &s_parryVolume, NULL}, {"parry_window", &s_parryWindow, NULL}, {"parry_damage", &s_parryDamage, NULL}, {"dash", NULL, &s_dash},
+    {"dash_swing", NULL, &s_dashSwing}, {"parry", NULL, &s_parry}, {"parry_sound", NULL, &s_parrySound}, {"parry_volume", &s_parryVolume, NULL}, {"parry_window", &s_parryWindow, NULL}, {"parry_damage", &s_parryDamage, NULL}, {"dash", NULL, &s_dash},
     {"dash_distance", &s_dashDistance, NULL}, {"dash_cooldown", &s_dashCooldown, NULL}, {"dash_damage", &s_dashDamage, NULL},
     {"mi_stacks", NULL, &s_miStacks}, {"mi_seconds", &s_miSeconds, NULL}, {"mi_damage", &s_miDamage, NULL}, {"mi_ap", &s_miAp, NULL}, {"mi_slow", &s_miSlow, NULL}, {"mi_status", NULL, &s_miStatus}, {"mi_status_buildup", &s_miBuildup, NULL},
     {"numbers", NULL, &s_numbers}, {"numbers_at", &s_numbersAt, NULL}, {"numbers_ticks", NULL, &s_numbersTicks},
@@ -1980,7 +1991,7 @@ static const KbOption kOptions[] = {
 HF_MOD_EXPORT int ascalon_key(unsigned version, int skill, int* vk, int* mods)
 {
     if (version != 1 || skill < 1 || skill > 3 || !vk || !mods) return 0;
-    if (skill == 3) { *vk = s_meleeVk; *mods = 0; return 1; }
+    if (skill == 3) { *vk = s_keys[0].vk; *mods = s_keys[0].mods; return 1; }   /* the dash: its own key (0.7.0) */
     *vk = s_keys[skill].vk;
     *mods = s_keys[skill].mods;
     return 1;
@@ -1994,7 +2005,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     self = mod;
     RosterJoin("ascalon", "Ascalon");
     kb_ini = "ascalon.ini";
-    kb_key_names[0] = "key_spare";
+    kb_key_names[0] = "key_dash";
     kb_key_names[1] = "key_endowment";
     kb_key_names[2] = "key_descent";
     KB_SETTINGS(kSettings);
