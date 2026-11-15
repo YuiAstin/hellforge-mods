@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-11-16: Ascalon 0.7.0 (first release) · Voymastina 0.4.3 · Faelynn 0.4.1 · Lenna 0.3.1
+
+### Ascalon 0.7.0
+- First release: Ascalon's kit from Arknights for your Helldiver, an ambusher who fights from hiding. Solo or host; no character model included.
+- Hidden until she makes noise: enemies see her far less and forget her, half the hits on her miss, and her body and gear shimmer out of sight (the look needs Bingus Shared Loader and HD2Runtime). Firing a gun reveals her; melee does not. With a backpack on or a support weapon in hand she is not hidden.
+- Ambusher: every hit of hers also strikes every enemy within 15 m.
+- Mortal Interrogation: her hits mark enemies (3 stacks, 25 s) with a bleed every second, 10% of the marking hit a stack, that goes through armour, and a slow.
+- Pursuit (by itself, 3 charges): 210% damage, lands twice, slows.
+- Endowment (X): 35 s of +130% damage, enemies around her slowed, kills spread marks.
+- Descent (C): she steps out of hiding, no hit on her lands, +50% damage, a 25 m reach and faster swings; each kill extends it.
+- Parry: with a melee weapon in hand, a right-click just before a hit nulls it, puts her behind the attacker, stuns it and counters. No clash sound is included; 16-bit .wav files named parry_clash_01.wav to parry_clash_09.wav in the mod's sounds folder are played if you add your own.
+- Dash (Z): through the enemies in the way, striking them; the way she moves, or the way she aims when she stands still. Where she lands is checked with the game's own fit test (the Warp Pack's).
+- Penumbral Image: her melee swings are faster while she is hidden.
+- HUD: her skills beside the stratagem list with icons and cooldowns, damage numbers for her skill-raised hits, key bindings in the game's binding pages and every number on the MODS tab.
+
+### Voymastina 0.4.3 · Faelynn 0.4.1 · Lenna 0.3.1
+- Their teleports land better (Voymastina's dashes and leaps, Faelynn's Loyal Dash, Lenna's Leaping Pursuit): whether she has room at a spot is now asked of the game's own fit test (the Warp Pack's) instead of the mod's own measurements.
+- Fixed: some maps have invisible level sheets about 2 m over the ground; a teleport could set her on one. They are no longer ground or walls.
+- Voymastina and Faelynn: an enemy standing beside the landing spot no longer counts as a wall, and the ground under foliage is no longer mistaken for buried ground.
+- Lenna: leaves, canopies and enemies' bodies are no longer ground to land on; with no room at a spot she lands closer.
+- Voymastina: less work each frame with many enemies about (her list of enemies is pruned of the dead and the gone).
+
 ## 2026-11-13: Exusiai 0.3.1
 - The summoned guns are now called Shooting Mode, her skill's own name: on the HUD, the MODS tab, the settings file's comments and the logs. The key setting is still key_guns, so your exusiai.ini keeps working.
 - Charging Mode counts every gun: weapons that run on heat or fire a beam (the Sickle, the Talon) and the Grenade Pistol charged nothing before, because only a dropping magazine was counted. A gun with no round to copy fires the guns' own round for its free bursts.
