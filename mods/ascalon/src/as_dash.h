@@ -179,7 +179,28 @@ static int SpotAt(uint32_t unit, const float pos[3], const float dir[2], float d
     {
         float above = 1e9f;   /* the lowest surface over this one */
         for (int j = 0; j < n; j++) if (high[j] > z[i] + 0.3f && high[j] < above) above = high[j];
-        if (above < 1e8f && !Roofed(unit, x, y, z[i], above - z[i])) { g_buried++; continue; }
+        if (above < 1e8f && !Roofed(unit, x, y, z[i], above - z[i]))
+        {
+            /* Under something a look up does not meet: underground, unless it lies open before her (0.6.9: the top of
+             * foliage is such a thing too, and with the ground under it read as buried she was set on the leaves, 4 m
+             * up). Open: near her own height, and a straight look from her waist to a waist over it meets nothing.
+             * Ground under terrain is behind the hillside. */
+            int open = 0;
+            if (fabsf(z[i] - pos[2]) < 1.5f)
+            {
+                float a[3] = {pos[0], pos[1], pos[2] + 0.9f}, b[3] = {x - a[0], y - a[1], z[i] + 0.9f - a[2]};
+                float len = sqrtf(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]);
+                if (len > 0.1f)
+                {
+                    for (int k = 0; k < 3; k++) b[k] /= len;
+                    g_rayBodies = 1;
+                    float r = RayWith(unit, a, b, len, 0, 0x80000009u, NULL);
+                    g_rayBodies = 0;
+                    open = r > len;
+                }
+            }
+            if (!open) { g_buried++; continue; }
+        }
         if (!g_spGame && !Fits(unit, x, y, z[i])) { if (g_fitWhy == 1) g_spHead++; else if (g_fitWhy == 2) g_spSide++; else g_spUnder++; if (g_nFoeUnits && crowded && FoeAbove(unit, (float[3]){x, y, z[i] + 0.1f}, 12.0f)) *crowded = 1; continue; }
         float at[3] = {x, y, z[i]};
         if (!g_spGame && Occupied(at)) { g_spTaken++; if (crowded) *crowded = 1; continue; }
