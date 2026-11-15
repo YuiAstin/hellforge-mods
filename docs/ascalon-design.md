@@ -223,3 +223,44 @@ perception research (docs/research/perception.md, when written) come first.
   (`[game+0x3326640]` records, +0x0C; StartAbility `game.dll+0x7CAF40` takes it as its fifth argument), and the
   Helldiver's state machine has `attack_speed` (0x6E1390F5; AnimSetVariable `game.dll+0x808AD0`), which the chainsaw's
   slowdown drives together with it. Not built yet.
+
+### 0.5.1 to 0.5.13: the cloak comes off cleanly
+
+- A material is given back by its id read from hex text kept at the swap: `IdString32` / `IdString64` userdata are
+  frame-scoped and go stale, and `tostring(unit)` names the unit's type, not the instance (key units by their id).
+- Hiding is per mesh. `Unit.set_unit_visibility(unit, true)` draws every mesh a unit has, including ones the game keeps
+  off (a grey default armour over her): not usable for showing her again.
+- She is not visually hidden until she has landed (her height still for 2.5 s, or 30 s). In the drop pod the game draws
+  meshes it switches off afterwards; hidden there they were recorded as hers and drawn at every reveal (a cape a
+  "hidden items" pack keeps hidden came back).
+- The cape is one shared unit (`3c33cf10a26cbb3e`, core bundle) with one material (`0x7531dea9b2a2b888`); the game
+  puts each cape's textures on that material at equip (cape bundles hold only textures, and a hide pack replaces those
+  textures with see-through ones). Given back by id the material comes back with default textures, so the shimmer
+  leaves that material alone and hides the cape's meshes instead.
+
+### 0.6.0 to 0.6.5: the mark is a real status
+
+- The game's status call is used directly: add `game.dll+0x699E40` (manager `[game+0x3326620]`, entity, status, 0,
+  build-up, from entity, 0), has `+0x69B1F0`. HellForge's `apply_status` takes only the statuses its header names.
+- A status row (list at `game+0x37C5C50`, 152 bytes) has strength at +0x24, duration at +0x28 and the id of the damage
+  it deals at +0x2C. `hf->damage_row` gave no row for those ids from this mod (not looked into).
+- Enemies take the game's bleed (2) and it deals them nothing. Of pure damage (24), thermite (12), poison (70),
+  electric (35) and radiation (33, 34), enemies refused 24, 70 and 35 and took 12 and 33. Thermite ticks about four
+  times a second (37 or 38 a tick), as damage over time credited to the entity passed as "from", with no effect of its
+  own, through armour.
+- The mark puts thermite on the enemy every half second (it lasts one) and rewrites its ticks in the damage event: one
+  hit a second of the mark's amount, the other ticks cancelled. An enemy that does not take it, or on which it does not
+  tick for 3 s, gets the spawned-round tick. A thermite grenade's own burn on a marked enemy is rewritten too.
+- An area strike's mark is laid when its round is sent, not when it lands.
+
+### 0.6.6 to 0.7.0: the dash
+
+- Whether she has room at a spot is the game's fit test's to say; the mod's looks over and beside the spot and its
+  enemy-on-the-spot rule are applied only when the test cannot be asked. Kept: a surface there, not underground, the
+  height limits, a clear way, the ground under her feet. Spots are tried every half metre down to 1 m.
+- Ground with something over it that a look up does not meet is underground, unless it lies open before her (near her
+  height, and a straight look from her waist to a waist over it meets nothing): the top of foliage is such a thing too.
+- The same landing changes went to Voymastina 0.4.3, Faelynn 0.4.1 and Lenna 0.3.1 (branch `teleport-fit`,
+  `kitbase/kb_fit.h`).
+- The dash has its own key (`key_dash`, Z): the way she moves, or the way she aims when she stands still.
+  `dash_swing 1` has a melee swing while moving dash as well, as before.
