@@ -10,7 +10,9 @@ How she is hidden follows what the **CAMO-EX01 Experimental Optical Cloak Pack**
 Helldiver is the avatar unit plus one unit per armour part sharing its root; a unit handle is its scene id times four;
 its "compatibility" cloak hides each visible mesh and hides it again as the game shows it; and enemies' visual
 detection is the per-entity visibility row at game.dll+0x3326540 (base +0, floor +12). No code, material or other file
-of that mod is included. Forgetting her uses the behaviour and perception records the author's Lost Contact works on.
+of that mod is included. The shimmer follows the same pack's recipe, also learned by reading it: the game's own armour
+material with its armour-set textures swapped for plain ones of the game's; HellForge makes that copy on your PC from
+your own game files (`hellforge-data.json`), so no game file is in this download. Forgetting her uses the behaviour and perception records the author's Lost Contact works on.
 
 The HUD uses HD2Runtime's
 public overlay API and the engine's Lua API.
