@@ -141,7 +141,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.6.1"
+#define VERSION "0.6.2"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -798,7 +798,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     if (s_miStatus > 0 && !MineHit(d) && Marked(d->target))
     {
         static unsigned seen;
-        if (seen < 40) { seen++; Log("on marked entity %u, not a hit of hers: kind %u, amount %d, element %u, dealer %u, owner %u, creditor %llx", d->target, d->kind, d->amount, d->element, d->dealer, d->owner, (unsigned long long)d->creditor); }
+        if (seen < 120) { seen++; Log("on marked entity %u, not a hit of hers: kind %u, amount %d, element %u, dealer %u, owner %u, creditor %llx", d->target, d->kind, d->amount, d->element, d->dealer, d->owner, (unsigned long long)d->creditor); }
     }
     /* damage over time on an enemy she has marked: the bleed at work (a number for it; the first ones in the log) */
     if (d->kind == 2 && s_miStatus > 0 && !g_statusBad && d->amount > 0 && Marked(d->target))
@@ -1037,7 +1037,8 @@ static int GameStatusReady(void)
             memcpy(&strength, row + 0x24, 4); memcpy(&duration, row + 0x28, 4);
             HfDamageInfo di;
             uintptr_t dr = dmg && dmg < 4096 && hf->damage_row ? hf->damage_row(dmg) : 0;
-            if (dr && ReadAt(dr, &di, sizeof di))
+            if (dr) memcpy(&di, (const void*)dr, sizeof di);   /* (HellForge's own row: not in the game's ranges ReadAt takes) */
+            if (dr)
                 Log("status %u: strength %.2f, duration %.1f, damage %u: standard %d, durable %d, penetration %u %u %u %u, demolition %u, stagger %u, push %u, statuses %u %u", t, (double)strength, (double)duration, dmg,
                     di.standard_damage, di.durable_damage, di.armor_penetration[0], di.armor_penetration[1], di.armor_penetration[2], di.armor_penetration[3], di.demolition, di.stagger, di.push_force, di.status_1_type, di.status_2_type);
             else Log("status %u: strength %.2f, duration %.1f, damage %u (no row)", t, (double)strength, (double)duration, dmg);
@@ -1083,10 +1084,14 @@ static void MarkFrame(void)
         {
             float dose = s_miBuildup * g_mark[i].stacks;
             int had = 0, has = 0;
-            if (GameStatus(en, (uint32_t)s_miStatus, dose > 1000 ? 1000 : dose, &had, &has))
+            /* (0.6.2, the probe: the game's bleed deals nothing to an enemy; which damaging status does. One of
+             * these by the mark's slot: pure damage, thermite, poison, electric, radiation light and heavy) */
+            static const uint32_t probe[] = {24, 12, 70, 35, 33, 34};
+            uint32_t st = probe[i % 6];
+            if (GameStatus(en, st, dose > 1000 ? 1000 : dose, &had, &has))
             {
                 static unsigned told;
-                if (told < 24) { told++; Log("game status %d on marked entity %u (%d stack(s), build-up %.0f): had it %d, has it now %d", s_miStatus, en, g_mark[i].stacks, (double)dose, had, has); }
+                if (told < 60 && (!had || !has)) { told++; Log("game status %u on marked entity %u (%d stack(s), build-up %.0f): had it %d, has it now %d", st, en, g_mark[i].stacks, (double)dose, had, has); }
             }
             else g_statusBad = 1;
         }
