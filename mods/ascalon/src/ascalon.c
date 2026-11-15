@@ -141,7 +141,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.6.0"
+#define VERSION "0.6.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -794,6 +794,12 @@ static void Mark(uint32_t e, int32_t damage)
 static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     (void)e; (void)me;
+    /* (0.6.1, the probe: whatever lands on a marked enemy that is not a hit of hers) */
+    if (s_miStatus > 0 && !MineHit(d) && Marked(d->target))
+    {
+        static unsigned seen;
+        if (seen < 40) { seen++; Log("on marked entity %u, not a hit of hers: kind %u, amount %d, element %u, dealer %u, owner %u, creditor %llx", d->target, d->kind, d->amount, d->element, d->dealer, d->owner, (unsigned long long)d->creditor); }
+    }
     /* damage over time on an enemy she has marked: the bleed at work (a number for it; the first ones in the log) */
     if (d->kind == 2 && s_miStatus > 0 && !g_statusBad && d->amount > 0 && Marked(d->target))
     {
@@ -1012,24 +1018,31 @@ static int TickRound(int i, int try, const float pos[3], int have)
 typedef void (*GsAddFn)(void*, uint32_t, uint32_t, uint32_t, float, uint32_t, uint64_t);
 typedef uint8_t (*GsHasFn)(void*, uint32_t, uint32_t, uint32_t);
 static int g_gsReady = -1;
-static void StatusRow(uint32_t type)
-{
-    uint8_t row[152];
-    char hex[152 * 2 + 1];
-    uintptr_t at = Pointer(game + 0x37C5C50 + 8u * type);
-    if (!at || !ReadAt(at, row, sizeof row)) { Log("status %u: no row", type); return; }
-    for (int k = 0; k < 152; k++) snprintf(hex + 2 * k, 3, "%02x", row[k]);
-    float strength, duration;
-    memcpy(&strength, row + 0x24, 4); memcpy(&duration, row + 0x28, 4);
-    Log("status %u row (strength %.3f, duration %.3f): %s", type, (double)strength, (double)duration, hex);
-}
 static int GameStatusReady(void)
 {
     if (g_gsReady >= 0) return g_gsReady;
     g_gsReady = hf->code_matches(game + 0x699E40, "40 55 53 57 41 55 41 57 48 8d 6c 24 d0 48 81 ec 30 01 00 00") &&
                 hf->code_matches(game + 0x69B1F0, "48 89 5c 24 10 48 89 6c 24 20 56 57 41 54 41 56 41 57 48 83 ec 70");
     Log(g_gsReady ? "the game's status calls are the reviewed code: mi_status goes to the game directly" : "the game's status calls are not the reviewed code: no game status for the mark");
-    if (g_gsReady) { static const uint32_t rows[] = {2, 5, 8, 12, 24, 31, 32, 42, 67, 70}; for (unsigned k = 0; k < sizeof rows / sizeof rows[0]; k++) StatusRow(rows[k]); }
+    if (g_gsReady)
+    {
+        /* every status with a damage id (row +0x2C), and that damage row */
+        for (uint32_t t = 1; t <= 71; t++)
+        {
+            uint8_t row[152];
+            uintptr_t at = Pointer(game + 0x37C5C50 + 8u * t);
+            if (!at || !ReadAt(at, row, sizeof row)) continue;
+            uint32_t dmg = Word(row + 0x2C);
+            float strength, duration;
+            memcpy(&strength, row + 0x24, 4); memcpy(&duration, row + 0x28, 4);
+            HfDamageInfo di;
+            uintptr_t dr = dmg && dmg < 4096 && hf->damage_row ? hf->damage_row(dmg) : 0;
+            if (dr && ReadAt(dr, &di, sizeof di))
+                Log("status %u: strength %.2f, duration %.1f, damage %u: standard %d, durable %d, penetration %u %u %u %u, demolition %u, stagger %u, push %u, statuses %u %u", t, (double)strength, (double)duration, dmg,
+                    di.standard_damage, di.durable_damage, di.armor_penetration[0], di.armor_penetration[1], di.armor_penetration[2], di.armor_penetration[3], di.demolition, di.stagger, di.push_force, di.status_1_type, di.status_2_type);
+            else Log("status %u: strength %.2f, duration %.1f, damage %u (no row)", t, (double)strength, (double)duration, dmg);
+        }
+    }
     return g_gsReady;
 }
 static int GameStatus(uint32_t en, uint32_t status, float buildup, int* had, int* has)
