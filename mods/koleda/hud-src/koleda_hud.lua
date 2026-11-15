@@ -464,7 +464,7 @@ local function status_bar(d)
     elseif sin == 1 then bits[#bits + 1] = 'SINNER INBOUND'
     elseif state.sinner_kind ~= 0 then
         local p = tonumber(state.frv_pkg)
-        bits[#bits + 1] = p == 1 and 'SINNER: FRV' or p < 0 and 'SINNER: FRV UNAVAILABLE (PATRIOT)' or 'SINNER: FRV LOADING (PATRIOT)'
+        bits[#bits + 1] = p < 0 and 'SINNER: PATRIOT (NO M-103 IN LOADOUT)' or 'SINNER: FRV'
     else bits[#bits + 1] = 'SINNER: PATRIOT' end
     heavy(d, table.concat(bits, '   '), cx, y - 6 * s, 20 * s, 'title', rgba(ELECTRIC, 1), 'center')
     buff_row(d, cx, y - 40 * s)
@@ -484,7 +484,7 @@ end
 -- from and written to koleda.dll (koleda_option_get / koleda_option_set, the koleda.ini names). The menu keeps what
 -- the player applies; until then a row starts from koleda.ini. Keys stay in koleda.ini.
 local OPTIONS = {
-    {'sinner_kind', 'choice', 'Sinner: Patriot or FRV', {'Patriot (EXO-45)', 'FRV (M-103 Supply FRV)'}, nil, nil, 'Which Sinner Hallucination calls: the Patriot exosuit (RRLLD) or her FRV (RRLLU), which she can ride. From her next Hallucination.', true},
+    {'sinner_kind', 'choice', 'Sinner: Patriot or FRV', {'Patriot (EXO-45)', 'FRV (M-103 Supply FRV)'}, nil, nil, 'Which Sinner Hallucination calls: the Patriot exosuit (RRLLD), or the M-103 Supply FRV from her loadout, which she can ride (without one in her loadout: the Patriot). From her next Hallucination.', true},
     {'s1_cooldown', 'slider', 'Eye of the Snow Wolf: Cooldown', 0, 120, 1, 'Seconds before Eye of the Snow Wolf can be used again.', true},
     {'s1_rounds', 'slider', 'Eye of the Snow Wolf: Rounds', 1, 10, 1, 'Heavy rounds fired at her target.'},
     {'s2_cooldown', 'slider', 'Tactical Playbook: Cooldown', 0, 120, 1, 'Seconds before Tactical Playbook can be used again.', true},
@@ -1061,7 +1061,7 @@ overlay:draw(function(d, dt)
         if not okO then O.failed = true; log('[Koleda HUD] options failed: ' .. tostring(errO)) end
     end
     if not find(dt) then return end
-    if not FP.failed then
+    if false and not FP.failed then   -- (0.2.12: no FRV call of her own, so no package to load: her loadout's M-103 is the FRV Sinner)
         local okP, errP = pcall(frv_package_step, dt)
         if not okP then FP.failed = true; log('[Koleda HUD] FRV package failed: ' .. tostring(errP)) end
     end

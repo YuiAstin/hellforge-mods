@@ -35,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.11"
+#define VERSION "0.2.12"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -204,9 +204,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Aiming: line_of_sight 1, Eye of the Snow Wolf's target must be in sight. first_person: the camera this close to\n"
                "; her head (m) counts as first person.\nline_of_sight = %d\nfirst_person = %g\n"
                "; Which Sinner: sinner_kind 1 the FRV Sinner (the default), 0 the Patriot (above) (also a choice on the MODS tab; it applies\n"
-               "; to her next Hallucination). The FRV Sinner: Hallucination puts one FRV Sinner call in her list (code RRLLU; with\n"
-               "; call_mode 0 one unlimited call at the drop), or with the M-103 Supply FRV in her loadout it clears that one's\n"
-               "; cooldown; the FRV she calls becomes the Sinner: its own turret fights (her damage on it by gear:\n"
+               "; to her next Hallucination). The FRV Sinner is the M-103 Supply FRV she brings in her loadout (without one she\n"
+               "; gets the Patriot): Hallucination clears its cooldown, and the one she calls becomes the Sinner: its own turret fights (her damage on it by gear:\n"
                "; frv_damage_n / _s / _plus, times Upshift and Kinetic Recovery), it takes part of her hits, Winner! repairs it.\n"
                "; Hallucination while it stands: Let's Go for a Ride! (she is put in its driver seat, else a free passenger\n"
                "; seat, within ride_range m); pressed again inside it: Winner!. It takes frv_taken_n of the damage in N and\n"
@@ -749,7 +748,7 @@ static void SinnerAdd(const HfApi* api, HfMod* mod)
     api->log(mod, "the Sinner: entity %016llx, stratagem %u (RRLLD, call_mode %d)", (unsigned long long)g_sinRes, g_sinType, s_callMode);
 }
 /* 0.2.6: the FRV Sinner's own call: the M-103 Supply FRV's stratagem copied (its FRV, its drop, its package) */
-static void FrvAdd(const HfApi* api, HfMod* mod)
+__attribute__((unused)) static void FrvAdd(const HfApi* api, HfMod* mod)
 {
     if (!s_sinOn || api->size < offsetof(HfApi, add_stratagem) + sizeof api->add_stratagem || !api->add_stratagem) return;
     HfStratagem st = {sizeof st};
@@ -2738,7 +2737,7 @@ HF_MOD_EXPORT KoledaHud* koleda_hud_state(void)
     g_hud.piloted = (uint32_t)g_piloting;
     g_hud.kr_left = (float)fmax(0, g_krUntil - g_now);
     g_hud.sinner_kind = (uint32_t)(s_frvOn != 0);
-    g_hud.frv_pkg = atomic_load(&g_frvPkg);
+    g_hud.frv_pkg = !g_inMission || !s_frvOn ? 0 : HasStratagem(FRV_STRATAGEM) > 0 ? 1 : -1;   /* (0.2.12: 1 her loadout has the M-103, -1 not) */
     g_hud.frv = (uint32_t)(g_frv && g_sinner);
     g_hud.sprint_left = Sprinting() ? (float)(g_sprintUntil - g_now) : 0;
     g_hud.sprint_cd = (float)fmax(0, g_sprintCdUntil - g_now);
@@ -2856,7 +2855,8 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     LoadSettings();
     RoundsAdd();
     SinnerAdd(api, mod);
-    FrvAdd(api, mod);
+    /* (0.2.12: no FRV Sinner call of her own: its package could not be loaded reliably. The M-103 she brings in her
+     * loadout is the FRV Sinner) */
     api->log(mod, "Koleda %s: keys %s / %s / %s (Eye of the Snow Wolf, Tactical Playbook, Hallucination); the Sinner takes %.0f%% of her hits",
              VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_sharePct);
     if (s_badKey) api->log(mod, "koleda.ini: a key could not be read (bits %d: s1, s2, s3); its default stays", s_badKey);
