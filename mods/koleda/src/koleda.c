@@ -18,12 +18,12 @@
  *     again. N: it takes no damage and holds Drift and Full Speed. S can only go up to S+, S+ is held. Parked (standing
  *     still): it takes park_taken of the damage. Always: it takes sinner_taken of the damage and heals sinner_heal of
  *     its health when hit (at most every sinner_heal_every s).
- *   Kinetic Release: while it fights in S or S+, every release_every s, waves of EMS bursts in rings out from it
- *     (S: release_rings_s out to release_reach; S+: release_rings_plus out to release_reach_plus), each enemy in reach
- *     taking release_damage (S+: release_damage_plus) once.
- *   Let's Go for a Drift! (not in N, every drift_every s with enemies near): rockets from the Sinner into each enemy
- *     within drift_radius m (nobody is moved). Let's Go Full Speed! full_delay s after it: rockets along a path
- *     full_length m ahead of it (three lines in S and S+). While she drives the FRV, Z is the sprint and fires the path.
+ *   Kinetic Release (Gear Shift): while it fights in S or S+, every release_every s, a small ring of EMS bursts around
+ *     it (S: out to release_reach, S+: two rings out to release_reach_plus); Tactical Routebook sets one off around her.
+ *   Let's Go for a Drift! (not in N, every drift_every s with enemies near): waves of EMS bursts out from the Sinner,
+ *     drift_rings rings out to drift_radius m, each enemy in reach taking drift_damage once (the stun holds them; nobody
+ *     is moved). Let's Go Full Speed! full_delay s after it: rockets along a path full_length m ahead of it, toward
+ *     the enemies it drifted (three lines in S and S+). While she drives the FRV, Z is the sprint and fires the path.
  *
  * The Sinner's driving goes through sinner_drive.h (the game's own locomotion, as Exo Companion by M!ni$try0fSc!eиce
  * drives a suit); until the probe fills it in, the Sinner slides on Voymastina's warp setter, where its guard allows.
@@ -46,7 +46,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.0"
+#define VERSION "0.3.1"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -97,10 +97,10 @@ static float s_s3Cd = 90, s_winnerCd = 30;
 /* 0.3.0: gears, Gear Shift, Post-Move Support, Kinetic Release's waves, Drift and Full Speed */
 static float s_gearSeconds = 15, s_gearD = 1.3f, s_gearS = 1.3f, s_gearPlus = 1.6f, s_gearN = 1.0f, s_postMove = 1.3f;
 static float s_sinTaken = 0.65f, s_parkTaken = 0.7f, s_sinHeal = 0.25f, s_sinHealEvery = 8;
-static int s_relRingsS = 3, s_relRingsPlus = 4, s_relPoints = 10, s_relDamagePlus = 1200;
-static float s_relReachPlus = 15, s_relInner = 5, s_relGap = 0.25f;
-static int s_driftOn = 1, s_driftMax = 10;
-static float s_driftEvery = 12, s_driftRadius = 12, s_driftMin = 5, s_fullDelay = 1, s_fullStart = 5, s_fullLength = 18, s_fullStep = 3, s_fullWidth = 5;
+static int s_relRingsS = 1, s_relRingsPlus = 2, s_relPoints = 10, s_relDamagePlus = 1000;
+static float s_relReachPlus = 9, s_relInner = 5, s_relGap = 0.25f;
+static int s_driftOn = 1, s_driftRings = 3, s_driftDamage = 800;
+static float s_driftEvery = 12, s_driftRadius = 12, s_fullDelay = 1, s_fullStart = 5, s_fullLength = 18, s_fullStep = 3, s_fullWidth = 5;
 static int s_cleanse = 1;
 /* driving (sinner_drive.h): the probe's numbers; -1 not known */
 static int s_drive = 1, s_driveTest = 0;
@@ -123,7 +123,7 @@ static float s_fpDistance = 0.45f;
 static int s_frvOn = 1, s_releaseRow = 150;   /* 0.2.6: sinner_kind: 0 the Patriot, 1 the FRV (her own FRV Sinner call; the default) */
    /* 0.2.5: an EMS burst on each enemy near it (0.2.1-0.2.4: blasts in a ring, which missed) */
 static int s_releaseShell = 154, s_releaseDamage = 800, s_releaseTargetsS = 3, s_releaseTargetsPlus = 6, s_emsImmune = 1;
-static float s_releaseAp = 6, s_releaseReach = 10;
+static float s_releaseAp = 6, s_releaseReach = 6;
 static float s_releaseEvery = 8, s_releaseRadius = 7,   /* 0.2.4: 7 m (4 m blasts flipped the FRV) */
     s_rideRange = 60;
 static int s_grip = 1;
@@ -149,7 +149,7 @@ static const KbSetting kSettings[] = {
     KB_F("post_move", s_postMove, 1, 5), KB_F("sinner_taken", s_sinTaken, 0, 1), KB_F("park_taken", s_parkTaken, 0, 1), KB_F("sinner_heal", s_sinHeal, 0, 1), KB_F("sinner_heal_every", s_sinHealEvery, 0.5, 120),
     KB_I("release_rings_s", s_relRingsS, 1, 8), KB_I("release_rings_plus", s_relRingsPlus, 1, 8), KB_I("release_points", s_relPoints, 3, 32), KB_I("release_damage_plus", s_relDamagePlus, 0, 100000),
     KB_F("release_reach_plus", s_relReachPlus, 2, 60), KB_F("release_inner", s_relInner, 0, 30), KB_F("release_gap", s_relGap, 0, 2),
-    KB_I("drift_on", s_driftOn, 0, 1), KB_I("drift_max", s_driftMax, 1, 30), KB_F("drift_every", s_driftEvery, 2, 600), KB_F("drift_radius", s_driftRadius, 2, 50), KB_F("drift_min", s_driftMin, 0, 20),
+    KB_I("drift_on", s_driftOn, 0, 1), KB_I("drift_rings", s_driftRings, 1, 8), KB_I("drift_damage", s_driftDamage, 0, 100000), KB_F("drift_every", s_driftEvery, 2, 600), KB_F("drift_radius", s_driftRadius, 2, 50),
     KB_F("full_delay", s_fullDelay, 0, 10), KB_F("full_start", s_fullStart, 0, 30), KB_F("full_length", s_fullLength, 3, 80), KB_F("full_step", s_fullStep, 1, 20), KB_F("full_width", s_fullWidth, 0, 20),
     KB_I("drive", s_drive, 0, 1), KB_I("turn", s_turnOn, 0, 1), KB_F("follow_distance", s_followDist, 3, 40), KB_F("personal_space", s_personal, 0, 20), KB_F("max_rounds", s_maxRounds, 1, 200), KB_F("round_speed", s_roundSpeed, 0, 3000), KB_I("drive_test", s_driveTest, 0, 1), KB_I("loco_manager", s_locoManager, -1, 100000000),
     KB_I("loco_map", s_locoMap, -1, 65536), KB_I("loco_records", s_locoRecords, -1, 65536), KB_I("loco_stride", s_locoStride, 16, 4096),
@@ -225,18 +225,20 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; times park_taken); a hit on it heals sinner_heal of its health, at most every sinner_heal_every s.\n"
                "gear_seconds = %g\ngear_damage_d = %g\ngear_damage_s = %g\ngear_damage_plus = %g\ngear_damage_n = %g\npost_move = %g\n"
                "sinner_taken = %g\npark_taken = %g\nsinner_heal = %g\nsinner_heal_every = %g\n"
-               "; Kinetic Release (S and S+, while it fights, every release_every s): rings of EMS bursts out from it, from\n"
-               "; release_inner m, evenly apart, release_gap s apart (S: release_rings_s out to release_reach m, S+:\n"
-               "; release_rings_plus out to release_reach_plus), at most release_points a ring. Each enemy within reach takes\n"
-               "; release_damage (S+: release_damage_plus) once, release_ap armour penetration. release_shell 154: the EMS\n"
-               "; mortar's shell from above; else release_explosion 150. ems_immune 1: no EMS stun on her or the Sinner.\n"
+               "; Kinetic Release (Gear Shift, S and S+, while it fights, every release_every s; and Tactical Routebook, around\n"
+               "; her): a ring of EMS bursts around it (S: release_rings_s rings out to release_reach m, S+: release_rings_plus\n"
+               "; out to release_reach_plus), from release_inner m, release_gap s apart, at most release_points a ring. Each enemy\n"
+               "; within reach takes release_damage (S+: release_damage_plus) once, release_ap armour penetration.\n"
+               "; release_shell 154: the EMS mortar's shell from above; else release_explosion 150. ems_immune 1: no EMS stun on\n"
+               "; her or the Sinner. Her bursts spare her, the Sinner and her allies.\n"
                "release_rings_s = %d\nrelease_rings_plus = %d\nrelease_points = %d\nrelease_damage_plus = %d\nrelease_reach_plus = %g\n"
                "release_inner = %g\nrelease_gap = %g\n"
                "; Let's Go for a Drift! (drift_on 0: off; not in N): every drift_every s with enemies within drift_radius m of\n"
-               "; the Sinner, a rocket from it into each (at most drift_max; minigun rounds within drift_min m). Nobody is moved.\n"
-               "; Let's Go Full Speed!: full_delay s later, rockets along its path ahead, from full_start m to full_length m,\n"
-               "; full_step m apart (S and S+: two more lines beside it, full_width m wide in all).\n"
-               "drift_on = %d\ndrift_every = %g\ndrift_radius = %g\ndrift_max = %d\ndrift_min = %g\n"
+               "; the Sinner, waves of EMS bursts out from it, drift_rings rings out to drift_radius m (the EMS stun holds them,\n"
+               "; nobody is moved), each enemy in reach taking drift_damage once.\n"
+               "; Let's Go Full Speed!: full_delay s later, rockets along its path ahead (toward the enemies it drifted), from\n"
+               "; full_start m to full_length m, full_step m apart (S and S+: two more lines beside it, full_width m wide in all).\n"
+               "drift_on = %d\ndrift_every = %g\ndrift_radius = %g\ndrift_rings = %d\ndrift_damage = %d\n"
                "full_delay = %g\nfull_start = %g\nfull_length = %g\nfull_step = %g\nfull_width = %g\n"
                "; Driving with the game's own locomotion (the probe's numbers; -1 unknown: the Sinner slides instead).\n"
                "; drive_test 1 writes the stick without the engine and mover calls.\n"
@@ -280,7 +282,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_gearSeconds, (double)s_gearD, (double)s_gearS, (double)s_gearPlus, (double)s_gearN, (double)s_postMove,
             (double)s_sinTaken, (double)s_parkTaken, (double)s_sinHeal, (double)s_sinHealEvery,
             s_relRingsS, s_relRingsPlus, s_relPoints, s_relDamagePlus, (double)s_relReachPlus, (double)s_relInner, (double)s_relGap,
-            s_driftOn, (double)s_driftEvery, (double)s_driftRadius, s_driftMax, (double)s_driftMin,
+            s_driftOn, (double)s_driftEvery, (double)s_driftRadius, s_driftRings, s_driftDamage,
             (double)s_fullDelay, (double)s_fullStart, (double)s_fullLength, (double)s_fullStep, (double)s_fullWidth,
             (double)s_followDist, (double)s_personal, (double)s_maxRounds, (double)s_roundSpeed, s_turnOn, s_drive, s_driveTest, s_locoManager, s_locoMap, s_locoRecords, s_locoStride, s_stickFwd, s_stickSide, s_stickTurn,
             s_sight, (double)s_fpDistance, s_frvOn, s_releaseRow, s_releaseShell, s_releaseDamage, (double)s_releaseAp, (double)s_releaseReach, s_releaseTargetsS,
@@ -2094,12 +2096,11 @@ static float g_parkFrom[3];
 static unsigned g_gearSaved, g_heals, g_drifts, g_fulls, g_driftShots;
 /* Kinetic Release: rings of EMS bursts out from a point */
 static struct { int on, ring, rings; float c[3], reach; double next; } g_wave;
-static atomic_int g_relPlus;
+static atomic_int g_relDmg;
 static double g_relUntil;             /* her EMS bursts spare her allies until then */
-static void ReleaseStart(const float c[3], int plus, const char* why)
+static void ReleaseStart(const float c[3], int rings, float reach, int damage, const char* why)
 {
     if (s_releaseShell <= 0 && s_releaseRow <= 0) return;
-    float reach = plus ? s_relReachPlus : s_releaseReach;
     struct { uint32_t e; float d2; } t[REL_TARGETS];
     int n = 0;
     for (int k = 0; k < FOES; k++)
@@ -2115,12 +2116,12 @@ static void ReleaseStart(const float c[3], int plus, const char* why)
     }
     for (int i = 0; i < REL_TARGETS; i++) { atomic_store(&g_relTarget[i], i < n ? t[i].e : 0); atomic_store(&g_relPaid[i], 0); }
     atomic_store(&g_relMs, GetTickCount64());
-    atomic_store(&g_relPlus, plus);
-    g_wave.on = 1; g_wave.ring = 0; g_wave.rings = plus ? s_relRingsPlus : s_relRingsS;
+    atomic_store(&g_relDmg, damage);
+    g_wave.on = 1; g_wave.ring = 0; g_wave.rings = rings;
     memcpy(g_wave.c, c, 12); g_wave.reach = reach; g_wave.next = g_now;
     g_relUntil = g_now + g_wave.rings * (double)s_relGap + 3;
     g_releases++;
-    if (g_releases <= 8) Log("Kinetic Release%s (%s): %d rings out to %.0f m, %d enemies within reach", plus ? "+" : "", why, g_wave.rings, (double)reach, n);
+    if (g_releases <= 10) Log("%s: EMS waves, %d ring(s) out to %.0f m, %d enemies within reach (%d each)", why, g_wave.rings, (double)reach, n, damage);
 }
 static void WaveFrame(void)
 {
@@ -2152,7 +2153,7 @@ static void WaveFrame(void)
         if (res == HF_ACT_REQUESTED) done++;
     }
     static unsigned told;
-    if (told++ < 12) Log("Kinetic Release: ring %d of %d, %.1f m out: %d of %d EMS bursts", g_wave.ring + 1, g_wave.rings, (double)r, done, n);
+    if (told++ < 12) Log("EMS wave: ring %d of %d, %.1f m out: %d of %d EMS bursts", g_wave.ring + 1, g_wave.rings, (double)r, done, n);
     if (++g_wave.ring >= g_wave.rings) g_wave.on = 0;
     else g_wave.next = g_now + s_relGap;
 }
@@ -2169,32 +2170,25 @@ static void DriftPush(uint32_t t, const float at[3], int rocket)
 }
 static int DriftStart(void)
 {
-    float p[3];
+    if (g_wave.on) return 0;
+    float p[3], cx = 0, cy = 0;
     memcpy(p, g_sinPos, 12);
-    struct { uint32_t e; float d2, q[3]; } t[30];
-    int n = 0, want = s_driftMax < 30 ? s_driftMax : 30;
+    int n = 0;
     for (int k = 0; k < FOES; k++)
     {
-        float q[3], d2;
+        float q[3];
         uint32_t e = g_foe[k];
-        if (!e || !TargetPos(e, g_foeRes[k], q) || (d2 = Dist2(q, p)) > s_driftRadius * s_driftRadius || !Alive(e)) continue;
-        int j;
-        if (n == want) { if (d2 >= t[n - 1].d2) continue; j = n - 1; }
-        else j = n++;
-        while (j > 0 && t[j - 1].d2 > d2) { t[j] = t[j - 1]; j--; }
-        t[j].e = e; t[j].d2 = d2; memcpy(t[j].q, q, 12);
+        if (!e || !TargetPos(e, g_foeRes[k], q) || Dist2(q, p) > s_driftRadius * s_driftRadius || !Alive(e)) continue;
+        cx += q[0] - p[0]; cy += q[1] - p[1]; n++;
     }
     if (!n) return 0;
-    if (g_dqi >= g_dqn) g_dqn = g_dqi = 0;
-    float cx = 0, cy = 0;
-    for (int i = 0; i < n; i++) { DriftPush(t[i].e, t[i].q, t[i].d2 >= s_driftMin * s_driftMin); cx += t[i].q[0] - p[0]; cy += t[i].q[1] - p[1]; }
     float cn = sqrtf(cx * cx + cy * cy);
     if (cn > 0.1f) { g_fullDir[0] = cx / cn; g_fullDir[1] = cy / cn; }
-    else { g_fullDir[0] = t[0].q[0] - p[0]; g_fullDir[1] = t[0].q[1] - p[1]; cn = sqrtf(g_fullDir[0] * g_fullDir[0] + g_fullDir[1] * g_fullDir[1]); if (cn < 0.1f) { g_fullDir[0] = 1; g_fullDir[1] = 0; } else { g_fullDir[0] /= cn; g_fullDir[1] /= cn; } }
+    else { g_fullDir[0] = 1; g_fullDir[1] = 0; }
     g_fullAt = g_now + s_fullDelay;
     g_drifts++;
     SinnerAction("Let's Go for a Drift!");
-    if (g_drifts <= 6) Log("Let's Go for a Drift! (%s): %d enemies within %.0f m of the Sinner take its fire", kGear[g_gear], n, (double)s_driftRadius);
+    ReleaseStart(p, s_driftRings, s_driftRadius, s_driftDamage, "Let's Go for a Drift!");
     return 1;
 }
 static void FullPath(const float p[3], const float dir[2], const char* why)
@@ -2240,7 +2234,9 @@ static void GearFrame(void)
     if ((g_gear == GEAR_S || g_gear == GEAR_PLUS) && g_now - g_fightAt < 1.5 && g_now >= g_releaseNext && !g_wave.on)
     {
         g_releaseNext = g_now + s_releaseEvery;
-        ReleaseStart(g_sinPos, g_gear == GEAR_PLUS, "the Sinner fights");
+        int plus = g_gear == GEAR_PLUS;
+        ReleaseStart(g_sinPos, plus ? s_relRingsPlus : s_relRingsS, plus ? s_relReachPlus : s_releaseReach, plus ? s_relDamagePlus : s_releaseDamage,
+                     plus ? "Kinetic Release+" : "Kinetic Release");
     }
 }
 static void DriftFrame(void)
@@ -2507,7 +2503,12 @@ static void TacticalRoutebook(void)
         if (s_krSinnerHeal > 0 && g_sinMax > 0) SinnerSetHealth(g_sinHp + (int32_t)(g_sinMax * s_krSinnerHeal), "Kinetic Recovery");
     }
     float me[3];
-    if (PlayerPose(me, NULL) && !g_wave.on) ReleaseStart(me, g_gear == GEAR_PLUS, "Tactical Routebook");
+    if (PlayerPose(me, NULL) && !g_wave.on)
+    {
+        int plus = g_gear == GEAR_PLUS;
+        ReleaseStart(me, plus ? s_relRingsPlus : s_relRingsS, plus ? s_relReachPlus : s_releaseReach, plus ? s_relDamagePlus : s_releaseDamage,
+                     "Tactical Routebook's Kinetic Release");
+    }
 }
 static void TheWinner(void)
 {
@@ -2641,9 +2642,9 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
         if (ri >= 0 && d->target != fsin && !atomic_exchange(&g_relPaid[ri], 1))
         {
             int32_t was = d->amount;
-            d->amount = (int32_t)((atomic_load(&g_relPlus) ? s_relDamagePlus : s_releaseDamage) * GearDamage() * Buffs() + 0.5);
+            d->amount = (int32_t)(atomic_load(&g_relDmg) * GearDamage() * Buffs() + 0.5);
             static atomic_uint told;
-            if (atomic_fetch_add(&told, 1) < 8) Log("Kinetic Release: entity %u takes %d (was %d)", d->target, d->amount, was);
+            if (atomic_fetch_add(&told, 1) < 8) Log("an EMS wave: entity %u takes %d (was %d)", d->target, d->amount, was);
             return;
         }
     }
