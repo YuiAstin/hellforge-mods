@@ -32,6 +32,11 @@
  * 0.2.2 (Yui: "there's a bleed damage DoT that should fit Ascalon nicely"): the mark's damage is the game's own bleed
  * (status 2 of HD2Runtime's status catalogue; mi_status), a dose a second for each stack (mi_status_buildup). If the game
  * refuses it, or with mi_status 0, the spawned-round tick of 0.2.1 does it instead.
+ * 0.6.3: the mark's damage is a real status on the enemy. The game's bleed deals an enemy nothing (0.6.0's probe); of six
+ * damaging statuses tried (0.6.2) enemies took thermite (12) and radiation, and thermite ticked about four times a second,
+ * credited to her, with no effect of its own on the row. It is put on each marked enemy by the game's own status call
+ * and each of its ticks is given the mark's amount for the time since the last. Where an enemy does not take it, or it
+ * does not tick, the spawned-round tick does it as before.
  * 0.3.0, her two keyed skills:
  * 0.5.1 (Yui: "do the attack speed first and switch the cloak shimmer on by default"): Penumbral Image (her melee
  *     swings x pi_speed 1.25 while hidden, x d_speed 1.4 during Descent; PenumbraFrame), cloak_shimmer 1 by default.
@@ -141,7 +146,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.6.2"
+#define VERSION "0.6.3"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -164,7 +169,7 @@ static float s_dSeconds = 5, s_dCooldown = 45, s_dMult = 1.5f, s_dPerKill = 2, s
 static float s_parryVolume = 0.4f, s_parryWindow = 0.3f, s_parryInvuln = 1, s_parryDamage = 300, s_parryBehind = 2.2f, s_parryStun = 300;
 static float s_dashDistance = 6, s_dashCooldown = 1.2f, s_dashDamage = 150, s_dashWidth = 2;
 static int s_parry = 1, s_dash = 1, s_meleeVk = 70, s_parrySound = 1, s_gameFit = 1;
-static int s_miStacks = 3, s_numbers = 1, s_miStatus = 2, s_numbersTicks = 0;
+static int s_miStacks = 3, s_numbers = 1, s_miStatus = 12, s_numbersTicks = 0;
 static float s_numbersAt = 1.5f;
 static float s_miBuildup = 100;
 static float s_visualCut = 95, s_revealHold = 1.5f, s_noiseWindow = 1.0f, s_heardHold = 5;
@@ -231,9 +236,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; a dose of the slow (mi_slow a stack; 100 a full dose).\n"
                "; mi_ap: the armour penetration of the mark's damage (10: no armour turns it; 0: its round's own, light).\n"
                "mi_stacks = %d\nmi_seconds = %g\nmi_damage = %g\nmi_ap = %g\nmi_slow = %g\n"
-               "; mi_status: the game status that does the mark's damage (2: bleed), a dose of mi_status_buildup a stack every\n"
-               "; second (100 a full dose). 0: no status; the mark's damage is mi_damage, above, dealt by the mod itself (as it\n"
-               "; is when the game refuses the status).\n"
+               "; mi_status: the game status that does the mark's damage (12: thermite, which enemies take; its ticks are given\n"
+               "; the mark's amount), put on with mi_status_buildup. 0: no status; the mark's damage is then a round of the mod's\n"
+               "; a second (as it is for an enemy that does not take the status).\n"
                "mi_status = %d\nmi_status_buildup = %g\n"
                "; Damage numbers (the HUD, as the other kits'): numbers 1 shows a number over each hit her skills raised to numbers_at\n"
                "; times its damage or more (Pursuit, Endowment, Descent, the parry's counter; 0: every hit); numbers_ticks 1 also\n"
@@ -761,12 +766,12 @@ HF_MOD_EXPORT int ascalon_view(unsigned version, float* out)
 }
 /* ---- Mortal Interrogation: the marks -------------------------------------------------------------------------------- */
 #define MARKS 64
-static struct { uint32_t e; int stacks, pending; double until, next; int32_t base; double sent; int tries; } g_mark[MARKS];
+static struct { uint32_t e; int stacks, pending; double until, next; int32_t base; double sent; int tries; double stNext, stSince, dotAt, carry; int stOk, stBad; } g_mark[MARKS];
 static unsigned g_marked, g_ticks, g_bleeds;
 static unsigned g_tickSent, g_tickSentLine, g_tickLandLine, g_tickLate, g_tickAgain, g_tickPierced;   /* for the log's Mortal Interrogation line */
 static double g_tickLineAt;
 static int g_statusBad;   /* the game refused mi_status this session: the spawned-round tick instead */
-static int Marked(uint32_t e)
+__attribute__((unused)) static int Marked(uint32_t e)
 {
     for (int i = 0; i < MARKS; i++) if (g_mark[i].e == e && g_mark[i].until > g_now) return 1;
     return 0;
@@ -789,26 +794,33 @@ static void Mark(uint32_t e, int32_t damage)
     if (free < 0) return;
     g_mark[free].e = e; g_mark[free].stacks = 1; g_mark[free].pending = 0; g_mark[free].tries = 0; g_mark[free].base = damage > 0 ? damage : 60;
     g_mark[free].until = g_now + s_miSeconds; g_mark[free].next = g_now + 1;
+    g_mark[free].stNext = g_mark[free].stSince = g_mark[free].dotAt = g_mark[free].carry = 0; g_mark[free].stOk = g_mark[free].stBad = 0;
     g_marked++;
 }
 static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     (void)e; (void)me;
-    /* (0.6.1, the probe: whatever lands on a marked enemy that is not a hit of hers) */
-    if (s_miStatus > 0 && !MineHit(d) && Marked(d->target))
-    {
-        static unsigned seen;
-        if (seen < 120) { seen++; Log("on marked entity %u, not a hit of hers: kind %u, amount %d, element %u, dealer %u, owner %u, creditor %llx", d->target, d->kind, d->amount, d->element, d->dealer, d->owner, (unsigned long long)d->creditor); }
-    }
-    /* damage over time on an enemy she has marked: the bleed at work (a number for it; the first ones in the log) */
-    if (d->kind == 2 && s_miStatus > 0 && !g_statusBad && d->amount > 0 && Marked(d->target))
-    {
-        static unsigned told;
-        if (told < 10) { told++; Log("damage over time on marked entity %u: %d (element %u, dealer %u, owner %u, %s)", d->target, d->amount, d->element, d->dealer, d->owner, MineHit(d) ? "hers" : "not credited to her"); }
-        g_bleeds++;
-        NoteHit(d, 0, -1);
-        return;
-    }
+    /* a tick of the mark's status (0.6.3): damage over time of hers, of no element (as thermite's came), on an enemy
+     * her mark's status is on. Its amount is the mark's for the time since the last tick (the status ticks about four
+     * times a second, not evenly), the fraction carried. */
+    if (d->kind == 2 && s_miStatus > 0 && d->amount > 0 && d->element == 0 && MineHit(d))
+        for (int i = 0; i < MARKS; i++)
+            if (g_mark[i].e == d->target && g_mark[i].until > g_now && g_mark[i].stOk)
+            {
+                double dt = g_mark[i].dotAt > 0 ? g_now - g_mark[i].dotAt : 0.25;
+                dt = dt < 0.02 ? 0.02 : dt > 1.0 ? 1.0 : dt;
+                g_mark[i].dotAt = g_now;
+                double a = (double)g_mark[i].base * s_miDamage * g_mark[i].stacks * dt + g_mark[i].carry;
+                int32_t whole = a > 2000000 ? 2000000 : (int32_t)a;
+                g_mark[i].carry = a - whole;
+                static unsigned told;
+                if (told < 12) { told++; Log("the mark's status tick on entity %u: the game's %d is %d (%.2f s since the last, %d stack(s), a second %.0f)", d->target, d->amount, whole, dt, g_mark[i].stacks, (double)g_mark[i].base * s_miDamage * g_mark[i].stacks); }
+                if (whole < 1) { e->cancel = 1; return; }
+                d->amount = whole;
+                g_bleeds++; g_ticks++;
+                NoteHit(d, 0, -1);
+                return;
+            }
     if (!MineHit(d) || d->amount <= 0 || Friend(d->target) || s_areaMax < 1 || s_areaRadius <= 0) return;
     /* one of the dash's strikes landing (its own list since 0.4.3: her melee hit of the same press set off an area
      * strike that wiped the shared one, and the dash's rounds landed with their own small amount) */
@@ -1065,6 +1077,42 @@ static void MarkFrame(void)
         uint32_t en = g_mark[i].e;
         if (!en) continue;
         if (g_mark[i].until <= g_now || !Living(en)) { g_mark[i].e = 0; continue; }
+        /* the mark's status, put on again each half second (it lasts one). While it is on and ticking it deals the
+         * mark's damage and no round is sent; an enemy that does not take it, or on which it has not ticked for 3 s,
+         * gets the rounds. */
+        if (s_miStatus > 0 && s_miDamage > 0 && !g_statusBad && !g_mark[i].stBad)
+        {
+            if (g_now >= g_mark[i].stNext)
+            {
+                int had = 0, has = 0;
+                g_mark[i].stNext = g_now + 0.5;
+                if (!GameStatus(en, (uint32_t)s_miStatus, s_miBuildup > 0 ? s_miBuildup : 100, &had, &has)) g_statusBad = 1;
+                else
+                {
+                    static unsigned told;
+                    if (has != g_mark[i].stOk && told < 24) { told++; Log("the mark's status %d on entity %u: %s", s_miStatus, en, has ? "taken" : "not taken (the rounds for this one)"); }
+                    if (has && !g_mark[i].stOk) g_mark[i].stSince = g_now;
+                    g_mark[i].stOk = has;
+                    if (!has) g_mark[i].stBad = 1;
+                }
+            }
+            if (g_mark[i].stOk && g_now - (g_mark[i].dotAt > g_mark[i].stSince ? g_mark[i].dotAt : g_mark[i].stSince) > 3)
+            {
+                static unsigned told;
+                if (told < 12) { told++; Log("the mark's status on entity %u has not ticked for 3 s: the rounds for this one", en); }
+                g_mark[i].stOk = 0; g_mark[i].stBad = 1;
+            }
+            if (g_mark[i].stOk)
+            {
+                g_mark[i].pending = 0;
+                if (g_now >= g_mark[i].next)
+                {
+                    g_mark[i].next = g_now + 1;
+                    if (s_miSlow > 0 && hf->apply_status) hf->apply_status(self, en, HF_STATUS_FLAMER_SLOWED, s_miSlow * g_mark[i].stacks);
+                }
+                continue;
+            }
+        }
         /* a tick that has not landed 0.15 s on missed (0.4.11: three in ten did, the enemy knocked about by her hits
          * between the look at where it is and the round getting there): again, up to three rounds a tick */
         if (g_mark[i].pending && g_mark[i].tries < 3 && g_now - g_mark[i].sent >= 0.25 && g_now < g_mark[i].next)
@@ -1080,21 +1128,6 @@ static void MarkFrame(void)
         g_mark[i].pending = 0;                         /* a tick that never landed is not owed */
         g_mark[i].tries = 0;
         if (s_miSlow > 0 && hf->apply_status) hf->apply_status(self, en, HF_STATUS_FLAMER_SLOWED, s_miSlow * g_mark[i].stacks);
-        if (s_miStatus > 0 && !g_statusBad)
-        {
-            float dose = s_miBuildup * g_mark[i].stacks;
-            int had = 0, has = 0;
-            /* (0.6.2, the probe: the game's bleed deals nothing to an enemy; which damaging status does. One of
-             * these by the mark's slot: pure damage, thermite, poison, electric, radiation light and heavy) */
-            static const uint32_t probe[] = {24, 12, 70, 35, 33, 34};
-            uint32_t st = probe[i % 6];
-            if (GameStatus(en, st, dose > 1000 ? 1000 : dose, &had, &has))
-            {
-                static unsigned told;
-                if (told < 60 && (!had || !has)) { told++; Log("game status %u on marked entity %u (%d stack(s), build-up %.0f): had it %d, has it now %d", st, en, g_mark[i].stacks, (double)dose, had, has); }
-            }
-            else g_statusBad = 1;
-        }
         if (s_miDamage <= 0) continue;
         int tr = TickRound(i, 0, pos, have);
         if (tr < 0) { g_mark[i].e = 0; continue; }
