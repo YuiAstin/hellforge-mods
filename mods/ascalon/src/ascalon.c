@@ -146,7 +146,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.6.7"
+#define VERSION "0.6.8"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -1443,7 +1443,9 @@ static int SafeSpot(uint32_t unit, const float pos[3], const float dir[2], float
     }
     float keep = s_lpClimb;
     s_lpClimb = 12;   /* (40 in 0.4.5: something high over open ground, met only from above, made the ground under it read as buried) */
+    g_spGame = s_gameFit && g_fitsAt;
     int r = SpotAt(unit, pos, dir, dist, out, NULL, 0);
+    g_spGame = 0;
     s_lpClimb = keep;
     if (!r) { *why = 1; return 0; }
     if (out[2] - pos[2] > rise || pos[2] - out[2] > 3) { *why = 2; return 0; }
@@ -1463,7 +1465,12 @@ static int SafeSpot(uint32_t unit, const float pos[3], const float dir[2], float
     {
         float at[3] = {out[0], out[1], out[2] + (k == 0 ? 0.05f : k == 1 ? 0.2f : 0.4f)};
         int fit = GameFits(me, unit, at);
-        if (fit < 0) return 1;                       /* not asked: the four above decide */
+        if (fit < 0)                                 /* not asked: her room by the mod's own looks, as before 0.6.8 */
+        {
+            if (Fits(unit, out[0], out[1], out[2]) && !Occupied(out)) return 1;
+            *why = 1;
+            return 0;
+        }
         if (fit) { if (told++ < 12) Log("the game's fit test: fits at %.1f %.1f %.2f (%.2f above the surface)", (double)at[0], (double)at[1], (double)at[2], (double)(at[2] - out[2])); out[2] = at[2] - 0.05f; return 1; }
     }
     if (told++ < 12) Log("the game's fit test: does not fit at %.1f %.1f %.2f", (double)out[0], (double)out[1], (double)out[2]);

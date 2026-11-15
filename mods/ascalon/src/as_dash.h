@@ -10,6 +10,10 @@ static float RayWith(uint32_t unit, const float from[3], const float dir[3], flo
 static float g_rayPrefer = -1;
 /* 1: bodies are nothing to the ray (0.6.6, for whether she fits: an enemy beside the spot is no wall) */
 static int g_rayBodies;
+/* 1: whether she has room at a spot is left to the game's own fit test, the Warp Pack's, which sets a Helldiver down in
+ * the middle of a swarm (0.6.8): the looks over and beside the spot and the enemy-on-it rule are not applied. What
+ * stays: a surface there, not an underground one, the height limits, a clear way, the ground under her feet. */
+static int g_spGame;
 static int g_spNone, g_spHead, g_spSide, g_spUnder, g_spTaken, g_fitWhy;   /* (why spots were not taken, below) */
 static int IsFoeUnit(uint32_t u);
 static float RayWith(uint32_t unit, const float from[3], const float dir[3], float len, uint32_t filter, uint32_t flags, unsigned* count)
@@ -176,9 +180,9 @@ static int SpotAt(uint32_t unit, const float pos[3], const float dir[2], float d
         float above = 1e9f;   /* the lowest surface over this one */
         for (int j = 0; j < n; j++) if (high[j] > z[i] + 0.3f && high[j] < above) above = high[j];
         if (above < 1e8f && !Roofed(unit, x, y, z[i], above - z[i])) { g_buried++; continue; }
-        if (!Fits(unit, x, y, z[i])) { if (g_fitWhy == 1) g_spHead++; else if (g_fitWhy == 2) g_spSide++; else g_spUnder++; if (g_nFoeUnits && crowded && FoeAbove(unit, (float[3]){x, y, z[i] + 0.1f}, 12.0f)) *crowded = 1; continue; }
+        if (!g_spGame && !Fits(unit, x, y, z[i])) { if (g_fitWhy == 1) g_spHead++; else if (g_fitWhy == 2) g_spSide++; else g_spUnder++; if (g_nFoeUnits && crowded && FoeAbove(unit, (float[3]){x, y, z[i] + 0.1f}, 12.0f)) *crowded = 1; continue; }
         float at[3] = {x, y, z[i]};
-        if (Occupied(at)) { g_spTaken++; if (crowded) *crowded = 1; continue; }
+        if (!g_spGame && Occupied(at)) { g_spTaken++; if (crowded) *crowded = 1; continue; }
         memcpy(out, at, sizeof at);
         return 1;
     }
