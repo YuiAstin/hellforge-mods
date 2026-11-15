@@ -27,7 +27,7 @@ end
 
 local ffi = require('ffi')
 pcall(ffi.cdef, [[
-typedef struct kolhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t upshift, upshift_max, gear, sinner; float sinner_hp, sinner_max; uint32_t leash, drive, winner, piloted; float kr_left; uint32_t keys[3]; char key_label[3][24]; uint32_t sinner_kind, frv; float sprint_left, sprint_cd, upshift_pct, kr_mult, share_pct; uint32_t share_on, ems_immune, release_on; float sprint_ram; int32_t frv_pkg; float turbo_left, turbo_mult, post_move, gear_left, winner_cd, upshift_guard; } kolhud1_state;
+typedef struct kolhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t upshift, upshift_max, gear, sinner; float sinner_hp, sinner_max; uint32_t leash, drive, winner, piloted; float kr_left; uint32_t keys[3]; char key_label[3][24]; uint32_t sinner_kind, frv; float sprint_left, sprint_cd, upshift_pct, kr_mult, share_pct; uint32_t share_on, ems_immune, release_on; float sprint_ram; int32_t frv_pkg; float turbo_left, turbo_mult, post_move, gear_left, winner_cd, upshift_guard, full_speed, full_ram; } kolhud1_state;
 void *kolhud1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
 void *kolhud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
 ]])
@@ -425,11 +425,13 @@ local function buff_row(d, cx, y)
     local kr = tonumber(state.kr_left)
     if kr > 0.05 then add(('KINETIC RECOVERY x%.2g  %ds'):format(tonumber(state.kr_mult), math.ceil(kr)), YELLOW) end
     local sp = tonumber(state.sprint_left)
-    if sp > 0.05 then add(('FULL SPEED  INVINCIBLE  RAMS x%.2g  %ds'):format(tonumber(state.sprint_ram), math.ceil(sp)), YELLOW)
+    if sp > 0.05 then add(('FULL SPEED BURST  INVINCIBLE  RAMS x%.2g  %ds'):format(tonumber(state.sprint_ram), math.ceil(sp)), YELLOW)
     elseif state.frv ~= 0 and state.piloted ~= 0 then
         local cd = tonumber(state.sprint_cd)
-        if cd > 0.05 then add(('FULL SPEED IN %ds'):format(math.ceil(cd)), MUTED) else add('FULL SPEED READY', GREEN) end
+        if cd > 0.05 then add(('BURST IN %ds'):format(math.ceil(cd)), MUTED) else add('BURST READY', GREEN) end
     end
+    local fs = tonumber(state.full_speed)
+    if fs > 0 then add(('FULL SPEED %d M/S  RAMS x%.2g'):format(math.floor(fs + 0.5), tonumber(state.full_ram)), YELLOW) end
     if state.release_on ~= 0 then add('KINETIC RELEASE', ELECTRIC) end
     if state.share_on ~= 0 then add(('SINNER GUARD %.0f%%'):format(tonumber(state.share_pct)), GREEN) end
     if state.ems_immune ~= 0 then add('EMS IMMUNE', MUTED) end
@@ -505,8 +507,10 @@ local OPTIONS = {
     {'upshift_damage', 'slider', 'Upshift: Damage Per Stack', 0, 0.3, 0.01, 'Her damage bonus per stack (0.15: 15%).'},
     {'upshift_decay', 'slider', 'Upshift: Decay', 1, 60, 1, 'Seconds without a gain before a stack is lost.'},
     {'gear_seconds', 'slider', 'Gears: Duration', 3, 60, 1, 'Seconds N, S and S+ last before the Sinner goes back to D.', true},
-    {'release_every', 'slider', 'Kinetic Release: Interval', 2, 30, 1, 'Seconds between its small EMS ring while it fights in S or S+.'},
-    {'drift_on', 'toggle', "Sinner: Let's Go for a Drift!", 0, 1, 1, 'Waves of EMS bursts out from the Sinner into the enemies around it, then rockets along its path ahead (Full Speed).'},
+    {'release_every', 'slider', 'Kinetic Release: Interval', 2, 30, 1, 'Seconds between its rifle volleys while it fights in S or S+.'},
+    {'drift_on', 'toggle', "Sinner: Let's Go for a Drift!", 0, 1, 1, 'Waves of EMS bursts out from the Sinner into the enemies around it.'},
+    {'full_on', 'toggle', "Sinner: Let's Go Full Speed!", 0, 1, 1, 'While the FRV moves fast it fires at the enemies ahead, faster the faster it goes, and its rams hit harder.'},
+    {'full_min_speed', 'slider', 'Full Speed: From Speed', 0, 30, 1, 'Metres a second it has to move for Full Speed.'},
     {'drift_every', 'slider', 'Drift: Interval', 3, 60, 1, 'Seconds between Drifts.'},
     {'leash_start', 'slider', 'Sinner: Follow From', 2, 40, 1, 'It walks to her beyond this many metres.', true},
     {'leash_stop', 'slider', 'Sinner: Stop Within', 1, 30, 1, 'It stops this close to her.'},
