@@ -141,7 +141,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.5.13"
+#define VERSION "0.6.0"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -1006,6 +1006,42 @@ static int TickRound(int i, int try, const float pos[3], int have)
     g_tickSent++;
     return 1;
 }
+/* ---- the game's own status build-up, called directly (0.6.0, a probe: does an enemy take the game's bleed, what does
+ * it deal, is it hers). HellForge's apply_status takes only the statuses its header names; this is the call under it
+ * (docs/research/game-notes.md: add game.dll+0x699E40, has +0x69B1F0, the manager at [game+0x3326620]). GAME THREAD. */
+typedef void (*GsAddFn)(void*, uint32_t, uint32_t, uint32_t, float, uint32_t, uint64_t);
+typedef uint8_t (*GsHasFn)(void*, uint32_t, uint32_t, uint32_t);
+static int g_gsReady = -1;
+static void StatusRow(uint32_t type)
+{
+    uint8_t row[152];
+    char hex[152 * 2 + 1];
+    uintptr_t at = Pointer(game + 0x37C5C50 + 8u * type);
+    if (!at || !ReadAt(at, row, sizeof row)) { Log("status %u: no row", type); return; }
+    for (int k = 0; k < 152; k++) snprintf(hex + 2 * k, 3, "%02x", row[k]);
+    float strength, duration;
+    memcpy(&strength, row + 0x24, 4); memcpy(&duration, row + 0x28, 4);
+    Log("status %u row (strength %.3f, duration %.3f): %s", type, (double)strength, (double)duration, hex);
+}
+static int GameStatusReady(void)
+{
+    if (g_gsReady >= 0) return g_gsReady;
+    g_gsReady = hf->code_matches(game + 0x699E40, "40 55 53 57 41 55 41 57 48 8d 6c 24 d0 48 81 ec 30 01 00 00") &&
+                hf->code_matches(game + 0x69B1F0, "48 89 5c 24 10 48 89 6c 24 20 56 57 41 54 41 56 41 57 48 83 ec 70");
+    Log(g_gsReady ? "the game's status calls are the reviewed code: mi_status goes to the game directly" : "the game's status calls are not the reviewed code: no game status for the mark");
+    if (g_gsReady) { static const uint32_t rows[] = {2, 5, 8, 12, 24, 31, 32, 42, 67, 70}; for (unsigned k = 0; k < sizeof rows / sizeof rows[0]; k++) StatusRow(rows[k]); }
+    return g_gsReady;
+}
+static int GameStatus(uint32_t en, uint32_t status, float buildup, int* had, int* has)
+{
+    uintptr_t mgr = Pointer(game + 0x3326620);
+    if (!GameStatusReady() || !mgr) return 0;
+    GsHasFn hasf = (GsHasFn)(game + 0x69B1F0);
+    *had = hasf((void*)mgr, en, status, 0) != 0;
+    ((GsAddFn)(game + 0x699E40))((void*)mgr, en, status, 0, buildup, atomic_load(&g_avatar), 0);
+    *has = hasf((void*)mgr, en, status, 0) != 0;
+    return 1;
+}
 static void MarkFrame(void)
 {
     float pos[3];
@@ -1030,13 +1066,16 @@ static void MarkFrame(void)
         g_mark[i].pending = 0;                         /* a tick that never landed is not owed */
         g_mark[i].tries = 0;
         if (s_miSlow > 0 && hf->apply_status) hf->apply_status(self, en, HF_STATUS_FLAMER_SLOWED, s_miSlow * g_mark[i].stacks);
-        if (s_miStatus > 0 && !g_statusBad && hf->apply_status)
+        if (s_miStatus > 0 && !g_statusBad)
         {
             float dose = s_miBuildup * g_mark[i].stacks;
-            int ar = hf->apply_status(self, en, (uint32_t)s_miStatus, dose > 1000 ? 1000 : dose);
-            if (ar == HF_ACT_DONE || ar == HF_ACT_REQUESTED || ar == HF_ACT_QUEUED) continue;
-            g_statusBad = 1;
-            Log("Mortal Interrogation: the game refused status %d (%s): the mark's damage is the mod's own from here", s_miStatus, hf->last_log ? hf->last_log(self) : "");
+            int had = 0, has = 0;
+            if (GameStatus(en, (uint32_t)s_miStatus, dose > 1000 ? 1000 : dose, &had, &has))
+            {
+                static unsigned told;
+                if (told < 24) { told++; Log("game status %d on marked entity %u (%d stack(s), build-up %.0f): had it %d, has it now %d", s_miStatus, en, g_mark[i].stacks, (double)dose, had, has); }
+            }
+            else g_statusBad = 1;
         }
         if (s_miDamage <= 0) continue;
         int tr = TickRound(i, 0, pos, have);
