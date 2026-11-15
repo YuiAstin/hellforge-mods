@@ -146,7 +146,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.6.4"
+#define VERSION "0.6.5"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -847,8 +847,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
                 double a = (double)g_vol.damage * s_areaMult * (g_vol.pursuit ? s_pursuitMult : 1);
                 d->amount = a < 1 ? 1 : a > 2000000 ? 2000000 : (int32_t)a;
                 if (g_vol.pursuit) SlowLater(d->target);
-                g_strikes++;
-                Mark(d->target, g_vol.damage);
+                g_strikes++;   /* (its mark was laid when the round was sent, since 0.6.5) */
                 NoteHit(d, g_vol.pursuit, g_vol.mult * (g_vol.pursuit ? s_pursuitMult : 1));
                 return;
             }
@@ -1198,6 +1197,10 @@ static void AreaFrame(void)
         int r = hf->spawn_projectile(self, (uint32_t)s_areaRound, from, v);
         if (r == HF_ACT_WAITING || !Act("an area strike", r)) { g_vol.left[i]--; if (r == HF_ACT_WAITING) g_volOwed++; break; }
         fired++;
+        /* the strike's mark, laid here and not when its round lands (0.6.5: of two enemies struck only the one she
+         * hit bled; a round that meets something else on its way left its enemy unmarked). The bleed is a status now
+         * and cannot miss; the round still has to land for the strike's own damage. */
+        Mark(c[j].e, g_vol.damage);
     }
     if (fired)
     {
