@@ -1,0 +1,212 @@
+/* Where she may land: the landing checks of Voymastina 0.4's teleports (mods/voymastina/src/voymastina.c), copied as they
+ * stand there: the surfaces under a spot, whether a Helldiver fits on one, whether it is a real floor, the best spot at
+ * a distance along a direction. The position setter is the LIFT-182 Warp Pack's call as the Warp Probe found it. */
+typedef void (*SetVecFn)(void*, uint32_t, const float*);
+static SetVecFn g_setPosition, g_setVelocity;
+static float s_lpClimb = 2.5f, s_lpDrop = 8;
+/* The nearest static obstruction along a ray (static actors only, so enemies are not walls): its distance, len + 1
+ * when clear, or -1 when the query cannot be made */
+static float RayWith(uint32_t unit, const float from[3], const float dir[3], float len, uint32_t filter, uint32_t flags, unsigned* count);
+static float g_rayPrefer = -1;
+/* 1: bodies are nothing to the ray (0.6.6, for whether she fits: an enemy beside the spot is no wall) */
+static int g_rayBodies;
+/* 1: whether she has room at a spot is left to the game's own fit test, the Warp Pack's, which sets a Helldiver down in
+ * the middle of a swarm (0.6.8): the looks over and beside the spot and the enemy-on-it rule are not applied. What
+ * stays: a surface there, not an underground one, the height limits, a clear way, the ground under her feet. */
+static int g_spGame;
+static int g_spNone, g_spHead, g_spSide, g_spUnder, g_spTaken, g_fitWhy;   /* (why spots were not taken, below) */
+static int IsFoeUnit(uint32_t u);
+static float RayWith(uint32_t unit, const float from[3], const float dir[3], float len, uint32_t filter, uint32_t flags, unsigned* count)
+{
+    uintptr_t world = Pointer(game + 0x346BFA0);
+    if (!world || !g_raycast || !g_worldId) return -1;
+    uint32_t id = g_worldId((const void*)world);
+    if (id >= 4) return -1;
+    uint8_t hits[16 * 44];
+    memset(hits, 0, sizeof hits);
+    uint32_t n = g_raycast(id, from, dir, len, 2, 1, filter, flags, unit, hits, 16);
+    if (count) *count = n;
+    if (n > 16) return -1;
+    float best = len + 1;
+    for (uint32_t i = 0; i < n; i++)
+    {
+        float d;
+        memcpy(&d, hits + 44u * i + 24, 4);
+        if (Word(hits + 44u * i + 28) == unit || !isfinite(d) || d < 0.02f) continue;
+        /* a zone, not a thing (Ascalon 0.4.14; ZONE_TAG below): nothing stands on it or is stopped by it */
+        uint32_t rf = ActorFilter(Word(hits + 44u * i + 32), Word(hits + 44u * i + 28));
+        if (rf == 0xEDC5EBE0u) continue;
+        if (g_rayBodies && (rf == 0x236122F0u || rf == 0xD5B33D56u || IsFoeUnit(Word(hits + 44u * i + 28)))) continue;
+        if (g_rayPrefer >= 0 ? fabsf(d - g_rayPrefer) < fabsf(best - g_rayPrefer) : d < best) best = d;
+    }
+    return best;
+}
+
+/* The units of the enemies near a dash (refreshed per dash): their bodies are no floor, and a spot under one is taken */
+static int g_underFoe;
+static uint32_t g_foeUnits[256];
+static int g_nFoeUnits;
+static int IsFoeUnit(uint32_t u)
+{
+    for (int i = 0; i < g_nFoeUnits; i++) if (g_foeUnits[i] == u) return 1;
+    return 0;
+}
+
+/* Every surface under (x, y) from lp_climb m above `ref` down to lp_drop m below it (terrain, rocks, floors, roofs),
+ * highest first; how many */
+/* Heights that are not ground though a look down meets them (Ascalon 0.4.12): where she stands, something above her
+ * that a look up does not meet. One map had such a level sheet 2 m over a flat road, everywhere: the road under it read
+ * as buried and she was set on the sheet. The caller fills these from her own spot; Surfaces leaves them out. */
+static float g_phantom[8];
+static int g_nPhantom;
+static int Surfaces(uint32_t unit, float x, float y, float ref, float* z, int max)
+{
+    float top[3] = {x, y, ref + s_lpClimb}, down[3] = {0, 0, -1}, len = s_lpClimb + s_lpDrop;
+    uintptr_t world = Pointer(game + 0x346BFA0);
+    if (!world || !g_raycast || !g_worldId) return 0;
+    uint32_t id = g_worldId((const void*)world);
+    if (id >= 4) return 0;
+    uint8_t hits[16 * 44];
+    memset(hits, 0, sizeof hits);
+    uint32_t n = g_raycast(id, top, down, len, 2, 1, 0, 0x80000009u, unit, hits, 16);
+    if (n > 16) return 0;
+    int k = 0;
+    for (uint32_t i = 0; i < n && k < max; i++)
+    {
+        float d;
+        memcpy(&d, hits + 44u * i + 24, 4);
+        uint32_t hu = Word(hits + 44u * i + 28);
+        if (hu == unit || !isfinite(d) || d < 0.02f || d > len) continue;
+        uint32_t filt = ActorFilter(Word(hits + 44u * i + 32), hu); if (filt == FILTER_FOLIAGE || (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u))) continue;   /* leaves, canopies and bodies (enemies, corpses: filters seen in Voymastina 0.2.1's probe) are no floor */
+        if (IsFoeUnit(hu)) { g_underFoe = 1; continue; }                              /* nor is an enemy's back */
+        /* Actors tagged 0xEDC5EBE0 are zones (0.4.14, from the log of a look down where she "flew up"): a level
+         * face 2 m over the ground across a whole area, around her wherever she stood in it, which a look meets from
+         * outside and which stops nothing. 0.4.12 told them by a look up from her own spot, which missed the zone
+         * she was about to dash into. */
+        if (filt == 0xEDC5EBE0u) continue;
+        int phantom = 0;
+        for (int q = 0; q < g_nPhantom; q++) if (fabsf(top[2] - d - g_phantom[q]) < 0.35f) phantom = 1;
+        if (phantom) continue;
+        z[k++] = top[2] - d;
+    }
+    for (int i = 1; i < k; i++)        /* highest first */
+        for (int j = i; j > 0 && z[j] > z[j - 1]; j--) { float t = z[j]; z[j] = z[j - 1]; z[j - 1] = t; }
+    return k;
+}
+/* Whether a Helldiver fits standing at (x, y, z): nothing within 1.8 m above her feet, nothing within 0.4 m around
+ * her at knee and chest height; 1 fits */
+static int FoeAbove(uint32_t unit, const float from[3], float len)
+{
+    uintptr_t world = Pointer(game + 0x346BFA0);
+    if (!world || !g_raycast || !g_worldId) return 0;
+    uint32_t id = g_worldId((const void*)world);
+    if (id >= 4) return 0;
+    uint8_t hits[16 * 44];
+    float up[3] = {0, 0, 1};
+    memset(hits, 0, sizeof hits);
+    uint32_t n = g_raycast(id, from, up, len, 2, 1, 0, 0x80000009u, unit, hits, 16);
+    for (uint32_t i = 0; i < n && i < 16; i++) if (IsFoeUnit(Word(hits + 44u * i + 28))) return 1;
+    return 0;
+}
+static int FitsStatic(uint32_t unit, float x, float y, float z)
+{
+    float up[3] = {0, 0, 1}, foot[3] = {x, y, z + 0.1f};
+    float r = RayWith(unit, foot, up, 1.8f, 0, 0x80000009u, NULL);
+    if (r < 0 || r <= 1.8f) { g_fitWhy = 1; return 0; }
+    for (int h = 0; h < 2; h++)
+        for (int k = 0; k < 4; k++)
+        {
+            float a = 1.5708f * (float)k + 0.785f;
+            float c[3] = {x, y, z + (h ? 1.3f : 0.6f)}, dir[3] = {cosf(a), sinf(a), 0};
+            float w = RayWith(unit, c, dir, 0.4f, 0, 0x80000009u, NULL);
+            if (w < 0 || w <= 0.4f) { g_fitWhy = 2; return 0; }
+        }
+    return 1;
+}
+/* (0.6.6: an enemy standing by the spot is no wall. Into a group every spot was refused, "no surface she fits on": the
+ * looks around her knee and chest met the enemies' bodies, and a spot within 1.5 m of any enemy was taken. Bodies are
+ * nothing to these looks now, and a spot is taken only with an enemy on it, within 0.8 m, or over it.) */
+static int Fits(uint32_t unit, float x, float y, float z)
+{
+    float foot[3] = {x, y, z + 0.1f};
+    if (g_nFoeUnits && FoeAbove(unit, foot, 12.0f)) { g_fitWhy = 3; return 0; }   /* under a Bile Titan, a Charger, a hulk: taken */
+    g_rayBodies = 1;
+    int fits = FitsStatic(unit, x, y, z);
+    g_rayBodies = 0;
+    return fits;
+}
+
+static int Occupied(const float at[3])
+{
+    float p[3];
+    uint8_t d[24];
+    for (int i = 0; i < FOES; i++)
+    {
+        if (!g_foe[i] || !Descriptor(g_foe[i], d) || Quad(d) != g_foeRes[i] || !UnitNode(Word(d + 12), 0, p)) continue;
+        float dx = p[0] - at[0], dy = p[1] - at[1], dz = p[2] - at[2];
+        if (dx * dx + dy * dy <= 0.5f * 0.5f && dz > -2 && dz < 2.5f) return 1;
+    }
+    return 0;
+}
+/* Whether a surface with another one `gap` m above it is a real floor under a real roof (a bridge, an arch, a nest):
+ * looking up from it must meet that roof. Terrain and many rocks are solid only from above, so under them the look up
+ * meets nothing: that floor is underground (a buried mesh, a rock's base). 1 a real floor */
+static int Roofed(uint32_t unit, float x, float y, float z, float gap)
+{
+    float up[3] = {0, 0, 1}, foot[3] = {x, y, z + 0.1f};
+    float r = RayWith(unit, foot, up, gap + 0.5f, 0, 0x80000009u, NULL);
+    return r >= 0 && r <= gap + 0.5f && fabsf(r - (gap - 0.1f)) < 0.6f;
+}
+static int g_buried;   /* spots skipped as underground (for the log) */
+/* why spots were not taken (0.6.7, for the log): nothing under the spot, no room over it, no room beside it, under an
+ * enemy, an enemy on it; and how far the nearest enemy to a refused spot was */
+/* The best spot at a distance along her direction: the highest surface there she fits on; *crowded when one fitted
+ * but an enemy stood on it. 1 found */
+static int SpotAt(uint32_t unit, const float pos[3], const float dir[2], float dist, float out[3], int* crowded, int upFirst)
+{
+    float z[16];
+    float x = pos[0] + dir[0] * dist, y = pos[1] + dir[1] * dist;
+    g_underFoe = 0;
+    int n = Surfaces(unit, x, y, pos[2], z, 16);
+    if (g_underFoe && crowded) *crowded = 1;
+    if (n == 0) { if (g_underFoe) g_spUnder++; else g_spNone++; }
+    float high[16];
+    memcpy(high, z, sizeof(float) * (n > 0 ? n : 0));   /* highest first */
+    if (!upFirst)   /* the surface nearest her own height first, then outwards */
+        for (int i = 1; i < n; i++)
+            for (int j = i; j > 0 && fabsf(z[j] - pos[2]) < fabsf(z[j - 1] - pos[2]); j--) { float t = z[j]; z[j] = z[j - 1]; z[j - 1] = t; }
+    for (int i = 0; i < n; i++)
+    {
+        float above = 1e9f;   /* the lowest surface over this one */
+        for (int j = 0; j < n; j++) if (high[j] > z[i] + 0.3f && high[j] < above) above = high[j];
+        if (above < 1e8f && !Roofed(unit, x, y, z[i], above - z[i]))
+        {
+            /* Under something a look up does not meet: underground, unless it lies open before her (0.6.9: the top of
+             * foliage is such a thing too, and with the ground under it read as buried she was set on the leaves, 4 m
+             * up). Open: near her own height, and a straight look from her waist to a waist over it meets nothing.
+             * Ground under terrain is behind the hillside. */
+            int open = 0;
+            if (fabsf(z[i] - pos[2]) < 1.5f)
+            {
+                float a[3] = {pos[0], pos[1], pos[2] + 0.9f}, b[3] = {x - a[0], y - a[1], z[i] + 0.9f - a[2]};
+                float len = sqrtf(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]);
+                if (len > 0.1f)
+                {
+                    for (int k = 0; k < 3; k++) b[k] /= len;
+                    g_rayBodies = 1;
+                    float r = RayWith(unit, a, b, len, 0, 0x80000009u, NULL);
+                    g_rayBodies = 0;
+                    open = r > len;
+                }
+            }
+            if (!open) { g_buried++; continue; }
+        }
+        if (!g_spGame && !Fits(unit, x, y, z[i])) { if (g_fitWhy == 1) g_spHead++; else if (g_fitWhy == 2) g_spSide++; else g_spUnder++; if (g_nFoeUnits && crowded && FoeAbove(unit, (float[3]){x, y, z[i] + 0.1f}, 12.0f)) *crowded = 1; continue; }
+        float at[3] = {x, y, z[i]};
+        if (!g_spGame && Occupied(at)) { g_spTaken++; if (crowded) *crowded = 1; continue; }
+        memcpy(out, at, sizeof at);
+        return 1;
+    }
+    return 0;
+}
+
