@@ -146,7 +146,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.6.6"
+#define VERSION "0.6.7"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -1561,9 +1561,10 @@ static void Dash(void)
     if (!s_dash || g_now < g_dashReady || !g_setPosition || !g_setVelocity || !g_raycast || !unit || !MoveDir(dir) || !PlayerPose(pos, NULL) || !QueryIdle()) return;
     NearFoeUnits(pos, s_dashDistance + 20);
     g_buried = 0;
+    g_spNone = g_spHead = g_spSide = g_spUnder = g_spTaken = 0;
     float dist = 0;
     int found = 0, stuck = 0, why = 0, whys[6] = {0};
-    for (float d = s_dashDistance; !found && d >= 1.5f; d -= 0.75f)
+    for (float d = s_dashDistance; !found && d >= 1.0f; d -= 0.5f)
     {
         if (SafeSpot(unit, pos, dir, d, d * 0.6f > 1.0f ? d * 0.6f : 1.0f, dest, &why)) { found = 1; dist = d; }
         else whys[why]++;
@@ -1571,7 +1572,8 @@ static void Dash(void)
     if (!found)
     {
         static unsigned told;
-        if (told++ < 20) Log("dash: no safe spot ahead (refused: %d no surface she fits on, %d too high or too low, %d something in the way, %d not the ground she would stand on, %d the game's fit test)", whys[1], whys[2], whys[3], whys[4], whys[5]);
+        if (told++ < 60) Log("dash: no safe spot ahead from %.1f %.1f %.1f, heading %.2f %.2f (refused: %d no surface she fits on, %d too high or too low, %d something in the way, %d not the ground she would stand on, %d the game's fit test; surfaces: %d spots with nothing under them, %d underground, %d no room over, %d no room beside, %d under an enemy, %d an enemy on it; %d enemy units near, %d heights left out as not ground)",
+                             (double)pos[0], (double)pos[1], (double)pos[2], (double)dir[0], (double)dir[1], whys[1], whys[2], whys[3], whys[4], whys[5], g_spNone, g_buried, g_spHead, g_spSide, g_spUnder, g_spTaken, g_nFoeUnits, g_nPhantom);
         return;
     }
     g_dashReady = g_now + s_dashCooldown;

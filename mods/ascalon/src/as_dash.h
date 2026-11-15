@@ -10,6 +10,7 @@ static float RayWith(uint32_t unit, const float from[3], const float dir[3], flo
 static float g_rayPrefer = -1;
 /* 1: bodies are nothing to the ray (0.6.6, for whether she fits: an enemy beside the spot is no wall) */
 static int g_rayBodies;
+static int g_spNone, g_spHead, g_spSide, g_spUnder, g_spTaken, g_fitWhy;   /* (why spots were not taken, below) */
 static int IsFoeUnit(uint32_t u);
 static float RayWith(uint32_t unit, const float from[3], const float dir[3], float len, uint32_t filter, uint32_t flags, unsigned* count)
 {
@@ -107,14 +108,14 @@ static int FitsStatic(uint32_t unit, float x, float y, float z)
 {
     float up[3] = {0, 0, 1}, foot[3] = {x, y, z + 0.1f};
     float r = RayWith(unit, foot, up, 1.8f, 0, 0x80000009u, NULL);
-    if (r < 0 || r <= 1.8f) return 0;
+    if (r < 0 || r <= 1.8f) { g_fitWhy = 1; return 0; }
     for (int h = 0; h < 2; h++)
         for (int k = 0; k < 4; k++)
         {
             float a = 1.5708f * (float)k + 0.785f;
             float c[3] = {x, y, z + (h ? 1.3f : 0.6f)}, dir[3] = {cosf(a), sinf(a), 0};
             float w = RayWith(unit, c, dir, 0.4f, 0, 0x80000009u, NULL);
-            if (w < 0 || w <= 0.4f) return 0;
+            if (w < 0 || w <= 0.4f) { g_fitWhy = 2; return 0; }
         }
     return 1;
 }
@@ -124,7 +125,7 @@ static int FitsStatic(uint32_t unit, float x, float y, float z)
 static int Fits(uint32_t unit, float x, float y, float z)
 {
     float foot[3] = {x, y, z + 0.1f};
-    if (g_nFoeUnits && FoeAbove(unit, foot, 12.0f)) return 0;   /* under a Bile Titan, a Charger, a hulk: taken */
+    if (g_nFoeUnits && FoeAbove(unit, foot, 12.0f)) { g_fitWhy = 3; return 0; }   /* under a Bile Titan, a Charger, a hulk: taken */
     g_rayBodies = 1;
     int fits = FitsStatic(unit, x, y, z);
     g_rayBodies = 0;
@@ -139,7 +140,7 @@ static int Occupied(const float at[3])
     {
         if (!g_foe[i] || !Descriptor(g_foe[i], d) || Quad(d) != g_foeRes[i] || !UnitNode(Word(d + 12), 0, p)) continue;
         float dx = p[0] - at[0], dy = p[1] - at[1], dz = p[2] - at[2];
-        if (dx * dx + dy * dy <= 0.8f * 0.8f && dz > -2 && dz < 2.5f) return 1;
+        if (dx * dx + dy * dy <= 0.5f * 0.5f && dz > -2 && dz < 2.5f) return 1;
     }
     return 0;
 }
@@ -153,6 +154,8 @@ static int Roofed(uint32_t unit, float x, float y, float z, float gap)
     return r >= 0 && r <= gap + 0.5f && fabsf(r - (gap - 0.1f)) < 0.6f;
 }
 static int g_buried;   /* spots skipped as underground (for the log) */
+/* why spots were not taken (0.6.7, for the log): nothing under the spot, no room over it, no room beside it, under an
+ * enemy, an enemy on it; and how far the nearest enemy to a refused spot was */
 /* The best spot at a distance along her direction: the highest surface there she fits on; *crowded when one fitted
  * but an enemy stood on it. 1 found */
 static int SpotAt(uint32_t unit, const float pos[3], const float dir[2], float dist, float out[3], int* crowded, int upFirst)
@@ -162,6 +165,7 @@ static int SpotAt(uint32_t unit, const float pos[3], const float dir[2], float d
     g_underFoe = 0;
     int n = Surfaces(unit, x, y, pos[2], z, 16);
     if (g_underFoe && crowded) *crowded = 1;
+    if (n == 0) { if (g_underFoe) g_spUnder++; else g_spNone++; }
     float high[16];
     memcpy(high, z, sizeof(float) * (n > 0 ? n : 0));   /* highest first */
     if (!upFirst)   /* the surface nearest her own height first, then outwards */
@@ -172,9 +176,9 @@ static int SpotAt(uint32_t unit, const float pos[3], const float dir[2], float d
         float above = 1e9f;   /* the lowest surface over this one */
         for (int j = 0; j < n; j++) if (high[j] > z[i] + 0.3f && high[j] < above) above = high[j];
         if (above < 1e8f && !Roofed(unit, x, y, z[i], above - z[i])) { g_buried++; continue; }
-        if (!Fits(unit, x, y, z[i])) { if (g_nFoeUnits && crowded && FoeAbove(unit, (float[3]){x, y, z[i] + 0.1f}, 12.0f)) *crowded = 1; continue; }
+        if (!Fits(unit, x, y, z[i])) { if (g_fitWhy == 1) g_spHead++; else if (g_fitWhy == 2) g_spSide++; else g_spUnder++; if (g_nFoeUnits && crowded && FoeAbove(unit, (float[3]){x, y, z[i] + 0.1f}, 12.0f)) *crowded = 1; continue; }
         float at[3] = {x, y, z[i]};
-        if (Occupied(at)) { if (crowded) *crowded = 1; continue; }
+        if (Occupied(at)) { g_spTaken++; if (crowded) *crowded = 1; continue; }
         memcpy(out, at, sizeof at);
         return 1;
     }
