@@ -20,7 +20,7 @@
  *     its health when hit (at most every sinner_heal_every s).
  *   Kinetic Release (Gear Shift): while it fights in S or S+, every release_every s (and after Tactical Routebook),
  *     rifle rounds from it at the enemies near it (S: release_targets_s within release_reach, S+: more, farther).
- *   Let's Go for a Drift! (not in N, every drift_every s with enemies near): waves of EMS bursts out from the Sinner,
+ *   Let's Go for a Drift! (0.3.4: active, key_drift, B; drift_cooldown; not in N): waves of EMS bursts out from the Sinner,
  *     drift_rings rings out to drift_radius m, each enemy in reach taking drift_damage once (the stun holds them; nobody
  *     is moved).
  *   Let's Go Full Speed! (not in N): while it moves at full_min_speed m/s or more it fires at the enemies in a cone
@@ -48,7 +48,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.3"
+#define VERSION "0.3.4"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -107,6 +107,7 @@ static int s_driftOn = 1, s_driftRings = 4, s_driftDamage = 800, s_fullOn = 1;
 static float s_driftEvery = 12, s_driftRadius = 20;
 static float s_fullMinSpeed = 5, s_fullRefSpeed = 15, s_fullEvery = 0.15f, s_fullCone = 35, s_fullRange = 30, s_fullRam = 0.06f, s_fullRamMax = 3;
 static int s_cleanse = 1;
+static Key s_driftKey = {'B', 0, "B"};   /* 0.3.4: key_drift */
 /* driving (sinner_drive.h): the probe's numbers; -1 not known */
 static int s_drive = 1, s_driveTest = 0;
 static int s_turnOn = 0;
@@ -156,7 +157,7 @@ static const KbSetting kSettings[] = {
     KB_I("drift_points", s_relPoints, 3, 32), KB_F("drift_inner", s_relInner, 0, 30), KB_F("drift_gap", s_relGap, 0, 2),
     KB_I("full_on", s_fullOn, 0, 1), KB_I("full_shots", s_fullShots, 1, 8), KB_F("full_min_speed", s_fullMinSpeed, 0, 50), KB_F("full_ref_speed", s_fullRefSpeed, 1, 60), KB_F("full_every", s_fullEvery, 0.05, 5),
     KB_F("full_cone", s_fullCone, 5, 90), KB_F("full_range", s_fullRange, 5, 100), KB_F("full_ram", s_fullRam, 0, 1), KB_F("full_ram_max", s_fullRamMax, 1, 10),
-    KB_I("drift_on", s_driftOn, 0, 1), KB_I("drift_rings", s_driftRings, 1, 8), KB_I("drift_damage", s_driftDamage, 0, 100000), KB_F("drift_every", s_driftEvery, 2, 600), KB_F("drift_radius", s_driftRadius, 2, 50),
+    KB_I("drift_on", s_driftOn, 0, 1), KB_I("drift_rings", s_driftRings, 1, 8), KB_I("drift_damage", s_driftDamage, 0, 100000), KB_F("drift_cooldown", s_driftEvery, 0, 600), KB_F("drift_radius", s_driftRadius, 2, 50),
     KB_I("drive", s_drive, 0, 1), KB_I("turn", s_turnOn, 0, 1), KB_F("follow_distance", s_followDist, 3, 40), KB_F("personal_space", s_personal, 0, 20), KB_F("max_rounds", s_maxRounds, 1, 200), KB_F("round_speed", s_roundSpeed, 0, 3000), KB_I("drive_test", s_driveTest, 0, 1), KB_I("loco_manager", s_locoManager, -1, 100000000),
     KB_I("loco_map", s_locoMap, -1, 65536), KB_I("loco_records", s_locoRecords, -1, 65536), KB_I("loco_stride", s_locoStride, 16, 4096),
     KB_I("stick_offset_fwd", s_stickFwd, -1, 4096), KB_I("stick_offset_side", s_stickSide, -1, 4096), KB_I("stick_offset_turn", s_stickTurn, -1, 4096),
@@ -179,6 +180,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
     fprintf(f, "; Koleda %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for a\n"
                "; combo (Shift+Q). The game still sees the keys too (Shift sprints, R reloads), so pick ones it leaves alone.\n"
                "key_s1 = %s\nkey_s2 = %s\nkey_s3 = %s\n"
+               "; key_drift: Let's Go for a Drift!, the Sinner's own action (any time it stands).\n"
+               "key_drift = %s\n"
                "; Upshift: at most upshift_max stacks, each +upshift_damage (0.15: 15%%) of her damage; one is lost every\n"
                "; upshift_decay s without a gain. A Sinner action (a volley, Drift, Full Speed) gives one (two in S+), at most one\n"
                "; gain every upshift_every s. At upshift_max she takes upshift_guard (0.3: 30%%) less damage.\n"
@@ -237,13 +240,13 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; release_targets_s enemies within release_reach m (S+: release_targets_plus within release_reach_plus),\n"
                "; release_rounds_s each (S+: release_rounds_plus), by its gear and her buffs.\n"
                "release_round = %d\nrelease_rounds_s = %d\nrelease_rounds_plus = %d\nrelease_reach_plus = %g\n"
-               "; Let's Go for a Drift! (drift_on 0: off; not in N): every drift_every s with enemies within drift_radius m of\n"
-               "; the Sinner, waves of EMS bursts out from it: drift_rings rings from drift_inner m out to drift_radius m,\n"
+               "; Let's Go for a Drift! (key_drift, at the top; drift_on 0: off): the Sinner's active, once a press, every\n"
+               "; drift_cooldown s, not in N: waves of EMS bursts out from it: drift_rings rings from drift_inner m out to drift_radius m,\n"
                "; drift_gap s apart, bursts about 5 m apart (at most drift_points a ring); each enemy in reach takes\n"
                "; drift_damage once, release_ap armour penetration (the stun holds them; nobody is moved). release_shell 154:\n"
                "; the EMS mortar's shell from above; else release_explosion 150. ems_immune 1: no EMS stun on her or the Sinner.\n"
                "; Her bursts spare her, the Sinner and her allies.\n"
-               "drift_on = %d\ndrift_every = %g\ndrift_radius = %g\ndrift_rings = %d\ndrift_damage = %d\ndrift_points = %d\ndrift_inner = %g\ndrift_gap = %g\n"
+               "drift_on = %d\ndrift_cooldown = %g\ndrift_radius = %g\ndrift_rings = %d\ndrift_damage = %d\ndrift_points = %d\ndrift_inner = %g\ndrift_gap = %g\n"
                "; Let's Go Full Speed! (full_on 0: off; not in N): while it moves at full_min_speed m/s or more, it fires at the\n"
                "; enemies ahead (full_cone degrees either side of its way, within full_range m), full_shots shots spread among\n"
                "; them every full_every s at full_ref_speed m/s (faster: more often); and its rams deal 1 + full_ram for each m/s over full_min_speed times\n"
@@ -278,7 +281,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint. hellbomb_on_exhaustion 1 sets off a\n"
                "; Hellbomb on her if she runs her stamina dry (a T-Doll's price).\n"
                "hp_mult = 1.5\nstamina_mult = 2\nhellbomb_on_exhaustion = 1\n",
-            VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_upMax, (double)s_upDecay, (double)s_upDamage, (double)s_upEvery, (double)s_upGuard,
+            VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_driftKey.label, s_upMax, (double)s_upDecay, (double)s_upDamage, (double)s_upEvery, (double)s_upGuard,
             s_sinOn, s_callMode, (double)s_sharePct, (double)s_shareRange,
             (double)s_leashStart, (double)s_leashStop, (double)s_guardStart, (double)s_leashWarp, (double)s_stuckSeconds, (double)s_pushStep, s_pushSteps, (double)s_slideSpeed,
             (double)s_plusDistance, (double)s_plusLeash, s_warpWalks, s_navPath,
@@ -2204,7 +2207,7 @@ static void KineticRelease(const char* why)
 }
 static int DriftStart(void)
 {
-    if (g_wave.on) return 0;
+    if (g_wave.on) { Log("Let's Go for a Drift!: its last waves are still going"); return 0; }
     float p[3];
     memcpy(p, g_sinPos, 12);
     int n = 0;
@@ -2214,8 +2217,8 @@ static int DriftStart(void)
         uint32_t e = g_foe[k];
         if (e && TargetPos(e, g_foeRes[k], q) && Dist2(q, p) <= s_driftRadius * s_driftRadius && Alive(e)) n++;
     }
-    if (!n) return 0;
     g_drifts++;
+    if (g_drifts <= 10) Log("Let's Go for a Drift! (%s): %d enemies within %.0f m", kGear[g_gear], n, (double)s_driftRadius);
     SinnerAction("Let's Go for a Drift!");
     ReleaseStart(p, s_driftRings, s_driftRadius, s_driftDamage, "Let's Go for a Drift!");
     return 1;
@@ -2310,11 +2313,18 @@ static void GearFrame(void)
         KineticRelease("Kinetic Release");
     }
 }
+static void Drift(void)
+{
+    static unsigned told;
+    if (!s_driftOn) return;
+    if (!g_sinner || !g_landed || !g_sinPosOk) { if (told++ < 8) Log("Let's Go for a Drift!: no Sinner standing"); return; }
+    if (g_gear == GEAR_N) { if (told++ < 8) Log("Let's Go for a Drift!: not in N"); return; }
+    if (g_now < g_driftNext) { if (told++ < 8) Log("Let's Go for a Drift!: %.0f s left on drift_cooldown", g_driftNext - g_now); return; }
+    if (DriftStart()) g_driftNext = g_now + s_driftEvery;
+}
 static void DriftFrame(void)
 {
     if (!g_sinner || !g_landed || !g_sinPosOk || (g_piloting && !g_frv)) return;
-    if (s_driftOn && g_gear != GEAR_N && g_now >= g_driftNext)
-        g_driftNext = g_now + (DriftStart() ? s_driftEvery : 0.5f);
     /* Kinetic Release's rounds, a few each frame */
     for (int shots = 0; g_dqi < g_dqn && shots < 3 && g_now >= g_shotNext && ProjBudget() >= 1; shots++)
     {
@@ -2972,6 +2982,8 @@ typedef struct KoledaHud
     float winner_cd;                   /* seconds until The Winner again */
     float upshift_guard;               /* % less damage she takes now (full Upshift) */
     float full_speed, full_ram;        /* 0.3.2: Full Speed firing now: its speed m/s (0: not now), its rams' multiplier */
+    float drift_cd;                    /* 0.3.4: seconds left on Drift (-1: no Sinner standing / off) */
+    char drift_key[24];
 } KoledaHud;
 static KoledaHud g_hud = {1};
 /* the Sinner, 5 floats (x, y, z over it, health 0..1, gear): 1 while it stands, else 0 */
@@ -3057,6 +3069,8 @@ HF_MOD_EXPORT KoledaHud* koleda_hud_state(void)
     g_hud.upshift_guard = g_up >= s_upMax ? s_upGuard * 100 : 0;
     g_hud.full_speed = g_sinner && s_fullOn && g_gear != GEAR_N && g_speed >= s_fullMinSpeed ? g_speed : 0;
     g_hud.full_ram = RamBonus();
+    g_hud.drift_cd = s_driftOn && g_sinner && g_landed ? (float)fmax(0, g_driftNext - g_now) : -1;
+    memcpy(g_hud.drift_key, s_driftKey.label, sizeof g_hud.drift_key);
     g_hud.sprint_ram = (float)(s_sprintRam * (g_gear == GEAR_PLUS ? s_sprintRamPlus : g_gear == GEAR_S ? s_sprintRamS : 1.0));
     for (int i = 0; i < 3; i++)
     {
@@ -3109,6 +3123,13 @@ static void Tick(HfMod* mod, float dt, void* user)
         prev[i] = down;
     }
     {
+        static int prevDrift;
+        int own = s_driftKey.vk == VK_SHIFT ? KM_SHIFT : s_driftKey.vk == VK_CONTROL ? KM_CTRL : s_driftKey.vk == VK_MENU ? KM_ALT : 0;
+        int down = focused && (GetAsyncKeyState(s_driftKey.vk) & 0x8000) != 0 && (mods & ~own) == s_driftKey.mods;
+        if (down && !prevDrift && g_alive && atomic_load(&g_avatar)) Drift();
+        prevDrift = down;
+    }
+    {
         static double upAt;
         if (prev[2]) upAt = g_now;
         if (g_rideWanted && !prev[2] && g_now - upAt >= 0.15) { g_rideWanted = 0; if (g_sinner && g_frv && !g_piloting) Ride(); }
@@ -3140,13 +3161,35 @@ static const KbOption kOptions[] = {
     {"upshift_damage", &s_upDamage, NULL}, {"upshift_decay", &s_upDecay, NULL}, {"leash_start", &s_leashStart, NULL}, {"leash_stop", &s_leashStop, NULL},
     {"leash_warp", &s_leashWarp, NULL}, {"slide_speed", &s_slideSpeed, NULL}, {"gun_every", &s_gunEvery, NULL}, {"plus_rate", &s_plusRate, NULL},
     {"fire_range", &s_fireRange, NULL}, {"guard_range", &s_guardRange, NULL}, {"sinner_fire", NULL, &s_sinFire}, {"drift_on", NULL, &s_driftOn}, {"full_on", NULL, &s_fullOn}, {"full_min_speed", &s_fullMinSpeed, NULL},
-    {"gear_seconds", &s_gearSeconds, NULL}, {"winner_cooldown", &s_winnerCd, NULL}, {"release_every", &s_releaseEvery, NULL}, {"drift_every", &s_driftEvery, NULL},
+    {"gear_seconds", &s_gearSeconds, NULL}, {"winner_cooldown", &s_winnerCd, NULL}, {"release_every", &s_releaseEvery, NULL}, {"drift_cooldown", &s_driftEvery, NULL},
     {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
 };
 static void OptionAfter(const char* name, int changed) { (void)name; (void)changed; }
 HF_MOD_EXPORT int koleda_option_get(const char* name, double* out) { return OptionGet(name, out); }
 HF_MOD_EXPORT int koleda_option_set(const char* name, double value) { return OptionSet(name, value); }
 
+/* 0.3.4: key_drift, a fourth key beside kitbase's three */
+static void LoadDriftKey(void)
+{
+    char path[MAX_PATH * 2], line[256];
+    snprintf(path, sizeof path, "%s\\%s", hf->mod_folder(self), kb_ini);
+    FILE* f = OpenUtf8(path, L"r");
+    if (!f) return;
+    while (fgets(line, sizeof line, f))
+    {
+        char* c = strchr(line, ';');
+        if (c) *c = 0;
+        char* eq = strchr(line, '=');
+        char key[64];
+        if (!eq) continue;
+        *eq = 0;
+        if (sscanf(line, " %63s", key) != 1 || strcmp(key, "key_drift")) continue;
+        Key parsed;
+        if (ParseKey(eq + 1, &parsed)) s_driftKey = parsed;
+        else Log("key_drift: not a key I know, so B");
+    }
+    fclose(f);
+}
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
@@ -3168,6 +3211,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
+    LoadDriftKey();
     RoundsAdd();
     SinnerAdd(api, mod);
     /* (0.2.12: no FRV Sinner call of her own: its package could not be loaded reliably. The M-103 she brings in her

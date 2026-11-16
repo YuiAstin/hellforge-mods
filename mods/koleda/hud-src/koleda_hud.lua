@@ -27,7 +27,7 @@ end
 
 local ffi = require('ffi')
 pcall(ffi.cdef, [[
-typedef struct kolhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t upshift, upshift_max, gear, sinner; float sinner_hp, sinner_max; uint32_t leash, drive, winner, piloted; float kr_left; uint32_t keys[3]; char key_label[3][24]; uint32_t sinner_kind, frv; float sprint_left, sprint_cd, upshift_pct, kr_mult, share_pct; uint32_t share_on, ems_immune, release_on; float sprint_ram; int32_t frv_pkg; float turbo_left, turbo_mult, post_move, gear_left, winner_cd, upshift_guard, full_speed, full_ram; } kolhud1_state;
+typedef struct kolhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t upshift, upshift_max, gear, sinner; float sinner_hp, sinner_max; uint32_t leash, drive, winner, piloted; float kr_left; uint32_t keys[3]; char key_label[3][24]; uint32_t sinner_kind, frv; float sprint_left, sprint_cd, upshift_pct, kr_mult, share_pct; uint32_t share_on, ems_immune, release_on; float sprint_ram; int32_t frv_pkg; float turbo_left, turbo_mult, post_move, gear_left, winner_cd, upshift_guard, full_speed, full_ram, drift_cd; char drift_key[24]; } kolhud1_state;
 void *kolhud1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
 void *kolhud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
 ]])
@@ -430,6 +430,11 @@ local function buff_row(d, cx, y)
         local cd = tonumber(state.sprint_cd)
         if cd > 0.05 then add(('BURST IN %ds'):format(math.ceil(cd)), MUTED) else add('BURST READY', GREEN) end
     end
+    local dc = tonumber(state.drift_cd)
+    if dc >= 0 then
+        local dk = ffi.string(state.drift_key)
+        if dc > 0.05 then add(('DRIFT [%s] %ds'):format(dk, math.ceil(dc)), MUTED) else add(('DRIFT READY [%s]'):format(dk), GREEN) end
+    end
     local fs = tonumber(state.full_speed)
     if fs > 0 then add(('FULL SPEED %d M/S  RAMS x%.2g'):format(math.floor(fs + 0.5), tonumber(state.full_ram)), YELLOW) end
     if state.release_on ~= 0 then add('KINETIC RELEASE', ELECTRIC) end
@@ -508,10 +513,10 @@ local OPTIONS = {
     {'upshift_decay', 'slider', 'Upshift: Decay', 1, 60, 1, 'Seconds without a gain before a stack is lost.'},
     {'gear_seconds', 'slider', 'Gears: Duration', 3, 60, 1, 'Seconds N, S and S+ last before the Sinner goes back to D.', true},
     {'release_every', 'slider', 'Kinetic Release: Interval', 2, 30, 1, 'Seconds between its rifle volleys while it fights in S or S+.'},
-    {'drift_on', 'toggle', "Sinner: Let's Go for a Drift!", 0, 1, 1, 'Waves of EMS bursts out from the Sinner into the enemies around it.'},
+    {'drift_on', 'toggle', "Sinner: Let's Go for a Drift!", 0, 1, 1, 'Its active (key_drift in koleda.ini, B): waves of EMS bursts out from the Sinner into the enemies around it.'},
     {'full_on', 'toggle', "Sinner: Let's Go Full Speed!", 0, 1, 1, 'While the FRV moves fast it fires at the enemies ahead, faster the faster it goes, and its rams hit harder.'},
     {'full_min_speed', 'slider', 'Full Speed: From Speed', 0, 30, 1, 'Metres a second it has to move for Full Speed.'},
-    {'drift_every', 'slider', 'Drift: Interval', 3, 60, 1, 'Seconds between Drifts.'},
+    {'drift_cooldown', 'slider', 'Drift: Cooldown', 0, 60, 1, 'Seconds before Drift can be used again.'},
     {'leash_start', 'slider', 'Sinner: Follow From', 2, 40, 1, 'It walks to her beyond this many metres.', true},
     {'leash_stop', 'slider', 'Sinner: Stop Within', 1, 30, 1, 'It stops this close to her.'},
     {'leash_warp', 'slider', 'Sinner: Warp Beyond', 10, 200, 5, 'Farther than this from her, it is warped beside her.'},
