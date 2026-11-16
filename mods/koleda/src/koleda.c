@@ -48,7 +48,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.2"
+#define VERSION "0.3.3"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -101,11 +101,11 @@ static float s_gearSeconds = 15, s_gearD = 1.3f, s_gearS = 1.3f, s_gearPlus = 1.
 static float s_sinTaken = 0.65f, s_parkTaken = 0.7f, s_sinHeal = 0.25f, s_sinHealEvery = 8;
 /* 0.3.2: Kinetic Release: rifle rounds from it at the enemies near it; Drift: EMS waves; Full Speed: its cone of fire
  * ahead while it moves fast, and harder rams */
-static int s_relRound = 241, s_relRoundsS = 2, s_relRoundsPlus = 3, s_relPoints = 16;
+static int s_relRound = 0, s_relRoundsS = 3, s_relRoundsPlus = 4, s_relPoints = 16, s_fullShots = 3;
 static float s_relReachPlus = 18, s_relInner = 6, s_relGap = 0.3f;
 static int s_driftOn = 1, s_driftRings = 4, s_driftDamage = 800, s_fullOn = 1;
 static float s_driftEvery = 12, s_driftRadius = 20;
-static float s_fullMinSpeed = 5, s_fullRefSpeed = 15, s_fullEvery = 0.3f, s_fullCone = 30, s_fullRange = 30, s_fullRam = 0.06f, s_fullRamMax = 3;
+static float s_fullMinSpeed = 5, s_fullRefSpeed = 15, s_fullEvery = 0.15f, s_fullCone = 35, s_fullRange = 30, s_fullRam = 0.06f, s_fullRamMax = 3;
 static int s_cleanse = 1;
 /* driving (sinner_drive.h): the probe's numbers; -1 not known */
 static int s_drive = 1, s_driveTest = 0;
@@ -127,9 +127,9 @@ static float s_fpDistance = 0.45f;
 /* 0.2.0: the FRV Sinner (her M-103 Supply FRV) */
 static int s_frvOn = 1, s_releaseRow = 150;   /* 0.2.6: sinner_kind: 0 the Patriot, 1 the FRV (her own FRV Sinner call; the default) */
    /* 0.2.5: an EMS burst on each enemy near it (0.2.1-0.2.4: blasts in a ring, which missed) */
-static int s_releaseShell = 154, s_releaseTargetsS = 3, s_releaseTargetsPlus = 6, s_emsImmune = 1;
+static int s_releaseShell = 154, s_releaseTargetsS = 4, s_releaseTargetsPlus = 6, s_emsImmune = 1;
 static float s_releaseAp = 6, s_releaseReach = 12;
-static float s_releaseEvery = 8, s_releaseRadius = 7,   /* 0.2.4: 7 m (4 m blasts flipped the FRV) */
+static float s_releaseEvery = 5, s_releaseRadius = 7,   /* 0.2.4: 7 m (4 m blasts flipped the FRV) */
     s_rideRange = 60;
 static int s_grip = 1;
 static float s_gripGravity = 12, s_gripCancel = 0.5f, s_gripMargin = 0.35f, s_gripMass = 3000;
@@ -152,9 +152,9 @@ static const KbSetting kSettings[] = {
     KB_F("s3_cooldown", s_s3Cd, 0, 3600), KB_I("cleanse", s_cleanse, 0, 2), KB_F("winner_cooldown", s_winnerCd, 0, 3600),
     KB_F("gear_seconds", s_gearSeconds, 1, 120), KB_F("gear_damage_d", s_gearD, 0, 10), KB_F("gear_damage_s", s_gearS, 0, 10), KB_F("gear_damage_plus", s_gearPlus, 0, 10), KB_F("gear_damage_n", s_gearN, 0, 10),
     KB_F("post_move", s_postMove, 1, 5), KB_F("sinner_taken", s_sinTaken, 0, 1), KB_F("park_taken", s_parkTaken, 0, 1), KB_F("sinner_heal", s_sinHeal, 0, 1), KB_F("sinner_heal_every", s_sinHealEvery, 0.5, 120),
-    KB_I("release_round", s_relRound, 1, 100000), KB_I("release_rounds_s", s_relRoundsS, 1, 10), KB_I("release_rounds_plus", s_relRoundsPlus, 1, 10), KB_F("release_reach_plus", s_relReachPlus, 2, 80),
+    KB_I("release_round", s_relRound, 0, 100000), KB_I("release_rounds_s", s_relRoundsS, 1, 10), KB_I("release_rounds_plus", s_relRoundsPlus, 1, 10), KB_F("release_reach_plus", s_relReachPlus, 2, 80),
     KB_I("drift_points", s_relPoints, 3, 32), KB_F("drift_inner", s_relInner, 0, 30), KB_F("drift_gap", s_relGap, 0, 2),
-    KB_I("full_on", s_fullOn, 0, 1), KB_F("full_min_speed", s_fullMinSpeed, 0, 50), KB_F("full_ref_speed", s_fullRefSpeed, 1, 60), KB_F("full_every", s_fullEvery, 0.05, 5),
+    KB_I("full_on", s_fullOn, 0, 1), KB_I("full_shots", s_fullShots, 1, 8), KB_F("full_min_speed", s_fullMinSpeed, 0, 50), KB_F("full_ref_speed", s_fullRefSpeed, 1, 60), KB_F("full_every", s_fullEvery, 0.05, 5),
     KB_F("full_cone", s_fullCone, 5, 90), KB_F("full_range", s_fullRange, 5, 100), KB_F("full_ram", s_fullRam, 0, 1), KB_F("full_ram_max", s_fullRamMax, 1, 10),
     KB_I("drift_on", s_driftOn, 0, 1), KB_I("drift_rings", s_driftRings, 1, 8), KB_I("drift_damage", s_driftDamage, 0, 100000), KB_F("drift_every", s_driftEvery, 2, 600), KB_F("drift_radius", s_driftRadius, 2, 50),
     KB_I("drive", s_drive, 0, 1), KB_I("turn", s_turnOn, 0, 1), KB_F("follow_distance", s_followDist, 3, 40), KB_F("personal_space", s_personal, 0, 20), KB_F("max_rounds", s_maxRounds, 1, 200), KB_F("round_speed", s_roundSpeed, 0, 3000), KB_I("drive_test", s_driveTest, 0, 1), KB_I("loco_manager", s_locoManager, -1, 100000000),
@@ -231,8 +231,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; times park_taken); a hit on it heals sinner_heal of its health, at most every sinner_heal_every s.\n"
                "gear_seconds = %g\ngear_damage_d = %g\ngear_damage_s = %g\ngear_damage_plus = %g\ngear_damage_n = %g\npost_move = %g\n"
                "sinner_taken = %g\npark_taken = %g\nsinner_heal = %g\nsinner_heal_every = %g\n"
-               "; Kinetic Release (Gear Shift, S and S+, while it fights, every release_every s; and right after Tactical\n"
-               "; Routebook): rifle rounds from it (release_round, 241: the Diligence Counter Sniper's) at the nearest\n"
+               "; Kinetic Release (Gear Shift, S and S+, every release_every s with enemies near; and right after Tactical\n"
+               "; Routebook): heavy rifle rounds from it (release_round 0: Snow Wolf's Eye's, with its tracer; else a game\n"
+               "; projectile, 241: the Diligence Counter Sniper's) at the nearest\n"
                "; release_targets_s enemies within release_reach m (S+: release_targets_plus within release_reach_plus),\n"
                "; release_rounds_s each (S+: release_rounds_plus), by its gear and her buffs.\n"
                "release_round = %d\nrelease_rounds_s = %d\nrelease_rounds_plus = %d\nrelease_reach_plus = %g\n"
@@ -244,10 +245,10 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Her bursts spare her, the Sinner and her allies.\n"
                "drift_on = %d\ndrift_every = %g\ndrift_radius = %g\ndrift_rings = %d\ndrift_damage = %d\ndrift_points = %d\ndrift_inner = %g\ndrift_gap = %g\n"
                "; Let's Go Full Speed! (full_on 0: off; not in N): while it moves at full_min_speed m/s or more, it fires at the\n"
-               "; enemies ahead (full_cone degrees either side of its way, within full_range m), one shot every full_every s at\n"
-               "; full_ref_speed m/s (faster: more often); and its rams deal 1 + full_ram for each m/s over full_min_speed times\n"
+               "; enemies ahead (full_cone degrees either side of its way, within full_range m), full_shots shots spread among\n"
+               "; them every full_every s at full_ref_speed m/s (faster: more often); and its rams deal 1 + full_ram for each m/s over full_min_speed times\n"
                "; more (at most full_ram_max).\n"
-               "full_on = %d\nfull_min_speed = %g\nfull_ref_speed = %g\nfull_every = %g\nfull_cone = %g\nfull_range = %g\nfull_ram = %g\nfull_ram_max = %g\n"
+               "full_on = %d\nfull_shots = %d\nfull_min_speed = %g\nfull_ref_speed = %g\nfull_every = %g\nfull_cone = %g\nfull_range = %g\nfull_ram = %g\nfull_ram_max = %g\n"
                "; Driving with the game's own locomotion (the probe's numbers; -1 unknown: the Sinner slides instead).\n"
                "; drive_test 1 writes the stick without the engine and mover calls.\n"
                "; turn 1: it turns toward what it fires at, else the way it slides (its turn record, 0.1.4).\n"
@@ -289,7 +290,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_sinTaken, (double)s_parkTaken, (double)s_sinHeal, (double)s_sinHealEvery,
             s_relRound, s_relRoundsS, s_relRoundsPlus, (double)s_relReachPlus,
             s_driftOn, (double)s_driftEvery, (double)s_driftRadius, s_driftRings, s_driftDamage, s_relPoints, (double)s_relInner, (double)s_relGap,
-            s_fullOn, (double)s_fullMinSpeed, (double)s_fullRefSpeed, (double)s_fullEvery, (double)s_fullCone, (double)s_fullRange, (double)s_fullRam, (double)s_fullRamMax,
+            s_fullOn, s_fullShots, (double)s_fullMinSpeed, (double)s_fullRefSpeed, (double)s_fullEvery, (double)s_fullCone, (double)s_fullRange, (double)s_fullRam, (double)s_fullRamMax,
             (double)s_followDist, (double)s_personal, (double)s_maxRounds, (double)s_roundSpeed, s_turnOn, s_drive, s_driveTest, s_locoManager, s_locoMap, s_locoRecords, s_locoStride, s_stickFwd, s_stickSide, s_stickTurn,
             s_sight, (double)s_fpDistance, s_frvOn, s_releaseRow, s_releaseShell, (double)s_releaseAp, (double)s_releaseReach, s_releaseTargetsS,
             s_releaseTargetsPlus, s_emsImmune, (double)s_releaseEvery, (double)s_releaseRadius, (double)s_rideRange,
@@ -1730,7 +1731,7 @@ static int SinnerShoot(int arm, uint32_t target, const float at0[3])
     RoundSpeed(r);
     if (r == 4) RocketRow();
     uint32_t round = g_roundBad[r] ? (uint32_t)s_roundFallback : g_round[r];
-    if (g_shootRifle) round = (uint32_t)s_relRound;
+    if (g_shootRifle) round = s_relRound > 0 ? (uint32_t)s_relRound : g_round[3] ? g_round[3] : (uint32_t)s_s1Round;
     if (ProjBudget() < 1) return 0;
     g_projTokens -= 1;
     int res = hf->spawn_projectile(self, round, from, d);
@@ -1778,7 +1779,7 @@ static int SinnerShoot(int arm, uint32_t target, const float at0[3])
     }
     /* 0.1.5: its gun's firing sound (the HUD side plays it: koleda_sounds) */
     {
-        uint32_t base = g_shootRifle ? (uint32_t)s_relRound : r == 4 ? (uint32_t)s_roundRocket : (uint32_t)(r == 0 ? s_roundN : r == 1 ? s_roundS : s_roundPlus);
+        uint32_t base = g_shootRifle ? (uint32_t)(s_relRound > 0 ? s_relRound : s_s1Round) : r == 4 ? (uint32_t)s_roundRocket : (uint32_t)(r == 0 ? s_roundN : r == 1 ? s_roundS : s_roundPlus);
         for (unsigned i = 0; i < sizeof kRoundGun / sizeof kRoundGun[0]; i++)
             if (kRoundGun[i].round == base) { ShotSound(kRoundGun[i].gun, from); break; }
     }
@@ -2194,6 +2195,7 @@ static void KineticRelease(const char* why)
         t[j].e = e; t[j].d2 = d2;
     }
     if (!n) return;
+    g_releaseNext = g_now + s_releaseEvery;
     if (g_dqi >= g_dqn) g_dqn = g_dqi = 0;
     for (int r = 0; r < rounds; r++)
         for (int i = 0; i < n && g_dqn < DRIFT_Q; i++) { g_dq[g_dqn].t = t[i].e; g_dq[g_dqn].rifle = 1; g_dqn++; }
@@ -2243,26 +2245,40 @@ static void FullFrame(void)
         g_wayAt = g_now;
     }
     if (!s_fullOn || g_gear == GEAR_N || g_speed < s_fullMinSpeed || g_now < g_fullNext || ProjBudget() < 1) return;
-    /* the nearest enemy in its cone ahead */
-    float cosMax = cosf(s_fullCone * 0.0174533f), best = s_fullRange * s_fullRange, at[3], q[3];
-    uint32_t t = 0;
+    /* the enemies in its cone ahead (the nearest few) */
+    float cosMax = cosf(s_fullCone * 0.0174533f), q[3];
+    struct { uint32_t e; float d2, q[3]; } t[8];
+    int n = 0;
     for (int k = 0; k < FOES; k++)
     {
         uint32_t e = g_foe[k];
         float d2;
-        if (!e || !TargetPos(e, g_foeRes[k], q) || (d2 = Dist2(q, g_sinPos)) >= best || d2 < 9) continue;
+        if (!e || !TargetPos(e, g_foeRes[k], q) || (d2 = Dist2(q, g_sinPos)) > s_fullRange * s_fullRange || d2 < 9) continue;
         float dx = q[0] - g_sinPos[0], dy = q[1] - g_sinPos[1], h = sqrtf(dx * dx + dy * dy);
         if (h < 0.1f || (dx * g_way[0] + dy * g_way[1]) / h < cosMax || !Alive(e)) continue;
-        best = d2; t = e; memcpy(at, q, 12);
+        int j;
+        if (n == 8) { if (d2 >= t[n - 1].d2) continue; j = n - 1; }
+        else j = n++;
+        while (j > 0 && t[j - 1].d2 > d2) { t[j] = t[j - 1]; j--; }
+        t[j].e = e; t[j].d2 = d2; memcpy(t[j].q, q, 12);
     }
-    if (!t) { g_fullNext = g_now + 0.1; return; }
+    if (!n) { g_fullNext = g_now + 0.1; return; }
     double every = s_fullEvery * s_fullRefSpeed / g_speed;
-    g_fullNext = g_now + (every < 0.06 ? 0.06 : every);
-    g_arm = !g_arm;
-    if (!SinnerShoot(g_arm, t, at)) return;
+    g_fullNext = g_now + (every < 0.05 ? 0.05 : every);
+    int fired = 0;
+    static unsigned rot;
+    for (int i = 0; i < s_fullShots && ProjBudget() >= 1; i++)
+    {
+        int k = (int)(rot++ % (unsigned)n);
+        float at[3];
+        memcpy(at, t[k].q, 12);
+        g_arm = !g_arm;
+        if (SinnerShoot(g_arm, t[k].e, at)) fired++;
+    }
+    if (!fired) return;
     g_fightAt = g_now;
-    g_driftShots++;
-    if (g_now - g_fullSeen > 3) { g_fulls++; if (g_fulls <= 8) Log("Let's Go Full Speed! (%s, %.0f m/s): it fires ahead, rams x%.2f", kGear[g_gear], (double)g_speed, (double)RamBonus()); }
+    g_driftShots += (unsigned)fired;
+    if (g_now - g_fullSeen > 3) { g_fulls++; if (g_fulls <= 8) Log("Let's Go Full Speed! (%s, %.0f m/s): it fires ahead at %d enemies, rams x%.2f", kGear[g_gear], (double)g_speed, n, (double)RamBonus()); }
     g_fullSeen = g_now;
     SinnerAction("Let's Go Full Speed!");
 }
@@ -2288,9 +2304,9 @@ static void GearFrame(void)
         SinnerSetHealth(to > g_sinMax ? g_sinMax : to, "Gear Shift's heal");
     }
     /* Kinetic Release while it fights in S or S+ */
-    if ((g_gear == GEAR_S || g_gear == GEAR_PLUS) && g_now - g_fightAt < 1.5 && g_now >= g_releaseNext)
+    if ((g_gear == GEAR_S || g_gear == GEAR_PLUS) && g_now >= g_releaseNext)
     {
-        g_releaseNext = g_now + s_releaseEvery;
+        g_releaseNext = g_now + 0.5;   /* (KineticRelease sets release_every once it fires) */
         KineticRelease("Kinetic Release");
     }
 }
