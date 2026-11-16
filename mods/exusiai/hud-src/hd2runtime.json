@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "Exusiai HUD",
+  "resource": "mods/yui/exusiai_hud",
+  "guid": "e327477b-8889-5265-8130-80f67df8385d",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.30.0",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}

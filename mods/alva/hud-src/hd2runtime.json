@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "Alva HUD",
+  "resource": "mods/yui/alva_hud",
+  "guid": "8d9698db-d3e8-573a-a648-6430d572802c",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.30.0",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}

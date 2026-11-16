@@ -1,0 +1,1409 @@
+-- Ascalon HUD (mods/yui/ascalon_hud): the side of Ascalon's kit that the engine's Lua has to do.
+--   * While she is hidden her body is not drawn: every visible mesh of her Helldiver's units (the avatar and each armour
+--     part are units of their own sharing one root) is switched off with Unit.set_mesh_visibility, and again four times
+--     a second, since the game switches meshes back on by itself; with hide_gear her weapons and backpack too. The way
+--     is the CAMO-EX01 Optical Cloak Pack's "compatibility" cloak (hide, remember, re-hide), found with the Cloak Probe.
+--   * A line at the bottom middle says what she is: hidden, revealed (how many enemies sense her, then the seconds
+--     left), or not hidden because of a backpack or support weapon.
+-- Ascalon is a HellForge code mod; this reads ascalon.dll's state (ascalon_hud_state, layout version 3) through LuaJIT's
+-- ffi every frame. Requires Bingus Shared Loader and HD2Runtime; uses HD2Runtime by SkyeShade
+-- (https://github.com/SkyeShade/HD2Runtime) through its public API (hd2.ui.overlay).
+local OWNER = 'mods/yui/ascalon_hud'
+
+local sink, sink_tried
+local function log(message)
+    pcall(print, message)
+    if not sink_tried then
+        sink_tried = true
+        local ok, result = pcall(function() return CowboyBingusModLoader.open_log('AscalonHUD.log') end)
+        if ok then sink = result end
+    end
+    if sink then
+        if not pcall(function() sink:write(message .. '\n'); if sink.flush then sink:flush() end end) then sink = nil end
+    end
+end
+
+local ok, hd2 = pcall(require, 'mods/skyeshade/hd2runtime')
+if not ok or type(hd2) ~= 'table' or type(hd2.ui) ~= 'table' or type(hd2.ui.overlay) ~= 'function' then
+    log('[Ascalon HUD] HD2Runtime with hd2.ui.overlay is not available: she stays drawn, no status line (' .. tostring(hd2) .. ')')
+    return
+end
+
+local ffi = require('ffi')
+pcall(ffi.cdef, [[
+typedef struct aschud3_state { uint32_t version, in_mission, state; float reveal_left; uint32_t cloak_visual, hide_gear; uint32_t units[5]; uint32_t sensing; float e_left, e_ready, d_left, d_ready; uint32_t keys[3]; char key_label[3][16]; uint32_t charges, charges_max; float charge_left; uint32_t nwanted; uint32_t wanted[256]; } aschud3_state;
+void *aschud1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
+void *aschud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
+]])
+local k32 = ffi.load('kernel32')
+local S = rawget(_G, 'stingray') or _G
+local function lib(name) local t = rawget(_G, name) or (type(S) == 'table' and S[name]) or nil; return type(t) == 'table' and t or nil end
+local function pc(f, ...) if type(f) ~= 'function' then return false, 'missing' end return pcall(f, ...) end
+
+local INK, PANEL, TEXT, MAGENTA, ORANGE, MUTED = {8, 9, 10}, {12, 14, 16}, {240, 243, 245}, {224, 72, 160}, {255, 138, 36}, {150, 156, 160}
+local function rgba(c, a) return {c[1], c[2], c[3], math.floor(255 * (a or 1) + 0.5)} end
+
+-- the kit, for the shared parts below; NAMES are her three key bindings (Pursuit has no key: it lands by itself)
+local KIT = {name = 'Ascalon', id = 'ascalon', module = k32.aschud1_GetModuleHandleA, proc = k32.aschud1_GetProcAddress}
+local NAMES = {'ENDOWMENT', 'DESCENT', 'DASH'}
+-- kitbase:bindings.lua begin. Shared by the GFL2 kits' HUDs: written by tools/kitbase_sync.py from kitbase/hud/bindings.lua, so edit
+-- it there (the kit names itself in KIT, above).
+-------------------------------- GFL2_SHARED: cooldowns while the list is closed, in-game key bindings (same in each kit) --
+-- Cooldowns: with the GFL2 KITS HUD option "<Kit>: Always Show Cooldowns" on (the default), the skills on cooldown stay
+-- on screen while the stratagem list is closed, each on its own (only the ones recharging), where the list shows them.
+-- Key bindings: the three skills are registered with Mod Bindings Menu (Vanilla Plus Megapack: ESC > OPTIONS > the
+-- keyboard or controller binding page > MODS) as native game actions, the game's own binding rows (they start unbound:
+-- only the menu's fixed slots get keyboard defaults); with every native action taken they fall back to extended bindings
+-- (MORE MODS) with the .ini's keys as defaults. Each press is passed to the DLL (<kit>_input); the .ini's keys keep
+-- working beside them (a press of both within 0.3 s counts once).
+local X = {kit = KIT.name, id = KIT.id, always = true, opt_done = false, opt_wait = 0, bind_done = false, bind_wait = 0,
+    ids = {}, prev = {}, labels = {}, beat = 0, label_wait = 0, last_box = nil}
+pcall(ffi.cdef, [[
+typedef int (*gfl2bind_input)(unsigned int version, int skill);
+typedef int (*gfl2bind_key)(unsigned int version, int skill, int *vk, int *mods);
+]])
+local VK_NAMES = {[0x08] = 'backspace', [0x09] = 'tab', [0x0D] = 'enter', [0x14] = 'caps lock', [0x20] = 'space',
+    [0x21] = 'page up', [0x22] = 'page down', [0x23] = 'end', [0x24] = 'home', [0x25] = 'left', [0x26] = 'up',
+    [0x27] = 'right', [0x28] = 'down', [0x2D] = 'insert', [0x2E] = 'delete', [0x10] = 'left shift', [0x11] = 'left ctrl',
+    [0x12] = 'left alt', [0xA0] = 'left shift', [0xA1] = 'right shift', [0xA2] = 'left ctrl', [0xA3] = 'right ctrl',
+    [0xA4] = 'left alt', [0xA5] = 'right alt'}
+local VK_MOUSE = {[0x04] = 'middle', [0x05] = 'extra 1', [0x06] = 'extra 2'}
+-- the .ini key as a binding default ({button, modifiers} with the engine's names), nil when it has no engine name
+local function default_spec(vk, mods)
+    local button, device
+    if vk >= 0x41 and vk <= 0x5A then button = string.char(vk + 32)
+    elseif vk >= 0x30 and vk <= 0x39 then button = string.char(vk)
+    elseif vk >= 0x70 and vk <= 0x87 then button = 'f' .. (vk - 0x6F)
+    elseif vk >= 0x60 and vk <= 0x69 then button = 'numpad ' .. (vk - 0x60)
+    elseif VK_MOUSE[vk] then button, device = VK_MOUSE[vk], 'mouse'
+    else button = VK_NAMES[vk] end
+    if not button then return nil end
+    local m = {}
+    if mods % 2 == 1 and button ~= 'left shift' then m[#m + 1] = 'left shift' end
+    if math.floor(mods / 2) % 2 == 1 and button ~= 'left ctrl' then m[#m + 1] = 'left ctrl' end
+    if math.floor(mods / 4) % 2 == 1 and button ~= 'left alt' then m[#m + 1] = 'left alt' end
+    return {{button = button, device = device, modifiers = #m > 0 and m or nil}}
+end
+local function gfl2_dll(name)
+    local module = KIT.module(X.id .. '.dll')
+    if module == nil then return nil end
+    local p = KIT.proc(module, name)
+    return p ~= nil and p or nil
+end
+-- "<Kit>: Always Show Cooldowns" on the MODS tab (its own GFL2 KITS HUD entry: each kit's own entry is full)
+local function gfl2_options(dt)
+    if X.opt_done then return end
+    X.opt_wait = X.opt_wait - dt
+    if X.opt_wait > 0 then return end
+    X.opt_wait = 2
+    local menu = rawget(_G, 'ModOptionsMenu')
+    if not menu or menu.api ~= 1 then return end
+    X.opt_done = true
+    local id = 'yui.gfl2hud.' .. X.id .. '.cooldowns'
+    local ok, why = menu.register_option(id, {type = 'toggle', label = X.kit .. ': Always Show Cooldowns', mod = 'GFL2 Kits HUD',
+        mod_id = 'yui.gfl2hud', default = true,
+        description = X.kit .. "'s skills on cooldown stay on screen while the stratagem list is closed."})
+    if not ok then log('[' .. X.kit .. ' HUD] cooldowns option not added: ' .. tostring(why)) return end
+    local saved = menu.get(id)
+    if saved ~= nil then X.always = saved and true or false end
+    menu.on_change(id, function(value) X.always = value and true or false end)
+end
+-- the bound keys' names for the list ('CTRL+A'), refreshed once a second
+local function binding_label(mbm, id)
+    local ok, list = pcall(mbm.binding, id)
+    if not ok or type(list) ~= 'table' then return nil end
+    local alt = list[1]
+    if type(alt) ~= 'table' then return 'UNBOUND' end
+    local parts = {}
+    for _, m in ipairs(type(alt.modifiers) == 'table' and alt.modifiers or {}) do parts[#parts + 1] = tostring(m):gsub('^left ', ''):gsub('^right ', '') end
+    parts[#parts + 1] = tostring(alt.button or '?')
+    return string.upper(table.concat(parts, '+'))
+end
+local function gfl2_bindings(dt)
+    if X.bind_done == 'off' then return end
+    local mbm = rawget(_G, 'ModBindingsMenu')
+    if not X.bind_done then
+        X.bind_wait = X.bind_wait - dt
+        if X.bind_wait > 0 then return end
+        X.bind_wait = 2
+        if type(mbm) ~= 'table' or type(mbm.register_binding) ~= 'function' or type(mbm.is_down) ~= 'function' then return end
+        if (tonumber(mbm.version) or 0) < 4 then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings: Mod Bindings Menu is too old (version ' .. tostring(mbm.version) .. ')') return end
+        local ip, kp = gfl2_dll(X.id .. '_input'), gfl2_dll(X.id .. '_key')
+        if not ip or not kp then
+            if gfl2_dll(X.id .. '_hud_state') then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings: this ' .. X.id .. '.dll has none (update it)') end
+            return
+        end
+        X.input = ffi.cast('gfl2bind_input', ip)
+        local key = ffi.cast('gfl2bind_key', kp)
+        local vk, mods = ffi.new('int[1]'), ffi.new('int[1]')
+        for i = 1, 3 do
+            local spec = nil
+            if key(1, i, vk, mods) == 1 then spec = default_spec(tonumber(vk[0]), tonumber(mods[0])) end
+            local id = 'yui.' .. X.id .. '.key' .. i   -- not '.skill': those ids were extended bindings (0.2.6), which stay extended
+            local ok, res, why = pcall(mbm.register_binding, id, X.kit .. ': ' .. NAMES[i], nil, {category = X.kit, default = spec})
+            if not ok or not res then
+                X.bind_done = 'off'
+                log('[' .. X.kit .. ' HUD] key bindings: ' .. id .. ' not registered (' .. tostring(ok and why or res) .. '): the .ini keys stay')
+                return
+            end
+            X.ids[i] = id
+        end
+        X.bind_done = true
+        local info = mbm.binding_info and mbm.binding_info(X.ids[1])
+        log('[' .. X.kit .. ' HUD] key bindings: registered with Mod Bindings Menu as ' .. tostring(type(info) == 'table' and info.backend or '?') .. ' bindings (the binding pages\' MODS tab); the .ini keys keep working')
+    end
+    for i = 1, 3 do
+        local down = mbm.is_down(X.ids[i]) == true
+        if down and not X.prev[i] then X.input(1, i) end
+        X.prev[i] = down
+    end
+    X.beat = X.beat - dt
+    if X.beat <= 0 then X.beat = 0.5; X.input(1, 0) end
+    X.label_wait = X.label_wait - dt
+    if X.label_wait <= 0 then
+        X.label_wait = 1
+        for i = 1, 3 do X.labels[i] = binding_label(mbm, X.ids[i]) end
+    end
+end
+-- The roster: with two or more character kits installed, an "Active Character" choice on the MODS tab (GFL2 Kits HUD);
+-- only the picked kit acts, from the next mission start (kitbase/kb_roster.h). Each HUD passes the pick to its own DLL;
+-- every kit reads the same shared answer. One kit alone: no row, it simply acts.
+pcall(ffi.cdef, [[
+typedef int (*gfl2roster_text)(char *out, int size);
+typedef int (*gfl2roster_pick)(const char *id);
+]])
+local R = {done = false, wait = 0, tries = 0}
+local function gfl2_roster(dt)
+    if R.done then return end
+    R.wait = R.wait - dt
+    if R.wait > 0 then return end
+    R.wait = 2
+    local menu = rawget(_G, 'ModOptionsMenu')
+    if not menu or menu.api ~= 1 then return end
+    local tp, pp = gfl2_dll(X.id .. '_roster'), gfl2_dll(X.id .. '_pick')
+    if not tp or not pp then R.done = true return end              -- a DLL from before the roster
+    local buf = ffi.new('char[1024]')
+    local n = ffi.cast('gfl2roster_text', tp)(buf, 1024)
+    R.tries = R.tries + 1
+    if n < 2 then if R.tries >= 5 then R.done = true end return end  -- alone: nothing to pick
+    R.done = true
+    local list, active = ffi.string(buf):match('^(.*)|(.*)$')
+    local ids, names, default = {}, {}, 1
+    for entry in (list or ''):gmatch('[^;]+') do
+        local id, name = entry:match('^([^:]+):(.*)$')
+        if id then ids[#ids + 1] = id; names[#names + 1] = name; if id == active then default = #ids end end
+    end
+    if #ids < 2 or #ids > 16 then return end
+    local key = 0                                                    -- a short id for this roster (a new kit: a new row)
+    for _, id in ipairs(ids) do for c = 1, #id do key = (key * 31 + id:byte(c)) % 2147483647 end end
+    local option = 'yui.gfl2hud.character.' .. key
+    local ok, why = menu.register_option(option, {type = 'choice', label = 'Active Character', mod = 'GFL2 Kits HUD', mod_id = 'yui.gfl2hud',
+        choices = names, default = default,
+        description = 'Several character kits are installed: only the picked one acts (keys, body, skills, HUD). Takes effect at the next mission start.'})
+    if not ok then log('[' .. X.kit .. ' HUD] roster: the picker row was not added here (' .. tostring(why) .. '): another kit\'s HUD may have it') end
+    local pick = ffi.cast('gfl2roster_pick', pp)
+    local saved = menu.get(option)
+    if type(saved) == 'number' and ids[saved] then pick(ids[saved]) end
+    menu.on_change(option, function(value) if ids[value] then pick(ids[value]) end end)
+    log('[' .. X.kit .. ' HUD] roster: ' .. #ids .. ' character kits installed: ' .. table.concat(names, ', ') .. '; picked: ' ..
+        tostring(names[(type(saved) == 'number' and ids[saved]) and saved or default]))
+end
+local function gfl2_step(dt)
+    local okR, errR = pcall(gfl2_roster, dt)
+    if not okR then R.done = true; log('[' .. X.kit .. ' HUD] roster failed: ' .. tostring(errR)) end
+    local ok, err = pcall(gfl2_options, dt)
+    if not ok then X.opt_done = true; log('[' .. X.kit .. ' HUD] cooldowns option failed: ' .. tostring(err)) end
+    ok, err = pcall(gfl2_bindings, dt)
+    if not ok then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings failed, the .ini keys stay: ' .. tostring(err)) end
+end
+-- kitbase:bindings.lua end
+
+local state, fn, find_wait = nil, nil, 0
+local function find(dt)
+    if fn ~= nil then state = fn() return state end
+    find_wait = find_wait - dt
+    if find_wait > 0 then return nil end
+    find_wait = 2
+    local module = k32.aschud1_GetModuleHandleA('ascalon.dll')
+    if module == nil then return nil end
+    local proc = k32.aschud1_GetProcAddress(module, 'ascalon_hud_state')
+    if proc == nil then return nil end
+    fn = ffi.cast('aschud3_state *(*)(void)', proc)
+    state = fn()
+    if state == nil or state.version < 3 then fn = nil return nil end
+    log('[Ascalon HUD] connected to Ascalon')
+    return state
+end
+
+
+-- text with a drop shadow; sizes stay at 17 px and up (at 1080p) so the strokes stay solid
+local function heavy(d, str, x, y, size, font, colour, align)
+    local sc = d.scale
+    d:text(str, x + math.max(1, 2 * sc), y + math.max(1, 2 * sc), {size = size, font = font, colour = rgba(INK, 0.75), z = 4, align = align})
+    d:text(str, x, y, {size = size, font = font, colour = colour, z = 5, align = align})
+end
+local YELLOW, GREY = {255, 232, 0}, {120, 124, 128}
+local SOS_BEACON = 145   -- StratagemType of the SOS Beacon
+-- kitbase:list.lua begin. Shared by the GFL2 kits' HUDs: written by tools/kitbase_sync.py from kitbase/hud/list.lua, so edit
+-- it there (the kit names itself in KIT, above).
+-------------------------------------------------------------------------- the stratagem list, to sit beside --
+-- The list's entries and their icons' rectangles come from HD2Runtime's slot overlay (code / research from
+-- HD2Runtime by SkyeShade, its internal modules); without them the abilities show at a fixed place under the list.
+local L = {on = true, entries = nil, wait = 0, proven = false}
+local okA, SO = pcall(require, 'hd2runtime/runtime/stratagem_slot_overlay')
+local okB, W = pcall(require, 'hd2runtime/runtime/event_world')
+local okC, SEL = pcall(require, 'hd2runtime/runtime/stratagem_selector')
+if not (okA and okB and okC and type(SO) == 'table' and type(SO.hud_entries) == 'function' and type(SO.rect) == 'function'
+        and type(W) == 'table' and type(W.open) == 'function' and type(SEL) == 'table' and type(SEL.prove) == 'function') then
+    L.on = false
+    log('[' .. X.kit .. ' HUD] the stratagem list cannot be followed on this HD2Runtime: abilities always shown')
+end
+local said = {}
+local function why_not(what, why)
+    local key = what .. ': ' .. tostring(why)
+    if said[key] then return end
+    said[key] = true
+    log('[' .. X.kit .. ' HUD] list: ' .. key)
+end
+-- {left, top, right, size, step, alpha} of the open list (top-left origin), false when it is closed, nil when unknown
+local function list_box(d, dt)
+    if not L.on then return nil end
+    local world = W.open()
+    if not world then why_not('no world', 'not open') return nil end
+    if not L.proven then
+        local proven, why = SEL.prove(world)
+        if not proven then why_not('not proven yet', why) return nil end
+        L.proven = true
+        log('[' .. X.kit .. ' HUD] the stratagem list can be followed on this build')
+    end
+    L.wait = L.wait - dt
+    if not L.entries or L.wait <= 0 then
+        L.wait = 0.5
+        local entries, why = SO.hud_entries(world)
+        L.entries = entries
+        if not entries then why_not('no list', why) end
+    end
+    if not L.entries then L.full = nil return nil end
+    local H = d.height or (d.width * 9 / 16)
+    local box, tops, total = nil, {}, 0
+    local seen, sos, sos_shown, reinforce = {}, false, false, nil
+    for idx, e in pairs(L.entries) do
+        if idx == 0 then reinforce = e end
+        local kind = tonumber(e.type) or 0
+        if kind == SOS_BEACON then sos = true end
+        local used = kind ~= 0 and kind ~= 0xFFFFFFFF
+        if used then total = total + 1 end
+        local r = SO.rect(world, e.icon)
+        seen[#seen + 1] = string.format('%s:%d%s', tostring(idx), kind, r and string.format('@%.0f', H - (r.y + r.h)) or '-')
+        if r and kind == SOS_BEACON then sos_shown = true end
+        if r then
+            local top = H - (r.y + r.h)
+            tops[#tops + 1] = top
+            if not box then box = {left = r.x, top = top, bottom = top + r.h, size = r.h, alpha = r.alpha or 1}
+            else
+                box.left = math.min(box.left, r.x); box.top = math.min(box.top, top); box.bottom = math.max(box.bottom, top + r.h)
+                box.alpha = math.max(box.alpha, r.alpha or 1)
+            end
+        end
+    end
+    table.sort(seen)
+    local view = string.format('%d of %d used entries shown: %s', #tops, total, table.concat(seen, ' '))
+    if view ~= L.last_view and (L.views or 0) < 40 then L.last_view = view; L.views = (L.views or 0) + 1; log('[' .. X.kit .. ' HUD] list: ' .. view) end
+    -- open or closed, by how many icons show: the open list shows the whole loadout (7, more with event stratagems;
+    -- limited-use ones stay listed), and its most this mission is learned the first time it opens; the closed list
+    -- keeps only Reinforce and the few stratagems inbound or recharging. Open: the most, or one fewer (the SOS Beacon
+    -- hidden while it recharges).
+    if not box then return false end
+    L.full = math.max(L.full or 0, #tops)
+    if L.full < 4 or #tops < L.full - 1 then return false end
+    table.sort(tops)
+    local step
+    for i = 2, #tops do
+        local gap = tops[i] - tops[i - 1]
+        if gap > box.size * 0.5 and (not step or gap < step) then step = gap end
+    end
+    step = step or box.size * 1.2
+    box.step = step
+    return box
+end
+
+-- kitbase:list.lua end
+------------------------------------------------------------------------------------------------ her skills --
+-- Beside the stratagem list, as a stratagem shows (0.4.2; the other kits' panel): a tile with a short name, the
+-- skill's name, then its key or what it waits for. Pursuit is passive (its charges); Endowment and Descent show the
+-- time they still run, then their cooldown.
+-- her skills' icons (0.4.17; images/ of the HUD project): Arknights' skill icons in their own colours. The game's icon
+-- material draws masks, not pictures, so each icon is split into its white (the G mask) and its one colour (the R
+-- mask), and the R mask is drawn in that colour (ICON_COLOUR, taken from the picture): the picture again, near enough.
+local ICON_COLOUR = {{187, 9, 0, 255}, {168, 7, 2, 255}, {128, 128, 128, 255}}
+local ICONS = {}
+for i, id in ipairs({'ascalon_pursuit', 'ascalon_endowment', 'ascalon_descent'}) do
+    local okI, handle = pcall(hd2.resources.image, id)
+    if okI and handle then ICONS[i] = handle end
+end
+local SKILLS = {
+    {name = 'PURSUIT', short = 'PUR'},
+    {name = 'ENDOWMENT', short = 'END', bind = 1, key = 1},
+    {name = 'DESCENT', short = 'DES', bind = 2, key = 2},
+}
+-- {ready, running seconds, waiting seconds, the number on the tile, the line under the name}
+local function skill_now(i)
+    if i == 1 then
+        local c, m, cl = tonumber(state.charges), tonumber(state.charges_max), tonumber(state.charge_left)
+        return c > 0, 0, (c < m) and cl or 0, ('%d/%d'):format(c, m), c > 0 and 'NEXT HIT' or 'PASSIVE'
+    end
+    local run = tonumber(i == 2 and state.e_left or state.d_left)
+    local wait = tonumber(i == 2 and state.e_ready or state.d_ready)
+    local sk = SKILLS[i]
+    local label = X.labels[sk.bind] or ffi.string(state.key_label[sk.key])
+    return run <= 0 and wait <= 0, run, wait, nil, label
+end
+local function ability(d, i, x, y, size, alpha)
+    local sc = d.scale
+    local sk = SKILLS[i]
+    local ready, run, wait, count, label = skill_now(i)
+    local a = alpha
+    local t = math.max(1, 2 * sc)
+    local frame = run > 0 and rgba(ORANGE, a) or ready and rgba(MAGENTA, a) or rgba(GREY, a * 0.8)
+    d:rect(x, y, size, size, rgba(INK, a * 0.9), 1)
+    d:rect(x, y, size, t, frame, 2); d:rect(x, y + size - t, size, t, frame, 2)
+    d:rect(x, y, t, size, frame, 2); d:rect(x + size - t, y, t, size, frame, 2)
+    local icon = ICONS[i]
+    if icon then
+        local pad = size * 0.08
+        d:image(icon, x + pad, y + pad, size - 2 * pad, size - 2 * pad, {z = 3,
+            colours = {r = ICON_COLOUR[i], g = {255, 255, 255, 255}},
+            colour = {255, 255, 255, math.floor(255 * a + 0.5)}})
+    end
+    if count then
+        if not icon then heavy(d, sk.short, x + size / 2, y + size * 0.12, math.max(17 * sc, size * 0.32), 'title', ready and rgba(TEXT, a) or rgba(MUTED, a), 'center') end
+        heavy(d, count, x + size / 2, y + size * 0.58, math.max(17 * sc, size * 0.32), 'title', ready and rgba(YELLOW, a) or rgba(TEXT, a), 'center')
+    elseif run > 0 or wait > 0 then
+        -- waiting: the icon darkened; running or waiting: the seconds over it
+        if icon and run <= 0 then d:rect(x + t, y + t, size - 2 * t, size - 2 * t, rgba(INK, a * 0.55), 4) end
+        heavy(d, ('%.0f'):format(math.ceil(run > 0 and run or wait)), x + size / 2, y + size * 0.25, math.max(20 * sc, size * 0.42), 'title', run > 0 and rgba(ORANGE, a) or rgba(TEXT, a), 'center')
+    elseif not icon then
+        heavy(d, sk.short, x + size / 2, y + size * 0.3, math.max(17 * sc, size * 0.34), 'title', rgba(TEXT, a), 'center')
+    end
+    local tx = x + size + 10 * sc
+    heavy(d, sk.name, tx, y + size * 0.02, math.max(17 * sc, size * 0.36), 'title', (ready or run > 0) and rgba(TEXT, a) or rgba(MUTED, a))
+    local ksize = math.max(18 * sc, size * 0.4)
+    local under = label
+    if run > 0 then under = ('ACTIVE %.0fs'):format(math.ceil(run))
+    elseif wait > 0 and not count then under = ('%s  %.0fs'):format(label, math.ceil(wait))
+    elseif wait > 0 then under = ('%s  +1 in %.0fs'):format(label, math.ceil(wait)) end
+    heavy(d, under, tx, y + size * 0.5, ksize, 'title', run > 0 and rgba(ORANGE, a) or ready and rgba(YELLOW, a) or rgba(MUTED, a))
+end
+local function abilities(d, box, only)
+    local sc = d.scale
+    local size, step, x, y, a
+    if box then
+        size, step, a = box.size, box.step, box.alpha
+        x = box.left + 290 * sc          -- past the list's names
+        y = box.top
+    else
+        size, step, a = 44 * sc, 52 * sc, 1
+        x, y = 330 * sc, 90 * sc
+    end
+    local shown = {}
+    for i = 1, #SKILLS do
+        local ready, run, wait = skill_now(i)
+        if not only or run > 0 or wait > 0 then shown[#shown + 1] = i end
+    end
+    if #shown == 0 then return end
+    local w = size + 10 * sc + math.max(230 * sc, size * 5)
+    d:rect(x - 10 * sc, y - 10 * sc, w + 20 * sc, step * #shown + 20 * sc - (step - size), rgba(PANEL, a * 0.72), 0)
+    d:rect(x - 10 * sc, y - 10 * sc, 3 * sc, step * #shown + 20 * sc - (step - size), rgba(MAGENTA, a), 1)
+    for k, i in ipairs(shown) do ability(d, i, x, y + (k - 1) * step, size, a) end
+end
+
+------------------------------------------------------------------------- settings in the Mod Options Menu --
+-- Ascalon's numbers as rows on the escape menu's MODS tab (Mod Options Menu by CowboyBingus, its public api 1), read
+-- from and written to ascalon.dll (ascalon_option_get / ascalon_option_set, the ascalon.ini names). The menu keeps
+-- what the player applies; until then a row starts from ascalon.ini. Keys stay in ascalon.ini and the binding pages.
+local OPTIONS = {
+    {'area_radius', 'slider', 'Ambusher: Radius', 5, 30, 1, 'Metres around her each of her hits also strikes every enemy in.'},
+    {'area_mult', 'slider', 'Ambusher: Damage', 0.1, 2, 0.05, 'What the enemies around her take, times the hit.'},
+    {'mi_damage', 'slider', 'Mortal Interrogation: Damage', 0, 0.5, 0.01, 'Each second a marked enemy takes this times her hit, per stack.', true},
+    {'mi_ap', 'slider', 'Mortal Interrogation: Penetration', 0, 10, 1, 'Armour penetration of the mark\'s damage (10: no armour turns it; 0: light).'},
+    {'mi_seconds', 'slider', 'Mortal Interrogation: Duration', 5, 60, 1, 'Seconds a mark lasts.'},
+    {'mi_stacks', 'slider', 'Mortal Interrogation: Stacks', 1, 6, 1, 'The most marks on one enemy.'},
+    {'pursuit_mult', 'slider', 'Pursuit: Damage', 1, 4, 0.05, 'A Pursuit hit deals this times its damage, and lands twice.', true},
+    {'pursuit_charges', 'slider', 'Pursuit: Charges', 0, 6, 1, 'Charges she holds (0: no Pursuit).'},
+    {'pursuit_every', 'slider', 'Pursuit: Recharge', 1, 60, 1, 'Seconds for one charge.'},
+    {'e_mult', 'slider', 'Endowment: Damage', 1, 4, 0.05, 'Her hits deal this times their damage while it runs.', true},
+    {'e_seconds', 'slider', 'Endowment: Duration', 5, 90, 1, 'Seconds it runs.'},
+    {'e_cooldown', 'slider', 'Endowment: Cooldown', 0, 180, 5, 'Seconds before it can be used again.'},
+    {'d_mult', 'slider', 'Descent: Damage', 1, 4, 0.05, 'Her hits deal this times their damage while it runs.', true},
+    {'pi_speed', 'slider', 'Penumbral Image: Melee Speed', 1, 3, 0.05, 'Her melee swings run this many times as fast while she is hidden.', true},
+    {'d_speed', 'slider', 'Descent: Melee Speed', 1, 3, 0.05, 'Her melee swings run this many times as fast while Descent runs.'},
+    {'d_radius', 'slider', 'Descent: Radius', 5, 60, 1, 'Metres her hits reach everyone in while Descent runs (Ambusher\'s radius otherwise).'},
+    {'d_seconds', 'slider', 'Descent: Duration', 2, 30, 1, 'Seconds it runs; each kill adds more.'},
+    {'d_cooldown', 'slider', 'Descent: Cooldown', 0, 180, 5, 'Seconds before it can be used again.'},
+    {'parry', 'toggle', 'Parry', nil, nil, nil, 'A right-click just before a hit, a melee weapon in hand: the hit does nothing and she counters.', true},
+    {'parry_sound', 'toggle', 'Parry: Clash Sound', nil, nil, nil, 'A clash on a parry, from the .wav files in the mod\'s sounds folder.'},
+    {'parry_volume', 'slider', 'Parry: Clash Volume', 0, 2, 0.05, 'How loud the clash is, times the game\'s Master and SFX volume.'},
+    {'parry_window', 'slider', 'Parry: Window', 0.05, 1, 0.05, 'Seconds before the hit the right-click still counts.'},
+    {'parry_damage', 'slider', 'Parry: Counter Damage', 0, 2000, 50, 'What her counter deals to everyone in range.'},
+    {'dash', 'toggle', 'Dash', nil, nil, nil, 'Her dash key (Z unless rebound) dashes her forward through the enemies in the way.', true},
+    {'dash_swing', 'toggle', 'Dash: On Melee Swing', nil, nil, nil, 'A melee swing while she moves dashes too, as it used to.'},
+    {'dash_distance', 'slider', 'Dash: Distance', 1, 15, 0.5, 'Metres of the dash.'},
+    {'dash_damage', 'slider', 'Dash: Damage', 0, 2000, 50, 'What the enemies on the path take.'},
+    {'dash_cooldown', 'slider', 'Dash: Cooldown', 0, 10, 0.1, 'Seconds between dashes.'},
+    {'dodge', 'slider', 'Hidden: Dodge', 0, 1, 0.05, 'The share of hits that miss her while she is hidden.', true},
+    {'visual_cut', 'slider', 'Hidden: Harder To See', 0, 100, 5, 'Per cent off how far enemies see her while she is hidden.'},
+    {'cloak_shimmer', 'toggle', 'Hidden: Shimmer (Experimental)', nil, nil, nil, 'Her body in a cloak material instead of not drawn. Turn it off if the game crashes when she hides.'},
+    {'shimmer_opacity', 'slider', 'Shimmer: Opacity', 0, 1, 0.02, 'The cloak material\'s opacity.'},
+    {'shimmer_stealth', 'slider', 'Shimmer: Stealth Opacity', 0, 1, 0.02, 'The cloak material\'s second opacity (opacity_stealth).'},
+    {'cloak_visual', 'toggle', 'Hidden: Body Not Drawn', nil, nil, nil, 'Her body is not drawn while she is hidden.'},
+    {'hide_gear', 'toggle', 'Hidden: Gear Not Drawn', nil, nil, nil, 'Her weapons and gear are not drawn either.'},
+    {'numbers', 'toggle', 'Damage Numbers', nil, nil, nil, 'Numbers over the hits her skills raise.', true},
+    {'numbers_at', 'slider', 'Damage Numbers: From', 0, 5, 0.1, 'A number shows for a hit her skills raised this many times or more (0: every hit).'},
+    {'numbers_ticks', 'toggle', 'Damage Numbers: Mark Ticks', nil, nil, nil, 'Also a number over each tick of a mark.'},
+    {'hp_mult', 'slider', 'Body: Health', 0.5, 4, 0.05, 'Her health, times a Helldiver\'s.', true},
+    {'stamina_mult', 'slider', 'Body: Stamina', 0.5, 6, 0.1, 'How long she sprints before the bar empties, times a Helldiver\'s.'},
+}
+pcall(ffi.cdef, [[
+typedef int (*ascopt_get)(const char *name, double *out);
+typedef int (*ascopt_set)(const char *name, double value);
+]])
+local O = {done = false, wait = 0}
+local function options_step(dt)
+    if O.done then return end
+    O.wait = O.wait - dt
+    if O.wait > 0 then return end
+    O.wait = 2
+    local menu = rawget(_G, 'ModOptionsMenu')
+    if not menu or menu.api ~= 1 then return end
+    local module = k32.aschud1_GetModuleHandleA('ascalon.dll')
+    if module == nil then return end
+    local gp, sp = k32.aschud1_GetProcAddress(module, 'ascalon_option_get'), k32.aschud1_GetProcAddress(module, 'ascalon_option_set')
+    if gp == nil or sp == nil then O.done = true; log('[Ascalon HUD] options: this ascalon.dll has no options (update Ascalon)') return end
+    O.done = true
+    local get, set = ffi.cast('ascopt_get', gp), ffi.cast('ascopt_set', sp)
+    local out = ffi.new('double[1]')
+    local count = 0
+    for _, o in ipairs(OPTIONS) do
+        local key, kind = o[1], o[2]
+        if get(key, out) == 1 then
+            local current = tonumber(out[0])
+            local id = 'yui.ascalon.' .. key
+            local spec = {type = kind, label = o[3], mod = 'Ascalon', mod_id = 'yui.ascalon', description = o[7], gap = o[8] or nil}
+            if kind == 'toggle' then spec.default = current ~= 0
+            else
+                spec.min, spec.max, spec.step = o[4], o[5], o[6]
+                spec.default = math.max(o[4], math.min(o[5], current))
+            end
+            local ok, why = menu.register_option(id, spec)
+            if ok then
+                count = count + 1
+                local function push(value)
+                    if type(value) == 'boolean' then value = value and 1 or 0 end
+                    if type(value) == 'number' then set(key, value) end
+                end
+                local saved = menu.get(id)
+                if saved ~= nil then push(saved) end
+                menu.on_change(id, function(value) push(value) end)
+            else
+                log('[Ascalon HUD] options: ' .. key .. ' not added: ' .. tostring(why))
+            end
+        else
+            log('[Ascalon HUD] options: ascalon.dll has no ' .. key)
+        end
+    end
+    log(('[Ascalon HUD] options: %d settings on the MODS tab'):format(count))
+end
+
+---------------------------------------------------------------------------------------------- her units --
+local AVATAR = '4d1c334d294dfa97'
+local TYPE_LIMIT = 64
+local RI = (function()
+    local okx, off = pcall(function() return rawget(_G, 'stingray').Script.index_offset() end)
+    return okx and type(off) == 'number' and off or 1
+end)()
+local function xyz(v)
+    if v == nil then return nil end
+    local V = lib('Vector3')
+    local okv, x, y, z = pcall(function() return V.to_elements(v) end)
+    if okv and x then return x, y, z end
+    local ok2, a, b, c = pcall(function() return v.x, v.y, v.z end)
+    if ok2 then return a, b, c end
+end
+-- a unit's root, asked only of units with a scene graph (a root read on one without crashed the game once)
+local function root(U, u)
+    local okn, n = pcall(U.num_scene_graph_items, u)
+    if not okn or type(n) ~= 'number' or n < 1 or n > 10000 then return nil end
+    local okp, v = pcall(U.world_position, u, RI)
+    if not okp then return nil end
+    return xyz(v)
+end
+-- the scene unit id a unit handle carries (the Optical Cloak Pack's finding: the handle is the id times four)
+local function unit_id(u)
+    local okc, h = pcall(ffi.cast, 'uintptr_t', u)
+    local v = okc and tonumber(h) or nil
+    return v and math.floor(v / 4) or nil
+end
+-- A unit's own key (0.5.5). tostring(unit) names its type, not the unit: with two units of one type on her (the Dual
+-- Wield Probe's copy of her gun, and the gun) the second one hidden was taken for already noted, so it was hidden and
+-- never shown again. The key is the unit's id; its text only when the id cannot be read.
+local function ukey(u)
+    local id = unit_id(u)
+    return id and ('u' .. tostring(id)) or tostring(u)
+end
+-- every unit of a type with at most TYPE_LIMIT copies, in every world; also the ones whose id is asked for
+local function scan(want)
+    local App, W, U = lib('Application'), lib('World'), lib('Unit')
+    if not (App and W and U) then return nil end
+    local worlds = {}
+    local okws, ws = pc(App.worlds)
+    if okws and type(ws) == 'table' and #ws > 0 then worlds = ws else
+        local okw, w = pc(App.main_world)
+        if okw and w then worlds = {w} end
+    end
+    local units, res, count, byid, avatars = {}, {}, {}, {}, {}
+    for _, world in ipairs(worlds) do
+        local oku, all = pcall(W.units, world)
+        if oku and type(all) == 'table' then
+            for _, u in ipairs(all) do
+                local okr, r = pcall(U.resource_name, u)
+                r = okr and tostring(r):lower() or '?'
+                units[#units + 1] = u; res[#units] = r
+                count[r] = (count[r] or 0) + 1
+                local id = unit_id(u)
+                if id and want[id] then byid[id] = u end
+                if r:find(AVATAR, 1, true) then avatars[#avatars + 1] = u end
+            end
+        end
+    end
+    local rare = {}
+    for i, u in ipairs(units) do if count[res[i]] <= TYPE_LIMIT and res[i] ~= '?' then rare[#rare + 1] = u end end
+    return rare, byid, avatars, #units
+end
+local function sharing(U, rare, x, y, z, out, seen)
+    local n = 0
+    for _, u in ipairs(rare) do
+        local key = ukey(u)
+        if not seen[key] then
+            local ux, uy, uz = root(U, u)
+            if ux and (ux - x) ^ 2 + (uy - y) ^ 2 + (uz - z) ^ 2 < 0.0004 then seen[key] = true; out[#out + 1] = u; n = n + 1 end
+        end
+    end
+    return n
+end
+
+local cl = {base = {}, on = false, units = nil, hidden = {}, keys = {}, acc = 0, scan_in = 0, ids = '', told = 0}
+-- her units now: the avatar's root and everything sharing it, then (hide_gear) each of her items' roots likewise
+local function collect(s)
+    local U = lib('Unit')
+    local want, ids = {}, {}
+    for k = 0, 4 do local id = tonumber(s.units[k]); ids[#ids + 1] = id; if id ~= 0 then want[id] = true end end
+    local linked = math.min(tonumber(s.nwanted), 256)
+    for k = 0, linked - 1 do want[tonumber(s.wanted[k])] = true end
+    local rare, byid, avatars, total = scan(want)
+    if not rare then return nil end
+    local me = byid[tonumber(s.units[0])]
+    local how = 'its unit id'
+    if not me and #avatars == 1 then me = avatars[1]; how = 'its type (the only one)' end
+    if not me then
+        if cl.told < 4 then cl.told = cl.told + 1; log(('[Ascalon HUD] her Helldiver\'s unit was not found (id %d, %d units of the avatar type, %d units in all)'):format(tonumber(s.units[0]), #avatars, total)) end
+        return nil
+    end
+    local mx, my, mz = root(U, me)
+    if not mx then return nil end
+    -- 0.1.3: her units by the engine's own links, when the DLL has them: exactly what hangs on her, nothing by position
+    if linked > 1 then
+        local out, found = {}, 0
+        for k = 0, linked - 1 do
+            local u = byid[tonumber(s.wanted[k])]
+            if u then out[#out + 1] = u; found = found + 1 end
+        end
+        local sig = 'links:' .. linked .. ':' .. found
+        if sig ~= cl.ids and cl.told < 12 then
+            cl.told = cl.told + 1
+            log(('[Ascalon HUD] her units: %d of the %d the engine links to her are in the worlds (%d units in all)'):format(found, linked, total))
+        end
+        cl.ids = sig
+        if found > 0 then return out, mx, my, mz end
+    end
+    local out, seen = {}, {}
+    local body = sharing(U, rare, mx, my, mz, out, seen)
+    local gear = 0
+    if s.hide_gear ~= 0 then
+        for k = 1, 4 do
+            local g = byid[tonumber(s.units[k])]
+            if g then
+                local gx, gy, gz = root(U, g)
+                if gx and (gx - mx) ^ 2 + (gy - my) ^ 2 + (gz - mz) ^ 2 < 16 then
+                    if not seen[ukey(g)] then seen[ukey(g)] = true; out[#out + 1] = g; gear = gear + 1 end
+                    gear = gear + sharing(U, rare, gx, gy, gz, out, seen)
+                end
+            end
+        end
+    end
+    local sig = table.concat(ids, ',') .. ':' .. body .. ':' .. gear
+    if sig ~= cl.ids and cl.told < 12 then
+        cl.told = cl.told + 1
+        log(('[Ascalon HUD] her units: the Helldiver by %s, %d units at its root, %d of her gear (%d units in all)'):format(how, body, gear, total))
+    end
+    cl.ids = sig
+    return out, mx, my, mz
+end
+local function alive(U, u)
+    local oka, a = pc(U.alive, u)
+    return oka and a == true
+end
+local function hide_units(units)
+    local U, M = lib('Unit'), lib('Mesh')
+    local hid = 0
+    for _, u in ipairs(units) do
+        if alive(U, u) then
+            local uk = ukey(u)
+            -- the whole unit switched off (0.5.11), its meshes left as the game has them: showing every mesh that was
+            -- ever seen drawn brought back a cape a mod keeps hidden, with the shimmer off too. Each look again, as
+            -- the game may switch a unit back on.
+            -- (0.5.12: not so. Switching a unit on again drew every mesh it has: a grey armour over her.)
+            local whole = false
+            local first = not cl.base[uk] and (cl.firsts or 0) < 60
+            local seen = {}
+            local okn, n = pc(U.num_meshes, u)
+            for i = 1, (not whole and okn and type(n) == 'number' and n <= 512) and n or 0 do
+                local okm, mesh = pc(U.mesh, u, i)
+                local okv, vis = false, nil
+                if okm then okv, vis = pc(M.visibility, mesh) end
+                if first then seen[#seen + 1] = i .. (okv and (vis == true and '+' or '-') or '?') end
+                if okm and okv and vis == true and pc(U.set_mesh_visibility, u, i, false) then
+                    local key = ukey(u) .. ':' .. i
+                    -- every mesh hidden is shown again (0.5.7). 0.5.5 showed only those drawn the first time the unit was
+                    -- hidden: she is hidden from the drop, when her gear is not drawn yet, so all of it stayed hidden
+                    if not cl.keys[key] then cl.keys[key] = true; cl.hidden[#cl.hidden + 1] = {unit = u, mesh = i, show = true} end
+                    hid = hid + 1
+                end
+            end
+            if first then cl.firsts = (cl.firsts or 0) + 1; log(('[Ascalon HUD] first hidden %s %s: meshes %s'):format(uk, tostring(u), table.concat(seen, ' '))) end
+            cl.base[uk] = true
+        end
+    end
+    return hid
+end
+-- (the meshes shown again, the unit list kept)
+local function show_all_keep()
+    local U = lib('Unit')
+    for _, h in ipairs(cl.hidden) do
+        if h.show and alive(U, h.unit) then
+            if h.whole then pc(U.set_unit_visibility, h.unit, true) else pc(U.set_mesh_visibility, h.unit, h.mesh, true) end
+        end
+    end
+    cl.hidden, cl.keys, cl.base = {}, {}, {}
+end
+-- Everything hidden is shown again. For the log (0.5.6: a gun stayed hidden after she was revealed), each unit's tally:
+-- meshes noted, those to show, those the engine took, and whether the unit is still there. A second later the meshes
+-- shown are looked at again (show_check): one that is hidden again is shown once more and said.
+local function show_all()
+    local U = lib('Unit')
+    local n = 0
+    local per, order, shown = {}, {}, {}
+    for _, h in ipairs(cl.hidden) do
+        local uk = ukey(h.unit)
+        local t = per[uk]
+        if not t then t = {name = tostring(h.unit), noted = 0, want = 0, ok = 0, alive = alive(U, h.unit)}; per[uk] = t; order[#order + 1] = uk end
+        t.noted = t.noted + 1
+        if h.show then
+            t.want = t.want + 1
+            if t.alive and h.whole then
+                if pc(U.set_unit_visibility, h.unit, true) then n = n + 1; t.ok = t.ok + 1; t.whole = true end
+            elseif t.alive and pc(U.set_mesh_visibility, h.unit, h.mesh, true) then n = n + 1; t.ok = t.ok + 1; shown[#shown + 1] = h end
+        end
+    end
+    if (cl.shows or 0) < 6 then
+        cl.shows = (cl.shows or 0) + 1
+        for k = 1, math.min(#order, 40) do
+            local t = per[order[k]]
+            log(('[Ascalon HUD]   %s %s: %d noted, %d to show, %d shown%s%s'):format(order[k], t.name, t.noted, t.want, t.ok, t.whole and ' (the unit as a whole)' or '', t.alive and '' or ' (the unit is gone)'))
+        end
+    end
+    cl.check = {wait = 1, items = shown}
+    cl.hidden, cl.keys, cl.units, cl.base = {}, {}, nil, {}
+    return n
+end
+local function show_check(dt)
+    local c = cl.check
+    if not c then return end
+    c.wait = c.wait - dt
+    if c.wait > 0 then return end
+    cl.check = nil
+    local U, M = lib('Unit'), lib('Mesh')
+    local again, gone, per = 0, 0, {}
+    for _, h in ipairs(c.items) do
+        if alive(U, h.unit) then
+            local okm, mesh = pc(U.mesh, h.unit, h.mesh)
+            local okv, vis = false, nil
+            if okm then okv, vis = pc(M.visibility, mesh) end
+            if okv and vis == false then
+                again = again + 1
+                local uk = ukey(h.unit)
+                per[uk] = (per[uk] or 0) + 1
+                pc(U.set_mesh_visibility, h.unit, h.mesh, true)
+            end
+        else
+            gone = gone + 1
+        end
+    end
+    if (again > 0 or gone > 0) and (cl.checks or 0) < 8 then
+        cl.checks = (cl.checks or 0) + 1
+        local parts = {}
+        for uk, k in pairs(per) do parts[#parts + 1] = uk .. ' x' .. k end
+        log(('[Ascalon HUD] a second after she was shown: %d mesh(es) were hidden again and are shown once more (%s), %d on units that are gone'):format(again, table.concat(parts, ', '), gone))
+    end
+end
+-- The shimmer (0.5.0, cloak_shimmer; experimental): hidden, her body's units wear the mod's cloak material instead of
+-- not being drawn. The material (yui/ascalon/cloak) is built by HellForge from the player's game copy
+-- (hellforge-data.json: one of the game's armour materials with plain textures). Each material slot of each visible
+-- mesh takes it (Unit.set_material(unit, slot id, material name), which returns what was there: put back when she is
+-- revealed), and its opacity and opacity_stealth are set from ascalon.ini (shimmer_opacity, shimmer_stealth: read
+-- through ascalon_option_get each second, so the MODS tab's sliders tune it live). Her gear is still not drawn: its
+-- meshes are not armour's, and an armour material on them is not known to be safe.
+local SH = {told2 = 0, pending = nil, stage = 0, wait = 0, mat = 'yui/ascalon/cloak', on = false, op = 0, st = 0, poll = 0, get = nil, out = nil, ready = false, applied = {}, keys = {}, mine = nil, told = 0, live = false}
+local function shimmer_settings(dt)
+    SH.poll = SH.poll - dt
+    if SH.poll > 0 then return end
+    SH.poll = 1
+    if not SH.get then
+        local module = k32.aschud1_GetModuleHandleA('ascalon.dll')
+        local gp = module ~= nil and k32.aschud1_GetProcAddress(module, 'ascalon_option_get') or nil
+        if gp == nil then return end
+        SH.get = ffi.cast('ascopt_get', gp)
+        SH.out = ffi.new('double[1]')
+    end
+    local function opt(name, default)
+        if SH.get(name, SH.out) == 1 then return tonumber(SH.out[0]) end
+        return default
+    end
+    SH.on = opt('cloak_shimmer', 0) ~= 0
+    SH.op, SH.st = opt('shimmer_opacity', 0), opt('shimmer_stealth', 0)
+    local A = lib('Application')
+    local okc, has = pc(A and A.can_get, 'material', SH.mat)
+    local ready = okc and has == true
+    if ready ~= SH.ready and SH.on and SH.told < 6 then
+        SH.told = SH.told + 1
+        log('[Ascalon HUD] shimmer: the cloak material is ' .. (ready and 'loaded' or 'not loaded (her body is not drawn instead)'))
+    end
+    SH.ready = ready
+end
+-- A change of material shows a unit's hidden meshes again (0.5.6: a cape a model mod keeps hidden came back whenever she
+-- was cloaked or shown). So around each change the meshes that were hidden are noted and, where the change showed
+-- them, hidden again, then and once more at the next look.
+local function hidden_meshes(U, M, u)
+    local out = {}
+    local okn, n = pc(U.num_meshes, u)
+    for i = 1, (okn and type(n) == 'number' and n <= 512) and n or 0 do
+        local okm, mesh = pc(U.mesh, u, i)
+        local okv, vis = false, nil
+        if okm then okv, vis = pc(M.visibility, mesh) end
+        if okv and vis == false then out[#out + 1] = i end
+    end
+    return out
+end
+local function keep_hidden(U, M, notes)
+    local n = 0
+    for _, note in ipairs(notes) do
+        if alive(U, note.unit) then
+            for _, i in ipairs(note.meshes) do
+                local okm, mesh = pc(U.mesh, note.unit, i)
+                local okv, vis = false, nil
+                if okm then okv, vis = pc(M.visibility, mesh) end
+                if okv and vis == true and pc(U.set_mesh_visibility, note.unit, i, false) then n = n + 1 end
+            end
+        end
+    end
+    if n > 0 and (SH.kept or 0) < 8 then SH.kept = (SH.kept or 0) + 1; log(('[Ascalon HUD] shimmer: %d mesh(es) a change of material had shown are hidden again'):format(n)) end
+    return n
+end
+-- The materials left alone (0.5.9): the cape's. Every cape is one shared unit and material, and the game puts the
+-- cape's own textures on the material when she is equipped (the cape bundles hold only textures). Given back by its id
+-- the material comes back with its default textures: the cape's design is lost, and a cape that a "hidden items" pack
+-- hides through see-through textures is drawn again. A slot wearing one keeps it; its mesh is not drawn instead, and
+-- shown again as her gear is. (0.5.8 left alone every material a mod's patch replaces: with a model mod that was her
+-- whole body, and the cape's material is not patched at all.) Keyed by the id's high half, as Material.id gives it.
+local PM = {['1966202537'] = true}   -- 0x7531dea9b2a2b888: the one cape unit's material (0.5.13, from the survey: the only unit of her body in the game's core bundle, with a material found nowhere else)
+local function patched_materials() return PM end
+-- For the log, once a session (0.5.10: which unit and material are the cape's): each of her units with every mesh,
+-- whether it is drawn, and each slot's material; and what the engine offers for materials, textures and cloth.
+local function shimmer_survey(units)
+    local U, M, Mat, Id64, Id32 = lib('Unit'), lib('Mesh'), lib('Material'), lib('IdString64'), lib('IdString32')
+    for _, name in ipairs({'Unit', 'Mesh', 'Material', 'Cloth'}) do
+        local L, f = lib(name), {}
+        if type(L) == 'table' then
+            for k, v in pairs(L) do
+                local kk = tostring(k):lower()
+                if type(v) == 'function' and (name ~= 'Unit' or kk:find('mater') or kk:find('textur') or kk:find('cloth') or kk:find('visib') or kk:find('lod')) then f[#f + 1] = tostring(k) end
+            end
+            table.sort(f)
+        end
+        log(('[Ascalon HUD] survey %s (%s): %s'):format(name, type(L), table.concat(f, ' ')))
+    end
+    for _, u in ipairs(units) do
+        if alive(U, u) then
+            local parts = {}
+            local okn, n = pc(U.num_meshes, u)
+            for i = 1, (okn and type(n) == 'number' and n <= 64) and n or 0 do
+                local okm, mesh = pc(U.mesh, u, i)
+                local okv, vis = false, nil
+                if okm then okv, vis = pc(M.visibility, mesh) end
+                local okc, c = false, nil
+                if okm then okc, c = pc(M.num_materials, mesh) end
+                local ms = {}
+                for j = 1, (okc and type(c) == 'number' and c <= 16) and c or 0 do
+                    local oksl, slot = pc(M.material_slot_id, mesh, j)
+                    local okt, mat = pc(M.material, mesh, j)
+                    local sh, mh = '?', '?'
+                    if oksl and slot ~= nil then local o, x = pc(Id32.to_hex, slot); if o then sh = tostring(x) end end
+                    if okt and mat then local o, id64 = pc(Mat.id64, mat); if o and id64 ~= nil then local o2, x = pc(Id64.to_hex, id64); if o2 then mh = tostring(x) end end end
+                    ms[#ms + 1] = sh .. '=' .. mh
+                end
+                parts[#parts + 1] = ('m%d %s [%s]'):format(i, okv and tostring(vis) or 'err', table.concat(ms, ' '))
+            end
+            log(('[Ascalon HUD] survey %s %s: %s'):format(ukey(u), tostring(u), table.concat(parts, '; ')))
+        end
+    end
+end
+local function shimmer_apply(units)
+    local U, M, Mat, Id64, Id32 = lib('Unit'), lib('Mesh'), lib('Material'), lib('IdString64'), lib('IdString32')
+    if not Id64 or type(Id64.to_hex) ~= 'function' or type(Id64.from_hex) ~= 'function' or not Id32 or type(Id32.to_hex) ~= 'function' or type(Id32.from_hex) ~= 'function' then
+        if SH.told < 12 then SH.told = SH.told + 1; log('[Ascalon HUD] shimmer: IdString64 or IdString32 is missing (a material could not be given back): her body is not drawn instead') end
+        SH.on = false
+        return
+    end
+    local set, bound, errs, skipped = 0, 0, 0, 0
+    local patched = patched_materials()
+    if not SH.surveyed then SH.surveyed = true; pc(shimmer_survey, units) end
+    if SH.notes then keep_hidden(U, M, SH.notes); SH.notes = nil end   -- what the last look's changes showed since
+    local notes = {}
+    for _, u in ipairs(units) do
+        if alive(U, u) then
+            notes[#notes + 1] = {unit = u, meshes = hidden_meshes(U, M, u)}
+            local okn, n = pc(U.num_meshes, u)
+            for i = 1, (okn and type(n) == 'number' and n <= 512) and n or 0 do
+                local okm, mesh = pc(U.mesh, u, i)
+                local okv, vis = false, nil
+                if okm then okv, vis = pc(M.visibility, mesh) end
+                local okc, c = false, nil
+                if okm and okv and vis == true then okc, c = pc(M.num_materials, mesh) end
+                for j = 1, (okc and type(c) == 'number' and c <= 64) and c or 0 do
+                    local oksl, slot = pc(M.material_slot_id, mesh, j)
+                    if oksl and slot ~= nil then
+                        local key = ukey(u) .. ':' .. tostring(slot)
+                        local okt, mat = pc(M.material, mesh, j)
+                        local oki, id = false, nil
+                        if okt and mat then oki, id = pc(Mat.id, mat) end
+                        local is_mine = oki and SH.mine ~= nil and tostring(id) == SH.mine
+                        if oki and id ~= nil and patched[tostring(id)] then
+                            -- the cape's material: the mesh is not drawn instead (noted, so it is shown again with her gear)
+                            if pc(U.set_mesh_visibility, u, i, false) then
+                                local hk = ukey(u) .. ':' .. i
+                                if not cl.keys[hk] then cl.keys[hk] = true; cl.hidden[#cl.hidden + 1] = {unit = u, mesh = i, show = true} end
+                                skipped = skipped + 1
+                            end
+                            break
+                        end
+                        -- its own material's id, read before it goes: without it the slot is left alone
+                        local prehex, pre64, before = nil, nil, (oki and id ~= nil) and tostring(id) or nil
+                        if not is_mine and okt and mat then
+                            local ok64, id64 = pc(Mat.id64, mat)
+                            if ok64 then pre64 = id64 end
+                            if ok64 and id64 ~= nil then local okx, hx = pc(Id64.to_hex, id64); if okx and type(hx) == 'string' then prehex = hx end end
+                        end
+                        -- the slot's id as text too: the engine's id values are the frame's own (0.5.4: the one kept for
+                        -- giving the material back had gone stale by then, and no way of handing it back found the slot)
+                        local slothex = nil
+                        do local oksh, sh = pc(Id32.to_hex, slot); if oksh and type(sh) == 'string' then slothex = sh end end
+                        if not is_mine and not (SH.keys[key] and SH.mine == nil) and ((prehex and slothex) or SH.keys[key]) then
+                            local okset, old = pc(U.set_material, u, slot, SH.mat)
+                            if okset then
+                                set = set + 1
+                                if not SH.keys[key] then
+                                    SH.keys[key] = true
+                                    -- what was there, kept as its id's text: given back by id (0.5.2: handing the
+                                    -- returned value itself back changed nothing, and she stayed cloaked)
+                                    local okh, hex = pc(Id64.to_hex, old)
+                                    SH.applied[#SH.applied + 1] = {unit = u, slot = slothex, mesh = i, index = j, hex = (okh and type(hex) == 'string') and hex or prehex, prehex = prehex, pre64 = pre64, old = old, before = before}
+                                    if SH.told2 < 4 then
+                                        SH.told2 = SH.told2 + 1
+                                        log(('[Ascalon HUD] shimmer slot %s: before id %s; set_material returned %s (%s), as hex %s; its id64 before %s (%s), as hex %s'):format(tostring(slot), tostring(before), tostring(old), type(old), tostring(okh and hex), tostring(pre64), type(pre64), tostring(prehex)))
+                                    end
+                                end
+                                okt, mat = pc(M.material, mesh, j)
+                                if okt and mat and SH.mine == nil then
+                                    local ok2, id2 = pc(Mat.id, mat)
+                                    if ok2 and id2 ~= nil then SH.mine = tostring(id2) end
+                                end
+                            else
+                                errs = errs + 1
+                                if SH.told < 12 then SH.told = SH.told + 1; log('[Ascalon HUD] shimmer: Unit.set_material failed: ' .. tostring(old)) end
+                            end
+                        end
+                        if okt and mat then
+                            pc(Mat.set_scalar, mat, 'opacity', SH.op)
+                            pc(Mat.set_scalar, mat, 'opacity_stealth', SH.st)
+                            bound = bound + 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if set > 0 then keep_hidden(U, M, notes); SH.notes = notes end
+    if set > 0 and SH.told < 12 then
+        SH.told = SH.told + 1
+        log(('[Ascalon HUD] shimmer: the cloak material on %d slot(s) of %d unit(s), %d binding(s) at opacity %.2f / %.2f, %d refused; %d cape mesh(es) not drawn instead'):format(set, #units, bound, SH.op, SH.st, errs, skipped))
+    end
+end
+-- Giving her own materials back (0.5.3). 0.5.1 handed back what set_material had returned and 0.5.2 that material's
+-- id made from its hex: both calls went through and neither changed a slot, so she stayed cloaked. Each way is now
+-- tried in turn, a quarter of a second apart, and a slot counts as hers again only when its material's id reads as it
+-- did before the cloak: the id made from the returned value's hex, the returned value itself, the id64 read before
+-- the swap, that id's hex as an id, and the two hex strings as names. The log says which way worked.
+local RESTORE_WAYS = {'the returned value\'s id (from hex)', 'the returned value', 'its id64 read before', 'that id64\'s hex as an id', 'the hex as text', 'the earlier hex as text'}
+local function slot_id(U, M, Mat, a)
+    local okm, mesh = pc(U.mesh, a.unit, a.mesh)
+    local okt, mat = false, nil
+    if okm then okt, mat = pc(M.material, mesh, a.index) end
+    local oki, mid = false, nil
+    if okt and mat then oki, mid = pc(Mat.id, mat) end
+    return oki and mid ~= nil and tostring(mid) or nil
+end
+local function shimmer_restore()
+    if #SH.applied > 0 then
+        SH.pending = SH.pending or {}
+        for _, a in ipairs(SH.applied) do SH.pending[#SH.pending + 1] = a end
+        SH.stage, SH.wait = 0, 0
+    end
+    SH.applied, SH.keys, SH.live = {}, {}, false
+end
+local function shimmer_restore_step(dt)
+    if not SH.pending then return end
+    SH.wait = SH.wait - dt
+    if SH.wait > 0 then return end
+    SH.wait = 0.25
+    local U, M, Mat, Id64, Id32 = lib('Unit'), lib('Mesh'), lib('Material'), lib('IdString64'), lib('IdString32')
+    if SH.rnotes then keep_hidden(U, M, SH.rnotes); SH.rnotes = nil end
+    -- what the last way did
+    local left = {}
+    for _, a in ipairs(SH.pending) do
+        if alive(U, a.unit) then
+            local now = slot_id(U, M, Mat, a)
+            if not (a.before and now == a.before) and not (SH.stage > 0 and a.before == nil) then left[#left + 1] = a end
+        end
+    end
+    if SH.stage > 0 and SH.told < 24 then
+        SH.told = SH.told + 1
+        log(('[Ascalon HUD] shimmer: giving back by %s: %d of %d slot(s) are hers again'):format(RESTORE_WAYS[SH.stage], #SH.pending - #left, #SH.pending))
+        if #left == 0 then SH.way = SH.stage end
+    end
+    if #left == 0 then SH.pending = nil return end
+    SH.pending = left
+    SH.stage = SH.stage + 1
+    if SH.way and SH.stage == 1 then SH.stage = SH.way end      -- the way that worked last time first
+    if SH.stage > #RESTORE_WAYS then
+        log(('[Ascalon HUD] shimmer: %d slot(s) could not be given their material back: the shimmer is off for this session (her body is not drawn instead)'):format(#left))
+        SH.pending, SH.broken = nil, true
+        return
+    end
+    local rnotes, noted = {}, {}
+    for _, a in ipairs(left) do
+        local uk = ukey(a.unit)
+        if not noted[uk] and alive(U, a.unit) then noted[uk] = true; rnotes[#rnotes + 1] = {unit = a.unit, meshes = hidden_meshes(U, M, a.unit)} end
+    end
+    SH.rnotes = rnotes
+    for _, a in ipairs(left) do
+        local what = nil
+        if SH.stage == 1 and a.hex then local okf, id = pc(Id64.from_hex, a.hex); if okf then what = id end
+        elseif SH.stage == 2 or SH.stage == 3 then what = nil      -- (the values kept from the swap's frame are stale: not handed back)
+        elseif SH.stage == 4 and a.prehex then local okf, id = pc(Id64.from_hex, a.prehex); if okf then what = id end
+        elseif SH.stage == 5 then what = a.hex
+        elseif SH.stage == 6 then what = a.prehex end
+        local okslot, slot = pc(Id32.from_hex, a.slot)
+        if okslot and slot ~= nil and what ~= nil and type(what) ~= 'boolean' then
+            local oks, res = pc(U.set_material, a.unit, slot, what)
+            if SH.told2 < 12 then SH.told2 = SH.told2 + 1; log(('[Ascalon HUD] shimmer slot %s: set_material with %s (%s): %s %s'):format(tostring(a.slot), tostring(what), type(what), tostring(oks), tostring(res))) end
+        end
+    end
+    keep_hidden(U, M, rnotes)
+end
+local can_alive = nil
+local function cloak_frame(s, dt)
+    pcall(shimmer_settings, dt)
+    local okR, errR = pcall(shimmer_restore_step, dt)
+    if not okR and SH.told < 24 then SH.told = SH.told + 1; log('[Ascalon HUD] shimmer: giving back failed: ' .. tostring(errR)) end
+    local want = s ~= nil and s.in_mission ~= 0 and s.cloak_visual ~= 0 and (s.state == 0 or s.state == 3)
+    if can_alive == nil then
+        local U = lib('Unit')
+        can_alive = U ~= nil and type(U.alive) == 'function'
+        if not can_alive then log('[Ascalon HUD] Unit.alive is missing: she stays drawn (hiding a unit that is gone is not safe)') end
+    end
+    if not can_alive then return end
+    if not want then
+        pcall(show_check, dt)
+        if cl.on then
+            cl.on = false
+            pcall(shimmer_restore)
+            local n = show_all()
+            if cl.told < 12 then log(('[Ascalon HUD] shown again: %d units or meshes'):format(n)) end
+        end
+        return
+    end
+    cl.acc = cl.acc + dt
+    cl.scan_in = cl.scan_in - dt
+    if not cl.on then cl.on = true; cl.acc = 1; cl.scan_in = 0; cl.check = nil end
+    if cl.acc < 0.25 then return end
+    cl.acc = 0
+    pcall(function()
+        if cl.scan_in <= 0 or not cl.units then
+            cl.scan_in = cl.settled and 2 or 0.5
+            local units, mx, my, mz = collect(s)
+            if units then
+                -- Not hidden until she has landed (0.5.12): what is drawn in the pod is not what is drawn after it (a
+                -- cape that a mod keeps hidden is drawn there), and every mesh hidden is shown again when she is
+                -- revealed. Landed: her height still for 2.5 s, or 30 s since her Helldiver appeared.
+                local av = tonumber(s.units[0])
+                if cl.av ~= av then cl.av = av; cl.settled = false; cl.still = 0; cl.lastz = nil; cl.waited = 0 end
+                if not cl.settled then
+                    cl.waited = cl.waited + 0.5
+                    if cl.lastz and math.abs(mz - cl.lastz) < 0.25 then cl.still = cl.still + 1 else cl.still = 0 end
+                    cl.lastz = mz
+                    if cl.still >= 5 or cl.waited >= 30 then
+                        cl.settled = true
+                        if cl.told < 24 then log(('[Ascalon HUD] she has landed (%s after %.1f s): hidden from now'):format(cl.still >= 5 and 'still' or 'by the clock', cl.waited)) end
+                    end
+                end
+                cl.units = units
+                -- her body: the units at her Helldiver's own root (the avatar and its armour parts); the rest is gear
+                local U = lib('Unit')
+                cl.body, cl.gear = {}, {}
+                for _, u in ipairs(units) do
+                    local ux, uy, uz = root(U, u)
+                    if mx and ux and (ux - mx) ^ 2 + (uy - my) ^ 2 + (uz - mz) ^ 2 < 0.0004 then cl.body[#cl.body + 1] = u else cl.gear[#cl.gear + 1] = u end
+                end
+            end
+        end
+        if not cl.units or not cl.settled then return end
+        local shimmer = SH.on and SH.ready and cl.body ~= nil and not SH.broken and not SH.pending
+        if shimmer ~= SH.live then        -- from not drawn to the shimmer or back: everything as it was first
+            shimmer_restore()
+            show_all_keep()
+            SH.live = shimmer
+        end
+        if shimmer then
+            shimmer_apply(cl.body)
+            hide_units(cl.gear)
+        else
+            hide_units(cl.units)
+        end
+    end)
+end
+
+---------------------------------------------------------------------------------------------- the status line --
+local LINES = {
+    [0] = {'HIDDEN', MAGENTA},
+    [2] = {'REVEALED', ORANGE},
+    [3] = {'NOT HIDDEN: BACKPACK OR SUPPORT WEAPON', MUTED},
+    [5] = {'DESCENT', ORANGE},
+}
+-- ---- her damage numbers (0.2.1; the Executor's 0.2.4 block, itself Lemuen's): a number over every hit, strike and
+-- tick of hers (ascalon.dll's ascalon_hits: x, y, z, damage, Pursuit's). The view camera: the engine camera standing
+-- where her view is (ascalon_view). Parts adapted from Chef Shared Loader by Th3chef (github.com/Th3chef/Chef-Shared-
+-- Loader, src/loader.lua): finding the view camera (a living unit with Unit.num_cameras > 0, its Unit.camera(u, 1)),
+-- projecting a world point with Camera.world_to_screen (bottom-left origin) and the behind-the-camera check, with
+-- Th3chef's permission (as Lemuen's HUD).
+pcall(ffi.cdef, [[ typedef int (*aschits1)(unsigned int version, float *out, int max, uint32_t *seq);
+typedef int (*ascview1)(unsigned int version, float *out); ]])
+local MK = {told = false}
+local CAM = {unit = nil, list = nil, i = 0, retry = 0}
+local function SR() return rawget(_G, 'stingray') end
+-- The camera standing where her view is (ascalon.dll's ascalon_view), checked every second (Lemuen 0.1.6b took the
+-- first unit with a camera, one 6 km under the map, and every number was "behind" it).
+local VW = {fn = nil, buf = ffi.new('float[6]'), look = 0, checked = 0, told = 0}
+local function her_view(t)
+    if not VW.fn then
+        if t < VW.look then return nil end
+        VW.look = t + 2
+        local module = k32.aschud1_GetModuleHandleA('ascalon.dll')
+        local proc = module ~= nil and k32.aschud1_GetProcAddress(module, 'ascalon_view') or nil
+        if proc == nil then return nil end
+        VW.fn = ffi.cast('ascview1', proc)
+    end
+    if VW.fn(1, VW.buf) ~= 1 then return nil end
+    return VW.buf[0], VW.buf[1], VW.buf[2]
+end
+local function cam_gap(s, u, hx, hy, hz)
+    local okc, c = pcall(s.Unit.camera, u, 1)
+    if not (okc and c) then return nil end
+    local okp, p = pcall(s.Camera.world_position, c)
+    if not (okp and p) then return nil end
+    local x, y, z = s.Vector3.to_elements(p)
+    if type(x) ~= 'number' then return nil end
+    return math.sqrt((x - hx) ^ 2 + (y - hy) ^ 2 + (z - hz) ^ 2), x, y, z
+end
+local function cam_unit(s, t)
+    local hx, hy, hz = her_view(t)
+    if CAM.unit then
+        local ok, alive = pcall(s.Unit.alive, CAM.unit)
+        if ok and alive == true then
+            if not hx or t < VW.checked then return CAM.unit end
+            VW.checked = t + 1
+            local gap = cam_gap(s, CAM.unit, hx, hy, hz)
+            if gap and gap < 4 then return CAM.unit end
+        end
+        CAM.unit = nil
+    end
+    if not CAM.list then
+        if t < CAM.retry then return nil end
+        local okw, w = pcall(s.Application.main_world)
+        if not (okw and w) then CAM.retry = t + 2; return nil end
+        local oku, units = pcall(s.World.units, w)
+        if not (oku and type(units) == 'table') then CAM.retry = t + 2; return nil end
+        CAM.list, CAM.i, CAM.best, CAM.gap, CAM.seen = units, 0, nil, nil, 0
+    end
+    local last = math.min(#CAM.list, CAM.i + 500)
+    for i = CAM.i + 1, last do
+        local u = CAM.list[i]
+        local oka, alive = pcall(s.Unit.alive, u)
+        if oka and alive == true then
+            local okn, n = pcall(s.Unit.num_cameras, u)
+            if okn and type(n) == 'number' and n > 0 then
+                CAM.seen = CAM.seen + 1
+                if not hx then CAM.unit, CAM.list = u, nil; return u end
+                local gap = cam_gap(s, u, hx, hy, hz)
+                if gap and (not CAM.gap or gap < CAM.gap) then CAM.best, CAM.gap = u, gap end
+            end
+        end
+    end
+    CAM.i = last
+    if last >= #CAM.list then
+        local found = CAM.best and CAM.gap and CAM.gap < 4
+        if VW.told < 6 then
+            VW.told = VW.told + 1
+            log(('[Ascalon HUD] camera: %d cameras in the world, nearest to her view %s'):format(CAM.seen,
+                CAM.gap and ('%.1f m away%s'):format(CAM.gap, found and ' (taken)' or ' (too far: none taken)') or 'none'))
+        end
+        CAM.list = nil
+        if found then CAM.unit = CAM.best; VW.checked = t + 1; return CAM.unit end
+        CAM.retry = t + 2
+    end
+    return nil
+end
+local mk_t = 0
+-- (0.1.3: her damage numbers, below, share this frame's view)
+local HN = {fn = nil, buf = ffi.new('float[320]'), seq = ffi.new('uint32_t[1]'), live = {}, primed = false}
+local function view(d)
+    local s = SR()
+    if type(s) ~= 'table' or not (s.Unit and s.Camera and s.Vector3 and s.Quaternion and s.World and s.Application) then return nil end
+    local u = cam_unit(s, mk_t)
+    if not u then return nil end
+    local c = s.Unit.camera(u, 1)
+    if not c then return nil end
+    local cx, cy, cz = s.Vector3.to_elements(s.Camera.world_position(c))
+    local fx, fy, fz = s.Vector3.to_elements(s.Quaternion.forward(s.Camera.world_rotation(c)))
+    local W, H = d.width, d.height or (d.width * 9 / 16)
+    -- the engine's screen pixels against the overlay's (the same at most resolutions; scaled if not)
+    local bw, bh = W, H
+    if s.Application.back_buffer_size then
+        local okb, a, b = pcall(s.Application.back_buffer_size)
+        if okb and type(a) == 'number' and a > 0 then bw, bh = a, b end
+    end
+    local kx, ky = W / bw, H / bh
+    if not MK.told then MK.told = true; log(('[Ascalon HUD] view: overlay %dx%d, screen %dx%d'):format(W, H, bw, bh)) end
+    return {s = s, c = c, cx = cx, cy = cy, cz = cz, fx = fx, fy = fy, fz = fz, W = W, H = H, kx = kx, ky = ky}
+end
+-- a world point on the overlay, or nil when behind the camera or off screen
+local function project(v, x, y, z)
+    local ax, ay, az = x - v.cx, y - v.cy, z - v.cz
+    if ax * v.fx + ay * v.fy + az * v.fz <= 0.5 then return nil end
+    local sx, sy = v.s.Vector3.to_elements(v.s.Camera.world_to_screen(v.c, v.s.Vector3(x, y, z)))
+    if type(sx) ~= 'number' then return nil end
+    sx, sy = sx * v.kx, v.H - sy * v.ky                    -- the overlay's origin is its top-left
+    if sx <= 0 or sx >= v.W or sy <= 0 or sy >= v.H then return nil end
+    return sx, sy, math.sqrt(ax * ax + ay * ay + az * az)
+end
+
+local HN_LIFE, HN_RISE, HN_MAX = 2.2, 46, 48
+local DG = {next = 5, told = 0, view_nil = 0, view_ok = 0, quiet = 0, seq = 0}
+local function numbers_draw(d, dt, v)
+    if not HN.fn then
+        local module = k32.aschud1_GetModuleHandleA('ascalon.dll')
+        local proc = module ~= nil and k32.aschud1_GetProcAddress(module, 'ascalon_hits') or nil
+        if proc == nil then return end
+        HN.fn = ffi.cast('aschits1', proc)
+    end
+    local n = HN.fn(1, HN.buf, 64, HN.seq)
+    if not HN.primed then HN.primed = true; n = 0 end    -- (not the hits from before the HUD looked)
+    for i = 0, n - 1 do
+        if (DG.hits or 0) < 8 then
+            DG.hits = (DG.hits or 0) + 1
+            local hx, hy, hz = HN.buf[i * 5], HN.buf[i * 5 + 1], HN.buf[i * 5 + 2] + 0.6
+            local sx, sy = nil, nil
+            if v then sx, sy = project(v, hx, hy, hz) end
+            log(('[Ascalon HUD] number %d: %.0f at %.1f %.1f %.1f, %s'):format(DG.hits, HN.buf[i * 5 + 3], hx, hy, hz,
+                not v and 'no view this frame' or sx and ('drawn at %.0f %.0f'):format(sx, sy) or 'nowhere (behind or off screen)'))
+        end
+        if #HN.live >= HN_MAX then table.remove(HN.live, 1) end
+        HN.live[#HN.live + 1] = {x = HN.buf[i * 5], y = HN.buf[i * 5 + 1], z = HN.buf[i * 5 + 2] + 0.6, amount = HN.buf[i * 5 + 3],
+                                 boosted = HN.buf[i * 5 + 4] > 0.5, t = 0, jx = (math.random() - 0.5) * 18}
+    end
+    local sc = d.scale or 1
+    for i = #HN.live, 1, -1 do
+        local h = HN.live[i]
+        h.t = h.t + dt
+        if h.t >= HN_LIFE then table.remove(HN.live, i)
+        elseif v then
+            local sx, sy = project(v, h.x, h.y, h.z)
+            if sx then
+                local rise = HN_RISE * (1 - math.exp(-h.t * 7))  -- fast, then slowing to a stop
+                local pop = h.t < 0.12 and (1.35 - h.t / 0.12 * 0.35) or 1
+                local a = h.t > HN_LIFE - 0.45 and (HN_LIFE - h.t) / 0.45 or 1
+                local size = (h.boosted and 24 or 18) * sc * pop
+                local col = h.boosted and {255, 120, 40} or {255, 95, 60}   -- the other kits' (0.4.18; teal before)
+                local str = tostring(math.floor(h.amount + 0.5))
+                local px, py = sx + h.jx * sc, sy - (rise + 6) * sc
+                d:text(str, px + 2 * sc, py + 2 * sc, {size = size, colour = {20, 10, 5, math.floor(200 * a)}, z = 7, align = 'center'})
+                d:text(str, px, py, {size = size, colour = {col[1], col[2], col[3], math.floor(255 * a)}, z = 8, align = 'center'})
+            end
+        end
+    end
+end
+
+
+-- The parry's clash: ascalon.dll counts parries (ascalon_parry_seq); when the count rises, the event ascalon_parry is
+-- posted through HD2Runtime's hd2.sounds. The event and its recordings are in the mod's copy of a bank the game always
+-- has loaded (data/, the Hellbomb objective's bank: tools/build_bank.py), so nothing is loaded here (0.4.1 tried a bank
+-- of its own with Wwise.load_bank: the engine never had it). The same patch adds the event to the game's event
+-- metadata, which is what has_event (and so HD2Runtime) asks.
+pcall(ffi.cdef, [[ typedef unsigned int (*ascparry1)(unsigned int version); ]])
+local PS = {fn = nil, look = 0, seen = nil, known = nil, told = 0, event = 'ascalon_parry'}
+local function parry_sound(dt)
+    PS.look = PS.look - dt
+    if not PS.fn then
+        if PS.look > 0 then return end
+        PS.look = 2
+        local module = k32.aschud1_GetModuleHandleA('ascalon.dll')
+        local proc = module ~= nil and k32.aschud1_GetProcAddress(module, 'ascalon_parry_seq') or nil
+        if proc == nil then return end
+        PS.fn = ffi.cast('ascparry1', proc)
+    end
+    local seq = tonumber(PS.fn(1))
+    if PS.seen == nil then PS.seen = seq end
+    if PS.look <= 0 then   -- whether the sound engine knows the event, logged when that changes
+        PS.look = 5
+        local sr = SR()
+        local W = sr and sr.Wwise
+        if W and type(W.has_event) == 'function' then
+            local okh, has = pcall(W.has_event, PS.event)
+            has = okh and has == true
+            if has ~= PS.known then PS.known = has; log('[Ascalon HUD] the parry sound is ' .. (has and 'known to the game (its event metadata)' or 'not in the game\'s event metadata')) end
+        end
+    end
+    if seq == PS.seen then return end
+    PS.seen = seq
+    local ok, handle, code, why = false, nil, 'NO_API', nil
+    if type(hd2.sounds) == 'table' and type(hd2.sounds.play) == 'function' then ok, handle, code, why = pcall(hd2.sounds.play, PS.event) end
+    local direct = ''
+    if not (ok and handle ~= nil) then
+        -- HD2Runtime refused it (it asks has_event, which answers from the game's event metadata): posted here, the
+        -- plugin's own call on the main world's sound world (0.4.3)
+        local sr = SR()
+        local okd, res = pcall(function()
+            local w = sr.Application.main_world()
+            return sr.WwiseWorld.trigger_event(sr.Wwise.wwise_world(w), PS.event)
+        end)
+        direct = ('; posted directly: %s %s'):format(tostring(okd), tostring(res))
+    end
+    if not PS.checked then
+        -- once: what the same two ways answer for sounds of the game's own (0.4.4: to tell a bank that is not loaded
+        -- from an event the loaded bank does not have): a menu click, and a Hellbomb bank event with nothing to hear
+        PS.checked = true
+        local function try(label, event)
+            local o, h, c, w = pcall(hd2.sounds.play, event)
+            log(('[Ascalon HUD] sound check, %s: %s %s %s'):format(label, tostring(o and h ~= nil), tostring(c), tostring(w or (not o and h) or '')))
+        end
+        if type(hd2.sounds) == 'table' and type(hd2.sounds.play) == 'function' then
+            try('a menu click', 'ui/generic_select')
+            try('the Hellbomb bank (2EA0C3F5)', {id = 0x2EA0C3F5})
+            try('the Hellbomb bank (AA0B6425)', {id = 0xAA0B6425})
+        end
+        local sr = SR()
+        local okd, res = pcall(function()
+            local w = sr.Application.main_world()
+            return sr.WwiseWorld.trigger_event(sr.Wwise.wwise_world(w), 'ui_generic_select')
+        end)
+        log(('[Ascalon HUD] sound check, posted directly (an unknown name): %s %s'):format(tostring(okd), tostring(res)))
+    end
+    if PS.told < 12 then
+        PS.told = PS.told + 1
+        log(('[Ascalon HUD] parry %d: sound %s %s %s%s'):format(seq, tostring(ok and handle ~= nil), tostring(code), tostring(why or (not ok and handle) or ''), direct))
+    end
+end
+
+local overlay = hd2.ui.overlay({id = 'ascalon', owner = OWNER})
+overlay:draw(function(d, dt)
+    dt = tonumber(dt) or 0
+    gfl2_step(dt)
+    if not O.failed then
+        local okO, errO = pcall(options_step, dt)
+        if not okO then O.failed = true; log('[Ascalon HUD] options failed: ' .. tostring(errO)) end
+    end
+    local s = find(dt)
+    cloak_frame(s, dt)
+    -- (the Wwise way, parry_sound above, is not run: the event never reached the sound engine, 0.4.1 to 0.4.4;
+    -- ascalon.dll plays the clash through Windows since 0.4.5)
+    if s == nil or s.in_mission == 0 then return end
+    mk_t = mk_t + dt
+    local okV, v = pcall(view, d)
+    if not okV then
+        if not HN.view_err then HN.view_err = true; log('[Ascalon HUD] view failed: ' .. tostring(v)) end
+        v = nil
+    end
+    if not HN.failed then
+        local okN, errN = pcall(numbers_draw, d, dt, v)
+        if not okN then HN.failed = true; log('[Ascalon HUD] damage numbers failed, off for this session: ' .. tostring(errN)) end
+    end
+    local line = LINES[tonumber(s.state)]
+    if not line then return end
+    local sc = d.scale
+    local text = line[1]
+    local left = tonumber(s.reveal_left)
+    local n = tonumber(s.sensing)
+    if s.state == 2 and n > 0 then text = ('%s: %d %s'):format(text, n, n == 1 and 'ENEMY SENSES HER' or 'ENEMIES SENSE HER')
+    elseif s.state == 5 then text = ('%s  %.1fs'):format(text, tonumber(s.d_left))
+    elseif left > 0 then text = ('%s  %.1fs'):format(text, left) end
+    if tonumber(s.charges_max) > 0 then
+        local c, m, cl = tonumber(s.charges), tonumber(s.charges_max), tonumber(s.charge_left)
+        text = ('%s   |   PURSUIT %d/%d%s'):format(text, c, m, (c < m and cl > 0) and ('  %.0fs'):format(cl) or '')
+    end
+    local size = 16 * sc
+    local cx, y = d.width / 2, d.height - 132 * sc
+    local w, h = (#text * 10 + 36) * sc, 26 * sc
+    d:rect(cx - w / 2, y, w, h, rgba(PANEL, 0.6), 0)
+    d:rect(cx - w / 2, y + h - 2 * sc, w, 2 * sc, rgba(line[2], 0.9), 1)
+    d:text(text, cx + math.max(1, sc), y + 4 * sc + math.max(1, sc), {size = size, font = 'title', colour = rgba(INK, 0.7), z = 4, align = 'center'})
+    d:text(text, cx, y + 4 * sc, {size = size, font = 'title', colour = rgba(line[2], 1), z = 5, align = 'center'})
+    -- her skills beside the stratagem list (0.4.2; before, a second line here)
+    local okL, box = pcall(list_box, d, dt)
+    if not okL then L.on = false; log('[Ascalon HUD] following the list failed, skills always shown: ' .. tostring(box)); box = nil end
+    if box == false then                 -- the list is closed: only what runs or recharges, under where the open list ends
+        if X.always then
+            local H = d.height or (d.width * 9 / 16)
+            local lb = X.last_box
+            local bsize = lb and lb.size or 44 * sc
+            local step = lb and lb.step or 52 * sc
+            local bleft = math.max(20 * sc, lb and lb.left or 40 * sc)
+            local top = lb and (lb.bottom + step * 0.6) or H * 0.45
+            abilities(d, {alpha = 1, size = bsize, step = step, left = bleft - 290 * sc, top = top}, true)
+        end
+        return
+    end
+    if box and (box.alpha or 1) >= 0.95 and box.left >= 0 and (not X.last_box or box.left >= X.last_box.left - 2) then
+        X.last_box = {left = box.left, top = box.top, bottom = box.bottom, size = box.size, step = box.step}
+    end
+    abilities(d, box or nil)
+end)
+
+log('[Ascalon HUD] ready (waiting for Ascalon)')

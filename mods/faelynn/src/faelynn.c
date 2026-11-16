@@ -40,7 +40,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.0"
+#define VERSION "0.4.1"
 #define BUILD "25480438"
 
 #define KB_STEADY 1
@@ -52,6 +52,7 @@
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
 #include "kitbase/kb_roster.h"
+#include "kitbase/kb_fit.h"
 
 /* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
 KB_ROSTER_EXPORTS(faelynn)
@@ -272,6 +273,13 @@ static RayFn g_raycast;
 /* The nearest static obstruction along a ray (static actors only, so enemies are not walls): its distance, len + 1
  * when clear, or -1 when the query cannot be made */
 static float RayWith(uint32_t unit, const float from[3], const float dir[3], float len, uint32_t filter, uint32_t flags, unsigned* count);
+/* 1: bodies are nothing to the ray (for whether she fits: an enemy beside the spot is no wall) */
+static int g_rayBodies;
+static uint32_t ActorFilter(uint32_t id, uint32_t unit);
+static int IsFoeUnit(uint32_t u);
+/* her entity while a landing spot is looked for for HER (0 for anything else that is set down, a mech, an ally): the
+ * game's own fit test can be asked only of her */
+static uint32_t g_spEntity;
 static float g_rayPrefer = -1;
 static float RayWith(uint32_t unit, const float from[3], const float dir[3], float len, uint32_t filter, uint32_t flags, unsigned* count)
 {
@@ -290,6 +298,11 @@ static float RayWith(uint32_t unit, const float from[3], const float dir[3], flo
         float d;
         memcpy(&d, hits + 44u * i + 24, 4);
         if (Word(hits + 44u * i + 28) == unit || !isfinite(d) || d < 0.02f) continue;
+        /* a zone, not a thing (from Ascalon 0.4.14): actors tagged 0xEDC5EBE0 are level faces some 2 m over the ground
+         * across a whole area, which a look meets from outside and which stop nothing */
+        uint32_t rf = ActorFilter(Word(hits + 44u * i + 32), Word(hits + 44u * i + 28));
+        if (rf == 0xEDC5EBE0u) continue;
+        if (g_rayBodies && (rf == 0x236122F0u || rf == 0xD5B33D56u || IsFoeUnit(Word(hits + 44u * i + 28)))) continue;
         if (g_rayPrefer >= 0 ? fabsf(d - g_rayPrefer) < fabsf(best - g_rayPrefer) : d < best) best = d;
     }
     return best;
@@ -347,8 +360,10 @@ static int Surfaces(uint32_t unit, float x, float y, float ref, float* z, int ma
         memcpy(&d, hits + 44u * i + 24, 4);
         uint32_t hu = Word(hits + 44u * i + 28);
         if (hu == unit || !isfinite(d) || d < 0.02f || d > len) continue;
-        if (ActorFilter(Word(hits + 44u * i + 32), hu) == FILTER_FOLIAGE) continue;   /* leaves and canopies are no floor */
+        uint32_t filt = ActorFilter(Word(hits + 44u * i + 32), hu);
+        if (filt == FILTER_FOLIAGE || (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u))) continue;   /* leaves, canopies and bodies (enemies, corpses) are no floor (as Voymastina 0.2.1) */
         if (IsFoeUnit(hu)) { g_underFoe = 1; continue; }                              /* nor is an enemy's back */
+        if (filt == 0xEDC5EBE0u) continue;                                            /* nor a zone's face (see RayWith) */
         z[k++] = top[2] - d;
     }
     for (int i = 1; i < k; i++)        /* highest first */
@@ -370,7 +385,7 @@ static int FoeAbove(uint32_t unit, const float from[3], float len)
     for (uint32_t i = 0; i < n && i < 16; i++) if (IsFoeUnit(Word(hits + 44u * i + 28))) return 1;
     return 0;
 }
-static int Fits(uint32_t unit, float x, float y, float z)
+static int FitsLooks(uint32_t unit, float x, float y, float z)
 {
     float up[3] = {0, 0, 1}, foot[3] = {x, y, z + 0.1f};
     float r = RayWith(unit, foot, up, 1.8f, 0, 0x80000009u, NULL);
@@ -385,6 +400,19 @@ static int Fits(uint32_t unit, float x, float y, float z)
             if (w < 0 || w <= 0.4f) return 0;
         }
     return 1;
+}
+/* Whether she has room there (from Ascalon 0.6.6 and 0.6.8). Where the game's own fit test can be asked (kb_fit.h) it
+ * says so, in SpotAt, and only a spot under a huge enemy is refused here; else the looks above, to which an enemy's
+ * body is no wall. */
+static int Fits(uint32_t unit, float x, float y, float z)
+{
+    float foot[3] = {x, y, z + 0.1f};
+    if (g_nFoeUnits && FoeAbove(unit, foot, 12.0f)) return 0;
+    if (g_spEntity && KbFitUsed()) return 1;
+    g_rayBodies = 1;
+    int fits = FitsLooks(unit, x, y, z);
+    g_rayBodies = 0;
+    return fits;
 }
 
 static Pulse g_retry[6];  /* blasts waiting for their packages (at: give up then) */
@@ -494,10 +522,43 @@ static int SpotAt(uint32_t unit, const float pos[3], const float dir[2], float d
     {
         float above = 1e9f;   /* the lowest surface over this one */
         for (int j = 0; j < n; j++) if (high[j] > z[i] + 0.3f && high[j] < above) above = high[j];
-        if (above < 1e8f && !Roofed(unit, x, y, z[i], above - z[i])) { g_buried++; continue; }
+        if (above < 1e8f && !Roofed(unit, x, y, z[i], above - z[i]))
+        {
+            /* Under something a look up does not meet: underground, unless it lies open before her (from Ascalon
+             * 0.6.9: the top of foliage is such a thing too, and with the ground under it read as buried she was set
+             * on the leaves). Open: near her own height, and a straight look from her waist to a waist over it meets
+             * nothing. Ground under terrain is behind the hillside. */
+            int open = 0;
+            if (fabsf(z[i] - pos[2]) < 1.5f)
+            {
+                float a[3] = {pos[0], pos[1], pos[2] + 0.9f}, b[3] = {x - a[0], y - a[1], z[i] + 0.9f - a[2]};
+                float len = sqrtf(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]);
+                if (len > 0.1f)
+                {
+                    for (int k = 0; k < 3; k++) b[k] /= len;
+                    g_rayBodies = 1;
+                    float r = RayWith(unit, a, b, len, 0, 0x80000009u, NULL);
+                    g_rayBodies = 0;
+                    open = r > len;
+                }
+            }
+            if (!open) { g_buried++; continue; }
+        }
         if (!Fits(unit, x, y, z[i])) { if (g_nFoeUnits && crowded && FoeAbove(unit, (float[3]){x, y, z[i] + 0.1f}, 12.0f)) *crowded = 1; continue; }
         float at[3] = {x, y, z[i]};
         if (Occupied(at)) { if (crowded) *crowded = 1; continue; }
+        if (g_spEntity && KbFitUsed())   /* her room: the game's own answer (a little above the surface too) */
+        {
+            int fit = KbFitsOn(g_spEntity, unit, at);
+            if (fit == 0) continue;
+            if (fit < 0)                 /* not asked after all: the looks */
+            {
+                g_rayBodies = 1;
+                int fits = FitsLooks(unit, x, y, z[i]);
+                g_rayBodies = 0;
+                if (!fits) continue;
+            }
+        }
         memcpy(out, at, sizeof at);
         return 1;
     }
@@ -644,6 +705,7 @@ static void DashFrame(void)
     float pos[3];
     if (!Descriptor(me, id) || Quad(id) != AVATAR || !PlayerPose(pos, NULL)) { Log("Loyal Dash: her Helldiver cannot be read"); return; }
     uint32_t unit = Word(id + 12);
+    g_spEntity = me;   /* her room at a spot: the game's own fit test (kb_fit.h) */
     /* where she lands: (1) the spot ld_distance m along her aim, the surface there nearest her height she fits on (no
      * leaves or canopies), not on an enemy
      * (no path check: she blinks); (2) else further on, 1.5 m at a time up to 6 m, and on past that while enemies
@@ -1024,6 +1086,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         hf->code_matches(exe + 0x7F4590, "48 8b c4 f3 0f 11 58 20 89 48 08 55 53 56 57 41 54 41 55 41 56 41 57 48"))
     {
         g_setPosition = (SetVecFn)(game + 0x5A2BB0);
+        KbFitInit();
         g_setVelocity = (SetVecFn)(game + 0x4A7550);
         g_worldId = (WorldFn)(exe + 0x79F860);
         g_raycast = (RayFn)(exe + 0x7F4590);

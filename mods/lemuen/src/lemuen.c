@@ -7,9 +7,12 @@
  *   Modus Extraditio (passive): modus_after s after she lands, her shots deal modus_mult times their damage.
  *   Salvē Etiam (key_s1, default Z): with a sniper or marksman rifle in hand, her shots deal s1_mult times their damage
  *     until she reloads.
- *   Honesta Missio (key_s2, default X): until she reloads, the enemy nearest the middle of her scope (first person,
- *     within s2_cone degrees, s2_range m) builds up: her next shot on it deals s2_min rising to s2_max times its damage
- *     over s2_hold s of holding it. Changing target starts again; each shot spends the build-up.
+ *   Honesta Missio (key_s2, default X): until she reloads, the enemy in the middle of her scope (first person; 0.1.7:
+ *     the first thing a ray from the middle of her camera meets, within s2_range m: an enemy behind it no longer takes
+ *     the lock, and a big enemy is held wherever she aims on it; without the raycast, the enemy nearest the middle
+ *     within s2_cone degrees) builds up: her next shot on it deals s2_min rising to s2_max times its damage over s2_hold
+ *     s of holding it. Changing target starts again (0.1.7: another enemy only after 0.3 s in the middle); each shot
+ *     spends the build-up.
  *   Memento Mori (key_s3, default C): an Orbital 120mm HE Barrage shell (projectile s3_shell) falls on every enemy she
  *     has marked, s3_every s apart, at most s3_max, wherever they are.
  *
@@ -34,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.6"
+#define VERSION "0.1.11"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -99,9 +102,10 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "modus_after = %g\nmodus_mult = %g\n"
                "; Salve Etiam: cooldown; with a sniper or marksman rifle in hand (any gun: s1_any_gun 1) her shots deal s1_mult\n"
                "; times their damage until she reloads.\ns1_cooldown = %g\ns1_mult = %g\ns1_any_gun = %d\n"
-               "; Honesta Missio: cooldown; until she reloads, the enemy nearest the middle of her scope (first person; within\n"
-               "; s2_cone degrees and s2_range m) builds up: her next shot on it deals s2_min rising to s2_max times its damage over\n"
-               "; s2_hold s. first_person: the camera this close to her head (m) counts as scoped.\n"
+               "; Honesta Missio: cooldown; until she reloads, the enemy in the middle of her scope (first person: the first thing\n"
+               "; a ray from the middle of her view meets, within s2_range m; s2_cone degrees only without the raycast) builds up:\n"
+               "; her next shot on it deals s2_min rising to s2_max times its damage over s2_hold s. first_person: the camera this\n"
+               "; close to her head (m) counts as scoped.\n"
                "s2_cooldown = %g\ns2_min = %g\ns2_max = %g\ns2_hold = %g\ns2_cone = %g\ns2_range = %g\nfirst_person = %g\n"
                "; Memento Mori: cooldown; an Orbital 120mm HE Barrage shell (s3_shell, 194) falls from s3_height m on every enemy\n"
                "; she has marked, s3_every s apart, at most s3_max.\n"
@@ -399,6 +403,8 @@ static void FindMates(Mark* m, const float q[3])
         if (told++ < 16) Log("Persecution: entity %u (%016llx) rides with entity %u (%.1f m across): one mark for the group", best, (unsigned long long)bestRes, m->e, sqrtf(bestD2));
     }
 }
+static int64_t Crosshair(const float cam[3], const float fwd[3]);
+static uint64_t ResOf(uint32_t e);
 static void MarkFrame(void)
 {
     static double next;
@@ -411,7 +417,24 @@ static void MarkFrame(void)
     /* 0.1.6d: in first person, the enemy under her crosshair (within mark_aim degrees, in sight, any enemy) is marked at
      * once (Yui) */
     uint32_t aimed = 0;
-    if (fp)
+    /* 0.1.11: the first thing the crosshair ray meets, as Honesta Missio holds it: a big enemy aimed at anywhere on
+     * its body (a War Strider's hull is metres above the point the cone measured to), and one the spawn test missed
+     * becomes one of her foes here (Yui: a War Strider was marked only after Honesta Missio held it) */
+    int64_t ray = fp ? Crosshair(cam, fwd) : -1;
+    if (ray > 0)
+    {
+        uint32_t e = (uint32_t)ray;
+        uint64_t r = ResOf(e);
+        float d;
+        if (r && TargetPos(e, r, q) && (Off(cam, fwd, q, &d), d <= s_markRange))
+        {
+            int known = 0;
+            for (int k = 0; k < FOES && !known; k++) known = g_foe[k] == e;
+            if (!known) AddFoe(e, r);
+            aimed = e;
+        }
+    }
+    else if (fp && ray < 0)
     {
         float bestOff = s_markAim;
         for (int k = 0; k < FOES; k++)
@@ -568,6 +591,170 @@ static double S2Mult(void)
     if (t > 1) t = 1;
     return s_s2Min + (s_s2Max - s_s2Min) * t;
 }
+static int EnemyTurret(uint64_t res);
+static int AiEnemy(uint64_t res);
+/* 0.1.7: every enemy-side entity seen (not only her foes): a Factory Strider's hull and other big enemies the kit
+ * base leaves out of its foes (turrets, seats) are found by their unit when the crosshair ray meets them */
+#define ANY 4096
+static uint32_t g_any[ANY];
+static uint64_t g_anyRes[ANY];
+static unsigned g_anyNext;
+static void SeeAny(uint32_t e, uint64_t res)
+{
+    if (!e || res == AVATAR || FriendRes(res)) return;
+    unsigned i = g_anyNext++ % ANY;
+    g_any[i] = e; g_anyRes[i] = res;
+}
+/* the entity whose unit this is: her foes first, then everything seen; 0 none */
+static uint32_t EntityOfUnit(uint32_t u, uint64_t* res)
+{
+    /* the last 32 units asked about, for a second each (the ground and walls are asked about every frame) */
+    static struct { uint32_t u, e; uint64_t r; double at; } c[32];
+    static unsigned cn;
+    for (int i = 0; i < 32; i++) if (c[i].u == u && g_now - c[i].at < 1.0) { *res = c[i].r; return c[i].e; }
+    uint32_t e = 0;
+    uint64_t r = 0;
+    for (int k = 0; k < FOES && !e; k++) if (g_foe[k] && UnitOf(g_foe[k]) == u) { e = g_foe[k]; r = g_foeRes[k]; }
+    for (unsigned i = 0; i < ANY && !e; i++)
+        if (g_any[i] && UnitOf(g_any[i]) == u)
+        {
+            uint8_t d[24];
+            if (Descriptor(g_any[i], d) && Quad(d) == g_anyRes[i]) { e = g_any[i]; r = g_anyRes[i]; }   /* not an id a later spawn took */
+            else g_any[i] = 0;
+        }
+    unsigned k = cn++ % 32;
+    c[k].u = u; c[k].e = e; c[k].r = r; c[k].at = g_now;
+    *res = r;
+    return e;
+}
+/* something to hold in her scope: no friend, no Helldiver, alive, and a fighting thing (her foes, enemy turrets, or
+ * anything with health that runs a behaviour, has a faction or carries seats: 0.1.8, a War Strider's walker is a
+ * vehicle its pilot rides, with no behaviour of its own, and it is what her shots hit) */
+static int Holdable(uint32_t e, uint64_t res)
+{
+    uint32_t stride, life;
+    int32_t hp = 1;
+    if (!e || res == AVATAR || FriendRes(res)) return 0;
+    if (HealthOf(e, &hp, &life) && hp <= 0) return 0;
+    if (FoeKind(res) || EnemyTurret(res)) return 1;
+    if (!hf->component_record("HealthComponentData", res, &stride)) return 0;
+    return hf->component_record("BehaviorComponentData", res, &stride) || hf->component_record("FactionComponentData", res, &stride) ||
+           hf->component_record("SeatCollectionComponentData", res, &stride);
+}
+/* the first thing the ray from the middle of her camera meets (her, leaves and bodies of the dead skipped): the
+ * entity when it is one to hold, 0 when it is a wall, the ground or nothing; -1 when the ray cannot be cast */
+static int64_t Crosshair(const float cam[3], const float fwd[3])
+{
+    if (!g_raycast || !g_worldId) return -1;
+    uintptr_t world = Pointer(game + 0x346BFA0);
+    if (!world) return -1;
+    uint32_t id = g_worldId((const void*)world);
+    if (id >= 4) return -1;
+    uint32_t me = UnitOf(atomic_load(&g_avatar));
+    /* in steps, so a long ray's many hits never crowd the nearest out of the 16 it reports */
+    static const float steps[] = {0, 60, 200, 1000};
+    for (int st = 0; st < 3 && steps[st] < s_s2Range; st++)
+    {
+        float from[3] = {cam[0] + fwd[0] * steps[st], cam[1] + fwd[1] * steps[st], cam[2] + fwd[2] * steps[st]};
+        float len = (steps[st + 1] < s_s2Range ? steps[st + 1] : s_s2Range) - steps[st];
+        uint8_t hits[16 * 44];
+        memset(hits, 0, sizeof hits);
+        uint32_t n = g_raycast(id, from, fwd, len, 2, 1, 0, 0x80000009u, me, hits, 16);
+        if (n > 16) n = 16;
+        /* nearest first */
+        int order[16], m = 0;
+        for (uint32_t i = 0; i < n; i++) order[m++] = (int)i;
+        for (int i = 1; i < m; i++)
+            for (int j = i; j > 0; j--)
+            {
+                float a, b;
+                memcpy(&a, hits + 44u * order[j - 1] + 24, 4); memcpy(&b, hits + 44u * order[j] + 24, 4);
+                if (!(b < a)) break;
+                int t = order[j]; order[j] = order[j - 1]; order[j - 1] = t;
+            }
+        for (int i = 0; i < m; i++)
+        {
+            const uint8_t* h = hits + 44u * order[i];
+            float d;
+            memcpy(&d, h + 24, 4);
+            uint32_t hu = Word(h + 28);
+            if (!isfinite(d) || (st == 0 && d < 1.2f) || (hu && hu == me)) continue;   /* her own gun and scope */
+            uint32_t filt = ActorFilter(Word(h + 32), hu);
+            if (filt == FILTER_FOLIAGE) continue;                                         /* leaves */
+            uint64_t res = 0;
+            uint32_t e = hu ? EntityOfUnit(hu, &res) : 0;
+            if (e)
+            {
+                uint32_t life;
+                int32_t hp = 1;
+                if (HealthOf(e, &hp, &life) && hp <= 0) continue;                         /* a body: looked past */
+                if (Holdable(e, res))
+                {
+                    if (!FoeKind(res) && !EnemyTurret(res) && !AiEnemy(res))
+                    {
+                        static uint64_t toldRes[16];
+                        static unsigned ntold;
+                        int seen = 0;
+                        for (unsigned t = 0; t < ntold && t < 16; t++) seen |= toldRes[t] == res;
+                        if (!seen && ntold < 16) { toldRes[ntold++] = res; Log("Honesta Missio: entity %u (%016llx, not one of her foes) in her crosshair at %.0f m: held", e, (unsigned long long)res, (double)(steps[st] + d)); }
+                    }
+                    return e;
+                }
+                {
+                    static uint64_t toldRes[16];
+                    static unsigned ntold;
+                    int seen = 0;
+                    for (unsigned t = 0; t < ntold && t < 16; t++) seen |= toldRes[t] == res;
+                    if (!seen && ntold < 16) { toldRes[ntold++] = res; Log("Honesta Missio: entity %u (%016llx) in her crosshair at %.0f m: not one to hold (a friend, a Helldiver, a prop)", e, (unsigned long long)res, (double)(steps[st] + d)); }
+                }
+                return 0;                                                                 /* a friend, a Helldiver, a prop */
+            }
+            if (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u)) continue;             /* a body she does not know */
+            if (hu && filt && filt != 0xEDC5EBE0u)
+            {
+                /* 0.1.9: a part of a big enemy with a unit of its own (a War Strider's legs and armour: filters
+                 * e5727f8e, 19dc4f24, 2026-11-08): the enemy whose body is nearest where the ray met it, within 10 m */
+                float at[3] = {from[0] + fwd[0] * d, from[1] + fwd[1] * d, from[2] + fwd[2] * d}, q[3];
+                uint32_t closest = 0;
+                uint64_t nres = 0;
+                float bd = 10.f * 10.f;
+                for (int k = 0; k < FOES; k++)
+                {
+                    uint32_t f = g_foe[k];
+                    if (!f || !TargetPos(f, g_foeRes[k], q)) continue;
+                    float dx = q[0] - at[0], dy = q[1] - at[1], dz = q[2] - at[2], d2 = dx * dx + dy * dy + dz * dz;
+                    uint32_t life;
+                    int32_t hp = 1;
+                    if (d2 < bd && !(HealthOf(f, &hp, &life) && hp <= 0)) { bd = d2; closest = f; nres = g_foeRes[k]; }
+                }
+                if (closest)
+                {
+                    static uint64_t toldN[16];
+                    static unsigned ntoldN;
+                    int seen = 0;
+                    for (unsigned t = 0; t < ntoldN && t < 16; t++) seen |= toldN[t] == nres;
+                    if (!seen && ntoldN < 16) { toldN[ntoldN++] = nres; Log("Honesta Missio: her crosshair meets unit %08x (filter %08x) %.1f m from entity %u (%016llx): held as part of it", hu, filt, (double)sqrtf(bd), closest, (unsigned long long)nres); }
+                    return closest;
+                }
+                /* 0.1.8: a unit no entity she has seen owns: named in the log (a few), to find what a big enemy is made of */
+                static uint32_t toldU[24];
+                static unsigned ntoldU;
+                int seen = 0;
+                for (unsigned t = 0; t < ntoldU && t < 24; t++) seen |= toldU[t] == hu;
+                if (!seen && ntoldU < 24) { toldU[ntoldU++] = hu; Log("Honesta Missio: her crosshair meets unit %08x (filter %08x) at %.0f m: no entity she knows", hu, filt, (double)(steps[st] + d)); }
+            }
+            return 0;                                                                     /* a wall, the ground */
+        }
+    }
+    return 0;
+}
+static uint64_t ResOf(uint32_t e)
+{
+    uint8_t d[24];
+    return Descriptor(e, d) ? Quad(d) : 0;
+}
+static uint32_t g_s2Cand;
+static double g_s2CandAt;
 static void ScopeFrame(double dt)
 {
     if (!g_s2On) { g_s2Target = 0; g_s2Held = 0; return; }
@@ -580,24 +767,41 @@ static void ScopeFrame(double dt)
     }
     g_s2Lost = g_now;
     uint32_t best = 0;
-    float bestOff = s_s2Cone;
-    for (int k = 0; k < FOES; k++)
+    int64_t aimed = Crosshair(cam, fwd);
+    if (aimed >= 0) best = (uint32_t)aimed;
+    else
     {
-        uint32_t e = g_foe[k];
-        float d;
-        if (!e || !TargetPos(e, g_foeRes[k], q)) continue;
-        float o = Off(cam, fwd, q, &d);
-        if (o < bestOff && d <= s_s2Range && InSight(cam, fwd, q, e)) { bestOff = o; best = e; }   /* 0.1.6: in sight only */
+        /* no raycast (another build): the enemy nearest the middle, as 0.1.6 */
+        float bestOff = s_s2Cone;
+        for (int k = 0; k < FOES; k++)
+        {
+            uint32_t e = g_foe[k];
+            float d;
+            if (!e || !TargetPos(e, g_foeRes[k], q)) continue;
+            float o = Off(cam, fwd, q, &d);
+            if (o < bestOff && d <= s_s2Range && InSight(cam, fwd, q, e)) { bestOff = o; best = e; }
+        }
+    }
+    if (best && best != g_s2Target && g_s2Target)
+    {
+        /* 0.1.7: another enemy in the middle (one crossing in front, the aim slipping onto its neighbour): the lock
+         * moves only once it stays there 0.3 s */
+        if (best != g_s2Cand) { g_s2Cand = best; g_s2CandAt = g_now; }
+        uint32_t life;
+        int32_t hp = 1;
+        int gone = !ResOf(g_s2Target) || (HealthOf(g_s2Target, &hp, &life) && hp <= 0);
+        if (!gone && g_now - g_s2CandAt < 0.3) { g_s2Held += dt; return; }
     }
     if (best == g_s2Target) { if (best) { g_s2Held += dt; g_s2Off = 0; } return; }
     if (!best && g_s2Target)
     {
-        /* nobody in the cone: keep the lock for a moment (sway, recoil) */
+        /* nobody in the middle: keep the lock for a moment (sway, recoil) */
         if (!g_s2Off) g_s2Off = g_now;
         if (g_now - g_s2Off < 0.4) return;
     }
     if (g_s2Target && g_s2Held > 0) { g_s2PrevTarget = g_s2Target; g_s2PrevHeld = g_s2Held; g_s2PrevAt = g_now; }
-    g_s2Target = best; g_s2Held = 0; g_s2Off = 0;
+    if (best) { uint64_t r = ResOf(best); if (r && !FoeKind(r)) AddFoe(best, r); }   /* a big enemy she holds: hers to mark too */
+    g_s2Target = best; g_s2Held = 0; g_s2Off = 0; g_s2Cand = 0;
 }
 
 /* 0.1.2: her marks for the HUD's markers (lemuen_marks): where each standing mark is, refreshed on the game thread
@@ -812,10 +1016,47 @@ static int EnemyTurret(uint64_t res)
     }
     return 0;
 }
+/* 0.1.10: an enemy the kit base's test misses: a War Strider (ef570293245a17c2) carries a turret and its behaviour
+ * record is not found by its resource, so it was neither a foe nor an enemy turret, and her marks and Memento Mori only
+ * saw it once Honesta Missio had held it (Yui). Anything with the AI's enemy record and health, and no friend, is one */
+static int AiEnemy(uint64_t res)
+{
+    static uint64_t keys[128];
+    static int8_t vals[128];
+    unsigned h = (unsigned)(res ^ (res >> 27)) & 127;
+    for (unsigned i = 0; i < 128; i++)
+    {
+        unsigned k = (h + i) & 127;
+        if (keys[k] == res) return vals[k];
+        if (keys[k]) continue;
+        uint32_t stride;
+        int t = res != AVATAR && hf->component_record("AiEnemyComponentData", res, &stride) != 0 && hf->component_record("HealthComponentData", res, &stride) != 0 &&
+                !hf->component_record("AvatarComponentData", res, &stride) && !FriendRes(res);
+        vals[k] = (int8_t)t;
+        keys[k] = res;
+        if (t && !FoeKind(res) && !EnemyTurret(res)) { static unsigned told; if (told++ < 8) Log("an enemy kind the kit base misses: %016llx (one of her foes)", (unsigned long long)res); }
+        return t;
+    }
+    return 0;
+}
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
-    if (s->resource != AVATAR) { if (FoeKind(s->resource) || EnemyTurret(s->resource)) AddFoe(s->entity, s->resource); return; }
+    if (s->resource == 0xEF570293245A17C2ull)
+    {
+        /* 0.1.11: why a War Strider is not one of her foes at its spawn (once) */
+        static int told;
+        if (!told++)
+        {
+            uint32_t st;
+            Log("a War Strider spawned (entity %u): foe %d, enemy turret %d, AI enemy %d; records: Behavior %d, Turret %d, AiEnemy %d, Health %d, Avatar %d, Seat %d",
+                s->entity, FoeKind(s->resource), EnemyTurret(s->resource), AiEnemy(s->resource),
+                hf->component_record("BehaviorComponentData", s->resource, &st) != 0, hf->component_record("TurretComponentData", s->resource, &st) != 0,
+                hf->component_record("AiEnemyComponentData", s->resource, &st) != 0, hf->component_record("HealthComponentData", s->resource, &st) != 0,
+                hf->component_record("AvatarComponentData", s->resource, &st) != 0, hf->component_record("SeatCollectionComponentData", s->resource, &st) != 0);
+        }
+    }
+    if (s->resource != AVATAR) { if (FoeKind(s->resource) || EnemyTurret(s->resource) || AiEnemy(s->resource)) AddFoe(s->entity, s->resource); SeeAny(s->entity, s->resource); return; }
     if (!s->authority) return;
     g_spawnEntity[g_spawnNext % 8] = s->entity;
     g_spawnNet[g_spawnNext % 8] = s->network;

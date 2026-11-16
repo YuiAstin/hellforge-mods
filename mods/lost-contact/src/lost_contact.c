@@ -7,14 +7,22 @@
  * you, to search there. Anything that sees you again acquires you as usual. Without it, bots, bugs and Illuminate off
  * sight keep their target and keep coming (bots for 40 s and more in the tests; with it, 0 within 5 to 10 s).
  *
+ * Patrols, as they set out (0.4.0): the game's roaming patrol is led by an entity of its own with no body (type
+ * f5252be8f520f3d8, Patrol Route Probe 2026-11-08: one every 30 to 40 s, 100 to 120 m from you, its destination set at
+ * spawn within 45 m of you; the patrol follows it). When the straight line from it to its destination passes within
+ * pass_by m of you, it is aimed so its straight line passes you at pass_by m (to the side its aim already leaned to) and
+ * goes 40 m on past, so the patrol walks by you instead of onto you (no turning back halfway, as the rerouting below does). The game
+ * aims it again later through set_destination (game+0x5B36C0, hooked): each such aim through you is moved the same way.
+ * Terrain and the patrol's spread can still bring single enemies closer; enemies that sense you hunt you as usual.
+ *
  * Patrols: enemies standing at ease (no target, their destination on themselves) mark the map's outposts. A walking
  * enemy with no target whose destination is within seek_radius of you is a patrol sent at you: it is given an outpost
  * at least keep_away from you instead, then the next, again every resend seconds (the game aims them again). Once it
  * has a target or senses you, it is left alone. With no outpost known yet it is sent away from you.
  *
  * Each runs on, observe (counts only, touches nothing) or off: the ini, or the keys (Ctrl+F9 / Ctrl+F10) in a
- * mission. Both on by default; the debug HUD is not shipped (its source stays in git). LC_BREAK_CONTACT=0 builds it
- * without break contact.
+ * mission, or the MODS tab (from C, or from Lua: hud-src/lost_contact_hud.lua, rows only). Both on by default; the
+ * debug HUD is not shipped (its source stays in git). LC_BREAK_CONTACT=0 builds it without break contact.
  *
  * Character kits: a kit that exports lost_contact_rules(1) (its answer: -1 when it is not the active kit, else a mask,
  * bit 0 break contact, bit 1 patrols) limits what runs while it acts. Lemuen allows patrols only (Yui: a sniper's
@@ -27,6 +35,7 @@
  * +0x10 active, +0x54 its position, +0x60 its destination. set_destination is game+0x5B36C0(NULL, entity, &pos).
  * Credit: the behaviour and perception layouts are HD2Runtime's research (SkyeShade), HellForge's turret code and
  * Smarter Guard Dogs' (chef, ported by giblett); nothing of their code is copied. */
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,7 +47,7 @@
 #include "hellforge_mod.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.0"
+#define VERSION "0.4.1"
 static const HfApi* hf;
 static HfMod* self;
 static uintptr_t game, exe;
@@ -132,6 +141,7 @@ static int s_breakMode = LC_BREAK_CONTACT ? 1 : 0, s_patrolMode = 1;   /* 0 off,
 static int s_kitRules = 1;   /* 1: a character kit may turn one off while it acts (Lemuen: patrols only) */
 static float s_loseAfter = 3, s_breakRange = 80;
 static float s_seekRadius = 50, s_keepAway = 100, s_patrolRange = 300, s_resend = 3;
+static float s_passBy = 50;   /* 0.4.1: 50 (0.4.0: 45); metres a patrol's leader's straight line keeps from you (0: off) */
 typedef struct { int vk, ctrl, shift, alt; char label[24]; } Key;
 static Key s_keyBreak = {VK_F9, 1, 0, 0, "Ctrl+F9"}, s_keyPatrol = {VK_F10, 1, 0, 0, "Ctrl+F10"};
 static int ParseKey(const char* v, Key* k)
@@ -158,7 +168,10 @@ static int ParseKey(const char* v, Key* k)
     *k = n;
     return 1;
 }
-static int ReadSettings(const char* path)
+/* 0.3.0: the numbers the MODS tab (Mod Options Menu, from Lua) changed: bit per number, kept in the saved choices */
+enum { SV_LOSE = 1, SV_RANGE = 2, SV_SEEK = 4, SV_KEEP = 8, SV_PRANGE = 16, SV_RESEND = 32, SV_PASS = 64 };
+static unsigned g_savedNums;
+static int ReadSettings(const char* path, int saved)
 {
     char line[256];
     FILE* f = fopen(path, "r");
@@ -176,6 +189,10 @@ static int ReadSettings(const char* path)
         while (*v == ' ' || *v == '\t') v++;
         for (char* e = v + strlen(v) - 1; e >= v && (*e == '\r' || *e == '\n' || *e == ' ' || *e == '\t'); e--) *e = 0;
         double x = atof(v);
+        if (saved)
+            g_savedNums |= !strcmp(k, "lose_after") ? SV_LOSE : !strcmp(k, "break_range") ? SV_RANGE : !strcmp(k, "seek_radius") ? SV_SEEK :
+                           !strcmp(k, "keep_away") ? SV_KEEP : !strcmp(k, "patrol_range") ? SV_PRANGE : !strcmp(k, "resend") ? SV_RESEND :
+                           !strcmp(k, "pass_by") ? SV_PASS : 0u;
         if (LC_BREAK_CONTACT && !strcmp(k, "break_mode")) s_breakMode = (int)x >= 0 && (int)x <= 2 ? (int)x : s_breakMode;
         else if (!strcmp(k, "lose_after")) s_loseAfter = x >= 0.5 && x <= 60 ? (float)x : s_loseAfter;
         else if (!strcmp(k, "break_range")) s_breakRange = x >= 10 && x <= 500 ? (float)x : s_breakRange;
@@ -185,6 +202,7 @@ static int ReadSettings(const char* path)
         else if (!strcmp(k, "patrol_range")) s_patrolRange = x >= 50 && x <= 1000 ? (float)x : s_patrolRange;
         else if (!strcmp(k, "kit_rules")) s_kitRules = (int)x ? 1 : 0;
         else if (!strcmp(k, "resend")) s_resend = x >= 0.5 && x <= 30 ? (float)x : s_resend;
+        else if (!strcmp(k, "pass_by")) s_passBy = x >= 0 && x <= 150 ? (x < 20 ? 0 : (float)x) : s_passBy;   /* under 20: off */
         else if (!strcmp(k, "key_break")) { if (!ParseKey(v, &s_keyBreak)) Log("settings: key_break \"%s\" is not a key", v); }
         else if (!strcmp(k, "key_patrol")) { if (!ParseKey(v, &s_keyPatrol)) Log("settings: key_patrol \"%s\" is not a key", v); }
     }
@@ -198,12 +216,12 @@ static void LoadSettings(void)
 {
     char path[MAX_PATH * 2], local[MAX_PATH];
     snprintf(path, sizeof path, "%s\\lost-contact.ini", hf->mod_folder(self));
-    if (!ReadSettings(path)) Log("settings: no lost-contact.ini, the defaults");
+    if (!ReadSettings(path, 0)) Log("settings: no lost-contact.ini, the defaults");
     DWORD n = GetEnvironmentVariableA("LOCALAPPDATA", local, sizeof local);
     if (n && n < sizeof local)
     {
         snprintf(g_savePath, sizeof g_savePath, "%s\\HellForgeMods\\lost-contact.ini", local);
-        if (ReadSettings(g_savePath)) Log("settings: the MODS tab's choices from %s", g_savePath);
+        if (ReadSettings(g_savePath, 1)) Log("settings: the MODS tab's choices from %s", g_savePath);
     }
 }
 static void SaveChoices(void)
@@ -217,6 +235,14 @@ static void SaveChoices(void)
     if (!f) { Log("settings: the MODS tab's choices could not be saved to %s", g_savePath); return; }
     fprintf(f, "; Lost Contact: the MODS tab's choices (read after the mod's lost-contact.ini). Delete this file to go back to the ini.\n"
                "break_mode = %d\npatrol_mode = %d\nkit_rules = %d\n", s_breakMode, s_patrolMode, s_kitRules);
+    /* 0.3.0: a number only once the tab changed it (else the mod's lost-contact.ini keeps it) */
+    if (g_savedNums & SV_LOSE) fprintf(f, "lose_after = %g\n", (double)s_loseAfter);
+    if (g_savedNums & SV_RANGE) fprintf(f, "break_range = %g\n", (double)s_breakRange);
+    if (g_savedNums & SV_SEEK) fprintf(f, "seek_radius = %g\n", (double)s_seekRadius);
+    if (g_savedNums & SV_KEEP) fprintf(f, "keep_away = %g\n", (double)s_keepAway);
+    if (g_savedNums & SV_PRANGE) fprintf(f, "patrol_range = %g\n", (double)s_patrolRange);
+    if (g_savedNums & SV_RESEND) fprintf(f, "resend = %g\n", (double)s_resend);
+    if (g_savedNums & SV_PASS) fprintf(f, "pass_by = %g\n", (double)s_passBy);
     fclose(f);
 }
 /* ---- what the active character kit allows ---------------------------------------------------------------------- */
@@ -626,6 +652,7 @@ static void PatrolPass(void)
     g_pt.seeking = nSeek; g_pt.routed = nRouted;
     g_ptSum.seeking += nSeek; g_ptSum.routed += nRouted; g_ptSum.passes++;
 }
+static void HookDest(void);
 static int Bind(void)
 {
     if (!hf->code_matches(game + 0xFD9D40, "48 83 ec 08 3b 0d 02 9f 4a 02 0f 84 9b 00 00 00") ||
@@ -640,14 +667,172 @@ static int Bind(void)
     if (bm) RD(bm + 0x20, &bc, 4);
     Log("bound: behaviours [game+0x3326740] = %llx (%u records), perception [game+0x3326548] = %llx", (unsigned long long)bm, bc, (unsigned long long)pm);
     if (Boundary(game + 0x5B36C0)) g_setDest = (SetDestFn)(game + 0x5B36C0);
+    HookDest();
     Log("patrols: navigation records [game+0x3326418] = %llx, set_destination %s", (unsigned long long)P(game + 0x3326418), g_setDest ? "on" : "off (not a function start)");
     return bm && pm;
+}
+/* ---- 0.4.0: patrols as they set out (their leader) ------------------------------------------------------------ */
+#define PATROL_LEADER 0xF5252BE8F520F3D8ull   /* the roaming patrol's bodiless leader (Patrol Route Probe, 2026-11-08) */
+#define LEADERS 64
+typedef struct { uint32_t entity; double at; int checked, moved; float to[3]; double checkAt; } Leader;
+static Leader g_lead[LEADERS];
+static atomic_uint g_leadNext;
+static float g_mePos[3];
+static atomic_int g_meOk;
+static struct { int seen, through, moved, again, kept; } g_side;   /* this mission */
+static Leader* LeaderOf(uint32_t e)
+{
+    for (int i = 0; i < LEADERS; i++) if (g_lead[i].entity == e) return &g_lead[i];
+    return NULL;
+}
+static float SegDist2D(const float a[3], const float b[3], const float p[3])
+{
+    float vx = b[0] - a[0], vy = b[1] - a[1], wx = p[0] - a[0], wy = p[1] - a[1], vv = vx * vx + vy * vy;
+    float t = vv > 1e-6f ? (wx * vx + wy * vy) / vv : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    float dx = a[0] + vx * t - p[0], dy = a[1] + vy * t - p[1];
+    return sqrtf(dx * dx + dy * dy);
+}
+/* from (the leader) aimed at dest: when that line passes within pass_by of you, a destination whose straight line
+ * from the leader passes you at pass_by (0.4.1: aimed off your direction by asin(pass_by / distance), to the side the
+ * aim leans to, and 40 m past the closest point; 0.4.0 put the point beside you and its line crossed too close for a
+ * wide pass_by); 0 when the aim does not come through you */
+static int SidePass(uint32_t id, const float from[3], const float dest[3], const float me[3], float out[3])
+{
+    if (s_passBy <= 0 || SegDist2D(from, dest, me) >= s_passBy) return 0;
+    float ux = me[0] - from[0], uy = me[1] - from[1], h = sqrtf(ux * ux + uy * uy);
+    if (h < 1) { ux = 1; uy = 0; h = 1; }
+    ux /= h; uy /= h;
+    float nx = -uy, ny = ux, side = (dest[0] - me[0]) * nx + (dest[1] - me[1]) * ny;
+    float sgn = side > 0.5f ? 1.f : side < -0.5f ? -1.f : (id & 1) ? 1.f : -1.f;
+    float r = s_passBy * 1.08f;
+    if (h <= r)
+    {
+        /* already within pass_by of you: out to the side, pass_by from you */
+        out[0] = me[0] + nx * sgn * r; out[1] = me[1] + ny * sgn * r; out[2] = dest[2];
+        return 1;
+    }
+    float sn = r / h, cs = sqrtf(1 - sn * sn), along = h * cs + 40;
+    /* the direction: yours turned by the angle, towards the side */
+    float dx = ux * cs + nx * sgn * sn, dy = uy * cs + ny * sgn * sn;
+    out[0] = from[0] + dx * along; out[1] = from[1] + dy * along; out[2] = dest[2];
+    return 1;
+}
+/* set_destination, hooked: the game aiming a patrol's leader through you again */
+typedef void (*SetDestFn2)(void*, uint32_t, const float*);
+static SetDestFn2 g_destOrig;
+static void DestDetour(void* a, uint32_t entity, const float* pos)
+{
+    Leader* l = pos && s_patrolMode && s_passBy > 0 && (g_rules & 2) && atomic_load(&g_meOk) ? LeaderOf(entity) : NULL;
+    if (l)
+    {
+        uint32_t k;
+        uintptr_t rec = NavIndex(entity, &k) ? NavRecord(k) : 0;
+        float from[3], me[3], to[3];
+        memcpy(me, g_mePos, 12);
+        if (rec && RD(rec + 0x54, from, 12) && SidePass(entity, from, pos, me, to))
+        {
+            g_side.again++;
+            static unsigned told;
+            if (told++ < 20)
+                Log("patrol leader %u aimed through you again (%.0f m from you): %s %.0f m beside you", entity, Dist2D(pos, me),
+                    s_patrolMode == 1 ? "moved" : "would move (observe)", SegDist2D(from, to, me));
+            if (s_patrolMode == 1)
+            {
+                _Alignas(16) float at[4] = {to[0], to[1], to[2], 0};
+                memcpy(l->to, to, 12); l->moved = 1;
+                g_destOrig(a, entity, at);
+                return;
+            }
+        }
+    }
+    g_destOrig(a, entity, pos);
+}
+static void HookDest(void)
+{
+    static int done;
+    if (done || !g_setDest) return;
+    done = 1;
+    if (!hf->code_matches(game + 0x5B36C0, "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 18 57 48 83 ec 50"))
+    { Log("patrols as they set out: off (set_destination is not the reviewed code)"); return; }
+    if (hf->hook_ex(self, game + 0x5B36C0, (void*)DestDetour, (void**)&g_destOrig, 0) || !g_destOrig)
+    { g_destOrig = NULL; Log("patrols as they set out: set_destination could not be hooked (leaders are still moved as they set out)"); g_destOrig = (SetDestFn2)g_setDest; return; }
+    g_setDest = (SetDestFn)g_destOrig;   /* its own sends go past the hook */
+    Log("patrols as they set out: set_destination hooked (pass_by %g m)", (double)s_passBy);
+}
+/* each frame: leaders that spawned, once their destination reads; 15 s later, where they went */
+static void LeaderFrame(void)
+{
+    uint32_t meId;
+    float me[3];
+    if (!Me(&meId, me)) { atomic_store(&g_meOk, 0); return; }
+    memcpy(g_mePos, me, 12);
+    atomic_store(&g_meOk, 1);
+    for (int i = 0; i < LEADERS; i++)
+    {
+        Leader* l = &g_lead[i];
+        if (!l->entity) continue;
+        uint32_t k;
+        uintptr_t rec = NavIndex(l->entity, &k) ? NavRecord(k) : 0;
+        float from[3], dest[3], to[3];
+        if (!rec || !RD(rec + 0x54, from, 12) || !RD(rec + 0x60, dest, 12) || !isfinite(dest[0]))
+        {
+            if (g_now - l->at > 5) l->entity = 0;   /* gone, or never had a navigation record */
+            continue;
+        }
+        if (!l->checked)
+        {
+            if (!dest[0] && !dest[1] && !dest[2] && g_now - l->at < 2) continue;   /* not aimed yet */
+            l->checked = 1;
+            g_side.seen++;
+            if (!s_patrolMode || !(g_rules & 2) || s_passBy <= 0) continue;
+            if (!SidePass(l->entity, from, dest, me, to))
+            {
+                static unsigned told;
+                g_side.kept++;
+                if (told++ < 10)
+                    Log("patrol leader %u set out %.0f m from you, aimed %.0f m from you (its line %.0f m from you): already passing by", l->entity,
+                        Dist2D(from, me), Dist2D(dest, me), SegDist2D(from, dest, me));
+                continue;
+            }
+            g_side.through++;
+            static unsigned told;
+            if (told++ < 30)
+                Log("patrol leader %u set out %.0f m from you, aimed %.0f m from you (its line %.0f m from you): %s %.0f m beside you", l->entity,
+                    Dist2D(from, me), Dist2D(dest, me), SegDist2D(from, dest, me), s_patrolMode == 1 ? "moved" : "would move (observe)", SegDist2D(from, to, me));
+            if (s_patrolMode == 1 && g_destOrig)
+            {
+                _Alignas(16) float at[4] = {to[0], to[1], to[2], 0};
+                g_destOrig(NULL, l->entity, at);
+                memcpy(l->to, to, 12); l->moved = 1;
+                g_side.moved++;
+                l->checkAt = g_now + 15;
+            }
+            continue;
+        }
+        if (l->moved && l->checkAt > 0 && g_now >= l->checkAt)
+        {
+            static unsigned told;
+            l->checkAt = 0;
+            if (told++ < 12)
+                Log("patrol leader %u 15 s later: %.0f m from you, %.0f m from where it was sent (destination now %.0f m from that)", l->entity,
+                    Dist2D(from, me), Dist2D(from, l->to), Dist2D(dest, l->to));
+        }
+        if (g_now - l->at > 300) l->entity = 0;
+    }
 }
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* e = (const HfSpawnEvent*)info;
     unsigned i = g_nseen % SEEN;
     g_seenEnt[i] = e->entity; g_seenRes[i] = e->resource; g_nseen++;
+    if (e->resource == PATROL_LEADER)
+    {
+        unsigned k = atomic_fetch_add(&g_leadNext, 1) % LEADERS;
+        g_lead[k].entity = 0;
+        g_lead[k].at = g_now; g_lead[k].checked = 0; g_lead[k].moved = 0; g_lead[k].checkAt = 0;
+        g_lead[k].entity = e->entity;
+    }
 }
 static void OnWeapon(HfMod* mod, const HfEventInfo* info, void* user)
 {
@@ -680,19 +865,39 @@ static int g_inMission;
 static void MissionStart(void)
 {
     g_nfoes = 0;
+    memset(&g_side, 0, sizeof g_side);
     g_nposts = g_realPosts = 0;
     memset(&g_bc, 0, sizeof g_bc); memset(&g_bcSum, 0, sizeof g_bcSum);
     memset(&g_pt, 0, sizeof g_pt); memset(&g_ptSum, 0, sizeof g_ptSum);
     memset(&g_gone, 0, sizeof g_gone);
 }
 
-/* ---- the MODS tab (Vanilla Plus Megapack's native menu, its hd2_mod_options.h): the modes, whether a kit may limit
- * them, and what runs now and why, so a player knows what is off and where to turn it back on ---------------------- */
+/* ---- the MODS tab (a menu that publishes hd2_mod_options.h, HD2_MOD_OPTIONS_v1: giblett's Vanilla Plus Megapack
+ * build): the modes, whether a kit may limit them, and what runs now and why, so a player knows what is off and where
+ * to turn it back on. 0.2.1: the public Vanilla Plus Megapack (0.2.0) does not publish it; its own menu API
+ * (vpm_mom_api, include/vpm_mom.h) has no public header yet, so it is only named in the log, never called. Without a
+ * menu the log says so once, after 30 s; rows the menu refuses are named and asked for again a few times. 0.3.0: with
+ * the public pack the rows come from Lua instead (lost_contact_menu and below); only one of the two registers. ------ */
 #define OPT_MOD "Lost Contact"
+#define OPT_ROWS 5
+#define OPT_TRIES 4          /* registrations of refused rows, the first included */
+#define OPT_RETRY 10.0       /* seconds between them */
 static const char* const kModes[] = {"Off", "On", "Observe (log only)"};
 static const char* const kStatus[] = {"Running", "Off (your setting)", "Off: the active kit (Character kits can limit)", "Observing"};
-static int g_optsDone;
+static int g_optsDone;       /* 1: every row is on the tab, or the tries ran out */
+static const Hd2ModOptionsApi* g_optsApi;   /* the menu the rows went to */
+static uint8_t g_rowOk[OPT_ROWS];
+static int g_optTries;
+static double g_optNextTry, g_optCheck;
+#define OPT_READDS 3         /* rows added again for one menu address, at most */
+static const Hd2ModOptionsApi* g_checkFor;  /* the menu address the two below are for */
+static int g_noCheck;        /* 1: the 10 s check is off for that menu (its get() did not find a row just added, or the cap) */
+static int g_readds;         /* rows added again for that menu */
 static int g_shownStatus[2] = {-1, -1};
+/* 0.3.0: which menu has the rows: 0 none yet, 1 this file's (HD2_MOD_OPTIONS_v1), 2 the Lua Mod Options Menu (the HUD
+ * addon, through lost_contact_menu). Only one registers. g_optLooked: Options() has looked for the C menu once, so the
+ * Lua side waits for that before it claims the rows. */
+static atomic_int g_menuOwner, g_optLooked;
 static int ModeIndex(int m) { return m == 1 ? 1 : m == 2 ? 2 : 0; }
 static int StatusOf(int mode, int bit)
 {
@@ -700,10 +905,61 @@ static int StatusOf(int mode, int bit)
     if (!(g_rules & bit)) return 2;
     return mode == 2 ? 3 : 0;
 }
+/* hd2_mod_options() with its refusals told: a menu of another process, or one whose version, size or functions this
+ * build does not accept, is logged (once per distinct value) instead of being skipped in silence. The table is read
+ * through hf->read and its functions checked (each inside a loaded module) only when the published value changes. */
+static int g_menuRefused;    /* a menu was published, and refused: the 30 s line says so instead of "no menu" */
+static char g_menuChecked[64];                /* the published value last accepted */
+static const Hd2ModOptionsApi* g_menuAccepted; /* its table */
+static int InModule(const void* fn)
+{
+    HMODULE m = NULL;
+    return fn && GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)fn, &m) && m;
+}
+static const Hd2ModOptionsApi* MenuApi(void)
+{
+    char text[64] = "";
+    DWORD n = GetEnvironmentVariableA(HD2_MOD_OPTIONS_ENV, text, sizeof text);
+    if (!n) return NULL;
+    if (n >= sizeof text) snprintf(text, sizeof text, "(too long: %lu)", (unsigned long)n);   /* text was left unset */
+    static char told[64];
+    if (g_menuAccepted && !strcmp(g_menuChecked, text)) return g_menuAccepted;   /* the same value as last time, already checked */
+    g_menuAccepted = NULL;
+    static double recheck;
+    if (!strcmp(told, text) && g_now < recheck) return NULL;   /* refused before: checked again only every 10 s */
+    recheck = g_now + OPT_RETRY;
+    unsigned long pid = 0;
+    unsigned long long at = 0;
+    const char* why = NULL;
+    Hd2ModOptionsApi copy;
+    memset(&copy, 0, sizeof copy);
+    if (n >= sizeof text || sscanf(text, "%lu:%llx", &pid, &at) != 2 || !at) why = "not \"<process id>:<address>\"";
+    else if (pid != GetCurrentProcessId()) why = "another process's";
+    else if (!RD((uintptr_t)at, &copy, 8)) why = "its address cannot be read";
+    else if (copy.version < 1) why = "an unknown version";
+    else if (copy.size < sizeof(Hd2ModOptionsApi)) why = "a smaller table than this build's";
+    else if (!RD((uintptr_t)at, &copy, sizeof copy)) why = "its table cannot be read";
+    else if (!InModule((const void*)copy.register_option) || !InModule((const void*)copy.get) || !InModule((const void*)copy.set))
+        why = "a function of its table is not in a loaded module";
+    if (!why)
+    {
+        snprintf(g_menuChecked, sizeof g_menuChecked, "%s", text);
+        g_menuAccepted = (const Hd2ModOptionsApi*)(uintptr_t)at;
+        return g_menuAccepted;
+    }
+    g_menuRefused = 1;
+    if (strcmp(told, text))
+    {
+        snprintf(told, sizeof told, "%s", text);
+        Log("MODS tab: %s = \"%s\" is refused: %s (version %u, size %u; this build needs version 1 or later, size %u or more)",
+            HD2_MOD_OPTIONS_ENV, text, why, copy.version, copy.size, (unsigned)sizeof(Hd2ModOptionsApi));
+    }
+    return NULL;
+}
 static void OptChanged(void* user, const char* id, int32_t v)
 {
     (void)user;
-    const Hd2ModOptionsApi* api = hd2_mod_options();
+    const Hd2ModOptionsApi* api = g_optsApi;
     if (!strcmp(id, "break")) { s_breakMode = v == 1 ? 1 : v == 2 ? 2 : 0; Log("MODS tab: break contact %s", ModeName(s_breakMode)); }
     else if (!strcmp(id, "patrols")) { s_patrolMode = v == 1 ? 1 : v == 2 ? 2 : 0; Log("MODS tab: patrols %s", ModeName(s_patrolMode)); }
     else if (!strcmp(id, "kits")) { s_kitRules = v ? 1 : 0; Log("MODS tab: character kits %s limit them", s_kitRules ? "may" : "may not"); KitRules(); }
@@ -712,28 +968,158 @@ static void OptChanged(void* user, const char* id, int32_t v)
     SaveChoices();
     g_shownStatus[0] = g_shownStatus[1] = -1;
 }
+/* the public Vanilla Plus Megapack, for the 30 s line: in the session's mods (hf->mods, SDK 10) by its id, and its DLL
+ * by its manifest's code.dll name (vanilla_plus_megapack.dll, which HellForge loads it under) */
+#define VPM_ID "cowboybingus.vanilla-plus-megapack"
+#define VPM_DLL "vanilla_plus_megapack.dll"
+static const char* PublicPack(void)
+{
+    int listed = -1;   /* -1: hf->mods is not there */
+    if (hf->size >= offsetof(HfApi, mods) + sizeof hf->mods && hf->mods)
+    {
+        listed = 0;
+        HfModInfo info;
+        for (uint32_t i = 0; i < 512; i++)
+        {
+            memset(&info, 0, sizeof info);
+            info.size = sizeof info;
+            if (!hf->mods(self, i, &info)) break;
+            if (info.id && !strcmp(info.id, VPM_ID)) { listed = info.loaded ? 2 : 1; break; }
+        }
+    }
+    HMODULE vpm = GetModuleHandleA(VPM_DLL);
+    int mom = vpm && GetProcAddress(vpm, "vpm_mom_api");
+    if (listed == 0 && !vpm) return "the Vanilla Plus Megapack (" VPM_ID ") is not installed";
+    if (listed == 1) return "the Vanilla Plus Megapack (" VPM_ID ") is installed but did not load";
+    if (!vpm) return listed == 2 ? "the Vanilla Plus Megapack is loaded, but not as " VPM_DLL ", so its exports were not checked"
+                                 : VPM_DLL " is not loaded";
+    return mom ? "the Vanilla Plus Megapack that is loaded offers only vpm_mom_api, which this release does not use yet"
+               : "the Vanilla Plus Megapack that is loaded publishes neither";
+}
+/* the mission keys, as the log names them (break contact's only when it is built in) */
+static const char* KeysText(void)
+{
+    static char keys[64];
+    if (LC_BREAK_CONTACT) snprintf(keys, sizeof keys, "%s / %s", s_keyBreak.label, s_keyPatrol.label);
+    else snprintf(keys, sizeof keys, "%s", s_keyPatrol.label);
+    return keys;
+}
+/* no usable menu 30 s after start: one line naming what was looked for and where the settings are without it */
+static void NoMenuYet(void)
+{
+    static int told;
+    if (told || g_optsApi || g_now < 30 || atomic_load(&g_menuOwner) == 2) return;
+    told = 1;
+    Log("MODS tab: %s after 30 s: looked for %s (published by giblett's Vanilla Plus Megapack build); %s. Without it: "
+        "lost-contact.ini, or %s in a mission (or Mod Options Menu, from Lua: needs HD2Runtime and Bingus Shared Loader)",
+        g_menuRefused ? "no usable menu (one was refused, see above)" : "no menu", HD2_MOD_OPTIONS_ENV, PublicPack(), KeysText());
+}
+/* right after the rows are added: a get() that does not find the first row (a stub, or rows keyed otherwise) would make
+ * the 10 s check re-add them for ever, so that menu address gets no check */
+static void CheckGet(const Hd2ModOptionsApi* api)
+{
+    int32_t v;
+    if (g_noCheck || api->get(OPT_MOD, "break", &v)) return;
+    g_noCheck = 1;
+    Log("MODS tab: the menu's get() does not find a row it just added; its rows are not checked again for this menu");
+}
 static void Options(void)
 {
-    const Hd2ModOptionsApi* api = hd2_mod_options();
-    if (!api) return;
+    const Hd2ModOptionsApi* api = MenuApi();
+    atomic_store(&g_optLooked, 1);
+    if (atomic_load(&g_menuOwner) == 2)
+    {
+        static int told;
+        if (!told++) Log("MODS tab: the rows are on Mod Options Menu (Lua, through Lost Contact's HUD addon)%s", api ? "; " HD2_MOD_OPTIONS_ENV " is not used" : "");
+        return;
+    }
+    if (!api) { g_optsApi = NULL; NoMenuYet(); return; }
+    int none = 0;
+    if (!atomic_compare_exchange_strong(&g_menuOwner, &none, 1) && none != 1) return;   /* gone: a menu published again, even at the same address, gets the rows */
+    if (api != g_optsApi)
+    {
+        /* a menu for the first time, or one set up again (a reload): every row is asked for */
+        g_optsApi = api;
+        if (api != g_checkFor) { g_checkFor = api; g_noCheck = 0; g_readds = 0; }
+        g_optsDone = 0; g_optTries = 0; g_optNextTry = 0;
+        memset(g_rowOk, 0, sizeof g_rowOk);
+        g_shownStatus[0] = g_shownStatus[1] = -1;
+    }
+    else if (g_optsDone && g_rowOk[0] && !g_noCheck && g_now >= g_optCheck)
+    {
+        /* every 10 s once registered: get() of the first row tells a menu set up again in place (HellForge's live mods:
+         * a taken-out mod's DLL is never freed, so its table stays readable and only its rows are gone). Only for a menu
+         * whose get() found that row right after it was added (CheckGet), and at most OPT_READDS re-adds per address.
+         * The table is checked first only as a guard against calling into a module that really was unloaded. */
+        Hd2ModOptionsApi copy;
+        int32_t v;
+        g_optCheck = g_now + OPT_RETRY;
+        if (!RD((uintptr_t)api, &copy, sizeof copy) || !InModule((const void*)copy.get) || !InModule((const void*)copy.register_option) ||
+            !InModule((const void*)copy.set))
+        {
+            Log("MODS tab: the menu's table or functions are no longer in a loaded module; looking for a menu again");
+            g_menuAccepted = NULL; g_menuChecked[0] = 0; g_optsApi = NULL;
+            return;
+        }
+        if (!api->get(OPT_MOD, "break", &v))
+        {
+            if (g_readds >= OPT_READDS)
+            {
+                g_noCheck = 1;
+                Log("MODS tab: the menu has lost Lost Contact's rows %d times; not checking or adding them again for this menu", g_readds + 1);
+                return;
+            }
+            g_readds++;
+            Log("MODS tab: the menu no longer has Lost Contact's rows (set up again?); adding them again (%d of %d)", g_readds, OPT_READDS);
+            g_optsDone = 0; g_optTries = 0; g_optNextTry = 0;
+            memset(g_rowOk, 0, sizeof g_rowOk);
+            g_shownStatus[0] = g_shownStatus[1] = -1;
+        }
+    }
     /* (at most 400 characters: the menu refuses longer descriptions) */
     static const char* const kText =
         "Break contact: an enemy that loses sight of you stops tracking you. Patrols rerouted: a patrol sent at you walks "
         "to an outpost away from you. A character kit can turn one off while it is your active kit (Lemuen: patrols only). "
         "Turn Character kits can limit off to keep both as set here. The Now rows show what runs.";
-    if (!g_optsDone)
+    if (!g_optsDone && g_now >= g_optNextTry)
     {
-        Hd2ModOption rows[5] = {
+        Hd2ModOption rows[OPT_ROWS] = {
             {sizeof(Hd2ModOption), OPT_MOD, "break", "Break contact", kText, HD2_MOD_OPTION_CHOICE, 3, kModes, ModeIndex(s_breakMode), OptChanged, NULL},
             {sizeof(Hd2ModOption), OPT_MOD, "patrols", "Patrols rerouted", kText, HD2_MOD_OPTION_CHOICE, 3, kModes, ModeIndex(s_patrolMode), OptChanged, NULL},
             {sizeof(Hd2ModOption), OPT_MOD, "kits", "Character kits can limit", kText, HD2_MOD_OPTION_TOGGLE, 0, NULL, s_kitRules, OptChanged, NULL},
             {sizeof(Hd2ModOption), OPT_MOD, "break_now", "Break contact now", kText, HD2_MOD_OPTION_CHOICE, 4, kStatus, 0, OptChanged, NULL},
             {sizeof(Hd2ModOption), OPT_MOD, "patrols_now", "Patrols now", kText, HD2_MOD_OPTION_CHOICE, 4, kStatus, 0, OptChanged, NULL},
         };
-        int added = 0;
-        for (int k = 0; k < 5; k++) added += api->register_option(&rows[k]) != 0;
-        g_optsDone = 1;
-        Log("MODS tab: %d of 5 rows added", added);
+        int added = 0, fresh = 0;
+        char refused[96] = "";
+        for (int k = 0; k < OPT_ROWS; k++)
+        {
+            if (!g_rowOk[k] && (g_rowOk[k] = api->register_option(&rows[k]) != 0)) fresh++;
+            if (g_rowOk[k]) added++;
+            else snprintf(refused + strlen(refused), sizeof refused - strlen(refused), "%s%s", refused[0] ? ", " : "", rows[k].id);
+        }
+        g_optTries++;
+        g_optNextTry = g_now + OPT_RETRY;
+        if (fresh) g_shownStatus[0] = g_shownStatus[1] = -1;   /* a Now row added now shows its status */
+        if (added == OPT_ROWS)
+        {
+            g_optsDone = 1; g_optCheck = g_now + OPT_RETRY;
+            Log("MODS tab: %d of %d rows added (menu: %s, version %u)", added, OPT_ROWS, HD2_MOD_OPTIONS_ENV, api->version);
+            CheckGet(api);
+        }
+        else if (g_optTries < OPT_TRIES)
+            Log("MODS tab: %d of %d rows added (menu: %s, version %u); refused: %s; asking again in %.0f s (try %d of %d)", added, OPT_ROWS,
+                HD2_MOD_OPTIONS_ENV, api->version, refused, OPT_RETRY, g_optTries, OPT_TRIES);
+        else
+        {
+            g_optsDone = 1;
+            g_optCheck = g_now + OPT_RETRY;
+            if (g_rowOk[0]) CheckGet(api);
+            if (!added) { atomic_store(&g_menuOwner, 0); g_optsApi = NULL; }   /* none on it: the Lua menu may take them */
+            Log("MODS tab: %d of %d rows added after %d tries (menu: %s, version %u); refused: %s (the menu may be full: 8 mods, 31 rows each). "
+                "Those settings stay in lost-contact.ini and on %s", added, OPT_ROWS, g_optTries, HD2_MOD_OPTIONS_ENV, api->version, refused,
+                KeysText());
+        }
     }
     int st[2] = {StatusOf(LC_BREAK_CONTACT ? s_breakMode : 0, 1), StatusOf(s_patrolMode, 2)};
     if (st[0] != g_shownStatus[0]) { g_shownStatus[0] = st[0]; api->set(OPT_MOD, "break_now", st[0]); if (st[0] == 2) Log("break contact is off while %s is your active kit (MODS tab: Character kits can limit)", g_kitBy ? g_kitBy : "a kit"); }
@@ -758,6 +1144,9 @@ static void Tick(HfMod* mod, float dt, void* user)
         if (!inMission && (g_bc.lost || g_pt.sent))
             Log("mission end: break contact lost you %d times (%d after you again unsensed); patrols: %d sends, %d re-aimed at you, %d outposts; %d patrols despawned (%d routed), %d killed",
                 g_bc.lost, g_bc.blind, g_pt.sent, g_pt.reaimed, g_realPosts, g_gone.patrolDespawned, g_gone.routedDespawned, g_gone.patrolKilled);
+        if (!inMission && g_side.seen)
+            Log("mission end: %d patrols set out, %d aimed through you (%s), %d aimed through you again later, %d already passing by", g_side.seen,
+                g_side.through, s_patrolMode == 1 ? "moved beside you" : "observed", g_side.again, g_side.kept);
         if (inMission) MissionStart();
     }
     if (!inMission) return;
@@ -796,6 +1185,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     static double rulesNext;
     if (g_now >= rulesNext) { rulesNext = g_now + 2; KitRules(); }
     if (LC_BREAK_CONTACT && s_breakMode && (g_rules & 1) && g_now >= bcNext) { bcNext = g_now + 0.25; BreakPass(); }
+    if (s_patrolMode && (g_rules & 2)) LeaderFrame();
     if (s_patrolMode && (g_rules & 2) && g_now >= ptNext) { ptNext = g_now + 1.0; PatrolPass(); }
     if (g_now - told >= 5)
     {
@@ -830,6 +1220,81 @@ HF_MOD_EXPORT int lost_contact_hud(unsigned version, int* out, int n)
     out[5] = g_bc.lost; out[6] = g_bc.blind; out[7] = s_patrolMode; out[8] = g_realPosts; out[9] = g_pt.seeking;
     out[10] = g_pt.routed; out[11] = g_pt.reaimed; out[12] = g_ready == 1 && g_inMission;
     return 13;
+}
+/* ---- 0.3.0: the MODS tab from Lua (hud-src/lost_contact_hud.lua: Mod Options Menu through HD2Runtime and Bingus
+ * Shared Loader, the menu the public Vanilla Plus Megapack has). The addon claims the rows (lost_contact_menu), reads
+ * each value (lost_contact_option_get) and pushes the player's changes (lost_contact_option), which are saved as the C
+ * menu's are: %LOCALAPPDATA%\\HellForgeMods\\lost-contact.ini. Keys: break, patrols (0 off, 1 on, 2 observe), kits
+ * (0 / 1), the six numbers by their ini names, and break_now / patrols_now (read only: 0 running, 1 off by your
+ * setting, 2 off by the active kit, 3 observing). ----------------------------------------------------------------- */
+/* claim 1: the Lua side asks for the rows. 1: they are its own (register them); 0: not now (the C menu has them, or
+ * it has not been looked for yet: ask again); -1: an unknown version. claim 0 only answers. */
+HF_MOD_EXPORT int lost_contact_menu(unsigned version, int claim)
+{
+    if (version != 1) return -1;
+    int owner = atomic_load(&g_menuOwner);
+    if (owner == 2) return 1;
+    if (!claim || owner == 1 || !atomic_load(&g_optLooked)) return 0;
+    int none = 0;
+    if (atomic_compare_exchange_strong(&g_menuOwner, &none, 2)) return 1;
+    return none == 2;
+}
+typedef struct { const char* key; float* at; float lo, hi; unsigned bit; } NumOpt;
+static const NumOpt kNums[] = {
+    {"lose_after", &s_loseAfter, 0.5f, 60, SV_LOSE}, {"break_range", &s_breakRange, 10, 500, SV_RANGE},
+    {"seek_radius", &s_seekRadius, 10, 300, SV_SEEK}, {"keep_away", &s_keepAway, 20, 600, SV_KEEP},
+    {"patrol_range", &s_patrolRange, 50, 1000, SV_PRANGE}, {"resend", &s_resend, 0.5f, 30, SV_RESEND},
+    {"pass_by", &s_passBy, 0, 150, SV_PASS},
+};
+HF_MOD_EXPORT int lost_contact_option_get(unsigned version, const char* key, double* out)
+{
+    if (version != 1 || !key || !out) return 0;
+    if (!strcmp(key, "break")) *out = s_breakMode;
+    else if (!strcmp(key, "patrols")) *out = s_patrolMode;
+    else if (!strcmp(key, "kits")) *out = s_kitRules;
+    else if (!strcmp(key, "break_now")) *out = StatusOf(LC_BREAK_CONTACT ? s_breakMode : 0, 1);
+    else if (!strcmp(key, "patrols_now")) *out = StatusOf(s_patrolMode, 2);
+    else
+    {
+        for (unsigned i = 0; i < sizeof kNums / sizeof kNums[0]; i++)
+            if (!strcmp(key, kNums[i].key)) { *out = *kNums[i].at; return 1; }
+        return 0;
+    }
+    return 1;
+}
+/* 1 applied (and saved), 0 refused: an unknown or read-only key, or a value out of range */
+HF_MOD_EXPORT int lost_contact_option(unsigned version, const char* key, double value)
+{
+    if (version != 1 || !key || !isfinite(value)) return 0;
+    int m = (int)value;
+    if (!strcmp(key, "break") || !strcmp(key, "patrols"))
+    {
+        if (m < 0 || m > 2 || m != value || (!LC_BREAK_CONTACT && key[0] == 'b')) return 0;
+        int* at = key[0] == 'b' ? &s_breakMode : &s_patrolMode;
+        if (*at != m)
+        {
+            *at = m;
+            if (key[0] == 'b') { g_bc.lost = g_bc.blind = 0; for (int j = 0; j < g_nfoes; j++) g_foes[j].unseen = 0; }
+            else { g_pt.sent = g_pt.reaimed = 0; for (int j = 0; j < g_nfoes; j++) g_foes[j].routed = 0; }
+            Log("MODS tab: %s %s", key[0] == 'b' ? "break contact" : "patrols", ModeName(m));
+        }
+    }
+    else if (!strcmp(key, "kits"))
+    {
+        if (value != 0 && value != 1) return 0;
+        if (s_kitRules != m) { s_kitRules = m; Log("MODS tab: character kits %s limit them", m ? "may" : "may not"); KitRules(); }
+    }
+    else
+    {
+        unsigned i;
+        for (i = 0; i < sizeof kNums / sizeof kNums[0] && strcmp(key, kNums[i].key); i++) {}
+        if (i == sizeof kNums / sizeof kNums[0] || value < kNums[i].lo || value > kNums[i].hi) return 0;
+        if (kNums[i].at == &s_passBy && value < 20) value = 0;   /* pass_by under 20: off */
+        if (*kNums[i].at != (float)value) { *kNums[i].at = (float)value; Log("MODS tab: %s %g", key, value); }
+        g_savedNums |= kNums[i].bit;
+    }
+    SaveChoices();
+    return 1;
 }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {

@@ -110,3 +110,21 @@ To give a skill an explosion or arc of its own (own damage, own arc), see [nativ
   reachable from HD2Runtime addons.
 - Both models load only with the Guard Dog in someone's loadout (`Application.can_get('unit', ...)`); a kit that
   shows them without one needs their package requested (hd2.require_assets) first.
+
+## Status effects: add, check, remove (build 25480438, static, from the game.dll dump)
+
+Read from the memory dump the Booster Table Probe writes (tools/dump-analysis). Static analysis only; nothing patched yet.
+
+- **Add / build up** `game.dll+0x699E40` (31 callers): `(manager, entity, status, r9 0, float buildup @[rsp+0x20], u32 entity
+  @[rsp+0x28], u64 0 @[rsp+0x30])`, as Death March calls it at `0xA8B5B4` (manager `[game+0x3326620]`, status 0x3B).
+  Every status on every entity passes through it, so a hook here can refuse a status for chosen entities (immunity).
+  Early outs (status rejected, `0x69A808` / `0x69A7F8` / `0x69A7E8`): `0x927050` true (263 callers; dead, guess) allows
+  only status 0x42; an entity holding status **0x38** refuses statuses **0x35-0x37** (a native immunity); an entity
+  with no resistance entry for a build-up status (`0x6992A0` returns none) refuses it; build-up below the entity's
+  threshold (`+0x90`) or failing its roll (`+0x94` x the LCG) does not apply yet.
+- **Has** `game.dll+0x69B1F0` (53 callers): `(manager, entity, status, 0)` -> al.
+- **Remove** `game.dll+0x69AEC0` (8 callers): `(manager, entity, status)`: what Death March uses to take its status off,
+  so a cleanse can call it on the game thread for each status to clear.
+- Slow/Stun Resistance booster: x0.5 on the build-up at `0x69A505`.
+- The damage event's cancel leaves a hit's status (SDK note), so cancelling an EMS blast's damage on an ally does not
+  stop its stun: refusing the status in the add hook does. Which rows EMS puts on a Helldiver is still to be logged.

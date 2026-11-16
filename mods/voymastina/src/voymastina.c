@@ -40,7 +40,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.1"
+#define VERSION "0.4.3"
 static int HerRide(uint32_t target);
 /* her two kits (p8): the Sinbreaker's GFL2 kit, the AK-15 kit on foot */
 static void AkHit(HfDamageEvent* d);
@@ -63,9 +63,53 @@ static double HowlImmuneUntil(void);
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
 #include "kitbase/kb_roster.h"
+#include "kitbase/kb_fit.h"
 
 /* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
 KB_ROSTER_EXPORTS(voymastina)
+
+/* ---- 0.4.2 (test): where the time goes. A player's Sinbreaker (the free one, an Emancipator) brought steady stutter
+ * from its call-in, and piloting it was unplayable (2026-11-08). Each part of the game-thread update and each hit hook is
+ * timed; once a second, when the slowest call of a part took over 1 ms or a frame over 50 ms, one line says which */
+enum { PF_TICK, PF_KIT, PF_SEAT, PF_FOES, PF_WALK, PF_LUNGE, PF_MPB, PF_AK, PF_BARE, PF_FIST, PF_MOVE, PF_SUPPORT, PF_DASH,
+       PF_CHARGE, PF_RIPPLE, PF_EYE, PF_DROP, PF_EXHAUST, PF_ITEMS, PF_STAMINA, PF_SIN, PF_HIT, PF_N };
+static const char* const kPf[PF_N] = {"update", "kit", "seat", "foes near the suit", "suit walk", "suit lunge", "pile bunker", "AK-15",
+    "bare", "fist", "move", "support", "dash", "charge", "ripple", "eye", "drop", "exhaustion", "items", "stamina", "sinbreaker frames", "hit hook"};
+static double g_pfMax[PF_N], g_pfSum[PF_N], g_pfFreq;
+static unsigned g_pfCalls[PF_N];
+static float g_pfFrameMax;
+static unsigned g_pfSlowFrames, g_pfLines;
+static double PfNow(void)
+{
+    LARGE_INTEGER c;
+    if (g_pfFreq <= 0) { LARGE_INTEGER f; QueryPerformanceFrequency(&f); g_pfFreq = (double)f.QuadPart; }
+    QueryPerformanceCounter(&c);
+    return (double)c.QuadPart / g_pfFreq * 1000.0;
+}
+#define PF(k, call) do { double pf0_ = PfNow(); call; double pf1_ = PfNow() - pf0_; if (pf1_ > g_pfMax[k]) g_pfMax[k] = pf1_; g_pfSum[k] += pf1_; g_pfCalls[k]++; } while (0)
+static uint32_t g_mech;
+static void PfReport(float dt)
+{
+    static double next;
+    if (dt > g_pfFrameMax) g_pfFrameMax = dt;
+    if (dt > 0.05f) g_pfSlowFrames++;
+    if (g_now < next) return;
+    next = g_now + 1;
+    int slow = g_pfFrameMax > 0.05f;
+    for (int k = 0; k < PF_N && !slow; k++) slow = g_pfMax[k] > 1.0;
+    if (slow && g_pfLines < 200)
+    {
+        char line[700];
+        int at = snprintf(line, sizeof line, "perf (%s): slowest frame %.0f ms, %u over 50 ms;", g_mech ? "in the suit" : "on foot", (double)g_pfFrameMax * 1000, g_pfSlowFrames);
+        for (int k = 0; k < PF_N; k++)
+            if (g_pfMax[k] > 0.3 && at < (int)sizeof line - 60)
+                at += snprintf(line + at, sizeof line - at, " %s %.1f ms (%u calls, %.1f total)", kPf[k], g_pfMax[k], g_pfCalls[k], g_pfSum[k]);
+        g_pfLines++;
+        Log("%s", line);
+    }
+    memset(g_pfMax, 0, sizeof g_pfMax); memset(g_pfSum, 0, sizeof g_pfSum); memset(g_pfCalls, 0, sizeof g_pfCalls);
+    g_pfFrameMax = 0; g_pfSlowFrames = 0;
+}
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static float s_sfCd = 6, s_sfRange = 40, s_sfWindow = 10;
@@ -287,6 +331,13 @@ static RayFn g_raycast;
 /* The nearest static obstruction along a ray (static actors only, so enemies are not walls): its distance, len + 1
  * when clear, or -1 when the query cannot be made */
 static float RayWith(uint32_t unit, const float from[3], const float dir[3], float len, uint32_t filter, uint32_t flags, unsigned* count);
+/* 1: bodies are nothing to the ray (for whether she fits: an enemy beside the spot is no wall) */
+static int g_rayBodies;
+static uint32_t ActorFilter(uint32_t id, uint32_t unit);
+static int IsFoeUnit(uint32_t u);
+/* her entity while a landing spot is looked for for HER (0 for anything else that is set down, a mech, an ally): the
+ * game's own fit test can be asked only of her */
+static uint32_t g_spEntity;
 static float g_rayPrefer = -1;
 static float RayWith(uint32_t unit, const float from[3], const float dir[3], float len, uint32_t filter, uint32_t flags, unsigned* count)
 {
@@ -305,6 +356,11 @@ static float RayWith(uint32_t unit, const float from[3], const float dir[3], flo
         float d;
         memcpy(&d, hits + 44u * i + 24, 4);
         if (Word(hits + 44u * i + 28) == unit || !isfinite(d) || d < 0.02f) continue;
+        /* a zone, not a thing (from Ascalon 0.4.14): actors tagged 0xEDC5EBE0 are level faces some 2 m over the ground
+         * across a whole area, which a look meets from outside and which stop nothing */
+        uint32_t rf = ActorFilter(Word(hits + 44u * i + 32), Word(hits + 44u * i + 28));
+        if (rf == 0xEDC5EBE0u) continue;
+        if (g_rayBodies && (rf == 0x236122F0u || rf == 0xD5B33D56u || IsFoeUnit(Word(hits + 44u * i + 28)))) continue;
         if (g_rayPrefer >= 0 ? fabsf(d - g_rayPrefer) < fabsf(best - g_rayPrefer) : d < best) best = d;
     }
     return best;
@@ -364,6 +420,7 @@ static int Surfaces(uint32_t unit, float x, float y, float ref, float* z, int ma
         if (hu == unit || !isfinite(d) || d < 0.02f || d > len) continue;
         uint32_t filt = ActorFilter(Word(hits + 44u * i + 32), hu); if (filt == FILTER_FOLIAGE || (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u))) continue;   /* leaves, canopies and bodies (enemies, corpses: filters seen in Voymastina 0.2.1's probe) are no floor */
         if (IsFoeUnit(hu)) { g_underFoe = 1; continue; }                              /* nor is an enemy's back */
+        if (filt == 0xEDC5EBE0u) continue;                                            /* nor a zone's face (see RayWith) */
         z[k++] = top[2] - d;
     }
     for (int i = 1; i < k; i++)        /* highest first */
@@ -385,7 +442,7 @@ static int FoeAbove(uint32_t unit, const float from[3], float len)
     for (uint32_t i = 0; i < n && i < 16; i++) if (IsFoeUnit(Word(hits + 44u * i + 28))) return 1;
     return 0;
 }
-static int Fits(uint32_t unit, float x, float y, float z)
+static int FitsLooks(uint32_t unit, float x, float y, float z)
 {
     float up[3] = {0, 0, 1}, foot[3] = {x, y, z + 0.1f};
     float r = RayWith(unit, foot, up, 1.8f, 0, 0x80000009u, NULL);
@@ -400,6 +457,19 @@ static int Fits(uint32_t unit, float x, float y, float z)
             if (w < 0 || w <= 0.4f) return 0;
         }
     return 1;
+}
+/* Whether she has room there (from Ascalon 0.6.6 and 0.6.8). Where the game's own fit test can be asked (kb_fit.h) it
+ * says so, in SpotAt, and only a spot under a huge enemy is refused here; else the looks above, to which an enemy's
+ * body is no wall. */
+static int Fits(uint32_t unit, float x, float y, float z)
+{
+    float foot[3] = {x, y, z + 0.1f};
+    if (g_nFoeUnits && FoeAbove(unit, foot, 12.0f)) return 0;
+    if (g_spEntity && KbFitUsed()) return 1;
+    g_rayBodies = 1;
+    int fits = FitsLooks(unit, x, y, z);
+    g_rayBodies = 0;
+    return fits;
 }
 
 /* ---- her blasts ----------------------------------------------------------------------------------------------------- */
@@ -606,10 +676,43 @@ static int SpotAt(uint32_t unit, const float pos[3], const float dir[2], float d
     {
         float above = 1e9f;   /* the lowest surface over this one */
         for (int j = 0; j < n; j++) if (high[j] > z[i] + 0.3f && high[j] < above) above = high[j];
-        if (above < 1e8f && !Roofed(unit, x, y, z[i], above - z[i])) { g_buried++; continue; }
+        if (above < 1e8f && !Roofed(unit, x, y, z[i], above - z[i]))
+        {
+            /* Under something a look up does not meet: underground, unless it lies open before her (from Ascalon
+             * 0.6.9: the top of foliage is such a thing too, and with the ground under it read as buried she was set
+             * on the leaves). Open: near her own height, and a straight look from her waist to a waist over it meets
+             * nothing. Ground under terrain is behind the hillside. */
+            int open = 0;
+            if (fabsf(z[i] - pos[2]) < 1.5f)
+            {
+                float a[3] = {pos[0], pos[1], pos[2] + 0.9f}, b[3] = {x - a[0], y - a[1], z[i] + 0.9f - a[2]};
+                float len = sqrtf(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]);
+                if (len > 0.1f)
+                {
+                    for (int k = 0; k < 3; k++) b[k] /= len;
+                    g_rayBodies = 1;
+                    float r = RayWith(unit, a, b, len, 0, 0x80000009u, NULL);
+                    g_rayBodies = 0;
+                    open = r > len;
+                }
+            }
+            if (!open) { g_buried++; continue; }
+        }
         if (!Fits(unit, x, y, z[i])) { if (g_nFoeUnits && crowded && FoeAbove(unit, (float[3]){x, y, z[i] + 0.1f}, 12.0f)) *crowded = 1; continue; }
         float at[3] = {x, y, z[i]};
         if (Occupied(at)) { if (crowded) *crowded = 1; continue; }
+        if (g_spEntity && KbFitUsed())   /* her room: the game's own answer (a little above the surface too) */
+        {
+            int fit = KbFitsOn(g_spEntity, unit, at);
+            if (fit == 0) continue;
+            if (fit < 0)                 /* not asked after all: the looks */
+            {
+                g_rayBodies = 1;
+                int fits = FitsLooks(unit, x, y, z[i]);
+                g_rayBodies = 0;
+                if (!fits) continue;
+            }
+        }
         memcpy(out, at, sizeof at);
         return 1;
     }
@@ -900,6 +1003,7 @@ static void DashFrame(void)
     uint32_t me = atomic_load(&g_avatar);
     if (!Descriptor(me, id) || Quad(id) != AVATAR || !PlayerPose(pos, NULL)) { Log("%s: her Helldiver cannot be read", kLeapName[L.kind]); return; }
     uint32_t unit = Word(id + 12);
+    g_spEntity = me;   /* her room at a spot: the game's own fit test (kb_fit.h) */
     float want = L.kind == LEAP_LUNGE ? s_pbLunge : L.kind == LEAP_FOLLOW ? s_pbDash : s_pbpDistance;
     if (L.kind == LEAP_CHARGE)
     {
@@ -1552,6 +1656,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         hf->code_matches(exe + 0x7F4590, "48 8b c4 f3 0f 11 58 20 89 48 08 55 53 56 57 41 54 41 55 41 56 41 57 48"))
     {
         g_setPosition = (SetVecFn)(game + 0x5A2BB0);
+        KbFitInit();
         g_setVelocity = (SetVecFn)(game + 0x4A7550);
         g_worldId = (WorldFn)(exe + 0x79F860);
         g_raycast = (RayFn)(exe + 0x7F4590);
@@ -1612,11 +1717,53 @@ static double g_mechLeftAt;
 typedef struct { uint32_t entity; uint64_t res; double at; } Spawned8;
 static Spawned8 g_spawned[256];
 static unsigned g_nspawned;
+/* 0.4.2 (test): the call-in watched: the Sinbreaker and the Pelican that drops it (its stratagem's second payload),
+ * and how long the Pelican stays; the stutter began at the call-in, before she boarded */
+static atomic_uint g_watchSin, g_watchPel;
 static void MechSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* e = (const HfSpawnEvent*)info;
     Spawned8* s = &g_spawned[g_nspawned++ % 256];
     s->entity = e->entity; s->res = e->resource; s->at = g_now;
+    if ((g_sinRes && e->resource == g_sinRes) || (g_sinFreeRes && e->resource == g_sinFreeRes)) atomic_store(&g_watchSin, e->entity);
+    if (e->resource == HF_ENTITY_PELICAN_TRANSPORT) atomic_store(&g_watchPel, e->entity);
+}
+static void CallInFrame(void)
+{
+    static uint32_t sin, pel;
+    static double sinAt, pelAt, next;
+    uint32_t ns = atomic_load(&g_watchSin), np = atomic_load(&g_watchPel);
+    if (ns && ns != sin)
+    {
+        sin = ns; sinAt = g_now;
+        /* what spawned with it (2 s either side) */
+        char line[600];
+        int at = snprintf(line, sizeof line, "call-in: the %s spawned (entity %u); with it:", ns && g_spawned[0].entity ? "Sinbreaker" : "Sinbreaker", ns);
+        for (unsigned i = 0; i < 256 && at < (int)sizeof line - 40; i++)
+            if (g_spawned[i].entity && g_spawned[i].entity != ns && fabs(g_spawned[i].at - g_now) < 2.0)
+                at += snprintf(line + at, sizeof line - at, " %u (%016llx)", g_spawned[i].entity, (unsigned long long)g_spawned[i].res);
+        Log("%s", line);
+    }
+    if (np && np != pel) { pel = np; pelAt = g_now; Log("call-in: a transport Pelican spawned (entity %u)", np); }
+    if (g_now < next) return;
+    next = g_now + 5;
+    uint8_t d[24];
+    float p[3];
+    if (pel)
+    {
+        int alive = Descriptor(pel, d) && Quad(d) == HF_ENTITY_PELICAN_TRANSPORT;
+        int pos = alive && UnitNode(Word(d + 12), 0, p);
+        Log("call-in: the Pelican %u, %.0f s after it came: %s%s", pel, g_now - pelAt, alive ? "still here" : "gone", pos ? "" : (alive ? " (position unread)" : ""));
+        if (pos) Log("  at %.0f %.0f %.0f", p[0], p[1], p[2]);
+        if (!alive) pel = 0;
+    }
+    if (sin)
+    {
+        int alive = Descriptor(sin, d);
+        static unsigned told;
+        if (told++ < 12) Log("call-in: the Sinbreaker %u, %.0f s after it came: %s, %s", sin, g_now - sinAt, alive ? "here" : "gone", g_mech == sin ? "piloted" : "empty");
+        if (!alive) sin = 0;
+    }
 }
 static void MechParts(uint32_t mech)
 {
@@ -2161,14 +2308,13 @@ static void SinTune(void);
 static void MechWalkFrame(void);
 static void KitFrame(void)
 {
-    SinHide();
-    SinPackage();
-    GrantFrame();
+    PF(PF_SIN, (SinHide(), SinPackage(), GrantFrame()));
     static double next;
     if (g_now >= next)
     {
         next = g_now + 0.1;
-        Seat s = ReadSeat();
+        Seat s;
+        PF(PF_SEAT, s = ReadSeat());
         uint8_t d[24];
         uint32_t mech = 0;
         if (s.found && !s.changing && s.vehicle && Descriptor(s.vehicle, d) && HerMechKind(Quad(d))) mech = s.vehicle;
@@ -2221,6 +2367,7 @@ static void KitFrame(void)
         was = bash;
     }
     SinTune();
+    double pfFoes = PfNow();
     if (g_mech)
     {   /* the enemies' units near the suit, so its rays see through them (the leap's list, refreshed 4 times a second) */
         static double nextFoes;
@@ -2238,11 +2385,12 @@ static void KitFrame(void)
             }
         }
     }
+    { double t = PfNow() - pfFoes; if (t > g_pfMax[PF_FOES]) g_pfMax[PF_FOES] = t; g_pfSum[PF_FOES] += t; g_pfCalls[PF_FOES]++; }
     if (g_mpbFireAt > 0 && g_now >= g_mpbFireAt) { g_mpbFireAt = 0; if (g_mech) MpbFire(); }
-    MechLungeFrame();
-    MechWalkFrame();
-    MpbFrame();
-    AkFrame();
+    PF(PF_LUNGE, MechLungeFrame());
+    PF(PF_WALK, MechWalkFrame());
+    PF(PF_MPB, MpbFrame());
+    PF(PF_AK, AkFrame());
 }
 static void KitReset(void)
 {
@@ -2990,12 +3138,28 @@ static void Tick(HfMod* mod, float dt, void* user)
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); KitReset(); g_inMission = inMission; }
     if (!g_inMission || !kb_kit_on) return;   /* (standing by: another kit is picked) */
+    double pfTick = PfNow();
+    PfReport(step);
+    {
+        /* 0.4.2: her foes' list holds every enemy seen this mission (1024 places, never emptied: the dead and the
+         * despawned stayed), and the suit's list of enemies near it walked all of it 4 times a second, about 14 reads
+         * each. Gone entries are cleared, 48 a frame, so the walks cost what the living enemies cost */
+        static unsigned at;
+        uint8_t fd[24];
+        for (int k = 0; k < 48; k++, at++)
+        {
+            unsigned i = at % FOES;
+            int32_t hp;
+            uint32_t life;
+            if (g_foe[i] && (!Descriptor(g_foe[i], fd) || Quad(fd) != g_foeRes[i] || (HealthOf(g_foe[i], &hp, &life) && hp <= 0))) g_foe[i] = 0;   /* and the dead */
+        }
+    }
     atomic_store(&g_ppArmorOn, g_ppReady || g_now < g_ppArmorUntil);
-    StaminaGuard();
-    BareFrame();
-    FistFrame();
-    MyItems();
-    MoveTrack();
+    PF(PF_STAMINA, StaminaGuard());
+    PF(PF_BARE, BareFrame());
+    PF(PF_FIST, FistFrame());
+    PF(PF_ITEMS, MyItems());
+    PF(PF_MOVE, MoveTrack());
     static int prev[3];
     int focused = Focused();
     int mods = focused ? ((GetAsyncKeyState(VK_SHIFT) & 0x8000) ? KM_SHIFT : 0) | ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? KM_CTRL : 0) |
@@ -3039,15 +3203,16 @@ static void Tick(HfMod* mod, float dt, void* user)
         uint32_t t = atomic_load(&g_hookTarget);
         if (t) { g_lastTarget = t; memcpy(g_lastPos, g_hookPos, sizeof g_lastPos); g_lastAt = g_now; }
     }
-    KitFrame();
+    PF(PF_KIT, KitFrame());
+    CallInFrame();
     RetryFrame();
-    SupportFrame();
-    DashFrame();
-    ChargeFrame();
-    RippleFrame();
-    EyeFrame();
-    DropFrame(step);
-    Exhaustion();
+    PF(PF_SUPPORT, SupportFrame());
+    PF(PF_DASH, DashFrame());
+    PF(PF_CHARGE, ChargeFrame());
+    PF(PF_RIPPLE, RippleFrame());
+    PF(PF_EYE, EyeFrame());
+    PF(PF_DROP, DropFrame(step));
+    PF(PF_EXHAUST, Exhaustion());
     /* Stability refills after stab_delay s unhurt; broken until it is full again */
     if (g_now - g_stabHitAt >= s_stabDelay && g_stab < s_stabMax)
     {
@@ -3060,6 +3225,9 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (own) { g_selfSpared += own; static unsigned noted; if (noted++ < 5) Log("Mastiff's Pledge: %u hit(s) of her own blasts cleared on her", own); }
     unsigned kd = atomic_exchange(&g_kdStopped, 0);
     if (kd) { g_knockdowns += kd; static unsigned noted2; if (noted2++ < 20) Log("Mastiff's Pledge: %u knockdown(s) stopped", kd); }
+    double pfT = PfNow() - pfTick;
+    if (pfT > g_pfMax[PF_TICK]) g_pfMax[PF_TICK] = pfT;
+    g_pfSum[PF_TICK] += pfT; g_pfCalls[PF_TICK]++;
 }
 
 /* ---- the Mod Options Menu (through the Voymastina HUD addon): read and set a setting by its voymastina.ini name ---- */
@@ -3180,6 +3348,8 @@ static int HitTaken(const uint8_t* h, void* result, unsigned long long now)
     return 0;
 }
 
+/* 0.4.2: the hit hook, timed (its slowest call shows in the perf lines; hits come on the game thread) */
+static void OnDamagePreTimed(HfMod* mod, const HfEventInfo* info, void* user) { PF(PF_HIT, OnDamagePre(mod, info, user)); }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
@@ -3223,7 +3393,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         g_fistBolt = g_fistBoltDamage ? api->add_projectile(mod, &bolt) : 0;
         if (!g_fistBolt || api->on(mod, HF_EVENT_PROJECTILES_READY, FistBoltReady, NULL)) g_fistBolt = 0;
     }
-    int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
+    int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePreTimed, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
              api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_SPAWN, MechSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_PLAYER_DOWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeaponAk, NULL, 0) &&
              api->on_game_thread(mod, Tick, NULL);

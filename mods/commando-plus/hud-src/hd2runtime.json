@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "name": "Commando Plus HUD",
+  "resource": "mods/yui/commando_plus_hud",
+  "guid": "e617b964-04bd-4aaa-a9a0-bd8d2b57f70d",
+  "requires": {
+    "bingus": {"min_release": 15, "api": 1},
+    "hd2runtime": {"min_version": "0.30.0", "api": 1, "module": "mods/skyeshade/hd2runtime"}
+  }
+}

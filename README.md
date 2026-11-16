@@ -9,13 +9,17 @@ Code mods for HellForge (offline Helldivers 2). Each folder under `mods/` is one
 | Leva | `mods/leva` | Leva's arc / area-lockdown kit from GFL2: Rational Suppression, Orderly Disruption, Quantum Calculation, Superconduct Blitz. T-Doll body. |
 | Voymastina | `mods/voymastina` | Voymastina's kit from GFL2 in her own exosuit, the Sinbreaker (Sirius Fall, Eye of the White Mastiff, Pile Bunker), and her AK-15 kit on foot. A free Sinbreaker for players without the Exo Experts warbond. |
 | Lemuen | `mods/lemuen` | Lemuen's sniper kit from Arknights: Persecution marks, Salve Etiam, Honesta Missio's scope build-up, Memento Mori's 120mm shells on marked enemies; markers and damage numbers on the HUD. |
-| Lost Contact | `mods/lost-contact` | Enemies that lose sight of you stop tracking you and search where they last saw you; patrols walk between their outposts instead of straight at you. On / observe / off; a kit can limit them (Lemuen: patrols only). |
+| Executor | `mods/executor` | Executor the Ex Foedere's kit from Arknights: every enemy his shot hits heals him, The Chosen One's free rounds, area rounds at every enemy in a square in front of him, Empathy by Shotgun, and Testament Exacted, Close Combat and Damnatus Ex Foedere counted in rounds. |
+| Exusiai | `mods/exusiai` | Exusiai's kit from Arknights: Charging Mode (every 4th burst sets off free bursts), Shooting Mode (two guns at her shoulders that fire with her), Overloading Mode (four more guns, each hunting its own target), Fast Cartridge and Angel's Blessings; skills and the guns' models on the HUD. |
+| Ascalon | `mods/ascalon` | Ascalon's kit from Arknights: hidden until she makes noise (a shimmer cloak), every hit strikes everyone within 15 m, Mortal Interrogation's bleed marks, Pursuit, Endowment and Descent, a parry and a dash; skill panel and damage numbers on the HUD. |
+| Lost Contact | `mods/lost-contact` | Enemies that lose sight of you stop tracking you and search where they last saw you; patrols walk between their outposts instead of straight at you. On / observe / off, in lost-contact.ini, on keys or on the MODS tab; a kit can limit them (Lemuen: patrols only). |
 | Veterancy System | `mods/field-promotions` | Per-mission gear progression: your gear levels up as you use it, for that mission only. |
 | Fire Mission | `mods/fire-mission` | A stratagem that calls mortar sentries onto a spot. |
 | Primed Sure Footed | `mods/primed-sure-footed` | No knockdown or ragdoll on your Helldiver; flinch and push stay. |
 | Stat Tuner | `mods/stat-tuner` | Per-item stat sliders on the in-game MODS tab, with presets. |
+| Commando Plus | `mods/commando-plus` | Commando missions a little more forgiving: no mission timer, extra Super Destroyer call-ins, cleared outposts bank ammo boxes called in by the Outpost Cache, and a Super Destroyer window that grows with every base cleared (each an ini setting). |
 
-The character kits and Veterancy System have HUDs drawn with HD2Runtime (Bingus Shared Loader + HD2Runtime). Their Lua sources sit in each mod's `hud-src/` (Veterancy System's in `huds/field-promotions-hud/`); the built HUD ships in the mod's `data/`.
+The character kits and Veterancy System have HUDs drawn with HD2Runtime (Bingus Shared Loader + HD2Runtime). Their Lua sources sit in each mod's `hud-src/` (Veterancy System's in `huds/field-promotions-hud/`); the built HUD ships in the mod's `data/`. Lost Contact's `hud-src/` holds no HUD, only its MODS tab rows for Mod Options Menu (Lua, the Vanilla Plus Megapack's menu); it ships the same way.
 
 ## Working on them
 
