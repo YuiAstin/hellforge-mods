@@ -50,7 +50,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.7"
+#define VERSION "0.3.8"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -108,6 +108,7 @@ static int s_relRound = 0, s_relRoundsS = 3, s_relRoundsPlus = 4, s_relPoints = 
 static int s_heRow = 266, s_fullHe = 1, s_releaseHe = 1;
 static int s_rideSafe = 1, s_relRingS = 8, s_relRingPlus = 12;   /* 0.3.7 */
 static unsigned g_rideSaved;
+static int s_sinSteady = 1;   /* 0.3.8: no stagger or push on the Sinner */
 static float s_heRate = 10;
 static float s_relReachPlus = 18, s_relInner = 6, s_relGap = 0.3f;
 static int s_driftOn = 1, s_driftRings = 4, s_driftDamage = 800, s_fullOn = 1;
@@ -161,7 +162,7 @@ static const KbSetting kSettings[] = {
     KB_F("post_move", s_postMove, 1, 5), KB_F("sinner_taken", s_sinTaken, 0, 1), KB_F("park_taken", s_parkTaken, 0, 1), KB_F("sinner_heal", s_sinHeal, 0, 1), KB_F("sinner_heal_every", s_sinHealEvery, 0.5, 120),
     KB_I("release_round", s_relRound, 0, 100000), KB_I("release_rounds_s", s_relRoundsS, 1, 10), KB_I("release_rounds_plus", s_relRoundsPlus, 1, 10), KB_F("release_reach_plus", s_relReachPlus, 2, 80),
     KB_I("drift_points", s_relPoints, 3, 32), KB_F("drift_inner", s_relInner, 0, 30), KB_F("drift_gap", s_relGap, 0, 2),
-    KB_I("ride_safe", s_rideSafe, 0, 1), KB_I("release_ring_s", s_relRingS, 0, 32), KB_I("release_ring_plus", s_relRingPlus, 0, 32),
+    KB_I("ride_safe", s_rideSafe, 0, 1), KB_I("sinner_steady", s_sinSteady, 0, 1), KB_I("release_ring_s", s_relRingS, 0, 32), KB_I("release_ring_plus", s_relRingPlus, 0, 32),
     KB_I("he_explosion", s_heRow, 0, 100000), KB_F("he_rate", s_heRate, 1, 60), KB_I("full_he", s_fullHe, 0, 1), KB_I("release_he", s_releaseHe, 0, 1),
     KB_I("full_on", s_fullOn, 0, 1), KB_I("full_shots", s_fullShots, 1, 8), KB_F("full_min_speed", s_fullMinSpeed, 0, 50), KB_F("full_ref_speed", s_fullRefSpeed, 1, 60), KB_F("full_every", s_fullEvery, 0.05, 5),
     KB_F("full_cone", s_fullCone, 5, 90), KB_F("full_range", s_fullRange, 5, 100), KB_F("full_ram", s_fullRam, 0, 1), KB_F("full_ram_max", s_fullRamMax, 1, 10),
@@ -248,8 +249,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; release_targets_s enemies within release_reach m (S+: release_targets_plus within release_reach_plus),\n"
                "; release_rounds_s each (S+: release_rounds_plus), by its gear and her buffs.\n"
                "; Around it too: release_ring_s rounds (S+: release_ring_plus) evenly all around, landing 0.7 of its reach out.\n"
-               "; ride_safe 1: in the Sinveiler nothing damages her.\n"
-               "release_round = %d\nrelease_rounds_s = %d\nrelease_rounds_plus = %d\nrelease_reach_plus = %g\nrelease_ring_s = %d\nrelease_ring_plus = %d\nride_safe = %d\n"
+               "; ride_safe 1: in the Sinveiler nothing damages her. sinner_steady 1: hits on the Sinner keep their damage but\n"
+               "; lose their stagger and push (the bots' cannons flipped the FRV).\n"
+               "release_round = %d\nrelease_rounds_s = %d\nrelease_rounds_plus = %d\nrelease_reach_plus = %g\nrelease_ring_s = %d\nrelease_ring_plus = %d\nride_safe = %d\nsinner_steady = %d\n"
                "; Let's Go for a Drift! (key_s2 in the FRV Sinner; drift_on 0: off): its active, once a press, every\n"
                "; drift_cooldown s, not in N: waves of EMS bursts out from it: drift_rings rings from drift_inner m out to drift_radius m,\n"
                "; drift_gap s apart, bursts about 5 m apart (at most drift_points a ring); each enemy in reach takes\n"
@@ -305,7 +307,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_s2Cd, (double)s_krSeconds, (double)s_krMult, (double)s_krHeal, (double)s_krSinnerHeal, (double)s_s3Cd, s_cleanse, (double)s_winnerCd,
             (double)s_gearSeconds, (double)s_gearD, (double)s_gearS, (double)s_gearPlus, (double)s_gearN, (double)s_postMove,
             (double)s_sinTaken, (double)s_parkTaken, (double)s_sinHeal, (double)s_sinHealEvery,
-            s_relRound, s_relRoundsS, s_relRoundsPlus, (double)s_relReachPlus, s_relRingS, s_relRingPlus, s_rideSafe,
+            s_relRound, s_relRoundsS, s_relRoundsPlus, (double)s_relReachPlus, s_relRingS, s_relRingPlus, s_rideSafe, s_sinSteady,
             s_driftOn, (double)s_driftEvery, (double)s_driftRadius, s_driftRings, s_driftDamage, s_relPoints, (double)s_relInner, (double)s_relGap,
             s_heRow, (double)s_heRate, s_fullHe, s_releaseHe,
             s_fullOn, s_fullShots, (double)s_fullMinSpeed, (double)s_fullRefSpeed, (double)s_fullEvery, (double)s_fullCone, (double)s_fullRange, (double)s_fullRam, (double)s_fullRamMax,
@@ -2080,11 +2082,30 @@ static void TurretSeen(KbHitCall* c)
 /* 0.2.4: her own blasts (Kinetic Release) do nothing to the FRV Sinner: their hit result on it is emptied, as the kit
  * base empties it on her */
 static unsigned g_carSpared;
+static atomic_uint g_carSteadied;
 static void CarSpared(KbHitCall* c)
 {
     uint32_t car = g_sinner;
     uint8_t h[HIT_SIZE];
-    if (!car || !c->hit || !c->out || !ReadAt((uintptr_t)c->hit, h, sizeof h) || Word(h + 0x20) != car || !OwnBlast(h, NULL)) return;
+    if (!car || !c->hit || !c->out || !ReadAt((uintptr_t)c->hit, h, sizeof h) || Word(h + 0x20) != car) return;
+    if (!OwnBlast(h, NULL))
+    {
+        /* 0.3.8: anyone else's hit on it: its damage stays, its stagger, push, knockdown and hit reaction go (the
+         * result's fields, as the kit base's knockdown guard on her) */
+        if (!s_sinSteady) return;
+        uint8_t* r = (uint8_t*)c->out;
+        float st, pu;
+        memcpy(&st, r + 0x0C, 4); memcpy(&pu, r + 0x10, 4);
+        if (st != 0 || pu != 0 || r[0x1E] || r[0x1F])
+        {
+            static atomic_uint told;
+            if (atomic_fetch_add(&told, 1) < 6) Log("a hit on the Sinner: stagger %.1f, push %.1f, knockdown %u, reaction %u: removed", (double)st, (double)pu, r[0x1E], r[0x1F]);
+            atomic_fetch_add(&g_carSteadied, 1);
+        }
+        memset(r + 0x0C, 0, 8);
+        r[0x1E] = 0; r[0x1F] = 0;
+        return;
+    }
     memset(c->out, 0, RESULT_SIZE);
     g_carSpared++;
 }
@@ -2922,6 +2943,7 @@ static void Reset(const char* why)
     if (g_sprints) Log("%s: %u sprints, %u rams, %u hits stopped in sprints", why, g_sprints, g_rams, g_sprintSaved);
     if (g_carSpared) Log("%s: her own blasts on the FRV Sinner emptied %u times", why, g_carSpared);
     g_carSpared = 0;
+    { unsigned n = atomic_exchange(&g_carSteadied, 0); if (n) Log("%s: stagger or push removed from %u hits on the Sinner", why, n); }
     if (g_gripCatches) Log("%s: Grip pushed the FRV Sinner down in %u frames", why, g_gripCatches);
     g_gripCatches = 0; g_gripActor = g_gripUnit = 0; g_gripRestN = 0;
     g_turretHits = g_rides = g_releases = g_noDeath = 0;
