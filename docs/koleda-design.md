@@ -4,7 +4,10 @@ Koleda is AK-12 in Girls' Frontline 2: Exilium (DEFY, with Voymastina / AK-15 an
 assault rifle. She is the test case the kit base was planned around (docs/kit-base.md, step 5): her kit should be the
 kit base's blocks plus her own skills and the Sinner.
 
-**Status: nothing here has been tested in game.** Every line below marked (untested) is written but has never run.
+**Status (2026-11-17): released as 0.4.1, played by Yui. The kit changed a great deal after this plan (0.3.0 on): the
+Sinner is the Sinveiler, the gears are D / N / S / S+ / P, Drift is an EMS wave on her key in the car, Full Speed its
+fire ahead at speed, Kinetic Release its HE shells. The header of mods/koleda/src/koleda.c and CHANGELOG.md are current;
+what follows is the first plan.** The plan's own status then: nothing here has been tested in game. Every line below marked (untested) is written but has never run.
 The kit is built so that the on-foot part keeps working when any Sinner part fails: each Sinner block checks its own
 game code and turns itself off with a log line.
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-17: Koleda 0.4.1 (first release)
+
+- First release: Koleda's kit from Girls' Frontline 2 (AK-12, a Vanguard) for your Helldiver. Solo or host; no character model included.
+- The Sinveiler: Spectre (C) makes the M-103 Supply FRV from her loadout her Sinveiler (without one: a Patriot exosuit). It takes 80% of the damage aimed at her, is never destroyed by a hit, heals when hit, is kept steady under fire and set upright when it rolls over.
+- Gears: D by default; her skills set N, S or S+ for 15 s; P while it stands still. Its damage and what it takes follow its gear.
+- Upshift: the Sinveiler's actions give her stacks, +15% damage each (up to 5); at 5 she takes 30% less damage. Post-Move Support: while it stands, her damage and its are x1.3.
+- On foot: Snow Wolf's Eye (Z) fires heavy rounds at the enemy in her crosshair, stronger per Upshift stack, with Turbo Boost (x1.45 for 6 s), and sets S+. Tactical Routebook (X) gives Kinetic Recovery (x1.25 for 10 s) and sets S. With the Sinveiler standing, C gets her in (Let's Go For a Spin!): nothing can hurt her inside.
+- In the Sinveiler her keys are its skills: Let's Go Full Speed! (Z: 6 s without damage and harder rams), Let's Go for a Drift! (X: waves of EMS bursts out to 20 m) and The Winner (C: it is restored, gear N).
+- At speed it fires HE shells at the enemies ahead and sprays tracers, and its rams hit harder the faster it goes. In S and S+ it fires HE shells all around it every few seconds (Kinetic Release).
+- HUD: her skills beside the stratagem list with icons and cooldowns (they change in the Sinveiler), her passive, Upshift, the Sinveiler's gear and health, her buffs, the low-stamina warning, key bindings in the game's binding pages and every number on the MODS tab.
+- Needs HellForge 0.4 or later; the HUD needs Bingus Shared Loader and HD2Runtime. The FRV Sinveiler needs the M-103 Supply FRV in her loadout.
+
 ## 2026-11-16: Ascalon 0.7.0 (first release) · Voymastina 0.4.3 · Faelynn 0.4.1 · Lenna 0.3.1
 
 ### Ascalon 0.7.0
