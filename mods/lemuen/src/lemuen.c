@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.11"
+#define VERSION "0.2.0"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -69,6 +69,7 @@ static int s_sight = 1;   /* 0.1.6: marks and Honesta Missio's lock need a clear
 static float s_s2Cd = 20, s_s2Min = 1.8f, s_s2Max = 4.25f, s_s2Hold = 3.5f, s_s2Cone = 4, s_s2Range = 600, s_fpDistance = 0.45f;
 static float s_s3Cd = 90, s_s3Every = 0.35f, s_s3Height = 120;
 static int s_s3Max = 8, s_s3Shell = 194;
+static int s_coopOn = 1, s_coopLoop = 0;   /* 0.2.0: co-op (lemuen_coop.h) */
 
 static const KbSetting kSettings[] = {
     KB_F("mark_range", s_markRange, 10, 1000), KB_F("mark_cone", s_markCone, 1, 90), KB_F("mark_seconds", s_markSeconds, 0, 30),
@@ -79,7 +80,7 @@ static const KbSetting kSettings[] = {
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("s2_min", s_s2Min, 1, 20), KB_F("s2_max", s_s2Max, 1, 20), KB_F("s2_hold", s_s2Hold, 0.1, 30),
     KB_F("s2_cone", s_s2Cone, 0.5, 30), KB_I("line_of_sight", s_sight, 0, 1), KB_F("s2_range", s_s2Range, 10, 1000), KB_F("first_person", s_fpDistance, 0.1, 2),
     KB_F("s3_cooldown", s_s3Cd, 0, 3600), KB_F("s3_every", s_s3Every, 0.05, 5), KB_F("s3_height", s_s3Height, 20, 500),
-    KB_I("s3_max", s_s3Max, 1, 32), KB_I("s3_shell", s_s3Shell, 1, 100000),
+    KB_I("s3_max", s_s3Max, 1, 32), KB_I("s3_shell", s_s3Shell, 1, 100000), KB_I("coop", s_coopOn, 0, 1), KB_I("coop_loopback", s_coopLoop, 0, 1),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
 };
@@ -117,11 +118,15 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; more, as Arknights' red numbers (Modus and Salve Etiam are ATK buffs, the shells her ATK: no number). 0: every hit.\n"
                "numbers_at = %g\n"
                "; Line of sight: 1, marks and Honesta Missio's lock only on enemies she can see (no walls or terrain between);\n"
-               "; 0 through walls (0.1.5's way).\nline_of_sight = %d\n",
+               "; 0 through walls (0.1.5's way).\nline_of_sight = %d\n"
+               "; Co-op (HellForge 0.4 or later): coop 1 lets a friend's Lemuen play in your lobby and yours in theirs (her state\n"
+               "; goes to the host's Lemuen, which applies her skills to her hits and drops her Memento Mori shells; everyone in\n"
+               "; the lobby needs this mod). coop_loopback 1 (a test): solo, her kit runs through that same path on this machine.\n"
+               "coop = %d\ncoop_loopback = %d\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_markRange, (double)s_markCone, (double)s_markSeconds,
             (double)s_markLast, (double)s_markMult, s_markArmour, s_markHealth, s_markMax, (double)s_markAim, (double)s_markRewatch, (double)s_modusAfter, (double)s_modusMult, (double)s_s1Cd,
             (double)s_s1Mult, s_s1AnyGun, (double)s_s2Cd, (double)s_s2Min, (double)s_s2Max, (double)s_s2Hold, (double)s_s2Cone,
-            (double)s_s2Range, (double)s_fpDistance, (double)s_s3Cd, (double)s_s3Every, (double)s_s3Height, s_s3Max, s_s3Shell, (double)s_numbersAt, s_sight);
+            (double)s_s2Range, (double)s_fpDistance, (double)s_s3Cd, (double)s_s3Every, (double)s_s3Height, s_s3Max, s_s3Shell, (double)s_numbersAt, s_sight, s_coopOn, s_coopLoop);
 }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
@@ -884,6 +889,7 @@ static void HonestaMissio(void)
     Log("Honesta Missio: until she reloads, what she holds in her scope builds up (x%.2f to x%.2f over %.1f s)", (double)s_s2Min,
         (double)s_s2Max, (double)s_s2Hold);
 }
+static int AskShells(const uint32_t* e, int n);   /* lemuen_coop.h */
 static uint32_t g_shellQ[32];
 static int g_nshell;
 static double g_shellNext;
@@ -899,6 +905,7 @@ static void MementoMori(void)
     }
     if (!n) { static unsigned told; if (told++ < 5) Log("Memento Mori: no enemy is marked"); return; }
     g_cd[2] = g_now + s_s3Cd;
+    if (AskShells(g_shellQ, n)) { g_casts[2]++; return; }   /* 0.2.0: a joiner's: the host drops them */
     g_nshell = n;
     g_shellNext = g_now;
     g_casts[2]++;
@@ -947,11 +954,13 @@ static void NoteHit(const HfDamageEvent* d, int boosted)
     h->seq = s;
     g_ringSeq = s;
 }
+#include "lemuen_coop.h"
 static int g_hitLogReset;
 static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     (void)e; (void)me;
     if (d->amount <= 0 || !MineHit(d)) return;
+    if (Loop()) { if (IsShot(d)) NoteTarget(d); PeerHit(d, CO_LOOP); return; }   /* 0.2.0: the co-op test path */
     double mult = 1, xMark = 1, xModus = 1, xS1 = 1, xS2 = 1;
     if (Marked(d->target)) mult *= xMark = s_markMult;                                   /* Persecution */
     if (g_landedAt >= 0 && g_now - g_landedAt >= s_modusAfter) mult *= xModus = s_modusMult;   /* Modus Extraditio */
@@ -1042,6 +1051,7 @@ static int AiEnemy(uint64_t res)
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
+    NetPut(s->entity, s->network);   /* 0.2.0: an enemy's network id, the same on every machine */
     if (s->resource == 0xEF570293245A17C2ull)
     {
         /* 0.1.11: why a War Strider is not one of her foes at its spawn (once) */
@@ -1117,6 +1127,7 @@ static void Reset(const char* why)
     g_nshell = 0;
     g_landedAt = -1;
     g_lastTarget = 0;
+    CoopReset(why);
 }
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {
@@ -1239,6 +1250,8 @@ static void Tick(HfMod* mod, float dt, void* user)
     g_now += step;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
+    RoleFrame();
+    if (g_inMission) HostFrame();   /* 0.2.0: joiners' hits told back and their shells, whichever kit this machine plays */
     if (!g_inMission || !kb_kit_on) return;   /* (standing by: another kit is picked) */
     MyItems();
     static int prev[3];
@@ -1268,6 +1281,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         ReloadFrame();
         ScopeFrame(step);
         ShellFrame();
+        StateFrame();
     }
     Exhaustion();
     atomic_exchange(&g_ownStopped, 0);
@@ -1321,5 +1335,6 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
              api->subscribe(mod, HF_ON_PLAYER_DOWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) &&
              api->subscribe(mod, HF_ON_WEAPON, OnWeaponLem, NULL, 0) && api->on_game_thread(mod, Tick, NULL);
     if (!ok) api->log(mod, "events or the game thread are unavailable: Lemuen stays off");
+    else if (s_coopOn) CoopInit(api, mod);
     return 0;
 }
