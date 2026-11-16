@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.11"
+#define VERSION "0.1.12"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -630,16 +630,29 @@ static uint32_t EntityOfUnit(uint32_t u, uint64_t* res)
 /* something to hold in her scope: no friend, no Helldiver, alive, and a fighting thing (her foes, enemy turrets, or
  * anything with health that runs a behaviour, has a faction or carries seats: 0.1.8, a War Strider's walker is a
  * vehicle its pilot rides, with no behaviour of its own, and it is what her shots hit) */
+/* 0.1.12: what a kind is made of, for the log (B behaviour, T turret, A AI enemy, H health, F faction, S seats, V avatar) */
+static const char* Records(uint64_t res, char out[16])
+{
+    static const struct { const char* name; char c; } r[] = {{"BehaviorComponentData", 'B'}, {"TurretComponentData", 'T'}, {"AiEnemyComponentData", 'A'},
+        {"HealthComponentData", 'H'}, {"FactionComponentData", 'F'}, {"SeatCollectionComponentData", 'S'}, {"AvatarComponentData", 'V'}};
+    uint32_t stride, n = 0;
+    for (unsigned i = 0; i < sizeof r / sizeof r[0]; i++) if (hf->component_record(r[i].name, res, &stride)) out[n++] = r[i].c;
+    out[n] = 0;
+    return n ? out : "none";
+}
+/* 0.1.12: one of her foes (seen spawning as an enemy, or marked by her) */
+static int IsFoe(uint32_t e) { for (int k = 0; k < FOES; k++) if (e && g_foe[k] == e) return 1; return 0; }
 static int Holdable(uint32_t e, uint64_t res)
 {
     uint32_t stride, life;
     int32_t hp = 1;
     if (!e || res == AVATAR || FriendRes(res)) return 0;
     if (HealthOf(e, &hp, &life) && hp <= 0) return 0;
-    if (FoeKind(res) || EnemyTurret(res)) return 1;
+    if (FoeKind(res) || EnemyTurret(res) || AiEnemy(res) || IsFoe(e)) return 1;
     if (!hf->component_record("HealthComponentData", res, &stride)) return 0;
+    /* 0.1.12: a tank (the Barrager's, the Annihilator's): its hull carries a turret and health (reported 2026-11) */
     return hf->component_record("BehaviorComponentData", res, &stride) || hf->component_record("FactionComponentData", res, &stride) ||
-           hf->component_record("SeatCollectionComponentData", res, &stride);
+           hf->component_record("SeatCollectionComponentData", res, &stride) || hf->component_record("TurretComponentData", res, &stride);
 }
 /* the first thing the ray from the middle of her camera meets (her, leaves and bodies of the dead skipped): the
  * entity when it is one to hold, 0 when it is a wall, the ground or nothing; -1 when the ray cannot be cast */
@@ -705,7 +718,8 @@ static int64_t Crosshair(const float cam[3], const float fwd[3])
                     static unsigned ntold;
                     int seen = 0;
                     for (unsigned t = 0; t < ntold && t < 16; t++) seen |= toldRes[t] == res;
-                    if (!seen && ntold < 16) { toldRes[ntold++] = res; Log("Honesta Missio: entity %u (%016llx) in her crosshair at %.0f m: not one to hold (a friend, a Helldiver, a prop)", e, (unsigned long long)res, (double)(steps[st] + d)); }
+                    char rec[16];
+                    if (!seen && ntold < 16) { toldRes[ntold++] = res; Log("Honesta Missio: entity %u (%016llx) in her crosshair at %.0f m: not one to hold (a friend, a Helldiver, a prop; records %s, friend %d, foe kind %d, enemy turret %d, AI enemy %d)", e, (unsigned long long)res, (double)(steps[st] + d), Records(res, rec), FriendRes(res), FoeKind(res), EnemyTurret(res), AiEnemy(res)); }
                 }
                 return 0;                                                                 /* a friend, a Helldiver, a prop */
             }
@@ -1000,16 +1014,19 @@ static int EnemyTurret(uint64_t res)
 {
     static uint64_t keys[128];
     static int8_t vals[128];
+    static double at[128];   /* 0.1.12: a no is asked again after 5 s (a kind's records can come later than its first sight) */
     unsigned h = (unsigned)(res ^ (res >> 31)) & 127;
     for (unsigned i = 0; i < 128; i++)
     {
         unsigned k = (h + i) & 127;
-        if (keys[k] == res) return vals[k];
+        if (keys[k] == res && (vals[k] || g_now - at[k] < 5.0)) return vals[k];
+        if (keys[k] == res) keys[k] = 0;
         if (keys[k]) continue;
         uint32_t stride;
         int t = hf->component_record("TurretComponentData", res, &stride) != 0 && hf->component_record("BehaviorComponentData", res, &stride) != 0 &&
                 !hf->component_record("AvatarComponentData", res, &stride) && !FriendRes(res);
         vals[k] = (int8_t)t;
+        at[k] = g_now;
         keys[k] = res;
         if (t) { static unsigned told; if (told++ < 8) Log("an enemy turret kind: %016llx (markable)", (unsigned long long)res); }
         return t;
@@ -1023,16 +1040,19 @@ static int AiEnemy(uint64_t res)
 {
     static uint64_t keys[128];
     static int8_t vals[128];
+    static double at[128];   /* 0.1.12: a no is asked again after 5 s (a kind's records can come later than its first sight) */
     unsigned h = (unsigned)(res ^ (res >> 27)) & 127;
     for (unsigned i = 0; i < 128; i++)
     {
         unsigned k = (h + i) & 127;
-        if (keys[k] == res) return vals[k];
+        if (keys[k] == res && (vals[k] || g_now - at[k] < 5.0)) return vals[k];
+        if (keys[k] == res) keys[k] = 0;
         if (keys[k]) continue;
         uint32_t stride;
         int t = res != AVATAR && hf->component_record("AiEnemyComponentData", res, &stride) != 0 && hf->component_record("HealthComponentData", res, &stride) != 0 &&
                 !hf->component_record("AvatarComponentData", res, &stride) && !FriendRes(res);
         vals[k] = (int8_t)t;
+        at[k] = g_now;
         keys[k] = res;
         if (t && !FoeKind(res) && !EnemyTurret(res)) { static unsigned told; if (told++ < 8) Log("an enemy kind the kit base misses: %016llx (one of her foes)", (unsigned long long)res); }
         return t;
