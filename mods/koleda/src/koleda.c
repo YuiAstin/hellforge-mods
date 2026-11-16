@@ -50,7 +50,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.9"
+#define VERSION "0.3.10"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -2224,8 +2224,10 @@ static void WaveFrame(void)
 }
 /* 0.3.6: HE rounds: a blast where each lands (its flight time after the shot) */
 #define HE_Q 32
-static struct { float at[3]; double when; } g_he[HE_Q];
-static unsigned g_heBlasts, g_heDropped;
+/* (0.3.10: the blast goes off where the round hit, just outside what it hit, on the Sinner's side: set off at the enemy's
+ * middle it burst inside it, downward, digging under it without hurting it. A round that hits nothing: short of its aim) */
+static struct { float at[3], from[3], hit[3]; double when; atomic_int struck; } g_he[HE_Q];
+static unsigned g_heBlasts, g_heDropped, g_heOnHit;
 static double g_heTokens;
 static void HeQueue(const float from[3], const float at[3])
 {
@@ -2235,10 +2237,23 @@ static void HeQueue(const float from[3], const float at[3])
         {
             float d = sqrtf(Dist2(from, at)), t = d / (s_roundSpeed > 50 ? s_roundSpeed : 250);
             memcpy(g_he[i].at, at, 12);
-            g_he[i].when = g_now + (t > 0.5f ? 0.5f : t);
+            memcpy(g_he[i].from, from, 12);
+            atomic_store(&g_he[i].struck, 0);
+            g_he[i].when = g_now + (t > 0.5f ? 0.5f : t) + 0.25;   /* the latest: its round has landed by then */
             return;
         }
     g_heDropped++;
+}
+/* the damage event: one of the Sinner's rounds hit here */
+static void HeHit(const float pos[3])
+{
+    for (int i = 0; i < HE_Q; i++)
+        if (g_he[i].when > 0 && !atomic_load(&g_he[i].struck) && Dist2(g_he[i].at, pos) < 3.5f * 3.5f)
+        {
+            memcpy(g_he[i].hit, pos, 12);
+            atomic_store(&g_he[i].struck, 1);
+            return;
+        }
 }
 static void HeFrame(double step)
 {
@@ -2246,17 +2261,26 @@ static void HeFrame(double step)
     if (g_heTokens > s_heRate) g_heTokens = s_heRate;
     for (int i = 0; i < HE_Q; i++)
     {
-        if (g_he[i].when <= 0 || g_now < g_he[i].when) continue;
+        int struck = g_he[i].when > 0 && atomic_load(&g_he[i].struck);
+        if (g_he[i].when <= 0 || (!struck && g_now < g_he[i].when)) continue;
         g_he[i].when = 0;
         if (g_heTokens < 1) { g_heDropped++; continue; }
+        /* back toward the Sinner from where it hit (0.5 m) or from its aim (1.2 m), and a little up */
+        float q[3], dir[3], back = struck ? 0.5f : 1.2f;
+        memcpy(q, struck ? g_he[i].hit : g_he[i].at, 12);
+        for (int k = 0; k < 3; k++) dir[k] = g_he[i].from[k] - q[k];
+        float n = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+        if (n > back + 0.5f) for (int k = 0; k < 3; k++) q[k] += dir[k] / n * back;
+        q[2] += 0.3f;
+        if (struck) g_heOnHit++;
         unsigned slot = g_ownNext++ % KB_OWN_SLOTS;   /* spares her and the Sinner */
-        memcpy(g_ownPos[slot], g_he[i].at, 12);
+        memcpy(g_ownPos[slot], q, 12);
         atomic_store(&g_ownEmp[slot], 0);
         atomic_store(&g_ownMs[slot], GetTickCount64());
-        if (hf->spawn_explosion(self, (uint32_t)s_heRow, g_he[i].at) == HF_ACT_REQUESTED)
+        if (hf->spawn_explosion(self, (uint32_t)s_heRow, q) == HF_ACT_REQUESTED)
         {
             g_heTokens -= 1;
-            if (g_heBlasts++ < 3) Log("HE round: the Orbital Gatling Barrage's blast (row %d) at %.1f %.1f %.1f", s_heRow, (double)g_he[i].at[0], (double)g_he[i].at[1], (double)g_he[i].at[2]);
+            if (g_heBlasts++ < 3) Log("HE round: the Orbital Gatling Barrage's blast (row %d) at %.1f %.1f %.1f (%s)", s_heRow, (double)q[0], (double)q[1], (double)q[2], struck ? "where its round hit" : "short of its aim");
         }
         else { static int told; if (!told++) Log("HE round: blast row %d refused (%s)", s_heRow, hf->last_log ? hf->last_log(self) : ""); }
     }
@@ -2896,6 +2920,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     double mult = Buffs();
     int sinShot = SinnerShotNear(d->position);
     if (sinShot) mult *= GearDamage();   /* its rounds (the Patriot's, Drift's, Full Speed's): by gear */
+    if (sinShot && IsShot(d)) HeHit(d->position);
     else if (d->target == g_eyeTarget && g_now < g_eyeHitUntil && IsShot(d)) mult *= 1 + g_up * (double)s_s1Stack;   /* Snow Wolf's Eye */
     /* 0.2.2: a ram credited to her as the driver (an impact while she drives in a sprint) */
     if (Sprinting() && g_piloting && d->kind == 5) mult *= s_sprintRam * (g_gear == GEAR_PLUS ? s_sprintRamPlus : g_gear == GEAR_S ? s_sprintRamS : 1.0);
@@ -3018,8 +3043,8 @@ static void Reset(const char* why)
         Log("%s: the FRV Sinner: %u turret hits, %u rides, %u Kinetic Releases, %u fatal hits survived", why, g_turretHits, g_rides, g_releases, g_noDeath);
     if (g_rideSaved) Log("%s: %u hits on her stopped in the Sinveiler", why, g_rideSaved);
     g_rideSaved = 0;
-    if (g_heBlasts || g_heDropped) Log("%s: %u HE blasts (%u over he_rate, left out)", why, g_heBlasts, g_heDropped);
-    g_heBlasts = g_heDropped = 0;
+    if (g_heBlasts || g_heDropped) Log("%s: %u HE blasts (%u where a round hit, %u over he_rate, left out)", why, g_heBlasts, g_heOnHit, g_heDropped);
+    g_heBlasts = g_heDropped = g_heOnHit = 0;
     for (int i = 0; i < HE_Q; i++) g_he[i].when = 0;
     if (g_drifts || g_fulls || g_gearSaved || g_heals)
         Log("%s: %u Drifts, %u Full Speeds, %u of their shots, %u hits on the Sinner stopped in N, %u Gear Shift heals", why, g_drifts, g_fulls, g_driftShots, g_gearSaved, g_heals);
