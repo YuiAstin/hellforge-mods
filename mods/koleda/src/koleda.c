@@ -50,7 +50,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.11"
+#define VERSION "0.3.12"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -110,6 +110,9 @@ static int s_rideSafe = 1, s_relRingS = 8, s_relRingPlus = 12;   /* 0.3.7 */
 static unsigned g_rideSaved;
 static int s_sinSteady = 1;   /* 0.3.8: no stagger or push on the Sinner */
 static float s_heRate = 10;
+/* 0.3.12: Full Speed's tracers: a weak round with a bright trail, sprayed ahead while it drives fast */
+static int s_fullTracers = 1, s_tracerDamage = 125;
+static float s_tracerEvery = 0.08f;
 static int s_heRound = 77;   /* 0.3.11: the Orbital Gatling Barrage's own shell, fired from the Sinner (0: a bullet and a blast set off where it lands) */
 static float s_relReachPlus = 18, s_relInner = 6, s_relGap = 0.3f;
 static int s_driftOn = 1, s_driftRings = 4, s_driftDamage = 800, s_fullOn = 1;
@@ -168,6 +171,7 @@ static const KbSetting kSettings[] = {
     KB_I("drift_points", s_relPoints, 3, 32), KB_F("drift_inner", s_relInner, 0, 30), KB_F("drift_gap", s_relGap, 0, 2),
     KB_I("ride_safe", s_rideSafe, 0, 1), KB_I("sinner_steady", s_sinSteady, 0, 1), KB_I("release_ring_s", s_relRingS, 0, 32), KB_I("release_ring_plus", s_relRingPlus, 0, 32),
     KB_I("he_explosion", s_heRow, 0, 100000), KB_I("he_round", s_heRound, 0, 100000), KB_F("he_rate", s_heRate, 1, 60), KB_I("full_he", s_fullHe, 0, 1), KB_I("release_he", s_releaseHe, 0, 1),
+    KB_I("full_tracers", s_fullTracers, 0, 1), KB_F("full_tracer_every", s_tracerEvery, 0.03, 2), KB_I("tracer_damage", s_tracerDamage, 0, 100000),
     KB_I("full_on", s_fullOn, 0, 1), KB_I("full_shots", s_fullShots, 1, 8), KB_F("full_min_speed", s_fullMinSpeed, 0, 50), KB_F("full_ref_speed", s_fullRefSpeed, 1, 60), KB_F("full_every", s_fullEvery, 0.05, 5),
     KB_F("full_cone", s_fullCone, 5, 90), KB_F("full_range", s_fullRange, 5, 100), KB_F("full_ram", s_fullRam, 0, 1), KB_F("full_ram_max", s_fullRamMax, 1, 10),
     KB_I("drift_on", s_driftOn, 0, 1), KB_I("drift_rings", s_driftRings, 1, 8), KB_I("drift_damage", s_driftDamage, 0, 100000), KB_F("drift_cooldown", s_driftEvery, 0, 600), KB_F("drift_radius", s_driftRadius, 2, 50),
@@ -275,6 +279,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; enemies ahead (full_cone degrees either side of its way, within full_range m), full_shots shots spread among\n"
                "; them every full_every s at full_ref_speed m/s (faster: more often); and its rams deal 1 + full_ram for each m/s over full_min_speed times\n"
                "; more (at most full_ram_max).\n"
+               "; full_tracers 1: at that speed it also sprays tracer rounds ahead across the cone, one every full_tracer_every s,\n"
+               "; enemies or not (Snow Wolf's Eye's bright round with the minigun's damage, tracer_damage: a damage id).\n"
+               "full_tracers = %d\nfull_tracer_every = %g\ntracer_damage = %d\n"
                "full_on = %d\nfull_shots = %d\nfull_min_speed = %g\nfull_ref_speed = %g\nfull_every = %g\nfull_cone = %g\nfull_range = %g\nfull_ram = %g\nfull_ram_max = %g\n"
                "; Driving with the game's own locomotion (the probe's numbers; -1 unknown: the Sinner slides instead).\n"
                "; drive_test 1 writes the stick without the engine and mover calls.\n"
@@ -322,6 +329,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             s_relRound, s_relRoundsS, s_relRoundsPlus, (double)s_relReachPlus, s_relRingS, s_relRingPlus, s_rideSafe, s_sinSteady,
             s_driftOn, (double)s_driftEvery, (double)s_driftRadius, s_driftRings, s_driftDamage, s_relPoints, (double)s_relInner, (double)s_relGap,
             s_heRow, (double)s_heRate, s_fullHe, s_releaseHe, s_heRound,
+            s_fullTracers, (double)s_tracerEvery, s_tracerDamage,
             s_fullOn, s_fullShots, (double)s_fullMinSpeed, (double)s_fullRefSpeed, (double)s_fullEvery, (double)s_fullCone, (double)s_fullRange, (double)s_fullRam, (double)s_fullRamMax,
             (double)s_followDist, (double)s_personal, (double)s_maxRounds, (double)s_roundSpeed, s_turnOn, s_drive, s_driveTest, s_locoManager, s_locoMap, s_locoRecords, s_locoStride, s_stickFwd, s_stickSide, s_stickTurn,
             s_sight, (double)s_fpDistance, s_frvOn, s_releaseRow, s_releaseShell, (double)s_releaseAp, (double)s_releaseReach, s_releaseTargetsS,
@@ -894,7 +902,7 @@ HF_MOD_EXPORT int koleda_hud_log(unsigned version, const char* text)
 static uint32_t CallType(void) { return s_frvOn && g_frvType && FrvReady() ? g_frvType : g_sinType; }
 
 /* her rounds: the Sinner's by gear and Snow Wolf's Eye's (copies, add_projectile; the vanilla round without one) */
-static uint32_t g_round[5];
+static uint32_t g_round[5], g_tracer;
 static int g_roundBad[5];
 static const char* const kRoundName[5] = {"N", "S", "S+", "Snow Wolf's Eye", "rocket"};
 static void RoundsAdd(void)
@@ -922,6 +930,18 @@ static void RoundsAdd(void)
         p.name = names[r];
         g_round[r] = hf->add_projectile ? hf->add_projectile(self, &p) : 0;
         if (!g_round[r]) { g_round[r] = p.base; Log("the %s round: no copy of projectile %u (the vanilla round fires)", kRoundName[r], p.base); }
+    }
+    /* 0.3.12: Full Speed's tracer: Snow Wolf's Eye's round (its trail) with a weak damage id */
+    if (s_s1Round && hf->add_projectile)
+    {
+        HfProjectile p;
+        memset(&p, 0, sizeof p);
+        p.size = sizeof p;
+        p.base = (uint32_t)s_s1Round;
+        p.damage = (uint32_t)s_tracerDamage;
+        p.name = "yui/koleda/sinner_tracer";
+        g_tracer = hf->add_projectile(self, &p);
+        if (!g_tracer) Log("Full Speed's tracer: no copy of projectile %d (no tracers)", s_s1Round);
     }
 }
 
@@ -2366,6 +2386,8 @@ static int DriftStart(void)
 }
 /* Full Speed: its speed and way (from its position frame to frame, smoothed) */
 static float g_speed, g_way[2], g_wayFrom[3];
+static double g_tracerNext, g_tracerAt = -100;
+static unsigned g_tracers;
 static double g_wayAt = -100, g_fullNext, g_fullSeen = -100;
 static float RamBonus(void)
 {
@@ -2388,7 +2410,21 @@ static void FullFrame(void)
         memcpy(g_wayFrom, g_sinPos, 12);
         g_wayAt = g_now;
     }
-    if (!s_fullOn || g_gear == GEAR_N || g_speed < s_fullMinSpeed || g_now < g_fullNext || ProjBudget() < 1) return;
+    if (!s_fullOn || g_gear == GEAR_N || g_speed < s_fullMinSpeed) return;
+    /* 0.3.12: tracers sprayed ahead across the cone, enemies or not: its front is shooting */
+    if (s_fullTracers && g_tracer && g_now >= g_tracerNext)
+    {
+        static unsigned side;
+        g_tracerNext = g_now + s_tracerEvery;
+        float a = (((float)rand() / RAND_MAX) * 2 - 1) * s_fullCone * 0.0174533f, ca = cosf(a), sa = sinf(a);
+        float dir[3] = {g_way[0] * ca - g_way[1] * sa, g_way[0] * sa + g_way[1] * ca, -0.02f - 0.04f * ((float)rand() / RAND_MAX)};
+        float rt[2] = {g_way[1], -g_way[0]}, off = (side++ & 1) ? 0.7f : -0.7f;
+        float from[3] = {g_sinPos[0] + g_way[0] * 2.8f + rt[0] * off, g_sinPos[1] + g_way[1] * 2.8f + rt[1] * off, g_sinPos[2] + 1.1f};
+        float n = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+        for (int k = 0; k < 3; k++) dir[k] /= n;
+        if (hf->spawn_projectile(self, g_tracer, from, dir) == HF_ACT_REQUESTED) { g_tracers++; g_tracerAt = g_now; }
+    }
+    if (g_now < g_fullNext || ProjBudget() < 1) return;
     /* the enemies in its cone ahead (the nearest few) */
     float cosMax = cosf(s_fullCone * 0.0174533f), q[3];
     struct { uint32_t e; float d2, q[3]; } t[8];
@@ -2937,6 +2973,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
         if (g_spared++ < 8) Log("Kinetic Release's burst on an ally cancelled (entity %u, %d damage)", d->target, d->amount);
         return;
     }
+    if (g_now - g_tracerAt < 1.5 && (d->kind == 0 || d->kind == 1) && Friend(d->target)) { e->cancel = 1; g_spared++; return; }   /* 0.3.12: its tracers */
     if (sin && (d->target == sin || (SinnerShotNear(d->position) && Friend(d->target))))
     {
         e->cancel = 1;
@@ -3069,6 +3106,8 @@ static void Reset(const char* why)
         Log("%s: the FRV Sinner: %u turret hits, %u rides, %u Kinetic Releases, %u fatal hits survived", why, g_turretHits, g_rides, g_releases, g_noDeath);
     if (g_rideSaved) Log("%s: %u hits on her stopped in the Sinveiler", why, g_rideSaved);
     g_rideSaved = 0;
+    if (g_tracers) Log("%s: %u Full Speed tracers", why, g_tracers);
+    g_tracers = 0;
     if (g_heBlasts || g_heDropped) Log("%s: %u HE blasts (%u where a round hit, %u over he_rate, left out)", why, g_heBlasts, g_heOnHit, g_heDropped);
     g_heBlasts = g_heDropped = g_heOnHit = 0;
     for (int i = 0; i < HE_Q; i++) g_he[i].when = 0;
