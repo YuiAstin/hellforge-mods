@@ -15,7 +15,11 @@ KB_VAR uint32_t g_foe[FOES];
 KB_VAR uint64_t g_foeRes[FOES];
 KB_VAR unsigned g_foeNext;
 typedef struct Kind { uint64_t res; int foe; } Kind;
-KB_VAR Kind g_kinds[256];
+/* (Lemuen 0.1.13: 4096, not 256: every kind of thing that spawns takes a place, and a long session with many mods
+ * filled 256; past a full table a new enemy kind read as no foe and a new friend as no friend. A full table now
+ * answers without keeping) */
+#define KB_KINDS 4096
+KB_VAR Kind g_kinds[KB_KINDS];
 
 /* Friends: what her blasts spare and what is never a target. Any exosuit and its parts (hers or not, piloted or empty,
  * still dropping), the arms she holds, the dog drones, sentries, SEAF and the Pelican. */
@@ -91,16 +95,17 @@ KB_FN int FriendTable(uint64_t res)
  * took it for an enemy); the answers kept per resource */
 KB_FN int FriendRes(uint64_t res)
 {
-    static uint64_t keys[256];
-    static int8_t vals[256];
+    static uint64_t keys[KB_KINDS];
+    static int8_t vals[KB_KINDS];
     if (!res) return 0;
     if (FriendTable(res)) return 1;
-    unsigned h = (unsigned)(res ^ (res >> 33)) & 255;
-    for (unsigned i = 0; i < 256; i++)
+    unsigned h = (unsigned)(res ^ (res >> 33)) & (KB_KINDS - 1);
+    for (unsigned i = 0; i <= KB_KINDS; i++)
     {
-        unsigned k = (h + i) & 255;
-        if (keys[k] == res) return vals[k];
-        if (keys[k]) continue;
+        unsigned k = (h + i) & (KB_KINDS - 1);
+        int full = i == KB_KINDS;   /* no place left: answered, not kept */
+        if (!full && keys[k] == res) return vals[k];
+        if (!full && keys[k]) continue;
         uint64_t at = res;
         int friend_ = 0;
         for (int depth = 0; depth < 4 && !friend_; depth++)
@@ -118,30 +123,35 @@ KB_FN int FriendRes(uint64_t res)
             if (FriendTable(base)) { friend_ = 1; Log("a mod's copy %016llx of a friend (%016llx): spared and never a target", (unsigned long long)res, (unsigned long long)base); }
             at = base;
         }
+        if (full) return friend_;
         vals[k] = (int8_t)friend_;   /* the answer before the key: a hit read on another thread never sees a key without it */
         keys[k] = res;
         return friend_;
     }
     return 0;
 }
+static int FoeKindOf(uint64_t res)
+{
+    uint32_t stride;
+    return hf->component_record("BehaviorComponentData", res, &stride) != 0 && !hf->component_record("TurretComponentData", res, &stride) &&
+           !hf->component_record("AvatarComponentData", res, &stride) && !hf->component_record("SeatCollectionComponentData", res, &stride) && !FriendRes(res); /* no friend: exosuits and their parts, dog drones, sentries, SEAF, the Pelican (FriendRes) */
+}
 KB_FN int FoeKind(uint64_t res)
 {
     if (!res || res == AVATAR) return 0;
-    unsigned h = (unsigned)(res ^ (res >> 29)) & 255;
-    for (unsigned i = 0; i < 256; i++)
+    unsigned h = (unsigned)(res ^ (res >> 29)) & (KB_KINDS - 1);
+    for (unsigned i = 0; i < KB_KINDS; i++)
     {
-        Kind* k = &g_kinds[(h + i) & 255];
+        Kind* k = &g_kinds[(h + i) & (KB_KINDS - 1)];
         if (k->res == res) return k->foe;
         if (!k->res)
         {
-            uint32_t stride;
+            k->foe = FoeKindOf(res);
             k->res = res;
-            k->foe = hf->component_record("BehaviorComponentData", res, &stride) != 0 && !hf->component_record("TurretComponentData", res, &stride) &&
-                     !hf->component_record("AvatarComponentData", res, &stride) && !hf->component_record("SeatCollectionComponentData", res, &stride) && !FriendRes(res); /* no friend: exosuits and their parts, dog drones, sentries, SEAF, the Pelican (FriendRes) */
             return k->foe;
         }
     }
-    return 0;
+    return FoeKindOf(res);   /* a full table: answered, not kept */
 }
 KB_FN void AddFoe(uint32_t entity, uint64_t res)
 {

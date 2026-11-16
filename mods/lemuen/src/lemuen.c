@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.12"
+#define VERSION "0.1.13"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -69,6 +69,7 @@ static int s_sight = 1;   /* 0.1.6: marks and Honesta Missio's lock need a clear
 static float s_s2Cd = 20, s_s2Min = 1.8f, s_s2Max = 4.25f, s_s2Hold = 3.5f, s_s2Cone = 4, s_s2Range = 600, s_fpDistance = 0.45f;
 static float s_s3Cd = 90, s_s3Every = 0.35f, s_s3Height = 120;
 static int s_s3Max = 8, s_s3Shell = 194;
+static int s_hullHealth = 600;   /* 0.1.13 */
 
 static const KbSetting kSettings[] = {
     KB_F("mark_range", s_markRange, 10, 1000), KB_F("mark_cone", s_markCone, 1, 90), KB_F("mark_seconds", s_markSeconds, 0, 30),
@@ -79,7 +80,7 @@ static const KbSetting kSettings[] = {
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("s2_min", s_s2Min, 1, 20), KB_F("s2_max", s_s2Max, 1, 20), KB_F("s2_hold", s_s2Hold, 0.1, 30),
     KB_F("s2_cone", s_s2Cone, 0.5, 30), KB_I("line_of_sight", s_sight, 0, 1), KB_F("s2_range", s_s2Range, 10, 1000), KB_F("first_person", s_fpDistance, 0.1, 2),
     KB_F("s3_cooldown", s_s3Cd, 0, 3600), KB_F("s3_every", s_s3Every, 0.05, 5), KB_F("s3_height", s_s3Height, 20, 500),
-    KB_I("s3_max", s_s3Max, 1, 32), KB_I("s3_shell", s_s3Shell, 1, 100000),
+    KB_I("s3_max", s_s3Max, 1, 32), KB_I("s3_shell", s_s3Shell, 1, 100000), KB_I("hull_health", s_hullHealth, 0, 1000000),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
 };
@@ -117,11 +118,13 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; more, as Arknights' red numbers (Modus and Salve Etiam are ATK buffs, the shells her ATK: no number). 0: every hit.\n"
                "numbers_at = %g\n"
                "; Line of sight: 1, marks and Honesta Missio's lock only on enemies she can see (no walls or terrain between);\n"
-               "; 0 through walls (0.1.5's way).\nline_of_sight = %d\n",
+               "; 0 through walls (0.1.5's way).\nline_of_sight = %d\n"
+               "; hull_health: Honesta Missio also holds a thing that is health alone (a tank's hull) with this much health or\n"
+               "; more (0: never).\nhull_health = %d\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_markRange, (double)s_markCone, (double)s_markSeconds,
             (double)s_markLast, (double)s_markMult, s_markArmour, s_markHealth, s_markMax, (double)s_markAim, (double)s_markRewatch, (double)s_modusAfter, (double)s_modusMult, (double)s_s1Cd,
             (double)s_s1Mult, s_s1AnyGun, (double)s_s2Cd, (double)s_s2Min, (double)s_s2Max, (double)s_s2Hold, (double)s_s2Cone,
-            (double)s_s2Range, (double)s_fpDistance, (double)s_s3Cd, (double)s_s3Every, (double)s_s3Height, s_s3Max, s_s3Shell, (double)s_numbersAt, s_sight);
+            (double)s_s2Range, (double)s_fpDistance, (double)s_s3Cd, (double)s_s3Every, (double)s_s3Height, s_s3Max, s_s3Shell, (double)s_numbersAt, s_sight, s_hullHealth);
 }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
@@ -650,6 +653,9 @@ static int Holdable(uint32_t e, uint64_t res)
     if (HealthOf(e, &hp, &life) && hp <= 0) return 0;
     if (FoeKind(res) || EnemyTurret(res) || AiEnemy(res) || IsFoe(e)) return 1;
     if (!hf->component_record("HealthComponentData", res, &stride)) return 0;
+    /* 0.1.13: a tank's hull is health alone (2c1a7790c435fd67, Yui's log: records H): held when it is a big one
+     * (hull_health or more; crates and fences are small) */
+    if (hp >= s_hullHealth && s_hullHealth > 0) return 1;
     /* 0.1.12: a tank (the Barrager's, the Annihilator's): its hull carries a turret and health (reported 2026-11) */
     return hf->component_record("BehaviorComponentData", res, &stride) || hf->component_record("FactionComponentData", res, &stride) ||
            hf->component_record("SeatCollectionComponentData", res, &stride) || hf->component_record("TurretComponentData", res, &stride);
@@ -1012,19 +1018,21 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
  * behaviour and is no friend (the kit base's list of Helldiver sentries, emplacements and their mods' copies) is one */
 static int EnemyTurret(uint64_t res)
 {
-    static uint64_t keys[128];
-    static int8_t vals[128];
-    static double at[128];   /* 0.1.12: a no is asked again after 5 s (a kind's records can come later than its first sight) */
-    unsigned h = (unsigned)(res ^ (res >> 31)) & 127;
-    for (unsigned i = 0; i < 128; i++)
+    static uint64_t keys[2048];   /* (0.1.13: 2048, not 128: the table filled in a long session and every new kind read as no) */
+    static int8_t vals[2048];
+    static double at[2048];   /* 0.1.12: a no is asked again after 5 s (a kind's records can come later than its first sight) */
+    unsigned h = (unsigned)(res ^ (res >> 31)) & 2047;
+    for (unsigned i = 0; i <= 2048; i++)
     {
-        unsigned k = (h + i) & 127;
-        if (keys[k] == res && (vals[k] || g_now - at[k] < 5.0)) return vals[k];
-        if (keys[k] == res) keys[k] = 0;
-        if (keys[k]) continue;
+        unsigned k = (h + i) & 2047;
+        int full = i == 2048;   /* no place left: answered, not kept */
+        if (!full && keys[k] == res && (vals[k] || g_now - at[k] < 5.0)) return vals[k];
+        if (!full && keys[k] == res) keys[k] = 0;
+        if (!full && keys[k]) continue;
         uint32_t stride;
         int t = hf->component_record("TurretComponentData", res, &stride) != 0 && hf->component_record("BehaviorComponentData", res, &stride) != 0 &&
                 !hf->component_record("AvatarComponentData", res, &stride) && !FriendRes(res);
+        if (full) return t;
         vals[k] = (int8_t)t;
         at[k] = g_now;
         keys[k] = res;
@@ -1038,19 +1046,21 @@ static int EnemyTurret(uint64_t res)
  * saw it once Honesta Missio had held it (Yui). Anything with the AI's enemy record and health, and no friend, is one */
 static int AiEnemy(uint64_t res)
 {
-    static uint64_t keys[128];
-    static int8_t vals[128];
-    static double at[128];   /* 0.1.12: a no is asked again after 5 s (a kind's records can come later than its first sight) */
-    unsigned h = (unsigned)(res ^ (res >> 27)) & 127;
-    for (unsigned i = 0; i < 128; i++)
+    static uint64_t keys[2048];   /* (0.1.13: 2048, not 128: the table filled in a long session and every new kind read as no) */
+    static int8_t vals[2048];
+    static double at[2048];   /* 0.1.12: a no is asked again after 5 s (a kind's records can come later than its first sight) */
+    unsigned h = (unsigned)(res ^ (res >> 27)) & 2047;
+    for (unsigned i = 0; i <= 2048; i++)
     {
-        unsigned k = (h + i) & 127;
-        if (keys[k] == res && (vals[k] || g_now - at[k] < 5.0)) return vals[k];
-        if (keys[k] == res) keys[k] = 0;
-        if (keys[k]) continue;
+        unsigned k = (h + i) & 2047;
+        int full = i == 2048;   /* no place left: answered, not kept */
+        if (!full && keys[k] == res && (vals[k] || g_now - at[k] < 5.0)) return vals[k];
+        if (!full && keys[k] == res) keys[k] = 0;
+        if (!full && keys[k]) continue;
         uint32_t stride;
         int t = res != AVATAR && hf->component_record("AiEnemyComponentData", res, &stride) != 0 && hf->component_record("HealthComponentData", res, &stride) != 0 &&
                 !hf->component_record("AvatarComponentData", res, &stride) && !FriendRes(res);
+        if (full) return t;
         vals[k] = (int8_t)t;
         at[k] = g_now;
         keys[k] = res;
