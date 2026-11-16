@@ -1,18 +1,18 @@
 /* Koleda (yui.koleda): Koleda's kit from Girls' Frontline 2 (AK-12, DEFY) as abilities on keys, for your own Helldiver
- * (solo or host): a Vanguard whose ultimate calls the Sinner, an empty exosuit of her own that follows her, fights for
+ * (solo or host): a Vanguard whose ultimate calls the Sinveiler, an empty exosuit of her own that follows her, fights for
  * her and takes half the damage aimed at her. Built on the kit base (kitbase/, docs/kit-base.md); the design and what
  * is still untested: docs/koleda-design.md. NOTHING HERE HAS RUN IN GAME YET.
  *
  * 0.3.0: the kit as her official skills read (Dandegate, 2026-11-16; docs/koleda-design.md), turns made seconds:
- *   The Sinner (her passive) and Sinveiler (the summon, "the Sinner" below): it takes share_pct (80) of each hit on her,
+ *   The Sinner (her passive) and Sinveiler (the summon): it takes share_pct (80) of each hit on her,
  *     follows her and shoots by its gear; each of its actions gives her Upshift (one more in S+). While both stand:
  *     Post-Move Support (her damage and its, x post_move).
  *   Upshift: +upshift_damage (15%) of her damage a stack, at most 5; at 5 she takes upshift_guard (30%) less damage.
  *   Snow Wolf's Eye (key_s1, Z): +1 Upshift first; heavy rounds on the enemy under her crosshair, each stack of Upshift
- *     s1_stack more; Turbo Boost on her and the Sinner (damage x turbo_mult for turbo_seconds); the Sinner to S+.
+ *     s1_stack more; Turbo Boost on her and the Sinveiler (damage x turbo_mult for turbo_seconds); the Sinveiler to S+.
  *   Tactical Routebook (key_s2, X): +2 Upshift; Kinetic Recovery on both (damage x kr_mult, no heal); one Kinetic
- *     Release around her; the Sinner to S.
- *   Spectre (key_s3, C): one Sinner call (the Patriot copy, or the M-103 from her loadout); while it stands: The Winner
+ *     Release around her; the Sinveiler to S.
+ *   Spectre (key_s3, C): one Sinveiler call (the Patriot copy, or the M-103 from her loadout); while it stands: The Winner
  *     (every winner_cooldown s: full health, cleansed; gear N if it was in D); in the FRV, Let's Go For a Spin! first.
  *   Gears (Gear Shift): D by default (its damage x gear_damage_d); N, S, S+ set by her skills for gear_seconds, then D
  *     again. N: it takes no damage and holds Drift and Full Speed. S can only go up to S+, S+ is held. Parked (standing
@@ -20,17 +20,17 @@
  *     its health when hit (at most every sinner_heal_every s).
  *   Kinetic Release (Gear Shift): while it fights in S or S+, every release_every s (and after Tactical Routebook),
  *     rifle rounds from it at the enemies near it (S: release_targets_s within release_reach, S+: more, farther).
- *   In the FRV Sinner (0.3.5, Voymastina's way): her keys are its skills: key_s1 Let's Go Full Speed! (the burst, at the
+ *   In the FRV Sinveiler (0.3.5, Voymastina's way): her keys are its skills: key_s1 Let's Go Full Speed! (the burst, at the
  *     wheel), key_s2 Let's Go for a Drift!, key_s3 The Winner.
- *   Let's Go for a Drift! (in it, key_s2; drift_cooldown; not in N): waves of EMS bursts out from the Sinner,
+ *   Let's Go for a Drift! (in it, key_s2; drift_cooldown; not in N): waves of EMS bursts out from the Sinveiler,
  *     drift_rings rings out to drift_radius m, each enemy in reach taking drift_damage once (the stun holds them; nobody
  *     is moved).
  *   Let's Go Full Speed! (not in N): while it moves at full_min_speed m/s or more it fires at the enemies in a cone
  *     ahead, more often the faster it goes, and its rams hit harder with speed. Z while she drives: the Full Speed
  *     burst (sprint_seconds without damage, harder rams).
  *
- * The Sinner's driving goes through sinner_drive.h (the game's own locomotion, as Exo Companion by M!ni$try0fSc!eиce
- * drives a suit); until the probe fills it in, the Sinner slides on Voymastina's warp setter, where its guard allows.
+ * The Sinveiler's driving goes through sinner_drive.h (the game's own locomotion, as Exo Companion by M!ni$try0fSc!eиce
+ * drives a suit); until the probe fills it in, the Sinveiler slides on Voymastina's warp setter, where its guard allows.
  *
  * Research credit: the kit base's (Helldiver Survival Rework by enochlophobianumerophobia, MIT; HD2Runtime by
  * SkyeShade); the camera pose as Apache - Rise Above (RSNLRiggs, after Khi) reads it; the warp setter as the LIFT-182
@@ -50,7 +50,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.13"
+#define VERSION "0.4.0"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -71,7 +71,7 @@ KB_ROSTER_EXPORTS(koleda)
 /* Upshift */
 static int s_upMax = 5;
 static float s_upDecay = 10, s_upDamage = 0.15f, s_upEvery = 3, s_upGuard = 0.3f;
-/* the Sinner: its call, the damage share */
+/* the Sinveiler: its call, the damage share */
 static int s_sinOn = 1, s_callMode = 1;
 static float s_sharePct = 80, s_shareRange = 60;
 /* the leash */
@@ -108,12 +108,12 @@ static int s_relRound = 0, s_relRoundsS = 3, s_relRoundsPlus = 4, s_relPoints = 
 static int s_heRow = 266, s_fullHe = 1, s_releaseHe = 1;
 static int s_rideSafe = 1, s_relRingS = 8, s_relRingPlus = 12;   /* 0.3.7 */
 static unsigned g_rideSaved;
-static int s_sinSteady = 1;   /* 0.3.8: no stagger or push on the Sinner */
+static int s_sinSteady = 1;   /* 0.3.8: no stagger or push on the Sinveiler */
 static float s_heRate = 10;
 /* 0.3.12: Full Speed's tracers: a weak round with a bright trail, sprayed ahead while it drives fast */
 static int s_fullTracers = 1, s_tracerDamage = 125;
 static float s_tracerEvery = 0.08f;
-static int s_heRound = 77;   /* 0.3.11: the Orbital Gatling Barrage's own shell, fired from the Sinner (0: a bullet and a blast set off where it lands) */
+static int s_heRound = 77;   /* 0.3.11: the Orbital Gatling Barrage's own shell, fired from the Sinveiler (0: a bullet and a blast set off where it lands) */
 static float s_relReachPlus = 18, s_relInner = 6, s_relGap = 0.3f;
 static int s_driftOn = 1, s_driftRings = 4, s_driftDamage = 800, s_fullOn = 1;
 static float s_driftEvery = 12, s_driftRadius = 20;
@@ -123,7 +123,7 @@ static int s_cleanse = 1;
 static int s_drive = 1, s_driveTest = 0;
 static int s_turnOn = 0;
 /* 0.1.8: its minigun rounds' speed (her copies only): at the base's ~1000 m/s a round's tracer is first drawn a frame
- * along its path, metres out from the arm (it looked spawned far from the Sinner); 0 keeps the base's */
+ * along its path, metres out from the arm (it looked spawned far from the Sinveiler); 0 keeps the base's */
 static float s_roundSpeed = 250;
 static float s_deadAfter = 5;   /* 0.2.10: a target its fire leaves its health alone this long: dead to it for 15 s */
 static float s_maxRounds = 20;   /* 0.1.7: off (the HUD side walks and turns it through its animation, Exo Autopilot's way) */
@@ -136,15 +136,15 @@ static int s_stickFwd = -1, s_stickSide = -1, s_stickTurn = -1;
 /* aiming */
 static int s_sight = 1;
 static float s_fpDistance = 0.45f;
-/* 0.2.0: the FRV Sinner (her M-103 Supply FRV) */
-static int s_frvOn = 1, s_releaseRow = 150;   /* 0.2.6: sinner_kind: 0 the Patriot, 1 the FRV (her own FRV Sinner call; the default) */
+/* 0.2.0: the FRV Sinveiler (her M-103 Supply FRV) */
+static int s_frvOn = 1, s_releaseRow = 150;   /* 0.2.6: sinner_kind: 0 the Patriot, 1 the FRV (her own FRV Sinveiler call; the default) */
    /* 0.2.5: an EMS burst on each enemy near it (0.2.1-0.2.4: blasts in a ring, which missed) */
 static int s_releaseShell = 154, s_releaseTargetsS = 4, s_releaseTargetsPlus = 6, s_emsImmune = 1;
 static float s_releaseAp = 6, s_releaseReach = 12;
 static float s_releaseEvery = 5, s_releaseRadius = 7,   /* 0.2.4: 7 m (4 m blasts flipped the FRV) */
     s_rideRange = 60;
 static int s_grip = 0;   /* (0.3.9: off by default: it never ran before the physics pins were fixed) */
-/* 0.3.9: the FRV Sinner kept steady: a hit's spin and launch taken off its physics body; set upright when it lies over */
+/* 0.3.9: the FRV Sinveiler kept steady: a hit's spin and launch taken off its physics body; set upright when it lies over */
 static int s_carSteady = 1, s_carRight = 1;
 static float s_carSpin = 1.5f, s_carLift = 2.0f, s_carWindow = 0.6f, s_carRightAfter = 1.5f;
 static float s_gripGravity = 12, s_gripCancel = 0.5f, s_gripMargin = 0.35f, s_gripMass = 3000;
@@ -199,15 +199,15 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
     fprintf(f, "; Koleda %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for a\n"
                "; combo (Shift+Q). The game still sees the keys too (Shift sprints, R reloads), so pick ones it leaves alone.\n"
                "key_s1 = %s\nkey_s2 = %s\nkey_s3 = %s\n"
-               "; In the FRV Sinner the same keys are its skills: key_s1 Let's Go Full Speed! (at the wheel), key_s2 Let's Go for\n"
+               "; In the FRV Sinveiler the same keys are its skills: key_s1 Let's Go Full Speed! (at the wheel), key_s2 Let's Go for\n"
                "; a Drift!, key_s3 The Winner.\n"
                "; Upshift: at most upshift_max stacks, each +upshift_damage (0.15: 15%%) of her damage; one is lost every\n"
-               "; upshift_decay s without a gain. A Sinner action (a volley, Drift, Full Speed) gives one (two in S+), at most one\n"
+               "; upshift_decay s without a gain. A Sinveiler action (a volley, Drift, Full Speed) gives one (two in S+), at most one\n"
                "; gain every upshift_every s. At upshift_max she takes upshift_guard (0.3: 30%%) less damage.\n"
                "upshift_max = %d\nupshift_decay = %g\nupshift_damage = %g\nupshift_every = %g\nupshift_guard = %g\n"
-               "; The Sinner (sinner 0: none). call_mode 1: Spectre puts one Sinner call in her stratagem list (code RRLLD)\n"
+               "; The Sinveiler (sinner 0: none). call_mode 1: Spectre puts one Sinveiler call in her stratagem list (code RRLLD)\n"
                "; each time; 0: one call granted at the drop, unlimited, with the stratagem's own cooldown (s3_cooldown).\n"
-               "; share_pct of each hit on her goes to the Sinner instead (never below 1 from that), while it stands within\n"
+               "; share_pct of each hit on her goes to the Sinveiler instead (never below 1 from that), while it stands within\n"
                "; share_range m.\n"
                "sinner = %d\ncall_mode = %d\nshare_pct = %g\nshare_range = %g\n"
                "; The leash: it walks to her beyond leash_start m and stops within leash_stop (in N gear: within guard_start);\n"
@@ -233,21 +233,21 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "sinner_fire = %d\ndead_after = %g\nsinner_sight = %d\nround_n = %d\nround_s = %d\nround_plus = %d\nround_rocket = %d\nround_fallback = %d\n"
                "gun_every = %g\nplus_rate = %g\nguard_range = %g\nfire_range = %g\n"
                "; The old pull (pull_on 1; untested, so off): in S+, every pull_every s, enemies within pull_radius m of the\n"
-               "; Patriot Sinner are dragged to it, and pull_explosion (0: none) goes off on it.\n"
+               "; Patriot Sinveiler are dragged to it, and pull_explosion (0: none) goes off on it.\n"
                "pull_on = %d\npull_every = %g\npull_radius = %g\npull_explosion = %d\n"
                "; Snow Wolf's Eye: cooldown; +1 Upshift, then the enemy under her crosshair (s1_cone degrees, s1_range m, in sight)\n"
                "; takes s1_rounds heavy rounds (s1_round, 226: the APW-1's), s1_every s apart, each s1_stack more per Upshift stack.\n"
-               "; Turbo Boost: her damage and the Sinner's x turbo_mult for turbo_seconds. The Sinner goes to S+.\n"
+               "; Turbo Boost: her damage and the Sinveiler's x turbo_mult for turbo_seconds. The Sinveiler goes to S+.\n"
                "s1_cooldown = %g\ns1_rounds = %d\ns1_every = %g\ns1_cone = %g\ns1_range = %g\ns1_round = %d\ns1_stack = %g\nturbo_seconds = %g\nturbo_mult = %g\n"
-               "; Tactical Routebook: cooldown; +2 Upshift; Kinetic Recovery for kr_seconds: her damage and the Sinner's x kr_mult\n"
-               "; (kr_heal: she heals this much, kr_sinner_heal: the Sinner this part of its health; 0: none); one Kinetic Release\n"
-               "; around her. The Sinner goes to S.\n"
+               "; Tactical Routebook: cooldown; +2 Upshift; Kinetic Recovery for kr_seconds: her damage and the Sinveiler's x kr_mult\n"
+               "; (kr_heal: she heals this much, kr_sinner_heal: the Sinveiler this part of its health; 0: none); one Kinetic Release\n"
+               "; around her. The Sinveiler goes to S.\n"
                "s2_cooldown = %g\nkr_seconds = %g\nkr_mult = %g\nkr_heal = %g\nkr_sinner_heal = %g\n"
                "; Spectre: cooldown. The Winner (Spectre while it stands, every winner_cooldown s): full health; cleanse 1 removes\n"
-               "; the Sinner's fire, gas, stun and slow once the game's status functions are pinned (off until then); 2 calls them\n"
+               "; the Sinveiler's fire, gas, stun and slow once the game's status functions are pinned (off until then); 2 calls them\n"
                "; unpinned; 0 never.\n"
                "s3_cooldown = %g\ncleanse = %d\nwinner_cooldown = %g\n"
-               "; Gears: D unless a skill set another, which lasts gear_seconds. The Sinner's damage by gear: gear_damage_d / _s /\n"
+               "; Gears: D unless a skill set another, which lasts gear_seconds. The Sinveiler's damage by gear: gear_damage_d / _s /\n"
                "; _plus / _n (times Upshift, Turbo Boost, Kinetic Recovery, Post-Move Support). Post-Move Support: while it stands,\n"
                "; her damage and its x post_move. Gear Shift: it takes sinner_taken of the damage (in N none; standing still:\n"
                "; times park_taken); a hit on it heals sinner_heal of its health, at most every sinner_heal_every s.\n"
@@ -259,20 +259,20 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; release_targets_s enemies within release_reach m (S+: release_targets_plus within release_reach_plus),\n"
                "; release_rounds_s each (S+: release_rounds_plus), by its gear and her buffs.\n"
                "; Around it too: release_ring_s rounds (S+: release_ring_plus) evenly all around, landing 0.85 of its reach out.\n"
-               "; ride_safe 1: in the Sinveiler nothing damages her. sinner_steady 1: hits on the Sinner keep their damage but\n"
+               "; ride_safe 1: in the Sinveiler nothing damages her. sinner_steady 1: hits on the Sinveiler keep their damage but\n"
                "; lose their stagger and push (the bots' cannons flipped the FRV).\n"
                "release_round = %d\nrelease_rounds_s = %d\nrelease_rounds_plus = %d\nrelease_reach_plus = %g\nrelease_ring_s = %d\nrelease_ring_plus = %d\nride_safe = %d\nsinner_steady = %d\n"
-               "; Let's Go for a Drift! (key_s2 in the FRV Sinner; drift_on 0: off): its active, once a press, every\n"
+               "; Let's Go for a Drift! (key_s2 in the FRV Sinveiler; drift_on 0: off): its active, once a press, every\n"
                "; drift_cooldown s, not in N: waves of EMS bursts out from it: drift_rings rings from drift_inner m out to drift_radius m,\n"
                "; drift_gap s apart, bursts about 5 m apart (at most drift_points a ring); each enemy in reach takes\n"
                "; drift_damage once, release_ap armour penetration (the stun holds them; nobody is moved). release_shell 154:\n"
-               "; the EMS mortar's shell from above; else release_explosion 150. ems_immune 1: no EMS stun on her or the Sinner.\n"
-               "; Her bursts spare her, the Sinner and her allies.\n"
+               "; the EMS mortar's shell from above; else release_explosion 150. ems_immune 1: no EMS stun on her or the Sinveiler.\n"
+               "; Her bursts spare her, the Sinveiler and her allies.\n"
                "drift_on = %d\ndrift_cooldown = %g\ndrift_radius = %g\ndrift_rings = %d\ndrift_damage = %d\ndrift_points = %d\ndrift_inner = %g\ndrift_gap = %g\n"
                "; HE rounds (full_he 1: Full Speed's, release_he 1: Kinetic Release's): where each of their rounds lands, the\n"
                "; Orbital Gatling Barrage's high-explosive blast (he_explosion, 266: its shell's; 0: none), at most he_rate a\n"
-               "; second; by its gear and her buffs, sparing her, the Sinner and her allies.\n"
-               "; he_round 77: the barrage's own HE shell is fired from the Sinner at them and bursts where it hits (its launch\n"
+               "; second; by its gear and her buffs, sparing her, the Sinveiler and her allies.\n"
+               "; he_round 77: the barrage's own HE shell is fired from the Sinveiler at them and bursts where it hits (its launch\n"
                "; crashed the game once in another mod: 0 goes back to a bullet with the blast set off where it lands).\n"
                "he_explosion = %d\nhe_rate = %g\nfull_he = %d\nrelease_he = %d\nhe_round = %d\n"
                "; Let's Go Full Speed! (full_on 0: off; not in N): while it moves at full_min_speed m/s or more, it fires at the\n"
@@ -283,7 +283,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; enemies or not (Snow Wolf's Eye's bright round with the minigun's damage, tracer_damage: a damage id).\n"
                "full_tracers = %d\nfull_tracer_every = %g\ntracer_damage = %d\n"
                "full_on = %d\nfull_shots = %d\nfull_min_speed = %g\nfull_ref_speed = %g\nfull_every = %g\nfull_cone = %g\nfull_range = %g\nfull_ram = %g\nfull_ram_max = %g\n"
-               "; Driving with the game's own locomotion (the probe's numbers; -1 unknown: the Sinner slides instead).\n"
+               "; Driving with the game's own locomotion (the probe's numbers; -1 unknown: the Sinveiler slides instead).\n"
                "; drive_test 1 writes the stick without the engine and mover calls.\n"
                "; turn 1: it turns toward what it fires at, else the way it slides (its turn record, 0.1.4).\n"
                "; round_speed: m/s of its minigun rounds (her copies; 0: the Patriot's own): slower, its tracers start at its arm.\n"
@@ -293,23 +293,23 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "stick_offset_fwd = %d\nstick_offset_side = %d\nstick_offset_turn = %d\n"
                "; Aiming: line_of_sight 1, Snow Wolf's Eye's target must be in sight. first_person: the camera this close to\n"
                "; her head (m) counts as first person.\nline_of_sight = %d\nfirst_person = %g\n"
-               "; Which Sinner: sinner_kind 1 the FRV Sinner (the default), 0 the Patriot (also a choice on the MODS tab; it applies\n"
-               "; to her next Spectre). The FRV Sinner is the M-103 Supply FRV she brings in her loadout (without one she gets\n"
-               "; the Patriot): Spectre clears its cooldown, and the one she calls becomes the Sinner: its own turret fights.\n"
+               "; Which Sinveiler: sinner_kind 1 the FRV Sinveiler (the default), 0 the Patriot (also a choice on the MODS tab; it applies\n"
+               "; to her next Spectre). The FRV Sinveiler is the M-103 Supply FRV she brings in her loadout (without one she gets\n"
+               "; the Patriot): Spectre clears its cooldown, and the one she calls becomes the Sinveiler: its own turret fights.\n"
                "; Spectre while it stands: Let's Go For a Spin! (she is put in its driver seat, else a free passenger seat, within\n"
                "; ride_range m); pressed again inside it: The Winner.\n"
                "; Kinetic Release's targets: release_targets_s / _plus, within release_reach (above). release_radius: unused.\n"
                "sinner_kind = %d\n"
                "release_explosion = %d\nrelease_shell = %d\nrelease_ap = %g\nrelease_reach = %g\n"
                "release_targets_s = %d\nrelease_targets_plus = %d\nems_immune = %d\nrelease_every = %g\nrelease_radius = %g\nride_range = %g\n"
-               "; Full Speed burst: Snow Wolf's Eye's key while she drives the FRV Sinner: for sprint_seconds it and she take\n"
+               "; Full Speed burst: Snow Wolf's Eye's key while she drives the FRV Sinveiler: for sprint_seconds it and she take\n"
                "; no damage and its rams deal sprint_ram times more (and sprint_ram_s more in S, sprint_ram_plus in S+).\n"
                "sprint_seconds = %g\nsprint_cooldown = %g\nsprint_ram = %g\nsprint_ram_s = %g\nsprint_ram_plus = %g\n"
-               "; Grip (grip 0: off): while fewer than 2 of the FRV Sinner's 4 corners are within grip_margin m of their resting\n"
+               "; Grip (grip 0: off): while fewer than 2 of the FRV Sinveiler's 4 corners are within grip_margin m of their resting\n"
                "; height over the ground, grip_cancel of its upward speed is taken out each frame and it is pushed down with\n"
                "; grip_gravity m/s2 more (its mass taken as grip_mass kg). Rocks fling it less; jumps are cut short too.\n"
                "grip = %d\ngrip_gravity = %g\ngrip_cancel = %g\ngrip_margin = %g\ngrip_mass = %g\n"
-               "; Steady (car_steady 0: off): for car_window s after a hit on the FRV Sinner, its roll and pitch spin is held to\n"
+               "; Steady (car_steady 0: off): for car_window s after a hit on the FRV Sinveiler, its roll and pitch spin is held to\n"
                "; car_spin rad/s and its upward speed to car_lift m/s (the bots' cannons flipped it). car_right 1: lying over\n"
                "; (tilted past 60 degrees) for car_right_after s, it is set upright where it is.\n"
                "car_steady = %d\ncar_spin = %g\ncar_lift = %g\ncar_window = %g\ncar_right = %d\ncar_right_after = %g\n"
@@ -352,7 +352,7 @@ static int g_gear = GEAR_D;
 static double g_gearUntil;            /* N, S, S+ until then, then D */
 static const char* const kGear[4] = {"N", "S", "S+", "D"};
 static double g_turboUntil, g_eyeHitUntil, g_fightAt = -100;
-static int g_parked;                  /* the Sinner stands still (P) */
+static int g_parked;                  /* the Sinveiler stands still (P) */
 static atomic_uint g_threat;          /* whoever last hit her (the hit hook) */
 static _Atomic unsigned long long g_threatMs;
 static uint32_t g_plusTarget;         /* Snow Wolf's Eye's target (S+ pushes toward it) */
@@ -390,8 +390,8 @@ static int HealthOf(uint32_t entity, int32_t* health, uint32_t* life)
     *life = Word(b + 412);
     return 1;
 }
-/* 0.2.10: who is dead to her and the Sinner (Exusiai 0.2.13's rule, and more): a life state counts as dead once a kill
- * has shown it; an entity a kill named stays dead for 60 s (whatever its record says); one the Sinner fired at for
+/* 0.2.10: who is dead to her and the Sinveiler (Exusiai 0.2.13's rule, and more): a life state counts as dead once a kill
+ * has shown it; an entity a kill named stays dead for 60 s (whatever its record says); one the Sinveiler fired at for
  * dead_after s without its health moving is left for 15 s (a corpse that kept its health and life state 0) */
 static uint32_t g_deadLife[8];
 static int g_ndeadLife;
@@ -412,7 +412,7 @@ static void LearnDeadLife(uint32_t e)
     uint32_t life = 0;
     if (!HealthOf(e, &hp, &life) || !life || DeadLife(life) || g_ndeadLife >= 8) return;
     g_deadLife[g_ndeadLife++] = life;
-    Log("a kill showed life state %u (health %d left): an enemy in it is dead to the Sinner", life, hp);
+    Log("a kill showed life state %u (health %d left): an enemy in it is dead to the Sinveiler", life, hp);
 }
 static int Alive(uint32_t e)
 {
@@ -526,7 +526,7 @@ static int HerHead(float out[3])
 }
 static float Flat(const float a[3], const float b[3]) { float x = a[0] - b[0], y = a[1] - b[1]; return sqrtf(x * x + y * y); }
 static int FoeIndex(uint32_t e) { for (int k = 0; k < FOES; k++) if (e && g_foe[k] == e) return k; return -1; }
-/* a friend of hers: another Helldiver, or anything on the kit base's friend list (the Sinner and its arms too) */
+/* a friend of hers: another Helldiver, or anything on the kit base's friend list (the Sinveiler and its arms too) */
 static int Friend(uint32_t e)
 {
     uint8_t d[24];
@@ -584,7 +584,7 @@ static int WorldId(uint32_t* id)
 }
 static uint32_t g_sinner;   /* (defined below) */
 /* the first wall along a ray (len + 1: clear); *hitTarget when the target's unit is met first; skip: a second unit to
- * see through (the Sinner) */
+ * see through (the Sinveiler) */
 static float FirstWall(uint32_t id, const float from[3], const float dir[3], float len, uint32_t me, uint32_t tu, uint32_t skip, int* hitTarget)
 {
     uint8_t hits[16 * 44];
@@ -630,7 +630,7 @@ static int InSight(const float cam[3], const float fwd[3], const float q[3], uin
             len = d + 2;
         }
         int hitTarget = 0;
-        float w = FirstWall(id, cam, dir, len, me, tu, UnitOf(g_sinner), &hitTarget);   /* 0.1.1: through the Sinner */
+        float w = FirstWall(id, cam, dir, len, me, tu, UnitOf(g_sinner), &hitTarget);   /* 0.1.1: through the Sinveiler */
         float reach = r < 2 ? len : len - 2;
         if (hitTarget || w > reach - 1.5f) return 1;
     }
@@ -680,7 +680,7 @@ static int Movable(uint32_t e, const char** why)
     if (!Descriptor(e, d)) { *why = "it is gone"; return 0; }
     if (!(Word(d + 20) & 1) || e >= 0x400000u) { *why = "it is not simulated here"; return 0; }
     if (!Alive(e)) { *why = "it is down"; return 0; }
-    /* 0.1.1: the Sinner is exempt (our own spawn, simulated here; the Drive Probe found it has no navigation record,
+    /* 0.1.1: the Sinveiler is exempt (our own spawn, simulated here; the Drive Probe found it has no navigation record,
      * so 0.1.0 never moved it): warp_needs_walks guards the others (a strider's pilot crashed the setter) */
     if (s_warpWalks && e != g_sinner && !Walks(e)) { *why = "it has no navigation record (warp_needs_walks 1)"; return 0; }
     return 1;
@@ -709,7 +709,7 @@ static uintptr_t NavRec(uint32_t e)
     return ReadAt(rec + 0x10, &active, 4) && (active & 0xFF) ? rec : 0;
 }
 static int Finite3(const float v[3]) { return isfinite(v[0]) && isfinite(v[1]) && isfinite(v[2]) && fabsf(v[0]) < 100000 && fabsf(v[1]) < 100000 && fabsf(v[2]) < 100000; }
-/* the point to steer at on the way to `to`: the path's next waypoint when the Sinner has a navigation record (its
+/* the point to steer at on the way to `to`: the path's next waypoint when the Sinveiler has a navigation record (its
  * destination sent every second), else `to` itself. 1 when the navmesh gave the point */
 static double g_navSentAt = -100;
 static int NavSteer(uint32_t e, const float p[3], const float to[3], float out[3])
@@ -724,7 +724,7 @@ static int NavSteer(uint32_t e, const float p[3], const float to[3], float out[3
         g_setDest(NULL, e, to);
         float dest[3] = {0, 0, 0};
         ReadAt(rec + 0x60, dest, 12);
-        if (g_navSends++ < 6) Log("Sinner pathing: set_destination %.1f %.1f %.1f (its record's destination reads %.1f %.1f %.1f)", (double)to[0], (double)to[1],
+        if (g_navSends++ < 6) Log("Sinveiler pathing: set_destination %.1f %.1f %.1f (its record's destination reads %.1f %.1f %.1f)", (double)to[0], (double)to[1],
                                   (double)to[2], (double)dest[0], (double)dest[1], (double)dest[2]);
     }
     float w[3];
@@ -733,7 +733,7 @@ static int NavSteer(uint32_t e, const float p[3], const float to[3], float out[3
     if (d2 < 0.5f * 0.5f || d2 > 30.0f * 30.0f) return 0;   /* reached, or not a waypoint of this path */
     memcpy(out, w, 12);
     static unsigned told;
-    if (told++ < 6) Log("Sinner pathing: heading for the next waypoint %.1f %.1f %.1f (%.1f m)", (double)w[0], (double)w[1], (double)w[2], sqrtf(d2));
+    if (told++ < 6) Log("Sinveiler pathing: heading for the next waypoint %.1f %.1f %.1f (%.1f m)", (double)w[0], (double)w[1], (double)w[2], sqrtf(d2));
     return 1;
 }
 
@@ -761,7 +761,7 @@ static void SinnerAction(const char* why)
     Upshift(g_gear == GEAR_PLUS ? 2 : 1, why);
 }
 /* 0.3.0: Gear Shift's rules: N, S, S+ last gear_seconds, then D; S goes only up to S+; S+ is held to its end; N comes
- * only from D (The Winner). D: always (the Sinner gone or new, the time over) */
+ * only from D (The Winner). D: always (the Sinveiler gone or new, the time over) */
 static int Gear(int gear, const char* why)
 {
     const char* no = NULL;
@@ -772,10 +772,10 @@ static int Gear(int gear, const char* why)
         else if (gear == GEAR_N && g_gear != GEAR_D) no = "N only from D";
         else if (gear == GEAR_S && g_gear == GEAR_S) no = NULL;
     }
-    if (no) { static unsigned told; if (told++ < 12) Log("the Sinner's gear stays %s (%s: %s)", kGear[g_gear], why, no); return 0; }
+    if (no) { static unsigned told; if (told++ < 12) Log("the Sinveiler's gear stays %s (%s: %s)", kGear[g_gear], why, no); return 0; }
     g_gearUntil = gear == GEAR_D ? 0 : g_now + s_gearSeconds;
     if (gear == g_gear) return 1;
-    Log("the Sinner's gear: %s -> %s (%s)", kGear[g_gear], kGear[gear], why);
+    Log("the Sinveiler's gear: %s -> %s (%s)", kGear[g_gear], kGear[gear], why);
     g_gear = gear;
     return 1;
 }
@@ -783,16 +783,16 @@ static int Gear(int gear, const char* why)
 static int RoundGear(void) { return g_gear == GEAR_D ? GEAR_S : g_gear; }
 static double GearDamage(void) { return g_gear == GEAR_PLUS ? s_gearPlus : g_gear == GEAR_S ? s_gearS : g_gear == GEAR_N ? s_gearN : s_gearD; }
 
-/* ==== the Sinner ===================================================================================================== */
+/* ==== the Sinveiler ===================================================================================================== */
 /* her exosuit (a copy of the EXO-45 Patriot) and its stratagem, made in hellforge_mod_init */
 static uint64_t g_sinRes;
 static uint32_t g_sinType;
-/* 0.2.0: the FRV Sinner: her own M-103 Supply FRV, its automatic turret its gun */
+/* 0.2.0: the FRV Sinveiler: her own M-103 Supply FRV, its automatic turret its gun */
 #define FRV_RES HF_ENTITY_M103_SUPPLY_FRV
 #define FRV_TURRET UINT64_C(0x4DF41F84668D07FB)
 #define FRV_STRATAGEM HF_STRATAGEM_M103_SUPPLY_FRV
-static int g_frv;                      /* the standing Sinner is the FRV */
-static uint32_t g_frvType;             /* 0.2.6: her FRV Sinner call (a copy of the M-103's stratagem) */
+static int g_frv;                      /* the standing Sinveiler is the FRV */
+static uint32_t g_frvType;             /* 0.2.6: her FRV Sinveiler call (a copy of the M-103's stratagem) */
 static uint32_t g_frvNet, g_turretNet, g_turretCandNet, g_turretCand, g_turretEnt;
 static atomic_uint g_turretSeenTarget;
 static _Atomic unsigned long long g_turretSeenMs;
@@ -840,19 +840,19 @@ static void SinnerAdd(const HfApi* api, HfMod* mod)
     HfEntity sin = {sizeof sin};
     sin.base = HF_ENTITY_EXO45_PATRIOT_EXOSUIT;
     sin.name = "yui/koleda/sinner";
-    sin.title = "Sinner";
+    sin.title = "Sinveiler";
     sin.designation = "EXO-45K";
     sin.description = "Koleda's Sinveiler: an exosuit that walks beside her, fights by its gear and takes half the damage aimed at her.";
     g_sinRes = api->add_entity(mod, &sin);
-    if (!g_sinRes) { api->log(mod, "the Sinner could not be added (see the log above): her kit runs without it"); return; }
+    if (!g_sinRes) { api->log(mod, "the Sinveiler could not be added (see the log above): her kit runs without it"); return; }
     static uint64_t payload[2];
     payload[0] = g_sinRes;
     payload[1] = HF_ENTITY_PELICAN_TRANSPORT;
     HfStratagem st = {sizeof st};
     st.base = HF_STRATAGEM_EXO45_PATRIOT;
     st.name = "yui/koleda/sinner_drop";
-    st.title = "Sinner";
-    st.description = "Koleda's Sinner, dropped by Pelican. It follows her and takes part of the damage aimed at her.";
+    st.title = "Sinveiler";
+    st.description = "Koleda's Sinveiler, dropped by Pelican. It follows her and takes part of the damage aimed at her.";
     st.code = "RRLLD";
     st.cooldown = s_s3Cd > 1 ? s_s3Cd : 1;
     st.uses = s_callMode ? 1 : -1;
@@ -860,22 +860,22 @@ static void SinnerAdd(const HfApi* api, HfMod* mod)
     st.payload_count = 2;
     st.package = 0x22749A294788AF66ull;   /* packages/generated/loadout/combat_walker (the Patriot's, as Voymastina's free Sinbreaker) */
     g_sinType = api->add_stratagem(mod, &st);
-    api->log(mod, "the Sinner: entity %016llx, stratagem %u (RRLLD, call_mode %d)", (unsigned long long)g_sinRes, g_sinType, s_callMode);
+    api->log(mod, "the Sinveiler: entity %016llx, stratagem %u (RRLLD, call_mode %d)", (unsigned long long)g_sinRes, g_sinType, s_callMode);
 }
-/* 0.2.6: the FRV Sinner's own call: the M-103 Supply FRV's stratagem copied (its FRV, its drop, its package) */
+/* 0.2.6: the FRV Sinveiler's own call: the M-103 Supply FRV's stratagem copied (its FRV, its drop, its package) */
 __attribute__((unused)) static void FrvAdd(const HfApi* api, HfMod* mod)
 {
     if (!s_sinOn || api->size < offsetof(HfApi, add_stratagem) + sizeof api->add_stratagem || !api->add_stratagem) return;
     HfStratagem st = {sizeof st};
     st.base = FRV_STRATAGEM;
     st.name = "yui/koleda/frv_sinner_drop";
-    st.title = "FRV Sinner";
-    st.description = "Koleda's Sinner as her Supply FRV: its turret fights by her gear, it takes part of the damage aimed at her, and she can ride it.";
+    st.title = "FRV Sinveiler";
+    st.description = "Koleda's Sinveiler as her Supply FRV: its turret fights by her gear, it takes part of the damage aimed at her, and she can ride it.";
     st.code = "RRLLU";
     st.cooldown = s_s3Cd > 1 ? s_s3Cd : 1;
     st.uses = s_callMode ? 1 : -1;
     g_frvType = api->add_stratagem(mod, &st);
-    api->log(mod, "the FRV Sinner: stratagem %u (RRLLU, a copy of the M-103 Supply FRV's)", g_frvType);
+    api->log(mod, "the FRV Sinveiler: stratagem %u (RRLLU, a copy of the M-103 Supply FRV's)", g_frvType);
 }
 /* 0.2.8: the FRV's package (its call-in package, 149f685717737cae) is not one HellForge's load_package knows, and an FRV
  * called without it crashed the game as it landed (game.dll+0x6f94c1, twice). HD2Runtime's catalogue knows it: Koleda's
@@ -886,7 +886,7 @@ HF_MOD_EXPORT int koleda_frv_package(unsigned version, int state)
 {
     if (version != 1) return 0;
     int was = atomic_exchange(&g_frvPkg, state);
-    if (was != state) Log("the FRV Sinner's package: %s (HD2Runtime, through her HUD)", state == 1 ? "resident" : state < 0 ? "refused" : "loading");
+    if (was != state) Log("the FRV Sinveiler's package: %s (HD2Runtime, through her HUD)", state == 1 ? "resident" : state < 0 ? "refused" : "loading");
     return 1;
 }
 static int FrvReady(void) { return atomic_load(&g_frvPkg) == 1; }
@@ -898,10 +898,10 @@ HF_MOD_EXPORT int koleda_hud_log(unsigned version, const char* text)
     if (told++ < 40) Log("[HUD] %.300s", text);
     return 1;
 }
-/* the call Spectre grants: the picked Sinner's (the FRV's only with its package resident) */
+/* the call Spectre grants: the picked Sinveiler's (the FRV's only with its package resident) */
 static uint32_t CallType(void) { return s_frvOn && g_frvType && FrvReady() ? g_frvType : g_sinType; }
 
-/* her rounds: the Sinner's by gear and Snow Wolf's Eye's (copies, add_projectile; the vanilla round without one) */
+/* her rounds: the Sinveiler's by gear and Snow Wolf's Eye's (copies, add_projectile; the vanilla round without one) */
 static uint32_t g_round[5], g_tracer;
 static int g_roundBad[5];
 static const char* const kRoundName[5] = {"N", "S", "S+", "Snow Wolf's Eye", "rocket"};
@@ -975,10 +975,10 @@ static int GrantPins(void)
         {0x66F2EB, "41 89 87 88 07 00 00"}};   /* count + 1 */
     ok = 1;
     for (unsigned i = 0; i < sizeof k / sizeof k[0]; i++)
-        if (!hf->code_matches(game + k[i].at, k[i].bytes)) { Log("Sinner call: game.dll+0x%llX is not as researched: no call", (unsigned long long)k[i].at); ok = 0; break; }
+        if (!hf->code_matches(game + k[i].at, k[i].bytes)) { Log("Sinveiler call: game.dll+0x%llX is not as researched: no call", (unsigned long long)k[i].at); ok = 0; break; }
     return ok;
 }
-/* the Sinner's call in her list with `uses` (-1 unlimited): refilled if there, else appended. 1 done; 0 not (logged),
+/* the Sinveiler's call in her list with `uses` (-1 unlimited): refilled if there, else appended. 1 done; 0 not (logged),
  * -1 not yet (her record unreadable) */
 static int GrantCall(uint32_t type, int uses)
 {
@@ -999,15 +999,15 @@ static int GrantCall(uint32_t type, int uses)
             /* refilled: uses, and the cooldown fields the append zeroes (untested: whether a used-up entry comes back) */
             uint32_t was = Word(e + 4);
             if (hf->write(at + 4, &u, 4) || hf->write(at + 0x10, &zero, 8) || hf->write(at + 0x18, &zero, 8) || hf->write(at + 0x20, &zero, 8))
-            { Log("Sinner call: the refill write failed"); return 0; }
+            { Log("Sinveiler call: the refill write failed"); return 0; }
             uint32_t back = 0;
             ReadAt(at + 4, &back, 4);
-            Log("Sinner call: refilled in her stratagems (slot %u: uses %u -> %u, reads back %u)", i, was, u, back);
+            Log("Sinveiler call: refilled in her stratagems (slot %u: uses %u -> %u, reads back %u)", i, was, u, back);
             return 1;
         }
         if (tmpl < 0 && e[9] == 1 && Quad(e + 0x20) <= now) tmpl = (int)i;
     }
-    if (count >= 16) { Log("Sinner call: her stratagem list is full (16)"); return 0; }
+    if (count >= 16) { Log("Sinveiler call: her stratagem list is full (16)"); return 0; }
     uint8_t e[0x30] = {0};
     if (tmpl >= 0) ReadAt(st + 0x188 + (uint32_t)tmpl * 0x30u, e, sizeof e);
     memcpy(e, &type, 4);
@@ -1017,9 +1017,9 @@ static int GrantCall(uint32_t type, int uses)
     memcpy(e + 0x18, &zero, 8);
     memcpy(e + 0x20, &zero, 8);
     uint32_t next = count + 1;
-    if (hf->write(st + 0x188 + count * 0x30u, e, sizeof e) || hf->write(st + 0x788, &next, 4)) { Log("Sinner call: the write failed"); return 0; }
-    Log("Sinner call: granted outside the loadout (slot %u of %u, template slot %d, uses %s): call it with %s", count, next, tmpl,
-        uses < 0 ? "unlimited" : "1", type == g_frvType ? "RRLLU (the FRV Sinner)" : "RRLLD");
+    if (hf->write(st + 0x188 + count * 0x30u, e, sizeof e) || hf->write(st + 0x788, &next, 4)) { Log("Sinveiler call: the write failed"); return 0; }
+    Log("Sinveiler call: granted outside the loadout (slot %u of %u, template slot %d, uses %s): call it with %s", count, next, tmpl,
+        uses < 0 ? "unlimited" : "1", type == g_frvType ? "RRLLU (the FRV Sinveiler)" : "RRLLD");
     return 1;
 }
 /* 0.2.0: is a stratagem in her own list (the M-103 in her loadout); its entry's cooldown cleared (Spectre with
@@ -1063,7 +1063,7 @@ static void GrantFrame(void)
     if (g_grantAt <= 0) { g_grantAt = g_now + 3; return; }
     if (g_now < g_grantAt) return;
     g_grantAt = g_now + 1;
-    if (++g_grantTries > 20) { g_grantDone = 1; Log("Sinner call: her stratagem record never became readable"); return; }
+    if (++g_grantTries > 20) { g_grantDone = 1; Log("Sinveiler call: her stratagem record never became readable"); return; }
     int r = GrantCall(CallType(), -1);
     if (r >= 0) g_grantDone = 1;
 }
@@ -1072,7 +1072,7 @@ static int g_pkgStates[2];
 static void SinPackageOf(int k, uint32_t type)
 {
     int* state = &g_pkgStates[k];
-    const char* who = k ? "the FRV Sinner" : "Sinner";
+    const char* who = k ? "the FRV Sinveiler" : "Sinveiler";
     if (*state == 2 || !type || !hf->stratagem_row || hf->size < offsetof(HfApi, load_package) + sizeof hf->load_package) return;
     uintptr_t row = hf->stratagem_row(type);
     uint64_t pkg = 0;
@@ -1131,20 +1131,20 @@ static int SinnerSetHealth(int32_t want, const char* why)
 {
     uintptr_t r = HealthRec(g_sinner);
     uint8_t b[416];
-    if (!r || !ReadAt(r, b, sizeof b)) { Log("%s: the Sinner's health record cannot be read", why); return 0; }
+    if (!r || !ReadAt(r, b, sizeof b)) { Log("%s: the Sinveiler's health record cannot be read", why); return 0; }
     int32_t hp = (int32_t)Word(b + 20);
     uint32_t life = Word(b + 412);
-    if (hp <= 0 || life != 0) { Log("%s: the Sinner is down (health %d, life %u): not written", why, hp, life); return 0; }
+    if (hp <= 0 || life != 0) { Log("%s: the Sinveiler is down (health %d, life %u): not written", why, hp, life); return 0; }
     int32_t top = g_sinMax > 0 ? g_sinMax : hp;
     if (want > top) want = top;
     if (want < 1) want = 1;
     if (want == hp) return 1;
-    if (hf->write(r + 20, &want, 4)) { Log("%s: the Sinner's health write failed", why); return 0; }
+    if (hf->write(r + 20, &want, 4)) { Log("%s: the Sinveiler's health write failed", why); return 0; }
     int32_t back = 0;
     ReadAt(r + 20, &back, 4);
     g_healthWrites++;
     static unsigned told;
-    if (told++ < 16 || strcmp(why, "the damage share")) Log("%s: the Sinner's health %d -> %d of %d (reads back %d)", why, hp, want, top, back);
+    if (told++ < 16 || strcmp(why, "the damage share")) Log("%s: the Sinveiler's health %d -> %d of %d (reads back %d)", why, hp, want, top, back);
     g_sinHp = back;
     atomic_store(&g_sinHpNow, back);
     return back == want;
@@ -1196,7 +1196,7 @@ static int Cleanse(uint32_t e)
     return removed;
 }
 
-/* ---- the Sinner's life: adopted at its spawn, landed, lost -------------------------------------------------------- */
+/* ---- the Sinveiler's life: adopted at its spawn, landed, lost -------------------------------------------------------- */
 static uint32_t g_parts[8];               /* its arms' units (spawned with it): its rays see through them */
 static int g_nparts;
 typedef struct { uint32_t entity; double at; } Spawned;
@@ -1206,7 +1206,7 @@ static int g_driving, g_driveTried;
 static void SinnerLost(const char* why)
 {
     if (!g_sinner) return;
-    Log("the Sinner (entity %u) is gone: %s", g_sinner, why);
+    Log("the Sinveiler (entity %u) is gone: %s", g_sinner, why);
     if (g_driving) SinnerDriveStop(g_sinner);
     g_sinner = g_sinUnit = 0;
     g_landed = g_winnerUsed = g_piloting = 0;
@@ -1220,13 +1220,13 @@ static void SinnerLost(const char* why)
     atomic_store(&g_sinHpNow, 0);
     atomic_store(&g_sharePending, 0);
     atomic_store(&g_shareOk, 0);
-    Gear(GEAR_D, "the Sinner is gone");
+    Gear(GEAR_D, "the Sinveiler is gone");
 }
 static int SinPos(float p[3])
 {
     return g_sinUnit && UnitNode(g_sinUnit, 0, p);
 }
-/* a ray that sees through the Sinner, her and its arms (and enemies: no ground or wall), as Voymastina's MechRay; only
+/* a ray that sees through the Sinveiler, her and its arms (and enemies: no ground or wall), as Voymastina's MechRay; only
  * while the scheduler is idle. len + 1 clear, -1 not now */
 static float SinRay(const float from[3], const float dir[3], float len)
 {
@@ -1262,8 +1262,8 @@ static void Adopt(uint32_t e)
     g_winnerNext = 0;
     g_sinMax = 0;
     g_callPending = 0;
-    Gear(GEAR_D, "a new Sinner");
-    Log("the Sinner: entity %u (unit %08x) spawned: waiting for it to land", e, g_sinUnit);
+    Gear(GEAR_D, "a new Sinveiler");
+    Log("the Sinveiler: entity %u (unit %08x) spawned: waiting for it to land", e, g_sinUnit);
 }
 /* landed: at least 5 s after its spawn, still for 1.5 s, on the ground (within 2.5 m under it) */
 static void ArrivalFrame(void)
@@ -1299,7 +1299,7 @@ static void ArrivalFrame(void)
     atomic_store(&g_sinHpNow, hp);
     const char* why;
     int movable = Movable(g_sinner, &why);
-    Log("the Sinner landed (entity %u): health %d of %d (life %u), %d parts, navigation record %s, warp %s%s", g_sinner, hp, g_sinMax, life, g_nparts,
+    Log("the Sinveiler landed (entity %u): health %d of %d (life %u), %d parts, navigation record %s, warp %s%s", g_sinner, hp, g_sinMax, life, g_nparts,
         Walks(g_sinner) ? "yes" : "none", movable ? "allowed" : "refused: ", movable ? "" : why);
 }
 
@@ -1314,7 +1314,7 @@ static void MoveRefused(const char* why)
 {
     g_leash = 3;
     static unsigned told;
-    if (g_moveRefused++ == 0 || told < 3) { told++; Log("the Sinner cannot be moved: %s (it stands and fights where it is)", why); }
+    if (g_moveRefused++ == 0 || told < 3) { told++; Log("the Sinveiler cannot be moved: %s (it stands and fights where it is)", why); }
 }
 /* a point on the ground near p (from 2 m above, down 6): 1 with out */
 static int Ground(const float p[3], float out[3])
@@ -1348,7 +1348,7 @@ static void WarpBeside(const char* why)
     g_slowFor = 0;
     g_pushing = 0;
     static unsigned told;
-    if (told++ < 10) Log("the Sinner is warped beside her (%s)", why);
+    if (told++ < 10) Log("the Sinveiler is warped beside her (%s)", why);
 }
 /* a step toward the point along the ground (the warp setter: a slide, no leg animation), stopping at walls and steps up */
 static int Slide(const float p[3], const float to[3], double dt)
@@ -1371,7 +1371,7 @@ static int Slide(const float p[3], const float to[3], double dt)
     if (!Ground(dest, g) || g[2] - p[2] > 0.5f || p[2] - g[2] > 3.0f) return 0;
     g_setPosition(NULL, g_sinner, g);
     g_moveDir[0] = dir[0]; g_moveDir[1] = dir[1];
-    if (g_slides++ == 0) Log("the Sinner slides (the warp setter; its own locomotion is not driven yet)");
+    if (g_slides++ == 0) Log("the Sinveiler slides (the warp setter; its own locomotion is not driven yet)");
     return 1;
 }
 /* stuck: walking, but its own speed (pushes left out) under 0.5 m/s for stuck_seconds: pushed through the obstacle a
@@ -1387,7 +1387,7 @@ static void StuckFrame(const float p[3], const float to[3])
     g_sampleAt = g_now;
     if (sp >= 0.5f)
     {
-        if (g_pushing) { static unsigned told; if (told++ < 10) Log("the Sinner moves again (%.1f m/s) after %d push steps", (double)sp, g_pushSteps); g_leash = 1; }
+        if (g_pushing) { static unsigned told; if (told++ < 10) Log("the Sinveiler moves again (%.1f m/s) after %d push steps", (double)sp, g_pushSteps); g_leash = 1; }
         g_pushing = 0; g_slowFor = 0;
         return;
     }
@@ -1397,12 +1397,12 @@ static void StuckFrame(const float p[3], const float to[3])
         if (g_slowFor < s_stuckSeconds || s_pushSteps <= 0) return;
         g_pushing = 1; g_pushSteps = 0;
         static unsigned told;
-        if (told++ < 10) Log("the Sinner is stuck (%.1f m/s for %.1f s): pushed through", (double)sp, g_slowFor);
+        if (told++ < 10) Log("the Sinveiler is stuck (%.1f m/s for %.1f s): pushed through", (double)sp, g_slowFor);
     }
     if (g_pushSteps >= s_pushSteps)
     {
         static unsigned told;
-        if (told++ < 6) Log("the Sinner: %d push steps did not free it (the far warp at %.0f m stays)", g_pushSteps, (double)s_leashWarp);
+        if (told++ < 6) Log("the Sinveiler: %d push steps did not free it (the far warp at %.0f m stays)", g_pushSteps, (double)s_leashWarp);
         g_pushing = 0; g_slowFor = 0;
         if (g_leash == 4) g_leash = 1;
         return;
@@ -1417,7 +1417,7 @@ static void StuckFrame(const float p[3], const float to[3])
     if (!Ground(dest, g) || fabsf(g[2] - p[2]) > 2.5f)
     {
         static unsigned told;
-        if (told++ < 6) Log("the Sinner: a push step skipped (no ground within 6 m there, or a drop or climb)");
+        if (told++ < 6) Log("the Sinveiler: a push step skipped (no ground within 6 m there, or a drop or climb)");
         return;
     }
     g_setPosition(NULL, g_sinner, g);
@@ -1625,7 +1625,7 @@ static const GunProfile* Profile(int gear)
         Log("the rocket arm: its projectile %s %.0f, its projectile entity %s %.0f (non-zero: each shot is a missile entity, not the row); "
             "row %u velocity %s %.0f m/s", okB ? "=" : "unread", b2.base.number, okA ? "=" : "unread", a.base.number, g->round, okC ? "=" : "unread", c.base.number);
     }
-    Log("the Sinner's %s: round %u, one every %.3f s, %u pellet(s) a shot", gear == 3 ? "rockets" : kGear[gear], g->round, (double)g->every, g->pellets);
+    Log("the Sinveiler's %s: round %u, one every %.3f s, %u pellet(s) a shot", gear == 3 ? "rockets" : kGear[gear], g->round, (double)g->every, g->pellets);
     return g;
 }
 static float g_faceTo[2];
@@ -1646,7 +1646,7 @@ static void TurnFrame(void)
     if (!mgr || !Lookup(mgr + 0x30, g_sinner, 1048576, &i) || i >= 65536 || !(recs = Pointer(mgr + 0x58)))
     {
         static unsigned told;
-        if (!told++) Log("turning: the Sinner has no turn record (it keeps facing where it landed)");
+        if (!told++) Log("turning: the Sinveiler has no turn record (it keeps facing where it landed)");
         return;
     }
     hf->write(recs + 0x3F0ull * i, dir, 12);
@@ -1673,7 +1673,7 @@ static void RoundSpeed(int r)
     memset(&was, 0, sizeof was);
     if (hf->get_live) hf->get_live(self, (HfRef)g_round[r], &f, &was);
     int ok = hf->set_live(self, (HfRef)g_round[r], &f, &v, 0);
-    Log("the Sinner's %s rounds (projectile %u): %.0f m/s -> %.0f (%s)", kGear[r], g_round[r], was.base.number, (double)s_roundSpeed, ok ? "set" : "refused");
+    Log("the Sinveiler's %s rounds (projectile %u): %.0f m/s -> %.0f (%s)", kGear[r], g_round[r], was.base.number, (double)s_roundSpeed, ok ? "set" : "refused");
 }
 /* 0.1.10: at most max_rounds projectiles a second in all (two game crashes in rendering came in fights with her guns
  * at the real fire rates: thousands of spawned rounds a mission) */
@@ -1701,7 +1701,7 @@ static void RocketRow(void)
 static int g_shootRocket;   /* 0.1.3: this shot is the left arm's rocket */
 static int g_shootRifle;    /* 0.3.2: this shot is Kinetic Release's rifle round (release_round, the vanilla one) */
 static int g_shootHe;       /* 0.3.11: this shot is the HE shell itself (he_round) */
-static double g_heShotAt = -100;   /* 0.3.13: its last HE shell: no blast or impact reaches the Sinner for 2.5 s after */
+static double g_heShotAt = -100;   /* 0.3.13: its last HE shell: no blast or impact reaches the Sinveiler for 2.5 s after */
 static int g_heRoundBad;
 static double g_rocketNext;
 static unsigned g_rocketsFired;
@@ -1741,7 +1741,7 @@ static void AimPoint(uint32_t target, const float from[3], const float at[3], fl
             for (int k = 0; k < 3; k++) v[k] /= n;
             int hit = 0;
             float w = FirstWall(id, from, v, n, UnitOf(atomic_load(&g_avatar)), UnitOf(target), g_sinUnit, &hit);
-            if (hit || w > n - 0.3f) { memcpy(out, c[i], 12); if (i) { static unsigned told; if (told++ < 6) Log("the Sinner aims higher on entity %u (point %d: the middle was behind cover)", target, i); } break; }
+            if (hit || w > n - 0.3f) { memcpy(out, c[i], 12); if (i) { static unsigned told; if (told++ < 6) Log("the Sinveiler aims higher on entity %u (point %d: the middle was behind cover)", target, i); } break; }
         }
     }
     if (s_roundSpeed > 50)
@@ -1810,12 +1810,12 @@ static int SinnerShoot(int arm, uint32_t target, const float at0[3])
     }
     if (res && g_shootHe)
     {
-        unsigned slot = g_ownNext++ % KB_OWN_SLOTS;   /* its burst spares her and the Sinner */
+        unsigned slot = g_ownNext++ % KB_OWN_SLOTS;   /* its burst spares her and the Sinveiler */
         memcpy(g_ownPos[slot], at0, 12);
         atomic_store(&g_ownEmp[slot], 0);
         atomic_store(&g_ownMs[slot], GetTickCount64());
         static unsigned told;
-        if (told++ < 3) Log("an HE shell (projectile %u) fired from the Sinner", round);
+        if (told++ < 3) Log("an HE shell (projectile %u) fired from the Sinveiler", round);
     }
     for (uint32_t k = 1; res && !g_shootRifle && !g_shootHe && s_gunEvery <= 0 && k < Profile(r == 4 ? 3 : r)->pellets && g_projTokens >= 1; k++)
     {
@@ -1836,17 +1836,17 @@ static int SinnerShoot(int arm, uint32_t target, const float at0[3])
     {
         /* (0.1.16: no fallback bullet for the rockets: no rockets, said once) */
         static int told;
-        if (!told++) Log("the Sinner's rocket (projectile %u) cannot be spawned here: no rockets this session (%s)", round, hf->last_log ? hf->last_log(self) : "");
+        if (!told++) Log("the Sinveiler's rocket (projectile %u) cannot be spawned here: no rockets this session (%s)", round, hf->last_log ? hf->last_log(self) : "");
         g_round[4] = 0;
         return 0;
     }
     if (!res && round != (uint32_t)s_roundFallback)
     {
         g_roundBad[r] = 1;
-        Log("the Sinner's %s round (projectile %u) cannot be spawned here: projectile %d (round_fallback) instead", kRoundName[r], round, s_roundFallback);
+        Log("the Sinveiler's %s round (projectile %u) cannot be spawned here: projectile %d (round_fallback) instead", kRoundName[r], round, s_roundFallback);
         return 0;
     }
-    if (!Act("a Sinner shot", res)) return 0;
+    if (!Act("a Sinveiler shot", res)) return 0;
     {
         /* 0.1.9: where its shots start (they looked spawned far out from it): the first 12 */
         static unsigned told;
@@ -1894,7 +1894,7 @@ static void FireFrame(void)
             {
                 DeadAdd(t, 15);
                 static unsigned told;
-                if (told++ < 8) Log("entity %u: its health stayed %d through %.0f s of the Sinner's fire (life state %u): left as dead for 15 s", t, hp, (double)s_deadAfter, life);
+                if (told++ < 8) Log("entity %u: its health stayed %d through %.0f s of the Sinveiler's fire (life state %u): left as dead for 15 s", t, hp, (double)s_deadAfter, life);
                 trk = 0;
                 g_fireNext = g_now + 0.1;
                 return;
@@ -1907,7 +1907,7 @@ static void FireFrame(void)
     if (g_gear == GEAR_PLUS && g_round[4] && g_now >= g_rocketNext)
     {
         g_shootRocket = 1;
-        if (SinnerShoot(0, t, at)) { g_rocketNext = g_now + (s_gunEvery > 0 ? s_gunEvery * 2 : Profile(3)->every); g_rocketAt = g_now; SinPos(g_rocketFrom); if (g_rocketsFired++ < 3) Log("the Sinner fires a rocket (projectile %u) at entity %u", g_round[4], t); }
+        if (SinnerShoot(0, t, at)) { g_rocketNext = g_now + (s_gunEvery > 0 ? s_gunEvery * 2 : Profile(3)->every); g_rocketAt = g_now; SinPos(g_rocketFrom); if (g_rocketsFired++ < 3) Log("the Sinveiler fires a rocket (projectile %u) at entity %u", g_round[4], t); }
         g_shootRocket = 0;
     }
     g_arm = 1;
@@ -1915,8 +1915,8 @@ static void FireFrame(void)
     g_fightAt = g_now;
     g_volleys++;
     static unsigned told;
-    if (told++ < 10) Log("the Sinner fires (%s) at entity %u", kGear[g_gear], t);
-    SinnerAction("a Sinner volley");
+    if (told++ < 10) Log("the Sinveiler fires (%s) at entity %u", kGear[g_gear], t);
+    SinnerAction("a Sinveiler volley");
 }
 
 /* ---- the pull: the pull (Voymastina's Pile Bunker drag, its guards) ---------------------------------------- */
@@ -1958,7 +1958,7 @@ static void PullFrame(void)
                 atomic_store(&g_ownMs[slot], GetTickCount64());
                 Act("the pull's blast", hf->spawn_explosion(self, (uint32_t)s_pullExplosion, p));
             }
-            Log("the pull: %d enemies dragged to the Sinner", n);
+            Log("the pull: %d enemies dragged to the Sinveiler", n);
             SinnerAction("the pull");
         }
     }
@@ -1986,7 +1986,7 @@ static void PullFrame(void)
     }
 }
 
-/* ---- the frame's Sinner bookkeeping: still there, piloted, its health, the share ----------------------------------- */
+/* ---- the frame's Sinveiler bookkeeping: still there, piloted, its health, the share ----------------------------------- */
 static void SinnerFrame(void)
 {
     SinPackage();
@@ -2009,23 +2009,23 @@ static void SinnerFrame(void)
         nextSeat = g_now + 0.25;
         int was = g_piloting;
         g_piloting = SeatVehicle() == g_sinner;
-        if (was != g_piloting) Log(g_frv ? (g_piloting ? "she rides the FRV Sinner" : "she left the FRV Sinner") :
-                                   g_piloting ? "she pilots the Sinner: it stops driving itself" : "she left the Sinner: it drives itself again");
+        if (was != g_piloting) Log(g_frv ? (g_piloting ? "she rides the FRV Sinveiler" : "she left the FRV Sinveiler") :
+                                   g_piloting ? "she pilots the Sinveiler: it stops driving itself" : "she left the Sinveiler: it drives itself again");
     }
     float me[3];
     atomic_store(&g_shareOk, g_landed && !g_piloting && g_sinPosOk && PlayerPose(me, NULL) && Flat(me, g_sinPos) <= s_shareRange);
     int pending = atomic_exchange(&g_sharePending, 0);
     if (pending > 0) SinnerSetHealth(g_sinHp - pending, "the damage share");
-    /* the game's locomotion, tried once a Sinner has landed */
+    /* the game's locomotion, tried once a Sinveiler has landed */
     if (g_landed && !g_driveTried && !g_piloting && !g_frv)
     {
         g_driveTried = 1;
         g_driving = SinnerDriveStart(g_sinner);
-        if (!g_driving) Log("the Sinner: no game locomotion (sinner_drive.h: %s): the slide instead", s_drive ? "its layout is not known yet" : "drive 0");
+        if (!g_driving) Log("the Sinveiler: no game locomotion (sinner_drive.h: %s): the slide instead", s_drive ? "its layout is not known yet" : "drive 0");
     }
 }
 
-/* ==== 0.2.0: the FRV Sinner ========================================================================================== */
+/* ==== 0.2.0: the FRV Sinveiler ========================================================================================== */
 /* ---- Let's Go For a Spin!: she is put straight into its seat (the game's own spawn-already-seated sequence, game.dll
  * 0x639830's; Seat Probe 0.1.1 / 0.1.2: it seats her at once, from where she stands, and she gets out as usual). The
  * seater manager [game+0x3326D78] (hash +0x20, 64-byte entries +0x48: +0 the vehicle, +0x10 the seat), the seat
@@ -2139,7 +2139,7 @@ static void TurretSeen(KbHitCall* c)
     if (w[0] == t && !g_turretNet) { atomic_store(&g_turretSeenTarget, w[1]); atomic_store(&g_turretSeenMs, GetTickCount64()); }
     if (w[0] == car && !g_frvNet) { atomic_store(&g_frvSeenTarget, w[1]); atomic_store(&g_frvSeenMs, GetTickCount64()); }
 }
-/* 0.2.4: her own blasts (Kinetic Release) do nothing to the FRV Sinner: their hit result on it is emptied, as the kit
+/* 0.2.4: her own blasts (Kinetic Release) do nothing to the FRV Sinveiler: their hit result on it is emptied, as the kit
  * base empties it on her */
 static unsigned g_carSpared;
 static atomic_uint g_carSteadied;
@@ -2161,7 +2161,7 @@ static void CarSpared(KbHitCall* c)
         if (st != 0 || pu != 0 || r[0x1E] || r[0x1F])
         {
             static atomic_uint told;
-            if (atomic_fetch_add(&told, 1) < 6) Log("a hit on the Sinner: stagger %.1f, push %.1f, knockdown %u, reaction %u: removed", (double)st, (double)pu, r[0x1E], r[0x1F]);
+            if (atomic_fetch_add(&told, 1) < 6) Log("a hit on the Sinveiler: stagger %.1f, push %.1f, knockdown %u, reaction %u: removed", (double)st, (double)pu, r[0x1E], r[0x1F]);
             atomic_fetch_add(&g_carSteadied, 1);
         }
         memset(r + 0x0C, 0, 8);
@@ -2171,7 +2171,7 @@ static void CarSpared(KbHitCall* c)
     memset(c->out, 0, RESULT_SIZE);
     g_carSpared++;
 }
-/* 0.2.5: no EMS stun on her or the FRV Sinner (the status add, game.dll+0x699E40, as Alva's guard: statuses 37-39) */
+/* 0.2.5: no EMS stun on her or the FRV Sinveiler (the status add, game.dll+0x699E40, as Alva's guard: statuses 37-39) */
 typedef void (*AddStatusFn)(void* m, uint32_t e, uint32_t st, uint32_t r9, float buildup, uint32_t from, uint64_t z);
 static AddStatusFn original_add;
 static unsigned g_emsRefused;
@@ -2180,7 +2180,7 @@ static void AddStatus(void* m, uint32_t e, uint32_t st, uint32_t r9, float build
     if (s_emsImmune && g_inMission && kb_kit_on && (st == 37 || st == 38 || st == 39) && e &&
         (e == atomic_load(&g_avatar) || e == g_sinner))
     {
-        if (g_emsRefused++ < 6) Log("EMS immunity: status %u refused on %s", st, e == g_sinner ? "the FRV Sinner" : "her");
+        if (g_emsRefused++ < 6) Log("EMS immunity: status %u refused on %s", st, e == g_sinner ? "the FRV Sinveiler" : "her");
         return;
     }
     original_add(m, e, st, r9, buildup, from, z);
@@ -2190,7 +2190,7 @@ static void StatusInstall(void)
     if (!hf->code_matches(game + 0x699E40, "40 55 53 57 41 55 41 57 48 8d 6c 24 d0 48 81 ec 30 01 00 00"))
     { Log("EMS immunity off: game.dll+0x699E40 is not the reviewed code"); return; }
     if (hf->hook(self, game + 0x699E40, (void*)AddStatus, (void**)&original_add)) { Log("EMS immunity off: the hook could not be placed"); return; }
-    Log("EMS immunity ready (her and the FRV Sinner: statuses 37-39)");
+    Log("EMS immunity ready (her and the FRV Sinveiler: statuses 37-39)");
 }
 /* ---- its turret's fight, Kinetic Release, its repair, whether it is parked ----------------------------------------- */
 static double g_frvLookNext;
@@ -2253,7 +2253,7 @@ static void WaveFrame(void)
     {
         float a = 6.2832f * (float)i / (float)n + 0.5f * (float)g_wave.ring, q[3] = {g_wave.c[0] + cosf(a) * r, g_wave.c[1] + sinf(a) * r, g_wave.c[2]}, g[3];
         if (!Ground(q, g)) memcpy(g, q, 12);
-        unsigned slot = g_ownNext++ % KB_OWN_SLOTS;   /* her own blast: it spares her and the Sinner */
+        unsigned slot = g_ownNext++ % KB_OWN_SLOTS;   /* her own blast: it spares her and the Sinveiler */
         memcpy(g_ownPos[slot], g, 12);
         atomic_store(&g_ownEmp[slot], 0);
         atomic_store(&g_ownMs[slot], GetTickCount64());
@@ -2274,7 +2274,7 @@ static void WaveFrame(void)
 }
 /* 0.3.6: HE rounds: a blast where each lands (its flight time after the shot) */
 #define HE_Q 32
-/* (0.3.10: the blast goes off where the round hit, just outside what it hit, on the Sinner's side: set off at the enemy's
+/* (0.3.10: the blast goes off where the round hit, just outside what it hit, on the Sinveiler's side: set off at the enemy's
  * middle it burst inside it, downward, digging under it without hurting it. A round that hits nothing: short of its aim) */
 static struct { float at[3], from[3], hit[3]; double when; atomic_int struck; } g_he[HE_Q];
 static unsigned g_heBlasts, g_heDropped, g_heOnHit;
@@ -2294,7 +2294,7 @@ static void HeQueue(const float from[3], const float at[3])
         }
     g_heDropped++;
 }
-/* the damage event: one of the Sinner's rounds hit here */
+/* the damage event: one of the Sinveiler's rounds hit here */
 static void HeHit(const float pos[3])
 {
     for (int i = 0; i < HE_Q; i++)
@@ -2315,7 +2315,7 @@ static void HeFrame(double step)
         if (g_he[i].when <= 0 || (!struck && g_now < g_he[i].when)) continue;
         g_he[i].when = 0;
         if (g_heTokens < 1) { g_heDropped++; continue; }
-        /* back toward the Sinner from where it hit (0.5 m) or from its aim (1.2 m), and a little up */
+        /* back toward the Sinveiler from where it hit (0.5 m) or from its aim (1.2 m), and a little up */
         float q[3], dir[3], back = struck ? 0.5f : 1.2f;
         memcpy(q, struck ? g_he[i].hit : g_he[i].at, 12);
         for (int k = 0; k < 3; k++) dir[k] = g_he[i].from[k] - q[k];
@@ -2323,7 +2323,7 @@ static void HeFrame(double step)
         if (n > back + 0.5f) for (int k = 0; k < 3; k++) q[k] += dir[k] / n * back;
         q[2] += 0.3f;
         if (struck) g_heOnHit++;
-        unsigned slot = g_ownNext++ % KB_OWN_SLOTS;   /* spares her and the Sinner */
+        unsigned slot = g_ownNext++ % KB_OWN_SLOTS;   /* spares her and the Sinveiler */
         memcpy(g_ownPos[slot], q, 12);
         atomic_store(&g_ownEmp[slot], 0);
         atomic_store(&g_ownMs[slot], GetTickCount64());
@@ -2335,7 +2335,7 @@ static void HeFrame(double step)
         else { static int told; if (!told++) Log("HE round: blast row %d refused (%s)", s_heRow, hf->last_log ? hf->last_log(self) : ""); }
     }
 }
-/* shots queued from the Sinner (Kinetic Release's rifle rounds), under max_rounds */
+/* shots queued from the Sinveiler (Kinetic Release's rifle rounds), under max_rounds */
 #define DRIFT_Q 64
 static struct { uint32_t t; int rifle; float at[3]; } g_dq[DRIFT_Q];
 static int g_dqn, g_dqi;
@@ -2487,7 +2487,7 @@ static void GearFrame(void)
         g_frvParked = g_parked;
         memcpy(g_parkFrom, g_sinPos, 12);
         g_parkAt = g_now;
-        if (was != g_parked) { static unsigned told; if (told++ < 6) Log("the Sinner %s", g_parked ? "stands still (P: it takes less damage)" : "moves again"); }
+        if (was != g_parked) { static unsigned told; if (told++ < 6) Log("the Sinveiler %s", g_parked ? "stands still (P: it takes less damage)" : "moves again"); }
     }
     /* Gear Shift: a hit on it heals it, at most every sinner_heal_every s */
     if (atomic_exchange(&g_repairPending, 0) && g_now >= g_healNext && s_sinHeal > 0 && g_sinMax > 0 && g_sinHp < g_sinMax)
@@ -2509,7 +2509,7 @@ static void Drift(void)
 {
     static unsigned told;
     if (!s_driftOn) return;
-    if (!g_sinner || !g_landed || !g_sinPosOk) { if (told++ < 8) Log("Let's Go for a Drift!: no Sinner standing"); return; }
+    if (!g_sinner || !g_landed || !g_sinPosOk) { if (told++ < 8) Log("Let's Go for a Drift!: no Sinveiler standing"); return; }
     if (g_gear == GEAR_N) { if (told++ < 8) Log("Let's Go for a Drift!: not in N"); return; }
     if (g_now < g_driftNext) { if (told++ < 8) Log("Let's Go for a Drift!: %.0f s left on drift_cooldown", g_driftNext - g_now); return; }
     if (DriftStart()) g_driftNext = g_now + s_driftEvery;
@@ -2534,7 +2534,7 @@ static void DriftFrame(void)
     }
 }
 
-/* ---- 0.2.3: Grip: the FRV Sinner kept on the ground. Its physics body (Khi's and RSNLRiggs' way in Apache - Rise Above:
+/* ---- 0.2.3: Grip: the FRV Sinveiler kept on the ground. Its physics body (Khi's and RSNLRiggs' way in Apache - Rise Above:
  * the unit's one physical actor among its components, id bit 29) is read each frame; four rays from its corners find
  * the ground; with fewer than 2 corners near their resting height, its upward speed is cut and it is pushed down (the
  * engine physics table's impulse, slot 0xC0, as Apache pushes its FRV-based body) -------------------------------- */
@@ -2574,7 +2574,7 @@ static void PhysicsPins(void)
         {(void**)&px.rotation, 0x799a90, 0x58, "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 20 57 48 83 ec 40 48 8b ea 8b f1 e8 0a 28 b2 00 33 d2"},
         {(void**)&px.components, 0x7e1c20, -1, "48 89 5c 24 20 55 48 83 ec 20 8b c1 4d 8b d0 25 ff ff 3f 00 8b ea 4c 8d 0c 40 48 8b 05 ff 3e fe"}};
     /* 0.3.9: the table is filled after the game loads (it read as not there at the loaded event, so Grip never ran):
-     * asked again when the FRV Sinner lands; any table whose slots are the researched code is the table */
+     * asked again when the FRV Sinveiler lands; any table whose slots are the researched code is the table */
     uintptr_t table = Pointer(game + 0x3326338);
     static int tries;
     if (!table) { if (tries++ < 3) Log("the engine physics table is not set yet ([game+0x3326338] = 0): asked again later"); return; }
@@ -2592,7 +2592,7 @@ static void PhysicsPins(void)
     if (sv > exe && sv < exe + exeSize && tp > exe && tp < exe + exeSize && tr > exe && tr < exe + exeSize)
     { px.set_velocities = (ActorPushFn)sv; px.teleport_position = (ActorVecFn)tp; px.teleport_rotation = (ActorVecFn)tr; }
     g_pxOk = 1;
-    Log("the engine physics ready (the FRV Sinner's body read%s)", px.set_velocities ? ", steadied and set upright" : "; its setters are not there: no Steady");
+    Log("the engine physics ready (the FRV Sinveiler's body read%s)", px.set_velocities ? ", steadied and set upright" : "; its setters are not there: no Steady");
 }
 static uint32_t g_gripActor, g_gripUnit;
 static float g_gripRest[4];
@@ -2638,7 +2638,7 @@ static void GripFrame(double dt)
         g_gripUnit = g_sinUnit;
         g_gripActor = GripActor(g_sinUnit);
         g_gripRestN = 0;
-        Log("Grip: the FRV Sinner's physics body %08x", g_gripActor);
+        Log("Grip: the FRV Sinveiler's physics body %08x", g_gripActor);
         if (!g_gripActor) return;
     }
     float pos[4] = {0}, q[4] = {0}, v[4] = {0}, w[4] = {0};
@@ -2685,7 +2685,7 @@ static void GripFrame(double dt)
     }
 }
 
-/* ---- 0.3.9: Steady: the FRV Sinner's body after a hit: its roll and pitch spin and its launch held down; set upright
+/* ---- 0.3.9: Steady: the FRV Sinveiler's body after a hit: its roll and pitch spin and its launch held down; set upright
  * when it lies over. (0.3.8 found the bots' cannon hits carry no stagger or push in their hit result: the shove is the
  * blast's own on its physics body.) ---------------------------------------------------------------------------------- */
 static unsigned g_carHeld, g_carRighted;
@@ -2702,7 +2702,7 @@ static void SteadyFrame(void)
         g_gripUnit = g_sinUnit;
         g_gripActor = GripActor(g_sinUnit);
         g_gripRestN = 0;
-        Log("Steady: the FRV Sinner's physics body %08x", g_gripActor);
+        Log("Steady: the FRV Sinveiler's physics body %08x", g_gripActor);
         if (!g_gripActor) return;
     }
     float pos[4] = {0}, q[4] = {0}, v[4] = {0}, w[4] = {0};
@@ -2740,7 +2740,7 @@ static void SteadyFrame(void)
     px.teleport_rotation(g_gripActor, nq);
     px.set_velocities(g_gripActor, zero, zero);
     g_carRighted++;
-    Log("Steady: the FRV Sinner lay over (its up axis %.2f): set upright where it is", (double)upz);
+    Log("Steady: the FRV Sinveiler lay over (its up axis %.2f): set upright where it is", (double)upz);
 }
 
 /* ---- the skills ---------------------------------------------------------------------------------------------------- */
@@ -2772,7 +2772,7 @@ static void FullSpeedDrive(void)
 }
 static void SnowWolfsEye(void)
 {
-    /* 0.2.2: while she drives the FRV Sinner, its key is Let's Go Full Speed! */
+    /* 0.2.2: while she drives the FRV Sinveiler, its key is Let's Go Full Speed! */
     if (g_frv && g_sinner && g_piloting && SeatIsDriver()) { FullSpeedDrive(); return; }
     if (g_now < g_cd[0]) return;
     float at[3];
@@ -2819,7 +2819,7 @@ static void TacticalRoutebook(void)
     g_krUntil = g_now + s_krSeconds;
     Upshift(2, "Tactical Routebook");
     int healed = s_krHeal > 0 && hf->size >= offsetof(HfApi, heal) + sizeof hf->heal && hf->heal ? Act("Kinetic Recovery's heal", hf->heal(self, s_krHeal)) : 0;
-    Log("Tactical Routebook: Kinetic Recovery for %.0f s (her damage and the Sinner's x%.2f%s)", (double)s_krSeconds, (double)s_krMult,
+    Log("Tactical Routebook: Kinetic Recovery for %.0f s (her damage and the Sinveiler's x%.2f%s)", (double)s_krSeconds, (double)s_krMult,
         s_krHeal > 0 ? (healed ? ", healed" : ", the heal refused") : "");
     if (g_sinner && g_landed)
     {
@@ -2830,7 +2830,7 @@ static void TacticalRoutebook(void)
 }
 static void TheWinner(void)
 {
-    if (!g_landed) { static unsigned told; if (told++ < 5) Log("The Winner: the Sinner has not landed yet"); return; }
+    if (!g_landed) { static unsigned told; if (told++ < 5) Log("The Winner: the Sinveiler has not landed yet"); return; }
     if (g_now < g_winnerNext) { static unsigned told; if (told++ < 5) Log("The Winner: %.0f s left on winner_cooldown", g_winnerNext - g_now); return; }
     g_winnerNext = g_now + s_winnerCd;
     g_winners++;
@@ -2838,7 +2838,7 @@ static void TheWinner(void)
     int max = g_sinMax > 0 ? g_sinMax : SinnerMaxRead();
     int ok = max > 0 && SinnerSetHealth(max, "The Winner");
     int cleansed = Cleanse(g_sinner);
-    Log("The Winner: the Sinner restored (%s), %s", ok ? "full health" : "its health could not be written",
+    Log("The Winner: the Sinveiler restored (%s), %s", ok ? "full health" : "its health could not be written",
         cleansed < 0 ? "no cleanse (not available)" : "its debuffs cleansed");
     Gear(GEAR_N, "The Winner");   /* (only from D) */
 }
@@ -2855,19 +2855,19 @@ static void Spectre(void)
         if (r <= 0) { if (r < 0) Log("Spectre: her stratagem record cannot be read yet"); return; }
         g_cd[2] = g_now + s_s3Cd;
         g_casts[2]++;
-        Log("Spectre: her M-103 Supply FRV is ready to call (its cooldown cleared); the one she calls becomes the Sinner");
+        Log("Spectre: her M-103 Supply FRV is ready to call (its cooldown cleared); the one she calls becomes the Sinveiler");
         return;
     }
     if (s_frvOn && g_frvType && !FrvReady())
-    { static unsigned told; if (told++ < 5) Log("Spectre: the FRV Sinner's package is not loaded (%s): the Patriot comes instead", atomic_load(&g_frvPkg) < 0 ? "HD2Runtime refused it" : "her HUD is loading it, or is not running"); }
-    if (!s_sinOn || !CallType()) { static unsigned told; if (told++ < 3) Log("Spectre: there is no Sinner in this session (sinner 0, or it could not be added)"); return; }
-    if (!s_callMode) { static unsigned told; if (told++ < 5) Log("Spectre: call the Sinner with its stratagem (%s; call_mode 0 grants it at the drop)", CallType() == g_frvType ? "RRLLU" : "RRLLD"); return; }
+    { static unsigned told; if (told++ < 5) Log("Spectre: the FRV Sinveiler's package is not loaded (%s): the Patriot comes instead", atomic_load(&g_frvPkg) < 0 ? "HD2Runtime refused it" : "her HUD is loading it, or is not running"); }
+    if (!s_sinOn || !CallType()) { static unsigned told; if (told++ < 3) Log("Spectre: there is no Sinveiler in this session (sinner 0, or it could not be added)"); return; }
+    if (!s_callMode) { static unsigned told; if (told++ < 5) Log("Spectre: call the Sinveiler with its stratagem (%s; call_mode 0 grants it at the drop)", CallType() == g_frvType ? "RRLLU" : "RRLLD"); return; }
     int r = GrantCall(CallType(), 1);
     if (r <= 0) { if (r < 0) Log("Spectre: her stratagem record cannot be read yet"); return; }
     g_cd[2] = g_now + s_s3Cd;
     g_callPending = 1;
     g_casts[2]++;
-    Log("Spectre: one %s call in her stratagems (%s)", CallType() == g_frvType ? "FRV Sinner" : "Sinner", CallType() == g_frvType ? "RRLLU" : "RRLLD");
+    Log("Spectre: one %s call in her stratagems (%s)", CallType() == g_frvType ? "FRV Sinveiler" : "Sinveiler", CallType() == g_frvType ? "RRLLU" : "RRLLD");
 }
 
 /* ---- the damage event ----------------------------------------------------------------------------------------- */
@@ -2897,10 +2897,10 @@ static void DamageTaken(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     g_shareHits++;
     g_shared += share;
     static atomic_uint told;
-    if (atomic_fetch_add(&told, 1) < 12) Log("the Sinner takes %d of a %d hit on her (kind %u): %d reaches her", share, before, d->kind, d->amount);
+    if (atomic_fetch_add(&told, 1) < 12) Log("the Sinveiler takes %d of a %d hit on her (kind %u): %d reaches her", share, before, d->kind, d->amount);
 }
 static unsigned g_spared;
-/* 0.3.0: the buffs on her damage and the Sinner's: Upshift, Kinetic Recovery, Turbo Boost, Post-Move Support */
+/* 0.3.0: the buffs on her damage and the Sinveiler's: Upshift, Kinetic Recovery, Turbo Boost, Post-Move Support */
 static double Buffs(void)
 {
     double m = 1 + g_up * (double)s_upDamage;
@@ -2915,7 +2915,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     uint32_t fsin = g_sinner;
     if (fsin && d->target == fsin && d->amount > 0 && !MineHit(d))
     {
-        /* 0.3.0 Gear Shift, either Sinner: none in N; sinner_taken of it, times park_taken standing still; never fatal;
+        /* 0.3.0 Gear Shift, either Sinveiler: none in N; sinner_taken of it, times park_taken standing still; never fatal;
          * a hit heals it (GearFrame) */
         if (Sprinting() || g_gear == GEAR_N) { e->cancel = 1; if (g_gear == GEAR_N) g_gearSaved++; else g_sprintSaved++; return; }
         /* 0.3.13: its own HE shells (their blast is not always counted as hers) */
@@ -2923,7 +2923,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
         {
             e->cancel = 1;
             static atomic_uint told;
-            if (atomic_fetch_add(&told, 1) < 6) Log("a hit on the Sinner right after its own HE shell (kind %u, %d damage) stopped", d->kind, d->amount);
+            if (atomic_fetch_add(&told, 1) < 6) Log("a hit on the Sinveiler right after its own HE shell (kind %u, %d damage) stopped", d->kind, d->amount);
             return;
         }
         double m = s_sinTaken * (g_parked ? s_parkTaken : 1.0);
@@ -2984,7 +2984,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     }
     if (d->amount <= 0 || !MineHit(d)) return;
     uint32_t sin = g_sinner;
-    /* her hits (and the Sinner's rounds, which are hers) spare the Sinner, and its rounds spare her allies */
+    /* her hits (and the Sinveiler's rounds, which are hers) spare the Sinveiler, and its rounds spare her allies */
     if (d->kind == 4 && g_now < g_relUntil && Friend(d->target))
     {
         e->cancel = 1;
@@ -2995,7 +2995,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     if (sin && (d->target == sin || (SinnerShotNear(d->position) && Friend(d->target))))
     {
         e->cancel = 1;
-        if (g_spared++ < 8) Log("a hit of hers on %s cancelled (entity %u, %d damage)", d->target == sin ? "the Sinner" : "an ally", d->target, d->amount);
+        if (g_spared++ < 8) Log("a hit of hers on %s cancelled (entity %u, %d damage)", d->target == sin ? "the Sinveiler" : "an ally", d->target, d->amount);
         return;
     }
     double mult = Buffs();
@@ -3025,7 +3025,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
             if (best < g_gapMin) g_gapMin = best;
             g_gapBins[best < 5 ? 0 : best < 10 ? 1 : best < 20 ? 2 : best < 40 ? 3 : 4]++;
             static unsigned told;
-            if (told++ < 10) Log("a Sinner round hit %.1f m from where it started, %.3f s after (%.0f m/s)", best, age, age > 0 ? best / age : 0.0);
+            if (told++ < 10) Log("a Sinveiler round hit %.1f m from where it started, %.3f s after (%.0f m/s)", best, age, age > 0 ? best / age : 0.0);
         }
     }
 }
@@ -3059,7 +3059,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     }
     if (s->resource == FRV_RES)
     {
-        /* 0.2.0: her M-103, with it in her loadout and no Sinner standing: the FRV Sinner */
+        /* 0.2.0: her M-103, with it in her loadout and no Sinveiler standing: the FRV Sinveiler */
         if (!g_inMission || !kb_kit_on || !s->authority || !s_frvOn || !s_sinOn || g_sinner) return;
         if (!g_callPending && HasStratagem(FRV_STRATAGEM) <= 0 && HasStratagem(g_frvType) <= 0) return;
         Adopt(s->entity);
@@ -3068,7 +3068,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
         g_turretEnt = g_now - g_turretCandAt < 2 ? g_turretCand : 0;
         g_turretNet = g_turretEnt && NetOk(g_turretCandNet) ? g_turretCandNet : 0;
         if (!NetOk(g_frvNet)) g_frvNet = 0;
-        Log("the FRV Sinner: her M-103 (entity %u), its turret entity %u (its network id learned from its first hits)", s->entity, g_turretEnt);
+        Log("the FRV Sinveiler: her M-103 (entity %u), its turret entity %u (its network id learned from its first hits)", s->entity, g_turretEnt);
         return;
     }
     if (s->resource != AVATAR) { if (FoeKind(s->resource)) AddFoe(s->entity, s->resource); return; }
@@ -3086,7 +3086,7 @@ static void OnKill(HfMod* mod, const HfEventInfo* info, void* user)
     DropFoe(k->victim);
     if (k->victim == g_lastTarget) g_lastTarget = 0;
     if (k->victim == g_plusTarget) g_plusTarget = 0;
-    /* (the Sinner's death is seen on the game thread: SinnerFrame) */
+    /* (the Sinveiler's death is seen on the game thread: SinnerFrame) */
 }
 static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
 {
@@ -3105,7 +3105,7 @@ static void Reset(const char* why)
     int start = !strcmp(why, "mission start");
     if (start) KitDecide();
     if (g_casts[0] || g_casts[1] || g_casts[2] || g_volleys)
-        Log("%s: casts %u / %u / %u, %u Eye rounds, %u Sinner volleys, %u The Winner, Upshift gained %u, %u hits shared (%.0f damage), "
+        Log("%s: casts %u / %u / %u, %u Eye rounds, %u Sinveiler volleys, %u The Winner, Upshift gained %u, %u hits shared (%.0f damage), "
             "%u health writes, %u slides, %u warps, %u push steps, %u pulls, %u hits of hers cancelled, %u path sends",
             why, g_casts[0], g_casts[1], g_casts[2], g_eyeRounds, g_volleys, g_winners, g_upGained, g_shareHits, g_shared, g_healthWrites,
             g_slides, g_warps, g_pushes, g_pulls, g_spared, g_navSends);
@@ -3119,9 +3119,9 @@ static void Reset(const char* why)
     if (start && s_hellbomb && s_hellbombRow == 125 && !hf->load_package(self, UINT64_C(0x346D785D6CA13FF4))) Log("the Hellbomb's package could not be loaded ahead");
     g_boomPending = 0;
     g_boomArmed = 0;
-    if (g_sinner) Log("the Sinner (entity %u) is gone with the mission", g_sinner);
+    if (g_sinner) Log("the Sinveiler (entity %u) is gone with the mission", g_sinner);
     if (g_turretHits || g_rides || g_releases || g_noDeath)
-        Log("%s: the FRV Sinner: %u turret hits, %u rides, %u Kinetic Releases, %u fatal hits survived", why, g_turretHits, g_rides, g_releases, g_noDeath);
+        Log("%s: the FRV Sinveiler: %u turret hits, %u rides, %u Kinetic Releases, %u fatal hits survived", why, g_turretHits, g_rides, g_releases, g_noDeath);
     if (g_rideSaved) Log("%s: %u hits on her stopped in the Sinveiler", why, g_rideSaved);
     g_rideSaved = 0;
     if (g_tracers) Log("%s: %u Full Speed tracers", why, g_tracers);
@@ -3130,15 +3130,15 @@ static void Reset(const char* why)
     g_heBlasts = g_heDropped = g_heOnHit = 0;
     for (int i = 0; i < HE_Q; i++) g_he[i].when = 0;
     if (g_drifts || g_fulls || g_gearSaved || g_heals)
-        Log("%s: %u Drifts, %u Full Speeds, %u of their shots, %u hits on the Sinner stopped in N, %u Gear Shift heals", why, g_drifts, g_fulls, g_driftShots, g_gearSaved, g_heals);
+        Log("%s: %u Drifts, %u Full Speeds, %u of their shots, %u hits on the Sinveiler stopped in N, %u Gear Shift heals", why, g_drifts, g_fulls, g_driftShots, g_gearSaved, g_heals);
     g_drifts = g_fulls = g_driftShots = g_gearSaved = g_heals = 0;
     if (g_sprints) Log("%s: %u sprints, %u rams, %u hits stopped in sprints", why, g_sprints, g_rams, g_sprintSaved);
-    if (g_carSpared) Log("%s: her own blasts on the FRV Sinner emptied %u times", why, g_carSpared);
+    if (g_carSpared) Log("%s: her own blasts on the FRV Sinveiler emptied %u times", why, g_carSpared);
     g_carSpared = 0;
-    if (g_carHeld || g_carRighted) Log("%s: Steady held %u shoves on the FRV Sinner, set it upright %u times", why, g_carHeld, g_carRighted);
+    if (g_carHeld || g_carRighted) Log("%s: Steady held %u shoves on the FRV Sinveiler, set it upright %u times", why, g_carHeld, g_carRighted);
     g_carHeld = g_carRighted = 0;
-    { unsigned n = atomic_exchange(&g_carSteadied, 0); if (n) Log("%s: stagger or push removed from %u hits on the Sinner", why, n); }
-    if (g_gripCatches) Log("%s: Grip pushed the FRV Sinner down in %u frames", why, g_gripCatches);
+    { unsigned n = atomic_exchange(&g_carSteadied, 0); if (n) Log("%s: stagger or push removed from %u hits on the Sinveiler", why, n); }
+    if (g_gripCatches) Log("%s: Grip pushed the FRV Sinveiler down in %u frames", why, g_gripCatches);
     g_gripCatches = 0; g_gripActor = g_gripUnit = 0; g_gripRestN = 0;
     g_turretHits = g_rides = g_releases = g_noDeath = 0;
     g_sprints = g_rams = g_sprintSaved = 0;
@@ -3205,24 +3205,24 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         g_raycast = (RayFn)(exe + 0x7F4590);
         Log("line of sight ready (the game's raycast)");
     }
-    else Log("line of sight off: the raycast is not the reviewed code (aims go through walls; the Sinner neither slides nor warps)");
+    else Log("line of sight off: the raycast is not the reviewed code (aims go through walls; the Sinveiler neither slides nor warps)");
     if (g_raycast && hf->code_matches(game + 0x5A2BB0, "48 89 5c 24 08 48 89 6c 24 10 56 57 41 54 41 56 41 57 48 83 ec 40") &&
         hf->code_matches(game + 0x4A7550, "48 89 5c 24 18 57 48 83 ec 20 3b 15 ?? ?? ?? ?? 48 8b 1d"))
     {
         g_setPosition = (SetVecFn)(game + 0x5A2BB0);
         g_setVelocity = (SetVecFn)(game + 0x4A7550);
-        Log("the warp setter ready (the Sinner's slide and leash; warp_needs_walks %d)", s_warpWalks);
+        Log("the warp setter ready (the Sinveiler's slide and leash; warp_needs_walks %d)", s_warpWalks);
     }
-    else Log("the warp setter off: its functions are not the reviewed code (the Sinner stands where it lands)");
+    else Log("the warp setter off: its functions are not the reviewed code (the Sinveiler stands where it lands)");
     StatusPrepare();
     if (Boundary(game + 0x5B36C0)) g_setDest = (SetDestFn)(game + 0x5B36C0);
-    Log("Sinner pathing: set_destination (game.dll+0x5B36C0) %s; navigation records [game+0x3326418] = %p", g_setDest ? "on" : "off (not a function start)",
+    Log("Sinveiler pathing: set_destination (game.dll+0x5B36C0) %s; navigation records [game+0x3326418] = %p", g_setDest ? "on" : "off (not a function start)",
         (void*)Pointer(game + 0x3326418));
-    Log("Sinner drive: %s", SinnerDriveReady() ? "the locomotion record's layout is set in koleda.ini" : "the locomotion record's layout is not known (the slide instead)");
+    Log("Sinveiler drive: %s", SinnerDriveReady() ? "the locomotion record's layout is set in koleda.ini" : "the locomotion record's layout is not known (the slide instead)");
     g_staminaOk = hf->code_matches(game + 0xA50E2D, "f3 42 0f 11 8c 11 54 78 54 00");
 }
 
-/* ---- for the HUD: the Sinner's marker, her view, her state ------------------------------------------------------- */
+/* ---- for the HUD: the Sinveiler's marker, her view, her state ------------------------------------------------------- */
 static float g_viewOut[6];
 static volatile int g_viewOk;
 static float g_markOut[5];
@@ -3258,33 +3258,33 @@ typedef struct KoledaHud
     uint32_t keys[3];
     char key_label[3][24];
     /* 0.2.6: her buffs, for the HUD's buff row */
-    uint32_t sinner_kind;              /* the picked Sinner: 0 the Patriot, 1 the FRV */
-    uint32_t frv;                      /* 1 the standing Sinner is the FRV */
+    uint32_t sinner_kind;              /* the picked Sinveiler: 0 the Patriot, 1 the FRV */
+    uint32_t frv;                      /* 1 the standing Sinveiler is the FRV */
     float sprint_left, sprint_cd;      /* Let's Go Full Speed!: seconds left, seconds until it can be used again */
     float upshift_pct;                 /* her damage bonus from Upshift, % */
     float kr_mult;                     /* Kinetic Recovery's multiplier */
-    float share_pct;                   /* % of each hit on her the Sinner takes (while it may) */
+    float share_pct;                   /* % of each hit on her the Sinveiler takes (while it may) */
     uint32_t share_on;                 /* 1 the share runs now */
-    uint32_t ems_immune;               /* 1 no EMS stun on her (and the FRV Sinner) */
-    uint32_t release_on;               /* 1 Kinetic Release runs (the FRV Sinner's turret in S / S+) */
+    uint32_t ems_immune;               /* 1 no EMS stun on her (and the FRV Sinveiler) */
+    uint32_t release_on;               /* 1 Kinetic Release runs (the FRV Sinveiler's turret in S / S+) */
     float sprint_ram;                  /* its rams, times this, while sprinting */
     int32_t frv_pkg;                   /* 0.2.8: the FRV's package: 1 resident, 0 loading, -1 refused */
     /* 0.3.0 */
     float turbo_left, turbo_mult;      /* Turbo Boost: seconds left, its multiplier */
-    float post_move;                   /* Post-Move Support's multiplier while the Sinner stands (0: not now) */
+    float post_move;                   /* Post-Move Support's multiplier while the Sinveiler stands (0: not now) */
     float gear_left;                   /* seconds until the gear goes back to D (0: D) */
     float winner_cd;                   /* seconds until The Winner again */
     float upshift_guard;               /* % less damage she takes now (full Upshift) */
     float full_speed, full_ram;        /* 0.3.2: Full Speed firing now: its speed m/s (0: not now), its rams' multiplier */
-    float drift_cd;                    /* 0.3.4: seconds left on Drift (-1: no Sinner standing / off) */
+    float drift_cd;                    /* 0.3.4: seconds left on Drift (-1: no Sinveiler standing / off) */
     char drift_key[24];                /* (0.3.5: unused) */
-    uint32_t mounted;                  /* 0.3.5: in the FRV Sinner: cd / cd_max are Full Speed's, Drift's, The Winner's */
+    uint32_t mounted;                  /* 0.3.5: in the FRV Sinveiler: cd / cd_max are Full Speed's, Drift's, The Winner's */
     float stamina;                     /* 0.3.13: her stamina 0 .. 1 (-1: not now), for the warning */
     uint32_t hellbomb;                 /* hellbomb_on_exhaustion */
 } KoledaHud;
 static KoledaHud g_hud = {1};
-/* the Sinner, 5 floats (x, y, z over it, health 0..1, gear): 1 while it stands, else 0 */
-/* 0.1.5: the Sinner's shots since `after` for their sounds: 5 floats each (x, y, z, the sound, sequence); its name */
+/* the Sinveiler, 5 floats (x, y, z over it, health 0..1, gear): 1 while it stands, else 0 */
+/* 0.1.5: the Sinveiler's shots since `after` for their sounds: 5 floats each (x, y, z, the sound, sequence); its name */
 HF_MOD_EXPORT int koleda_sounds(unsigned version, unsigned after, float* out, int max)
 {
     if (version != 1 || !out || max <= 0) return 0;
@@ -3295,7 +3295,7 @@ HF_MOD_EXPORT const char* koleda_sound_name(int i)
     return i >= 0 && i < (int)(sizeof kWeaponSound / sizeof kWeaponSound[0]) ? kWeaponSound[i].name : NULL;
 }
 /* 0.1.7: walking it (the HUD side, through its animation: Exo Autopilot by marti's method): 12 floats: active (landed,
- * nobody in it, this kit acting), want to move, the goal (3), the Sinner's root (3), facing a target (1/0), the target's
+ * nobody in it, this kit acting), want to move, the goal (3), the Sinveiler's root (3), facing a target (1/0), the target's
  * direction (2), unused. koleda_walk_ack(1, 1) each frame it walks and answers: the slide stays off meanwhile */
 HF_MOD_EXPORT int koleda_walk(unsigned version, float* out)
 {
@@ -3316,7 +3316,7 @@ HF_MOD_EXPORT int koleda_walk_ack(unsigned version, int walking)
     if (version != 1) return 0;
     if (walking) g_walkAckAt = g_now;
     static int told;
-    if (walking && !told) { told = 1; Log("the HUD side walks the Sinner (its own legs): the slide is off while it does"); }
+    if (walking && !told) { told = 1; Log("the HUD side walks the Sinveiler (its own legs): the slide is off while it does"); }
     return 1;
 }
 HF_MOD_EXPORT int koleda_marks(unsigned version, float* out, int max)
@@ -3421,7 +3421,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         int press = (down && !prev[i]) || (presses >> i & 1);
         if (press && GetTickCount64() - fired[i] > 300 && g_alive && atomic_load(&g_avatar) && (fired[i] = GetTickCount64(), 1))
         {
-            if (Mounted())   /* 0.3.5: in the FRV Sinner, its skills */
+            if (Mounted())   /* 0.3.5: in the FRV Sinveiler, its skills */
             {
                 if (i == 0) { if (SeatIsDriver()) FullSpeedDrive(); else { static unsigned told; if (told++ < 5) Log("Let's Go Full Speed!: only at the wheel"); } }
                 else if (i == 1) Drift();
@@ -3497,9 +3497,9 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     LoadSettings();
     RoundsAdd();
     SinnerAdd(api, mod);
-    /* (0.2.12: no FRV Sinner call of her own: its package could not be loaded reliably. The M-103 she brings in her
-     * loadout is the FRV Sinner) */
-    api->log(mod, "Koleda %s: keys %s / %s / %s (Snow Wolf's Eye, Tactical Routebook, Spectre); the Sinner takes %.0f%% of her hits",
+    /* (0.2.12: no FRV Sinveiler call of her own: its package could not be loaded reliably. The M-103 she brings in her
+     * loadout is the FRV Sinveiler) */
+    api->log(mod, "Koleda %s: keys %s / %s / %s (Snow Wolf's Eye, Tactical Routebook, Spectre); the Sinveiler takes %.0f%% of her hits",
              VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_sharePct);
     if (s_badKey) api->log(mod, "koleda.ini: a key could not be read (bits %d: s1, s2, s3); its default stays", s_badKey);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;

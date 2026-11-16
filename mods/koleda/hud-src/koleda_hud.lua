@@ -1,6 +1,6 @@
 -- Koleda HUD (mods/yui/koleda_hud): Koleda's skills beside the mission's stratagem list (shown with it, as the
--- stratagems are: icon or short name, name, key, cooldown), her Upshift, the Sinner's gear and health at the bottom
--- middle, and a marker over the Sinner, drawn with HD2Runtime's screen overlay (hd2.ui.overlay). Koleda is a HellForge
+-- stratagems are: icon or short name, name, key, cooldown), her Upshift, the Sinveiler's gear and health at the bottom
+-- middle, and a marker over the Sinveiler, drawn with HD2Runtime's screen overlay (hd2.ui.overlay). Koleda is a HellForge
 -- code mod; this reads its state through LuaJIT's ffi (koleda.dll exports koleda_hud_state, layout version 1) every
 -- frame. Requires Bingus Shared Loader and HD2Runtime; uses HD2Runtime by SkyeShade
 -- (https://github.com/SkyeShade/HD2Runtime) through its public API. Adapted from the Alva HUD.
@@ -210,7 +210,7 @@ local function gfl2_step(dt)
 end
 -- kitbase:bindings.lua end
 local SHORT = {'S1', 'S2', 'S3'}
--- in the FRV Sinner her keys are its skills (Voymastina's way)
+-- in the FRV Sinveiler her keys are its skills (Voymastina's way)
 local MOUNT_NAMES = {"LET'S GO FULL SPEED!", "LET'S GO FOR A DRIFT!", 'THE WINNER'}
 local MOUNT_SHORT = {'FS', 'DR', 'W'}
 
@@ -249,11 +249,14 @@ end
 local RED, WARN_AT, WARN = {255, 48, 40}, 0.25, {t = 0}
 local SOS_BEACON = 145   -- StratagemType of the SOS Beacon
 local ORANGE, GREY = {255, 138, 36}, {120, 124, 128}
-local ICONS = {}
-for i, id in ipairs({'koleda_s1', 'koleda_s2', 'koleda_s3'}) do
-    local okI, handle = pcall(hd2.resources.image, id)
-    if okI and handle then ICONS[i] = handle end   -- (no images yet: the tiles show short names)
+-- her skill icons (0.4.0): on foot S1 S2 S3 and her passive; in the Sinveiler Full Speed, Drift, The Winner and Gear Shift;
+-- Let's Go For a Spin! on her third key while it stands
+local ICON = {}
+for _, id in ipairs({'s1', 's2', 's3', 'passive', 'winner', 'spin', 'drift', 'full', 'gear'}) do
+    local okI, handle = pcall(hd2.resources.image, 'koleda_' .. id)
+    if okI and handle then ICON[id] = handle end   -- (an image missing: its tile shows a short name)
 end
+local FOOT_ICONS, MOUNT_ICONS = {'s1', 's2', 's3'}, {'full', 'drift', 'winner'}
 
 -- kitbase:list.lua begin. Shared by the GFL2 kits' HUDs: written by tools/kitbase_sync.py from kitbase/hud/list.lua, so edit
 -- it there (the kit names itself in KIT, above).
@@ -344,7 +347,7 @@ local function ability(d, i, x, y, size, alpha)
     local s = d.scale
     local left, full = tonumber(state.cd[i - 1]), math.max(0.01, tonumber(state.cd_max[i - 1]))
     local mounted = state.mounted ~= 0
-    local winner = not mounted and i == 3 and state.winner ~= 0
+    local winner = not mounted and i == 3 and tonumber(state.sinner) == 2   -- (on foot with the Sinveiler standing: her third key gets her in)
     local ready = left <= 0.05 or winner
     local passive = false
     local on = not mounted and (i == 2 and tonumber(state.kr_left) > 0.05)
@@ -355,7 +358,7 @@ local function ability(d, i, x, y, size, alpha)
     d:rect(x, y, size, size, rgba(INK, a * 0.9), 1)
     d:rect(x, y, size, t, frame, 2); d:rect(x, y + size - t, size, t, frame, 2)
     d:rect(x, y, t, size, frame, 2); d:rect(x + size - t, y, t, size, frame, 2)
-    local icon = not mounted and ICONS[i]
+    local icon = ICON[mounted and MOUNT_ICONS[i] or winner and 'spin' or FOOT_ICONS[i]]
     if icon then
         local pad = size * 0.08
         d:image(icon, x + pad, y + pad, size - 2 * pad, size - 2 * pad, {z = 3,
@@ -377,7 +380,7 @@ local function ability(d, i, x, y, size, alpha)
     -- the name, and the key where a stratagem shows its code
     local tx = x + size + 10 * s
     local nsize = math.max(17 * s, size * 0.36)
-    heavy(d, mounted and MOUNT_NAMES[i] or winner and 'THE WINNER' or NAMES[i], tx, y + size * 0.02, nsize, 'title', ready and rgba(TEXT, a) or rgba(MUTED, a))
+    heavy(d, mounted and MOUNT_NAMES[i] or winner and "LET'S GO FOR A SPIN!" or NAMES[i], tx, y + size * 0.02, nsize, 'title', ready and rgba(TEXT, a) or rgba(MUTED, a))
     local label = on and 'KINETIC RECOVERY' or X.labels[i] or ffi.string(state.key_label[i - 1])
     local ksize = math.max(18 * s, size * 0.4)
     heavy(d, label, tx, y + size * 0.5, ksize, 'title', ready and rgba(YELLOW, a) or rgba(MUTED, a))
@@ -385,6 +388,35 @@ local function ability(d, i, x, y, size, alpha)
         local kw = d:text_width(label, ksize, 'title') or (ksize * #label * 0.6)
         heavy(d, string.format('%.0fs', math.ceil(left)), tx + kw + 12 * s, y + size * 0.5, ksize, 'title', rgba(TEXT, a * 0.8))
     end
+end
+
+-- her passive's tile: The Sinner on foot (the share it takes for her), Gear Shift in the Sinveiler (its gear)
+local PGEARS = {[0] = 'N', [1] = 'S', [2] = 'S+', [3] = 'D', [4] = 'P'}
+local function passive_tile(d, x, y, size, a)
+    local s = d.scale
+    local mounted = state.mounted ~= 0
+    local lit = tonumber(state.sinner) == 2
+    local t = math.max(1, 2 * s)
+    local frame = lit and rgba(ELECTRIC, a) or rgba(GREY, a * 0.8)
+    d:rect(x, y, size, size, rgba(INK, a * 0.9), 1)
+    d:rect(x, y, size, t, frame, 2); d:rect(x, y + size - t, size, t, frame, 2)
+    d:rect(x, y, t, size, frame, 2); d:rect(x + size - t, y, t, size, frame, 2)
+    local icon = ICON[mounted and 'gear' or 'passive']
+    if icon then
+        local pad = size * 0.08
+        d:image(icon, x + pad, y + pad, size - 2 * pad, size - 2 * pad, {z = 3,
+            colours = lit and {r = rgba(ORANGE, 1), g = {255, 255, 255, 255}} or {r = rgba(GREY, 1), g = {150, 154, 158, 255}},
+            colour = {255, 255, 255, math.floor(255 * a + 0.5)}})
+    else
+        heavy(d, mounted and 'GS' or 'P', x + size / 2, y + size * 0.3, math.max(17 * s, size * 0.34), 'title', lit and rgba(TEXT, a) or rgba(MUTED, a), 'center')
+    end
+    local tx = x + size + 10 * s
+    heavy(d, mounted and 'GEAR SHIFT' or 'THE SINNER', tx, y + size * 0.02, math.max(17 * s, size * 0.36), 'title', lit and rgba(TEXT, a) or rgba(MUTED, a))
+    local text
+    if not lit then text = 'NO SINVEILER'
+    elseif mounted then text = 'GEAR ' .. (PGEARS[tonumber(state.gear)] or '?')
+    else text = ('TAKES %.0f%% OF HER HITS'):format(tonumber(state.share_pct)) end
+    heavy(d, text, tx, y + size * 0.5, math.max(18 * s, size * 0.4), 'title', lit and rgba(YELLOW, a) or rgba(MUTED, a))
 end
 
 local function abilities(d, box, only)
@@ -401,14 +433,16 @@ local function abilities(d, box, only)
     local shown = {}
     for i = 1, 3 do if not only or (tonumber(state.cd[i - 1]) > 0.05 and not (i == 3 and state.winner ~= 0)) then shown[#shown + 1] = i end end
     if #shown == 0 then return end
+    local rows = #shown + (only and 0 or 1)   -- (the list open: her passive's tile under them)
     -- a panel like the list's
     local w = size + 10 * s + math.max(230 * s, size * 5)
-    d:rect(x - 10 * s, y - 10 * s, w + 20 * s, step * #shown + 20 * s - (step - size), rgba(PANEL, a * 0.72), 0)
-    d:rect(x - 10 * s, y - 10 * s, 3 * s, step * #shown + 20 * s - (step - size), rgba(ELECTRIC, a), 1)
+    d:rect(x - 10 * s, y - 10 * s, w + 20 * s, step * rows + 20 * s - (step - size), rgba(PANEL, a * 0.72), 0)
+    d:rect(x - 10 * s, y - 10 * s, 3 * s, step * rows + 20 * s - (step - size), rgba(ELECTRIC, a), 1)
     for k, i in ipairs(shown) do ability(d, i, x, y + (k - 1) * step, size, a) end
+    if not only then passive_tile(d, x, y + #shown * step, size, a) end
 end
 
------------------------------------------------------ Upshift, the Sinner's gear and health, bottom middle --
+----------------------------------------------------- Upshift, the Sinveiler's gear and health, bottom middle --
 local GEARS = {[0] = 'N', [1] = 'S', [2] = 'S+', [3] = 'D', [4] = 'P'}
 local LEASH = {[0] = '', [1] = 'FOLLOWING', [2] = 'WARPED', [3] = 'CANNOT MOVE', [4] = 'PUSHING THROUGH'}
 local GREEN = {120, 230, 140}
@@ -438,7 +472,7 @@ local function buff_row(d, cx, y)
     local fs = tonumber(state.full_speed)
     if fs > 0 then add(('FULL SPEED %d M/S  RAMS x%.2g'):format(math.floor(fs + 0.5), tonumber(state.full_ram)), YELLOW) end
     if state.release_on ~= 0 then add('KINETIC RELEASE', ELECTRIC) end
-    if state.share_on ~= 0 then add(('SINNER GUARD %.0f%%'):format(tonumber(state.share_pct)), GREEN) end
+    if state.share_on ~= 0 then add(('SINVEILER GUARD %.0f%%'):format(tonumber(state.share_pct)), GREEN) end
     if state.ems_immune ~= 0 then add('EMS IMMUNE', MUTED) end
     if #chips == 0 then return end
     local size, padx, h, gap = 17 * s, 8 * s, 24 * s, 6 * s
@@ -476,11 +510,11 @@ local function status_bar(d)
         local leash = LEASH[tonumber(state.leash)]
         if state.piloted ~= 0 then bits[#bits + 1] = 'PILOTED'
         elseif leash and leash ~= '' then bits[#bits + 1] = leash end
-    elseif sin == 1 then bits[#bits + 1] = 'SINNER INBOUND'
+    elseif sin == 1 then bits[#bits + 1] = 'SINVEILER INBOUND'
     elseif state.sinner_kind ~= 0 then
         local p = tonumber(state.frv_pkg)
-        bits[#bits + 1] = p < 0 and 'SINNER: PATRIOT (NO M-103 IN LOADOUT)' or 'SINNER: FRV'
-    else bits[#bits + 1] = 'SINNER: PATRIOT' end
+        bits[#bits + 1] = p < 0 and 'SINVEILER: PATRIOT (NO M-103 IN LOADOUT)' or 'SINVEILER: FRV'
+    else bits[#bits + 1] = 'SINVEILER: PATRIOT' end
     heavy(d, table.concat(bits, '   '), cx, y - 6 * s, 20 * s, 'title', rgba(ELECTRIC, 1), 'center')
     buff_row(d, cx, y - 40 * s)
     -- running dry sets off the Hellbomb: a flashing red warning above it all while her stamina runs low (as the other kits)
@@ -501,14 +535,14 @@ local function status_bar(d)
             WARN.t = 0
         end
     end
-    -- the Sinner's health bar
+    -- the Sinveiler's health bar
     if sin == 2 then
         local hp, top = tonumber(state.sinner_hp), math.max(1, tonumber(state.sinner_max))
         local f = math.max(0, math.min(1, hp / top))
         local bw, bh, by = 220 * s, 6 * s, y + 34 * s
         d:rect(cx - bw / 2, by, bw, bh, rgba(INK, 0.7), 1)
         d:rect(cx - bw / 2, by, bw * f, bh, rgba(f > 0.3 and GREEN or RED, 1), 2)
-        heavy(d, ('SINNER %.0f / %.0f'):format(hp, top), cx, by + bh + 2 * s, 17 * s, 'title', rgba(TEXT, 0.9), 'center')
+        heavy(d, ('SINVEILER %.0f / %.0f'):format(hp, top), cx, by + bh + 2 * s, 17 * s, 'title', rgba(TEXT, 0.9), 'center')
     end
 end
 
@@ -517,33 +551,33 @@ end
 -- from and written to koleda.dll (koleda_option_get / koleda_option_set, the koleda.ini names). The menu keeps what
 -- the player applies; until then a row starts from koleda.ini. Keys stay in koleda.ini.
 local OPTIONS = {
-    {'sinner_kind', 'choice', 'Sinner: Patriot or FRV', {'Patriot (EXO-45)', 'FRV (M-103 Supply FRV)'}, nil, nil, 'Which Sinner Spectre calls: the Patriot exosuit (RRLLD), or the M-103 Supply FRV from her loadout, which she can ride (without one in her loadout: the Patriot). From her next Spectre.', true},
+    {'sinner_kind', 'choice', 'Sinveiler: Patriot or FRV', {'Patriot (EXO-45)', 'FRV (M-103 Supply FRV)'}, nil, nil, 'Which Sinveiler Spectre calls: the Patriot exosuit (RRLLD), or the M-103 Supply FRV from her loadout, which she can ride (without one in her loadout: the Patriot). From her next Spectre.', true},
     {'s1_cooldown', 'slider', "Snow Wolf's Eye: Cooldown", 0, 120, 1, "Seconds before Snow Wolf's Eye can be used again.", true},
     {'s1_rounds', 'slider', "Snow Wolf's Eye: Rounds", 1, 10, 1, 'Heavy rounds fired at her target.'},
     {'s2_cooldown', 'slider', 'Tactical Routebook: Cooldown', 0, 120, 1, 'Seconds before Tactical Routebook can be used again.', true},
     {'kr_seconds', 'slider', 'Kinetic Recovery: Duration', 0, 60, 1, 'Seconds Kinetic Recovery lasts.'},
-    {'kr_mult', 'slider', 'Kinetic Recovery: Damage', 1, 3, 0.05, "Her damage and the Sinner's, times this."},
-    {'s3_cooldown', 'slider', 'Spectre: Cooldown', 0, 600, 5, 'Seconds before another Sinner call.', true},
-    {'winner_cooldown', 'slider', 'The Winner: Cooldown', 0, 300, 5, 'Seconds between The Winner (Spectre while the Sinner stands: full health, gear N).'},
-    {'share_pct', 'slider', 'Sinner: Damage Taken For Her', 0, 100, 5, 'Percent of each hit on her the Sinner takes instead.'},
+    {'kr_mult', 'slider', 'Kinetic Recovery: Damage', 1, 3, 0.05, "Her damage and the Sinveiler's, times this."},
+    {'s3_cooldown', 'slider', 'Spectre: Cooldown', 0, 600, 5, 'Seconds before another Sinveiler call.', true},
+    {'winner_cooldown', 'slider', 'The Winner: Cooldown', 0, 300, 5, 'Seconds between The Winner (Spectre while the Sinveiler stands: full health, gear N).'},
+    {'share_pct', 'slider', 'Sinveiler: Damage Taken For Her', 0, 100, 5, 'Percent of each hit on her the Sinveiler takes instead.'},
     {'upshift_max', 'slider', 'Upshift: Most', 1, 10, 1, 'The most Upshift stacks she holds.', true},
     {'upshift_damage', 'slider', 'Upshift: Damage Per Stack', 0, 0.3, 0.01, 'Her damage bonus per stack (0.15: 15%).'},
     {'upshift_decay', 'slider', 'Upshift: Decay', 1, 60, 1, 'Seconds without a gain before a stack is lost.'},
-    {'gear_seconds', 'slider', 'Gears: Duration', 3, 60, 1, 'Seconds N, S and S+ last before the Sinner goes back to D.', true},
+    {'gear_seconds', 'slider', 'Gears: Duration', 3, 60, 1, 'Seconds N, S and S+ last before the Sinveiler goes back to D.', true},
     {'release_every', 'slider', 'Kinetic Release: Interval', 2, 30, 1, 'Seconds between its rifle volleys while it fights in S or S+.'},
-    {'drift_on', 'toggle', "Sinner: Let's Go for a Drift!", 0, 1, 1, 'In the FRV, her second key: waves of EMS bursts out from it into the enemies around it.'},
-    {'full_on', 'toggle', "Sinner: Let's Go Full Speed!", 0, 1, 1, 'While the FRV moves fast it fires at the enemies ahead, faster the faster it goes, and its rams hit harder.'},
+    {'drift_on', 'toggle', "Sinveiler: Let's Go for a Drift!", 0, 1, 1, 'In the FRV, her second key: waves of EMS bursts out from it into the enemies around it.'},
+    {'full_on', 'toggle', "Sinveiler: Let's Go Full Speed!", 0, 1, 1, 'While the FRV moves fast it fires at the enemies ahead, faster the faster it goes, and its rams hit harder.'},
     {'full_min_speed', 'slider', 'Full Speed: From Speed', 0, 30, 1, 'Metres a second it has to move for Full Speed.'},
     {'drift_cooldown', 'slider', 'Drift: Cooldown', 0, 60, 1, 'Seconds before Drift can be used again.'},
-    {'leash_start', 'slider', 'Sinner: Follow From', 2, 40, 1, 'It walks to her beyond this many metres.', true},
-    {'leash_stop', 'slider', 'Sinner: Stop Within', 1, 30, 1, 'It stops this close to her.'},
-    {'leash_warp', 'slider', 'Sinner: Warp Beyond', 10, 200, 5, 'Farther than this from her, it is warped beside her.'},
-    {'slide_speed', 'slider', 'Sinner: Slide Speed', 0.5, 15, 0.5, 'Metres a second while it slides (without its own walk).'},
-    {'gun_every', 'slider', 'Sinner: Fire Interval', 0, 3, 0.05, 'Seconds between its shots (0: the fire rate of the gun each gear\'s round comes from).', true},
-    {'plus_rate', 'slider', 'Sinner: S+ Interval', 0.2, 1, 0.05, 'Its interval in S+ gear, times this.'},
-    {'fire_range', 'slider', 'Sinner: Range', 10, 150, 5, 'Metres it looks for enemies.'},
-    {'guard_range', 'slider', 'Sinner: N Gear Range', 5, 80, 1, 'In N gear, the enemies this close to her.'},
-    {'sinner_fire', 'toggle', 'Sinner: Fires', 0, 1, 1, 'Whether the Sinner shoots at all.'},
+    {'leash_start', 'slider', 'Sinveiler: Follow From', 2, 40, 1, 'It walks to her beyond this many metres.', true},
+    {'leash_stop', 'slider', 'Sinveiler: Stop Within', 1, 30, 1, 'It stops this close to her.'},
+    {'leash_warp', 'slider', 'Sinveiler: Warp Beyond', 10, 200, 5, 'Farther than this from her, it is warped beside her.'},
+    {'slide_speed', 'slider', 'Sinveiler: Slide Speed', 0.5, 15, 0.5, 'Metres a second while it slides (without its own walk).'},
+    {'gun_every', 'slider', 'Sinveiler: Fire Interval', 0, 3, 0.05, 'Seconds between its shots (0: the fire rate of the gun each gear\'s round comes from).', true},
+    {'plus_rate', 'slider', 'Sinveiler: S+ Interval', 0.2, 1, 0.05, 'Its interval in S+ gear, times this.'},
+    {'fire_range', 'slider', 'Sinveiler: Range', 10, 150, 5, 'Metres it looks for enemies.'},
+    {'guard_range', 'slider', 'Sinveiler: N Gear Range', 5, 80, 1, 'In N gear, the enemies this close to her.'},
+    {'sinner_fire', 'toggle', 'Sinveiler: Fires', 0, 1, 1, 'Whether the Sinveiler shoots at all.'},
     {'hp_mult', 'slider', 'Body: Health', 0.5, 4, 0.05, "Her health, times a Helldiver's.", true},
     {'stamina_mult', 'slider', 'Body: Stamina', 0.5, 6, 0.1, "How long she sprints before the bar empties, times a Helldiver's."},
 }
@@ -598,12 +632,12 @@ local function options_step(dt)
     log(('[Koleda HUD] options: %d settings on the MODS tab'):format(count))
 end
 
--- ---- the Sinner's marker: its health and gear over it ------------------------------------------------------------
+-- ---- the Sinveiler's marker: its health and gear over it ------------------------------------------------------------
 -- Parts adapted from Chef Shared Loader by Th3chef (github.com/Th3chef/Chef-Shared-Loader, src/loader.lua): finding
 -- the view camera (a living unit with Unit.num_cameras > 0, its Unit.camera(u, 1), searched a few hundred units a
 -- frame), projecting a world point with Camera.world_to_screen (bottom-left origin) and the behind-the-camera check
 -- (the point's offset along the camera's forward), with Th3chef's permission. koleda.dll's koleda_marks gives the
--- Sinner (5 floats: x, y, z over it, health 0..1, gear 0 N / 1 S / 2 S+).
+-- Sinveiler (5 floats: x, y, z over it, health 0..1, gear 0 N / 1 S / 2 S+).
 pcall(ffi.cdef, [[ typedef int (*kolmarks1)(unsigned int version, float *out, int max);
 typedef int (*kolview1)(unsigned int version, float *out); ]])
 local MK = {fn = nil, buf = ffi.new('float[160]'), look = 0, failed = false, told = false}
@@ -733,17 +767,17 @@ local function marks_draw(d, dt, v)
     local col = {255, 70, 90, 230}
     d:rect(sx - w / 2, sy, w, h, {8, 9, 10, 180}, 6)
     d:rect(sx - w / 2, sy, w * math.max(0, math.min(1, f)), h, f > 0.3 and {120, 230, 140, 230} or {255, 48, 40, 230}, 7)
-    d:text(('SINNER %s'):format(GEARS[math.floor(gear + 0.5)] or '?'), sx, sy - 18 * sc, {size = 14 * sc, colour = col, z = 6, align = 'center'})
+    d:text(('SINVEILER %s'):format(GEARS[math.floor(gear + 0.5)] or '?'), sx, sy - 18 * sc, {size = 14 * sc, colour = col, z = 6, align = 'center'})
 end
 
--- ---- gunshot sounds (0.1.5): the Sinner's shots (koleda.dll's koleda_sounds: x, y, z, sound, sequence;
+-- ---- gunshot sounds (0.1.5): the Sinveiler's shots (koleda.dll's koleda_sounds: x, y, z, sound, sequence;
 -- koleda_sound_name) played with HD2Runtime's hd2.sounds (its weapon firing-sound catalogue), at the muzzle, each
 -- sound's bank loaded once
 pcall(ffi.cdef, [[ typedef int (*kolsnd1)(unsigned int version, unsigned int after, float *out, int max);
 typedef const char *(*kolsndname1)(int i); ]])
 local SND = {fn = nil, name_fn = nil, look = 0, seq = 0, buf = ffi.new('float[80]'), names = {}, asked = {}, tokens = 20, failed = false, told = 0, skip = true}
 local function snd_log(m) if SND.told < 12 then SND.told = SND.told + 1; log('[Koleda HUD] sounds: ' .. m) end end
--- 0.1.14: where a sound plays: on the Sinner's own unit (its sounds follow it); a post at a position was accepted but
+-- 0.1.14: where a sound plays: on the Sinveiler's own unit (its sounds follow it); a post at a position was accepted but
 -- never heard
 local WK   -- (the walk's state, below)
 local function snd_opts(x, y, z)
@@ -845,11 +879,11 @@ local function sound_step(dt)
     SND.skip = false
 end
 
--- ---- walking the Sinner on its own legs (0.1.7). The method is Exo Autopilot's (by marti; Chef Shared Loader): an
+-- ---- walking the Sinveiler on its own legs (0.1.7). The method is Exo Autopilot's (by marti; Chef Shared Loader): an
 -- EXO-45 walks through its animation state machine. Its walk state (recorded piloting it) is set once, then every
 -- frame (in update and in render: the game rewrites them) move_speed (5.625: half its sprint), move_angle (degrees,
 -- against its facing: the way to go) and the torso's yaw (0.5 - degrees / 360, -90 .. 90: here toward what it fires
--- at). koleda.dll's koleda_walk gives the goal; koleda_walk_ack(1, 1) tells it the Sinner answers (the slide stops).
+-- at). koleda.dll's koleda_walk gives the goal; koleda_walk_ack(1, 1) tells it the Sinveiler answers (the slide stops).
 pcall(ffi.cdef, [[ typedef int (*kolwalk1)(unsigned int version, float *out);
 typedef int (*kolwalkack1)(unsigned int version, int walking); ]])
 WK = {fn = nil, ack = nil, look = 0, buf = ffi.new('float[12]'), unit = nil, scan = 0, failed = false, told = 0,
@@ -905,7 +939,7 @@ local function var(s, u, name)
     local ok2, i = pcall(s.Unit.animation_find_variable, u, name)
     return ok2 and type(i) == 'number' and i >= 0 and i or nil
 end
--- the Sinner's unit: the walker (move_angle, move_speed, an 11-layer state machine) within 2 m of its root
+-- the Sinveiler's unit: the walker (move_angle, move_speed, an 11-layer state machine) within 2 m of its root
 local function find_unit(s, x, y, z)
     local okw, w = pcall(s.Application.main_world)
     if not okw or not w then return nil end
@@ -1039,7 +1073,7 @@ local function walk_tick(dt)
 end
 pcall(function() hd2.on_frame(function(dt) local ok, err = pcall(walk_tick, tonumber(dt) or 0); if not ok then WK.failed = true; log('[Koleda HUD] walk failed, off for this session: ' .. tostring(err)) end end, {owner = OWNER}) end)
 
-------------------------------------------------- 0.2.8: the FRV Sinner's package, loaded through HD2Runtime --
+------------------------------------------------- 0.2.8: the FRV Sinveiler's package, loaded through HD2Runtime --
 -- HellForge's load_package does not know the M-103 Supply FRV's call-in package, and an FRV called without it crashed
 -- the game as it landed. HD2Runtime's catalogue does: hd2.require_assets of the M-103 (it loads the assets, it grants
 -- nothing). The state goes to koleda.dll (koleda_frv_package); until it is resident she calls the Patriot.
@@ -1100,7 +1134,7 @@ overlay:draw(function(d, dt)
         if not okO then O.failed = true; log('[Koleda HUD] options failed: ' .. tostring(errO)) end
     end
     if not find(dt) then return end
-    if false and not FP.failed then   -- (0.2.12: no FRV call of her own, so no package to load: her loadout's M-103 is the FRV Sinner)
+    if false and not FP.failed then   -- (0.2.12: no FRV call of her own, so no package to load: her loadout's M-103 is the FRV Sinveiler)
         local okP, errP = pcall(frv_package_step, dt)
         if not okP then FP.failed = true; log('[Koleda HUD] FRV package failed: ' .. tostring(errP)) end
     end
