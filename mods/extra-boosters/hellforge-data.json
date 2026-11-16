@@ -4,7 +4,9 @@
     {
       "archives": ["9ba626afa44a3aa3"],
       "resources": [
-        { "icon": "icons/primed_sure_footed.png", "name": "yui/extra_boosters/icons/primed_sure_footed", "prepare": "image" }
+        { "icon": "icons/primed_sure_footed.png", "name": "yui/extra_boosters/icons/primed_sure_footed_tex", "prepare": "image" },
+        { "type": "material", "copy": "0xA9C52A2333DFCB68", "name": "yui/extra_boosters/icons/primed_sure_footed",
+          "replace": [{ "from": "0xA9C52A2333DFCB68", "to": "yui/extra_boosters/icons/primed_sure_footed_tex" }] }
       ]
     }
   ]
