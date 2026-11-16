@@ -50,7 +50,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.10"
+#define VERSION "0.3.11"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -110,6 +110,7 @@ static int s_rideSafe = 1, s_relRingS = 8, s_relRingPlus = 12;   /* 0.3.7 */
 static unsigned g_rideSaved;
 static int s_sinSteady = 1;   /* 0.3.8: no stagger or push on the Sinner */
 static float s_heRate = 10;
+static int s_heRound = 77;   /* 0.3.11: the Orbital Gatling Barrage's own shell, fired from the Sinner (0: a bullet and a blast set off where it lands) */
 static float s_relReachPlus = 18, s_relInner = 6, s_relGap = 0.3f;
 static int s_driftOn = 1, s_driftRings = 4, s_driftDamage = 800, s_fullOn = 1;
 static float s_driftEvery = 12, s_driftRadius = 20;
@@ -166,7 +167,7 @@ static const KbSetting kSettings[] = {
     KB_I("release_round", s_relRound, 0, 100000), KB_I("release_rounds_s", s_relRoundsS, 1, 10), KB_I("release_rounds_plus", s_relRoundsPlus, 1, 10), KB_F("release_reach_plus", s_relReachPlus, 2, 80),
     KB_I("drift_points", s_relPoints, 3, 32), KB_F("drift_inner", s_relInner, 0, 30), KB_F("drift_gap", s_relGap, 0, 2),
     KB_I("ride_safe", s_rideSafe, 0, 1), KB_I("sinner_steady", s_sinSteady, 0, 1), KB_I("release_ring_s", s_relRingS, 0, 32), KB_I("release_ring_plus", s_relRingPlus, 0, 32),
-    KB_I("he_explosion", s_heRow, 0, 100000), KB_F("he_rate", s_heRate, 1, 60), KB_I("full_he", s_fullHe, 0, 1), KB_I("release_he", s_releaseHe, 0, 1),
+    KB_I("he_explosion", s_heRow, 0, 100000), KB_I("he_round", s_heRound, 0, 100000), KB_F("he_rate", s_heRate, 1, 60), KB_I("full_he", s_fullHe, 0, 1), KB_I("release_he", s_releaseHe, 0, 1),
     KB_I("full_on", s_fullOn, 0, 1), KB_I("full_shots", s_fullShots, 1, 8), KB_F("full_min_speed", s_fullMinSpeed, 0, 50), KB_F("full_ref_speed", s_fullRefSpeed, 1, 60), KB_F("full_every", s_fullEvery, 0.05, 5),
     KB_F("full_cone", s_fullCone, 5, 90), KB_F("full_range", s_fullRange, 5, 100), KB_F("full_ram", s_fullRam, 0, 1), KB_F("full_ram_max", s_fullRamMax, 1, 10),
     KB_I("drift_on", s_driftOn, 0, 1), KB_I("drift_rings", s_driftRings, 1, 8), KB_I("drift_damage", s_driftDamage, 0, 100000), KB_F("drift_cooldown", s_driftEvery, 0, 600), KB_F("drift_radius", s_driftRadius, 2, 50),
@@ -267,7 +268,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; HE rounds (full_he 1: Full Speed's, release_he 1: Kinetic Release's): where each of their rounds lands, the\n"
                "; Orbital Gatling Barrage's high-explosive blast (he_explosion, 266: its shell's; 0: none), at most he_rate a\n"
                "; second; by its gear and her buffs, sparing her, the Sinner and her allies.\n"
-               "he_explosion = %d\nhe_rate = %g\nfull_he = %d\nrelease_he = %d\n"
+               "; he_round 77: the barrage's own HE shell is fired from the Sinner at them and bursts where it hits (its launch\n"
+               "; crashed the game once in another mod: 0 goes back to a bullet with the blast set off where it lands).\n"
+               "he_explosion = %d\nhe_rate = %g\nfull_he = %d\nrelease_he = %d\nhe_round = %d\n"
                "; Let's Go Full Speed! (full_on 0: off; not in N): while it moves at full_min_speed m/s or more, it fires at the\n"
                "; enemies ahead (full_cone degrees either side of its way, within full_range m), full_shots shots spread among\n"
                "; them every full_every s at full_ref_speed m/s (faster: more often); and its rams deal 1 + full_ram for each m/s over full_min_speed times\n"
@@ -318,7 +321,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_sinTaken, (double)s_parkTaken, (double)s_sinHeal, (double)s_sinHealEvery,
             s_relRound, s_relRoundsS, s_relRoundsPlus, (double)s_relReachPlus, s_relRingS, s_relRingPlus, s_rideSafe, s_sinSteady,
             s_driftOn, (double)s_driftEvery, (double)s_driftRadius, s_driftRings, s_driftDamage, s_relPoints, (double)s_relInner, (double)s_relGap,
-            s_heRow, (double)s_heRate, s_fullHe, s_releaseHe,
+            s_heRow, (double)s_heRate, s_fullHe, s_releaseHe, s_heRound,
             s_fullOn, s_fullShots, (double)s_fullMinSpeed, (double)s_fullRefSpeed, (double)s_fullEvery, (double)s_fullCone, (double)s_fullRange, (double)s_fullRam, (double)s_fullRamMax,
             (double)s_followDist, (double)s_personal, (double)s_maxRounds, (double)s_roundSpeed, s_turnOn, s_drive, s_driveTest, s_locoManager, s_locoMap, s_locoRecords, s_locoStride, s_stickFwd, s_stickSide, s_stickTurn,
             s_sight, (double)s_fpDistance, s_frvOn, s_releaseRow, s_releaseShell, (double)s_releaseAp, (double)s_releaseReach, s_releaseTargetsS,
@@ -1677,6 +1680,8 @@ static void RocketRow(void)
 }
 static int g_shootRocket;   /* 0.1.3: this shot is the left arm's rocket */
 static int g_shootRifle;    /* 0.3.2: this shot is Kinetic Release's rifle round (release_round, the vanilla one) */
+static int g_shootHe;       /* 0.3.11: this shot is the HE shell itself (he_round) */
+static int g_heRoundBad;
 static double g_rocketNext;
 static unsigned g_rocketsFired;
 static double g_rocketAt = -100;
@@ -1762,12 +1767,27 @@ static int SinnerShoot(int arm, uint32_t target, const float at0[3])
     if (r == 4) RocketRow();
     uint32_t round = g_roundBad[r] ? (uint32_t)s_roundFallback : g_round[r];
     if (g_shootRifle) round = s_relRound > 0 ? (uint32_t)s_relRound : g_round[3] ? g_round[3] : (uint32_t)s_s1Round;
+    if (g_shootHe) round = (uint32_t)s_heRound;
     if (ProjBudget() < 1) return 0;
     g_projTokens -= 1;
     int res = hf->spawn_projectile(self, round, from, d);
     if (res == HF_ACT_WAITING) return 0;
     /* 0.1.2: a shotgun's other pellets, 5 degrees wide */
-    for (uint32_t k = 1; res && !g_shootRifle && s_gunEvery <= 0 && k < Profile(r == 4 ? 3 : r)->pellets && g_projTokens >= 1; k++)
+    if (!res && g_shootHe)
+    {
+        if (!g_heRoundBad++) Log("the HE shell (projectile %u) cannot be spawned here: a bullet and its blast instead (%s)", round, hf->last_log ? hf->last_log(self) : "");
+        return 0;
+    }
+    if (res && g_shootHe)
+    {
+        unsigned slot = g_ownNext++ % KB_OWN_SLOTS;   /* its burst spares her and the Sinner */
+        memcpy(g_ownPos[slot], at0, 12);
+        atomic_store(&g_ownEmp[slot], 0);
+        atomic_store(&g_ownMs[slot], GetTickCount64());
+        static unsigned told;
+        if (told++ < 3) Log("an HE shell (projectile %u) fired from the Sinner", round);
+    }
+    for (uint32_t k = 1; res && !g_shootRifle && !g_shootHe && s_gunEvery <= 0 && k < Profile(r == 4 ? 3 : r)->pellets && g_projTokens >= 1; k++)
     {
         g_projTokens -= 1;
         float dir[3];
@@ -1809,7 +1829,7 @@ static int SinnerShoot(int arm, uint32_t target, const float at0[3])
     }
     /* 0.1.5: its gun's firing sound (the HUD side plays it: koleda_sounds) */
     {
-        uint32_t base = g_shootRifle ? (uint32_t)(s_relRound > 0 ? s_relRound : s_s1Round) : r == 4 ? (uint32_t)s_roundRocket : (uint32_t)(r == 0 ? s_roundN : r == 1 ? s_roundS : s_roundPlus);
+        uint32_t base = g_shootHe ? (uint32_t)s_roundPlus : g_shootRifle ? (uint32_t)(s_relRound > 0 ? s_relRound : s_s1Round) : r == 4 ? (uint32_t)s_roundRocket : (uint32_t)(r == 0 ? s_roundN : r == 1 ? s_roundS : s_roundPlus);
         for (unsigned i = 0; i < sizeof kRoundGun / sizeof kRoundGun[0]; i++)
             if (kRoundGun[i].round == base) { ShotSound(kRoundGun[i].gun, from); break; }
     }
@@ -2397,7 +2417,11 @@ static void FullFrame(void)
         float at[3];
         memcpy(at, t[k].q, 12);
         g_arm = !g_arm;
-        if (SinnerShoot(g_arm, t[k].e, at)) { fired++; if (s_fullHe) HeQueue(g_sinPos, at); }
+        int he = s_fullHe && s_heRound > 0 && !g_heRoundBad && g_heTokens >= 1;   /* (at most he_rate shells a second: the rest plain rounds) */
+        g_shootHe = he;
+        int ok = SinnerShoot(g_arm, t[k].e, at);
+        g_shootHe = 0;
+        if (ok) { fired++; if (he) { g_heTokens -= 1; g_heBlasts++; } else if (s_fullHe && (s_heRound <= 0 || g_heRoundBad)) HeQueue(g_sinPos, at); }
     }
     if (!fired) return;
     g_fightAt = g_now;
@@ -2454,11 +2478,13 @@ static void DriftFrame(void)
         float at[3];
         if (!g_dq[i].t) memcpy(at, g_dq[i].at, 12);
         else if (k < 0 || !Alive(g_dq[i].t) || !TargetPos(g_dq[i].t, g_foeRes[k], at)) continue;
-        g_shootRifle = g_dq[i].rifle;
+        int he = s_releaseHe && s_heRound > 0 && !g_heRoundBad && g_heTokens >= 1;
+        g_shootRifle = g_dq[i].rifle && !he;
+        g_shootHe = he;
         g_arm = !g_arm;
         int ok = SinnerShoot(g_arm, g_dq[i].t, at);
-        g_shootRifle = 0;
-        if (ok) { g_driftShots++; if (s_releaseHe) HeQueue(g_sinPos, at); }
+        g_shootRifle = g_shootHe = 0;
+        if (ok) { g_driftShots++; if (he) { g_heTokens -= 1; g_heBlasts++; } else if (s_releaseHe && (s_heRound <= 0 || g_heRoundBad)) HeQueue(g_sinPos, at); }
     }
 }
 
