@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.13"
+#define VERSION "0.1.14"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -643,8 +643,18 @@ static const char* Records(uint64_t res, char out[16])
     out[n] = 0;
     return n ? out : "none";
 }
+/* 0.1.14: a kind none of whose records are found by its resource */
+static int Unrecorded(uint64_t res)
+{
+    static const char* const r[] = {"BehaviorComponentData", "TurretComponentData", "AiEnemyComponentData", "HealthComponentData", "FactionComponentData",
+        "SeatCollectionComponentData", "AvatarComponentData"};
+    uint32_t stride;
+    for (unsigned i = 0; i < sizeof r / sizeof r[0]; i++) if (hf->component_record(r[i], res, &stride)) return 0;
+    return 1;
+}
 /* 0.1.12: one of her foes (seen spawning as an enemy, or marked by her) */
 static int IsFoe(uint32_t e) { for (int k = 0; k < FOES; k++) if (e && g_foe[k] == e) return 1; return 0; }
+static int HpOr(uint32_t e) { int32_t hp = 0; uint32_t life; return HealthOf(e, &hp, &life) ? hp : -1; }
 static int Holdable(uint32_t e, uint64_t res)
 {
     uint32_t stride, life;
@@ -652,7 +662,9 @@ static int Holdable(uint32_t e, uint64_t res)
     if (!e || res == AVATAR || FriendRes(res)) return 0;
     if (HealthOf(e, &hp, &life) && hp <= 0) return 0;
     if (FoeKind(res) || EnemyTurret(res) || AiEnemy(res) || IsFoe(e)) return 1;
-    if (!hf->component_record("HealthComponentData", res, &stride)) return 0;
+    /* 0.1.14: a kind whose records are not found by its resource (Yui's log: one she aimed at, a Berserker by her
+     * account, read "records none"): the thing itself is in the game's health table, alive, and no friend */
+    if (!hf->component_record("HealthComponentData", res, &stride)) return Unrecorded(res) && HealthOf(e, &hp, &life) && hp > 0;
     /* 0.1.13: a tank's hull is health alone (2c1a7790c435fd67, Yui's log: records H): held when it is a big one
      * (hull_health or more; crates and fences are small) */
     if (hp >= s_hullHealth && s_hullHealth > 0) return 1;
@@ -725,7 +737,7 @@ static int64_t Crosshair(const float cam[3], const float fwd[3])
                     int seen = 0;
                     for (unsigned t = 0; t < ntold && t < 16; t++) seen |= toldRes[t] == res;
                     char rec[16];
-                    if (!seen && ntold < 16) { toldRes[ntold++] = res; Log("Honesta Missio: entity %u (%016llx) in her crosshair at %.0f m: not one to hold (a friend, a Helldiver, a prop; records %s, friend %d, foe kind %d, enemy turret %d, AI enemy %d)", e, (unsigned long long)res, (double)(steps[st] + d), Records(res, rec), FriendRes(res), FoeKind(res), EnemyTurret(res), AiEnemy(res)); }
+                    if (!seen && ntold < 16) { toldRes[ntold++] = res; Log("Honesta Missio: entity %u (%016llx) in her crosshair at %.0f m: not one to hold (a friend, a Helldiver, a prop; records %s, friend %d, foe kind %d, enemy turret %d, AI enemy %d, its health %d)", e, (unsigned long long)res, (double)(steps[st] + d), Records(res, rec), FriendRes(res), FoeKind(res), EnemyTurret(res), AiEnemy(res), HpOr(e)); }
                 }
                 return 0;                                                                 /* a friend, a Helldiver, a prop */
             }
@@ -1069,6 +1081,30 @@ static int AiEnemy(uint64_t res)
     }
     return 0;
 }
+#define LATE 256
+static struct { uint32_t e; uint64_t res; double at; } g_late[LATE];
+static unsigned g_lateNext, g_lateFoes;
+static void LateFrame(void)
+{
+    for (int i = 0; i < LATE; i++)
+    {
+        if (!g_late[i].e || g_now < g_late[i].at) continue;
+        uint32_t e = g_late[i].e;
+        uint64_t res = g_late[i].res;
+        g_late[i].e = 0;
+        uint8_t d[24];
+        int32_t hp = 0;
+        uint32_t life;
+        if (!Descriptor(e, d) || Quad(d) != res || !HealthOf(e, &hp, &life) || hp <= 0) continue;
+        AddFoe(e, res);
+        g_lateFoes++;
+        static uint64_t told[16];
+        static unsigned ntold;
+        int seen = 0;
+        for (unsigned k = 0; k < ntold; k++) if (told[k] == res) seen = 1;
+        if (!seen && ntold < 16) { told[ntold++] = res; Log("an enemy kind without records by its resource: %016llx (entity %u, health %d): one of her foes", (unsigned long long)res, e, hp); }
+    }
+}
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
@@ -1086,7 +1122,18 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
                 hf->component_record("AvatarComponentData", s->resource, &st) != 0, hf->component_record("SeatCollectionComponentData", s->resource, &st) != 0);
         }
     }
-    if (s->resource != AVATAR) { if (FoeKind(s->resource) || EnemyTurret(s->resource) || AiEnemy(s->resource)) AddFoe(s->entity, s->resource); SeeAny(s->entity, s->resource); return; }
+    if (s->resource != AVATAR)
+    {
+        if (FoeKind(s->resource) || EnemyTurret(s->resource) || AiEnemy(s->resource)) AddFoe(s->entity, s->resource);
+        else if (!FriendRes(s->resource) && Unrecorded(s->resource))
+        {
+            /* 0.1.14: its kind's records are not found: asked a second later whether the thing itself has health */
+            unsigned i = g_lateNext++ % LATE;
+            g_late[i].e = s->entity; g_late[i].res = s->resource; g_late[i].at = g_now + 1.0;
+        }
+        SeeAny(s->entity, s->resource);
+        return;
+    }
     if (!s->authority) return;
     g_spawnEntity[g_spawnNext % 8] = s->entity;
     g_spawnNet[g_spawnNext % 8] = s->network;
@@ -1290,6 +1337,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         }
         prev[i] = down;
     }
+    LateFrame();
     if (g_alive)
     {
         MarkFrame();
