@@ -50,7 +50,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.6"
+#define VERSION "0.3.7"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -106,6 +106,8 @@ static float s_sinTaken = 0.65f, s_parkTaken = 0.7f, s_sinHeal = 0.25f, s_sinHea
 static int s_relRound = 0, s_relRoundsS = 3, s_relRoundsPlus = 4, s_relPoints = 16, s_fullShots = 3;
 /* 0.3.6: their rounds land as the Orbital Gatling Barrage's HE shells (its blast row, 266, where each round lands) */
 static int s_heRow = 266, s_fullHe = 1, s_releaseHe = 1;
+static int s_rideSafe = 1, s_relRingS = 8, s_relRingPlus = 12;   /* 0.3.7 */
+static unsigned g_rideSaved;
 static float s_heRate = 10;
 static float s_relReachPlus = 18, s_relInner = 6, s_relGap = 0.3f;
 static int s_driftOn = 1, s_driftRings = 4, s_driftDamage = 800, s_fullOn = 1;
@@ -159,6 +161,7 @@ static const KbSetting kSettings[] = {
     KB_F("post_move", s_postMove, 1, 5), KB_F("sinner_taken", s_sinTaken, 0, 1), KB_F("park_taken", s_parkTaken, 0, 1), KB_F("sinner_heal", s_sinHeal, 0, 1), KB_F("sinner_heal_every", s_sinHealEvery, 0.5, 120),
     KB_I("release_round", s_relRound, 0, 100000), KB_I("release_rounds_s", s_relRoundsS, 1, 10), KB_I("release_rounds_plus", s_relRoundsPlus, 1, 10), KB_F("release_reach_plus", s_relReachPlus, 2, 80),
     KB_I("drift_points", s_relPoints, 3, 32), KB_F("drift_inner", s_relInner, 0, 30), KB_F("drift_gap", s_relGap, 0, 2),
+    KB_I("ride_safe", s_rideSafe, 0, 1), KB_I("release_ring_s", s_relRingS, 0, 32), KB_I("release_ring_plus", s_relRingPlus, 0, 32),
     KB_I("he_explosion", s_heRow, 0, 100000), KB_F("he_rate", s_heRate, 1, 60), KB_I("full_he", s_fullHe, 0, 1), KB_I("release_he", s_releaseHe, 0, 1),
     KB_I("full_on", s_fullOn, 0, 1), KB_I("full_shots", s_fullShots, 1, 8), KB_F("full_min_speed", s_fullMinSpeed, 0, 50), KB_F("full_ref_speed", s_fullRefSpeed, 1, 60), KB_F("full_every", s_fullEvery, 0.05, 5),
     KB_F("full_cone", s_fullCone, 5, 90), KB_F("full_range", s_fullRange, 5, 100), KB_F("full_ram", s_fullRam, 0, 1), KB_F("full_ram_max", s_fullRamMax, 1, 10),
@@ -244,7 +247,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; projectile, 241: the Diligence Counter Sniper's) at the nearest\n"
                "; release_targets_s enemies within release_reach m (S+: release_targets_plus within release_reach_plus),\n"
                "; release_rounds_s each (S+: release_rounds_plus), by its gear and her buffs.\n"
-               "release_round = %d\nrelease_rounds_s = %d\nrelease_rounds_plus = %d\nrelease_reach_plus = %g\n"
+               "; Around it too: release_ring_s rounds (S+: release_ring_plus) evenly all around, landing 0.7 of its reach out.\n"
+               "; ride_safe 1: in the Sinveiler nothing damages her.\n"
+               "release_round = %d\nrelease_rounds_s = %d\nrelease_rounds_plus = %d\nrelease_reach_plus = %g\nrelease_ring_s = %d\nrelease_ring_plus = %d\nride_safe = %d\n"
                "; Let's Go for a Drift! (key_s2 in the FRV Sinner; drift_on 0: off): its active, once a press, every\n"
                "; drift_cooldown s, not in N: waves of EMS bursts out from it: drift_rings rings from drift_inner m out to drift_radius m,\n"
                "; drift_gap s apart, bursts about 5 m apart (at most drift_points a ring); each enemy in reach takes\n"
@@ -300,7 +305,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_s2Cd, (double)s_krSeconds, (double)s_krMult, (double)s_krHeal, (double)s_krSinnerHeal, (double)s_s3Cd, s_cleanse, (double)s_winnerCd,
             (double)s_gearSeconds, (double)s_gearD, (double)s_gearS, (double)s_gearPlus, (double)s_gearN, (double)s_postMove,
             (double)s_sinTaken, (double)s_parkTaken, (double)s_sinHeal, (double)s_sinHealEvery,
-            s_relRound, s_relRoundsS, s_relRoundsPlus, (double)s_relReachPlus,
+            s_relRound, s_relRoundsS, s_relRoundsPlus, (double)s_relReachPlus, s_relRingS, s_relRingPlus, s_rideSafe,
             s_driftOn, (double)s_driftEvery, (double)s_driftRadius, s_driftRings, s_driftDamage, s_relPoints, (double)s_relInner, (double)s_relGap,
             s_heRow, (double)s_heRate, s_fullHe, s_releaseHe,
             s_fullOn, s_fullShots, (double)s_fullMinSpeed, (double)s_fullRefSpeed, (double)s_fullEvery, (double)s_fullCone, (double)s_fullRange, (double)s_fullRam, (double)s_fullRamMax,
@@ -2225,7 +2230,7 @@ static void HeFrame(double step)
 }
 /* shots queued from the Sinner (Kinetic Release's rifle rounds), under max_rounds */
 #define DRIFT_Q 64
-static struct { uint32_t t; int rifle; } g_dq[DRIFT_Q];
+static struct { uint32_t t; int rifle; float at[3]; } g_dq[DRIFT_Q];
 static int g_dqn, g_dqi;
 static double g_driftNext, g_shotNext;
 static void KineticRelease(const char* why)
@@ -2246,13 +2251,23 @@ static void KineticRelease(const char* why)
         while (j > 0 && t[j - 1].d2 > d2) { t[j] = t[j - 1]; j--; }
         t[j].e = e; t[j].d2 = d2;
     }
-    if (!n) return;
+    int ring = plus ? s_relRingPlus : s_relRingS;
+    if (!n) return;   /* (only with an enemy in reach) */
     g_releaseNext = g_now + s_releaseEvery;
     if (g_dqi >= g_dqn) g_dqn = g_dqi = 0;
+    /* 0.3.7: all around it: a ring of rounds, whichever way it faces */
+    static unsigned turn;
+    for (int i = 0; i < ring && g_dqn < DRIFT_Q; i++)
+    {
+        float a = 6.2832f * ((float)i + 0.5f * (float)(turn & 1)) / (float)ring, q[3] = {g_sinPos[0] + cosf(a) * reach * 0.7f, g_sinPos[1] + sinf(a) * reach * 0.7f, g_sinPos[2]}, g[3];
+        if (!Ground(q, g)) memcpy(g, q, 12);
+        g_dq[g_dqn].t = 0; g_dq[g_dqn].rifle = 1; memcpy(g_dq[g_dqn].at, g, 12); g_dqn++;
+    }
+    turn++;
     for (int r = 0; r < rounds; r++)
         for (int i = 0; i < n && g_dqn < DRIFT_Q; i++) { g_dq[g_dqn].t = t[i].e; g_dq[g_dqn].rifle = 1; g_dqn++; }
     g_releases++;
-    if (g_releases <= 8) Log("%s%s: %d rifle rounds each at %d enemies within %.0f m", why, plus ? "+" : "", rounds, n, (double)reach);
+    if (g_releases <= 8) Log("%s%s: %d rounds all around it, %d each at %d enemies within %.0f m", why, plus ? "+" : "", ring, rounds, n, (double)reach);
 }
 static int DriftStart(void)
 {
@@ -2376,16 +2391,17 @@ static void DriftFrame(void)
 {
     if (!g_sinner || !g_landed || !g_sinPosOk || (g_piloting && !g_frv)) return;
     /* Kinetic Release's rounds, a few each frame */
-    for (int shots = 0; g_dqi < g_dqn && shots < 3 && g_now >= g_shotNext && ProjBudget() >= 1; shots++)
+    for (int shots = 0; g_dqi < g_dqn && shots < 4 && g_now >= g_shotNext && ProjBudget() >= 1; shots++)
     {
-        int i = g_dqi++, k = FoeIndex(g_dq[i].t);
+        int i = g_dqi++, k = g_dq[i].t ? FoeIndex(g_dq[i].t) : -1;
         float at[3];
-        if (k < 0 || !Alive(g_dq[i].t) || !TargetPos(g_dq[i].t, g_foeRes[k], at)) continue;
+        if (!g_dq[i].t) memcpy(at, g_dq[i].at, 12);
+        else if (k < 0 || !Alive(g_dq[i].t) || !TargetPos(g_dq[i].t, g_foeRes[k], at)) continue;
         g_shootRifle = g_dq[i].rifle;
         g_arm = !g_arm;
         int ok = SinnerShoot(g_arm, g_dq[i].t, at);
         g_shootRifle = 0;
-        if (ok) { g_driftShots++; g_shotNext = g_now + 0.05; if (s_releaseHe) HeQueue(g_sinPos, at); }
+        if (ok) { g_driftShots++; if (s_releaseHe) HeQueue(g_sinPos, at); }
     }
 }
 
@@ -2658,6 +2674,13 @@ static void DamageTaken(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     (void)me;
     if (d->amount > 0 && g_piloting && Sprinting()) { e->cancel = 1; g_sprintSaved++; return; }
+    /* 0.3.7: in the Sinveiler nothing reaches her (Let's Go For a Spin!: its rider cannot be targeted) */
+    if (d->amount > 0 && s_rideSafe && g_frv && g_sinner && g_piloting)
+    {
+        e->cancel = 1;
+        if (g_rideSaved++ < 3) Log("Let's Go For a Spin!: a hit on her in the Sinveiler stopped (%d damage, kind %u)", d->amount, d->kind);
+        return;
+    }
     /* 0.3.0: at full Upshift she takes upshift_guard less */
     if (d->amount > 0 && g_up >= s_upMax && s_upGuard > 0) ScaleDamage(d, 1.0 - s_upGuard);
     if (d->amount <= 0 || d->kind == 8 || d->kind == 9 || s_sharePct <= 0 || !atomic_load(&g_shareOk)) return;
@@ -2888,6 +2911,8 @@ static void Reset(const char* why)
     if (g_sinner) Log("the Sinner (entity %u) is gone with the mission", g_sinner);
     if (g_turretHits || g_rides || g_releases || g_noDeath)
         Log("%s: the FRV Sinner: %u turret hits, %u rides, %u Kinetic Releases, %u fatal hits survived", why, g_turretHits, g_rides, g_releases, g_noDeath);
+    if (g_rideSaved) Log("%s: %u hits on her stopped in the Sinveiler", why, g_rideSaved);
+    g_rideSaved = 0;
     if (g_heBlasts || g_heDropped) Log("%s: %u HE blasts (%u over he_rate, left out)", why, g_heBlasts, g_heDropped);
     g_heBlasts = g_heDropped = 0;
     for (int i = 0; i < HE_Q; i++) g_he[i].when = 0;
