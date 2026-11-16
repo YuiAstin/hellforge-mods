@@ -50,7 +50,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.8"
+#define VERSION "0.3.9"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -139,7 +139,10 @@ static int s_releaseShell = 154, s_releaseTargetsS = 4, s_releaseTargetsPlus = 6
 static float s_releaseAp = 6, s_releaseReach = 12;
 static float s_releaseEvery = 5, s_releaseRadius = 7,   /* 0.2.4: 7 m (4 m blasts flipped the FRV) */
     s_rideRange = 60;
-static int s_grip = 1;
+static int s_grip = 0;   /* (0.3.9: off by default: it never ran before the physics pins were fixed) */
+/* 0.3.9: the FRV Sinner kept steady: a hit's spin and launch taken off its physics body; set upright when it lies over */
+static int s_carSteady = 1, s_carRight = 1;
+static float s_carSpin = 1.5f, s_carLift = 2.0f, s_carWindow = 0.6f, s_carRightAfter = 1.5f;
 static float s_gripGravity = 12, s_gripCancel = 0.5f, s_gripMargin = 0.35f, s_gripMass = 3000;
 static float s_sprintSeconds = 6, s_sprintCd = 20, s_sprintRam = 3, s_sprintRamS = 1.5f, s_sprintRamPlus = 2;
 
@@ -177,6 +180,8 @@ static const KbSetting kSettings[] = {
     KB_I("release_targets_plus", s_releaseTargetsPlus, 1, 20), KB_I("ems_immune", s_emsImmune, 0, 1), KB_F("release_every", s_releaseEvery, 0.5, 60), KB_F("release_radius", s_releaseRadius, 1, 20),
     KB_I("grip", s_grip, 0, 1), KB_F("grip_gravity", s_gripGravity, 0, 100), KB_F("grip_cancel", s_gripCancel, 0, 1), KB_F("grip_margin", s_gripMargin, 0.05, 3),
     KB_F("grip_mass", s_gripMass, 100, 100000),
+    KB_I("car_steady", s_carSteady, 0, 1), KB_F("car_spin", s_carSpin, 0, 20), KB_F("car_lift", s_carLift, 0, 30), KB_F("car_window", s_carWindow, 0.1, 5),
+    KB_I("car_right", s_carRight, 0, 1), KB_F("car_right_after", s_carRightAfter, 0.2, 30),
     KB_F("ride_range", s_rideRange, 1, 1000), KB_F("sprint_seconds", s_sprintSeconds, 0.5, 60), KB_F("sprint_cooldown", s_sprintCd, 0, 600),
     KB_F("sprint_ram", s_sprintRam, 0, 100), KB_F("sprint_ram_s", s_sprintRamS, 0, 100), KB_F("sprint_ram_plus", s_sprintRamPlus, 0, 100),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
@@ -294,6 +299,10 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; height over the ground, grip_cancel of its upward speed is taken out each frame and it is pushed down with\n"
                "; grip_gravity m/s2 more (its mass taken as grip_mass kg). Rocks fling it less; jumps are cut short too.\n"
                "grip = %d\ngrip_gravity = %g\ngrip_cancel = %g\ngrip_margin = %g\ngrip_mass = %g\n"
+               "; Steady (car_steady 0: off): for car_window s after a hit on the FRV Sinner, its roll and pitch spin is held to\n"
+               "; car_spin rad/s and its upward speed to car_lift m/s (the bots' cannons flipped it). car_right 1: lying over\n"
+               "; (tilted past 60 degrees) for car_right_after s, it is set upright where it is.\n"
+               "car_steady = %d\ncar_spin = %g\ncar_lift = %g\ncar_window = %g\ncar_right = %d\ncar_right_after = %g\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint. hellbomb_on_exhaustion 1 sets off a\n"
                "; Hellbomb on her if she runs her stamina dry (a T-Doll's price).\n"
                "hp_mult = 1.5\nstamina_mult = 2\nhellbomb_on_exhaustion = 1\n",
@@ -315,7 +324,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             s_sight, (double)s_fpDistance, s_frvOn, s_releaseRow, s_releaseShell, (double)s_releaseAp, (double)s_releaseReach, s_releaseTargetsS,
             s_releaseTargetsPlus, s_emsImmune, (double)s_releaseEvery, (double)s_releaseRadius, (double)s_rideRange,
             (double)s_sprintSeconds, (double)s_sprintCd, (double)s_sprintRam, (double)s_sprintRamS, (double)s_sprintRamPlus,
-            s_grip, (double)s_gripGravity, (double)s_gripCancel, (double)s_gripMargin, (double)s_gripMass);
+            s_grip, (double)s_gripGravity, (double)s_gripCancel, (double)s_gripMargin, (double)s_gripMass,
+            s_carSteady, (double)s_carSpin, (double)s_carLift, (double)s_carWindow, s_carRight, (double)s_carRightAfter);
 }
 
 #include "sinner_drive.h"
@@ -2083,11 +2093,13 @@ static void TurretSeen(KbHitCall* c)
  * base empties it on her */
 static unsigned g_carSpared;
 static atomic_uint g_carSteadied;
+static atomic_ullong g_carHitMs;
 static void CarSpared(KbHitCall* c)
 {
     uint32_t car = g_sinner;
     uint8_t h[HIT_SIZE];
     if (!car || !c->hit || !c->out || !ReadAt((uintptr_t)c->hit, h, sizeof h) || Word(h + 0x20) != car) return;
+    atomic_store(&g_carHitMs, GetTickCount64());   /* 0.3.9: Steady's window */
     if (!OwnBlast(h, NULL))
     {
         /* 0.3.8: anyone else's hit on it: its damage stays, its stagger, push, knockdown and hit reaction go (the
@@ -2446,8 +2458,13 @@ static struct
     ActorVecFn position, rotation;
     ActorVelFn velocities;
     ActorPushFn impulse;
+    /* 0.3.9, from the table itself (the game calls them so at game.dll+0x5C91F2 .. 0x5C9223: both speeds set, then its
+     * place and its turn): */
+    ActorPushFn set_velocities;          /* slot 0xA0: (actor, linear, angular) */
+    ActorVecFn teleport_position;        /* slot 0x60 */
+    ActorVecFn teleport_rotation;        /* slot 0x68 */
 } px;
-static int g_pxOk;
+static int g_pxOk, g_pxBad;
 static void PhysicsPins(void)
 {
     struct { void** slot; uintptr_t rva; int table; const char* bytes; } k[] = {
@@ -2460,17 +2477,26 @@ static void PhysicsPins(void)
         {(void**)&px.position, 0x7999a0, 0x50, "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 20 57 48 83 ec 30 48 8b ea 8b f1 e8 fa 28 b2 00 33 d2"},
         {(void**)&px.rotation, 0x799a90, 0x58, "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 20 57 48 83 ec 40 48 8b ea 8b f1 e8 0a 28 b2 00 33 d2"},
         {(void**)&px.components, 0x7e1c20, -1, "48 89 5c 24 20 55 48 83 ec 20 8b c1 4d 8b d0 25 ff ff 3f 00 8b ea 4c 8d 0c 40 48 8b 05 ff 3e fe"}};
+    /* 0.3.9: the table is filled after the game loads (it read as not there at the loaded event, so Grip never ran):
+     * asked again when the FRV Sinner lands; any table whose slots are the researched code is the table */
     uintptr_t table = Pointer(game + 0x3326338);
-    if (table != exe + 0x27CD910) { Log("Grip off: the engine physics table is not where it was researched"); return; }
+    static int tries;
+    if (!table) { if (tries++ < 3) Log("the engine physics table is not set yet ([game+0x3326338] = 0): asked again later"); return; }
+    if (table != exe + 0x27CD910) Log("the engine physics table is at %p (helldivers2.exe+0x%llX, researched at +0x27CD910): its slots decide", (void*)table, (unsigned long long)(table - exe));
     for (unsigned i = 0; i < sizeof k / sizeof k[0]; i++)
     {
         uintptr_t at = exe + k[i].rva;
         if (!hf->code_matches(at, k[i].bytes) || (k[i].table >= 0 && Pointer(table + (uintptr_t)k[i].table) != at))
-        { Log("Grip off: helldivers2.exe+0x%llX is not the researched code", (unsigned long long)k[i].rva); return; }
+        { if (tries++ < 6) Log("Grip and Steady off: helldivers2.exe+0x%llX is not the researched code (table slot 0x%X = %p)", (unsigned long long)k[i].rva, k[i].table, k[i].table >= 0 ? (void*)Pointer(table + (uintptr_t)k[i].table) : NULL); g_pxBad = 1; return; }
         *k[i].slot = (void*)at;
     }
+    uintptr_t sv = Pointer(table + 0xA0), tp = Pointer(table + 0x60), tr = Pointer(table + 0x68);
+    size_t exeSize = 0;
+    hf->module_base("helldivers2.exe", &exeSize);
+    if (sv > exe && sv < exe + exeSize && tp > exe && tp < exe + exeSize && tr > exe && tr < exe + exeSize)
+    { px.set_velocities = (ActorPushFn)sv; px.teleport_position = (ActorVecFn)tp; px.teleport_rotation = (ActorVecFn)tr; }
     g_pxOk = 1;
-    Log("Grip ready (the engine physics: the FRV Sinner's body read and pushed)");
+    Log("the engine physics ready (the FRV Sinner's body read%s)", px.set_velocities ? ", steadied and set upright" : "; its setters are not there: no Steady");
 }
 static uint32_t g_gripActor, g_gripUnit;
 static float g_gripRest[4];
@@ -2561,6 +2587,64 @@ static void GripFrame(double dt)
         Log("Grip: %d of 4 corners down (gaps %.2f %.2f %.2f %.2f m), up %.1f m/s, %.1f m/s across: pushed down", touching,
             dist[0] - g_gripRest[0], dist[1] - g_gripRest[1], dist[2] - g_gripRest[2], dist[3] - g_gripRest[3], v[2], hs);
     }
+}
+
+/* ---- 0.3.9: Steady: the FRV Sinner's body after a hit: its roll and pitch spin and its launch held down; set upright
+ * when it lies over. (0.3.8 found the bots' cannon hits carry no stagger or push in their hit result: the shove is the
+ * blast's own on its physics body.) ---------------------------------------------------------------------------------- */
+static unsigned g_carHeld, g_carRighted;
+static double g_overSince = -1;
+static void SteadyFrame(void)
+{
+    if (!g_frv || !g_sinner || !g_landed || !g_sinUnit) { g_overSince = -1; return; }
+    if (!g_pxOk) { static double next; if (!g_pxBad && g_now >= next) { next = g_now + 5; PhysicsPins(); } return; }
+    if ((!s_carSteady && !s_carRight) || !px.set_velocities) return;
+    uint8_t d[24];
+    if (!Descriptor(g_sinner, d) || !(Word(d + 20) & 1)) return;   /* only where it is simulated */
+    if (g_gripUnit != g_sinUnit || !g_gripActor || !px.valid(g_gripActor) || px.owner(g_gripActor) != g_sinUnit)
+    {
+        g_gripUnit = g_sinUnit;
+        g_gripActor = GripActor(g_sinUnit);
+        g_gripRestN = 0;
+        Log("Steady: the FRV Sinner's physics body %08x", g_gripActor);
+        if (!g_gripActor) return;
+    }
+    float pos[4] = {0}, q[4] = {0}, v[4] = {0}, w[4] = {0};
+    px.position(g_gripActor, pos);
+    px.rotation(g_gripActor, q);
+    px.velocities(g_gripActor, v, w);
+    for (int i = 0; i < 3; i++) if (!isfinite(v[i]) || !isfinite(w[i]) || !isfinite(q[i]) || !isfinite(pos[i])) return;
+    if (!isfinite(q[3])) return;
+    if (s_carSteady && GetTickCount64() - atomic_load(&g_carHitMs) < (unsigned long long)(s_carWindow * 1000))
+    {
+        float wh = sqrtf(w[0] * w[0] + w[1] * w[1]);
+        int held = 0;
+        if (wh > s_carSpin) { float k = s_carSpin / wh; w[0] *= k; w[1] *= k; held = 1; }
+        if (v[2] > s_carLift) { v[2] = s_carLift; held = 1; }
+        if (held)
+        {
+            px.set_velocities(g_gripActor, v, w);
+            if (g_carHeld++ < 8) Log("Steady: a hit's shove held (its roll and pitch spin was %.1f rad/s, now at most %.1f; up %.1f m/s)", (double)wh, (double)s_carSpin, (double)v[2]);
+        }
+    }
+    /* lying over: set upright where it is, facing as it faced */
+    float upz = 1 - 2 * (q[0] * q[0] + q[1] * q[1]);
+    if (!s_carRight || upz > 0.5f) { g_overSince = -1; return; }
+    if (g_overSince < 0) { g_overSince = g_now; return; }
+    if (g_now - g_overSince < s_carRightAfter) return;
+    g_overSince = -1;
+    static const float fwdL[3] = {0, 1, 0}, rightL[3] = {1, 0, 0};
+    float f[3], a;
+    QRotate(q, fwdL, f);
+    if (f[0] * f[0] + f[1] * f[1] > 0.04f) a = atan2f(-f[0], f[1]);
+    else { QRotate(q, rightL, f); a = atan2f(f[1], f[0]); }
+    float nq[4] = {0, 0, sinf(a * 0.5f), cosf(a * 0.5f)}, np[4] = {pos[0], pos[1], pos[2] + 0.8f, 0}, zero[4] = {0, 0, 0, 0};
+    px.set_velocities(g_gripActor, zero, zero);
+    px.teleport_position(g_gripActor, np);
+    px.teleport_rotation(g_gripActor, nq);
+    px.set_velocities(g_gripActor, zero, zero);
+    g_carRighted++;
+    Log("Steady: the FRV Sinner lay over (its up axis %.2f): set upright where it is", (double)upz);
 }
 
 /* ---- the skills ---------------------------------------------------------------------------------------------------- */
@@ -2943,6 +3027,8 @@ static void Reset(const char* why)
     if (g_sprints) Log("%s: %u sprints, %u rams, %u hits stopped in sprints", why, g_sprints, g_rams, g_sprintSaved);
     if (g_carSpared) Log("%s: her own blasts on the FRV Sinner emptied %u times", why, g_carSpared);
     g_carSpared = 0;
+    if (g_carHeld || g_carRighted) Log("%s: Steady held %u shoves on the FRV Sinner, set it upright %u times", why, g_carHeld, g_carRighted);
+    g_carHeld = g_carRighted = 0;
     { unsigned n = atomic_exchange(&g_carSteadied, 0); if (n) Log("%s: stagger or push removed from %u hits on the Sinner", why, n); }
     if (g_gripCatches) Log("%s: Grip pushed the FRV Sinner down in %u frames", why, g_gripCatches);
     g_gripCatches = 0; g_gripActor = g_gripUnit = 0; g_gripRestN = 0;
@@ -3248,6 +3334,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     TurnFrame();
     PullFrame();
     FrvFrame();
+    SteadyFrame();
     GearFrame();
     WaveFrame();
     DriftFrame();

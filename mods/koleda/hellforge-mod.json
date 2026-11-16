@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.koleda",
   "name": "Koleda",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "icon": "icon.png",
   "description": "Koleda's kit from Girls' Frontline 2 for your Helldiver (AK-12, a Vanguard). Spectre calls the Sinner (Sinveiler): the M-103 Supply FRV from her loadout (else the Patriot exosuit). It follows her, fights by its gear (D by default; N, S, S+ for a while from her skills; P standing still) and takes 80% of the damage aimed at her; pressed again near it she gets in (Let's Go For a Spin!), and inside it The Winner restores it. Snow Wolf's Eye fires heavy rounds at her target, stronger per Upshift, with Turbo Boost, and sends the Sinner to S+; Tactical Routebook gives Kinetic Recovery and an EMS Kinetic Release and sets S. In the FRV her keys become its skills (Full Speed, Drift, The Winner): Let's Go for a Drift! sends waves of EMS bursts out from it into the enemies around it; at speed it fires into a cone ahead and rams harder (Let's Go Full Speed!); in S and S+ it fires rifle rounds at the enemies near it (Kinetic Release). Sinner actions build Upshift (+15% damage a stack; at 5 she takes less). TEST BUILD. Solo or host. Keys in koleda.ini; numbers on the MODS tab (Mod Options Menu). HUD needs Bingus Shared Loader and HD2Runtime. Installs beside the author's other character kits (pick one on the MODS tab). No character model included.",
   "gameplay": true,
