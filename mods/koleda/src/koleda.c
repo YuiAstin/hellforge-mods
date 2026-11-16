@@ -50,7 +50,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.5"
+#define VERSION "0.3.6"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -104,6 +104,9 @@ static float s_sinTaken = 0.65f, s_parkTaken = 0.7f, s_sinHeal = 0.25f, s_sinHea
 /* 0.3.2: Kinetic Release: rifle rounds from it at the enemies near it; Drift: EMS waves; Full Speed: its cone of fire
  * ahead while it moves fast, and harder rams */
 static int s_relRound = 0, s_relRoundsS = 3, s_relRoundsPlus = 4, s_relPoints = 16, s_fullShots = 3;
+/* 0.3.6: their rounds land as the Orbital Gatling Barrage's HE shells (its blast row, 266, where each round lands) */
+static int s_heRow = 266, s_fullHe = 1, s_releaseHe = 1;
+static float s_heRate = 10;
 static float s_relReachPlus = 18, s_relInner = 6, s_relGap = 0.3f;
 static int s_driftOn = 1, s_driftRings = 4, s_driftDamage = 800, s_fullOn = 1;
 static float s_driftEvery = 12, s_driftRadius = 20;
@@ -156,6 +159,7 @@ static const KbSetting kSettings[] = {
     KB_F("post_move", s_postMove, 1, 5), KB_F("sinner_taken", s_sinTaken, 0, 1), KB_F("park_taken", s_parkTaken, 0, 1), KB_F("sinner_heal", s_sinHeal, 0, 1), KB_F("sinner_heal_every", s_sinHealEvery, 0.5, 120),
     KB_I("release_round", s_relRound, 0, 100000), KB_I("release_rounds_s", s_relRoundsS, 1, 10), KB_I("release_rounds_plus", s_relRoundsPlus, 1, 10), KB_F("release_reach_plus", s_relReachPlus, 2, 80),
     KB_I("drift_points", s_relPoints, 3, 32), KB_F("drift_inner", s_relInner, 0, 30), KB_F("drift_gap", s_relGap, 0, 2),
+    KB_I("he_explosion", s_heRow, 0, 100000), KB_F("he_rate", s_heRate, 1, 60), KB_I("full_he", s_fullHe, 0, 1), KB_I("release_he", s_releaseHe, 0, 1),
     KB_I("full_on", s_fullOn, 0, 1), KB_I("full_shots", s_fullShots, 1, 8), KB_F("full_min_speed", s_fullMinSpeed, 0, 50), KB_F("full_ref_speed", s_fullRefSpeed, 1, 60), KB_F("full_every", s_fullEvery, 0.05, 5),
     KB_F("full_cone", s_fullCone, 5, 90), KB_F("full_range", s_fullRange, 5, 100), KB_F("full_ram", s_fullRam, 0, 1), KB_F("full_ram_max", s_fullRamMax, 1, 10),
     KB_I("drift_on", s_driftOn, 0, 1), KB_I("drift_rings", s_driftRings, 1, 8), KB_I("drift_damage", s_driftDamage, 0, 100000), KB_F("drift_cooldown", s_driftEvery, 0, 600), KB_F("drift_radius", s_driftRadius, 2, 50),
@@ -248,6 +252,10 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; the EMS mortar's shell from above; else release_explosion 150. ems_immune 1: no EMS stun on her or the Sinner.\n"
                "; Her bursts spare her, the Sinner and her allies.\n"
                "drift_on = %d\ndrift_cooldown = %g\ndrift_radius = %g\ndrift_rings = %d\ndrift_damage = %d\ndrift_points = %d\ndrift_inner = %g\ndrift_gap = %g\n"
+               "; HE rounds (full_he 1: Full Speed's, release_he 1: Kinetic Release's): where each of their rounds lands, the\n"
+               "; Orbital Gatling Barrage's high-explosive blast (he_explosion, 266: its shell's; 0: none), at most he_rate a\n"
+               "; second; by its gear and her buffs, sparing her, the Sinner and her allies.\n"
+               "he_explosion = %d\nhe_rate = %g\nfull_he = %d\nrelease_he = %d\n"
                "; Let's Go Full Speed! (full_on 0: off; not in N): while it moves at full_min_speed m/s or more, it fires at the\n"
                "; enemies ahead (full_cone degrees either side of its way, within full_range m), full_shots shots spread among\n"
                "; them every full_every s at full_ref_speed m/s (faster: more often); and its rams deal 1 + full_ram for each m/s over full_min_speed times\n"
@@ -294,6 +302,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_sinTaken, (double)s_parkTaken, (double)s_sinHeal, (double)s_sinHealEvery,
             s_relRound, s_relRoundsS, s_relRoundsPlus, (double)s_relReachPlus,
             s_driftOn, (double)s_driftEvery, (double)s_driftRadius, s_driftRings, s_driftDamage, s_relPoints, (double)s_relInner, (double)s_relGap,
+            s_heRow, (double)s_heRate, s_fullHe, s_releaseHe,
             s_fullOn, s_fullShots, (double)s_fullMinSpeed, (double)s_fullRefSpeed, (double)s_fullEvery, (double)s_fullCone, (double)s_fullRange, (double)s_fullRam, (double)s_fullRamMax,
             (double)s_followDist, (double)s_personal, (double)s_maxRounds, (double)s_roundSpeed, s_turnOn, s_drive, s_driveTest, s_locoManager, s_locoMap, s_locoRecords, s_locoStride, s_stickFwd, s_stickSide, s_stickTurn,
             s_sight, (double)s_fpDistance, s_frvOn, s_releaseRow, s_releaseShell, (double)s_releaseAp, (double)s_releaseReach, s_releaseTargetsS,
@@ -2175,6 +2184,45 @@ static void WaveFrame(void)
     if (++g_wave.ring >= g_wave.rings) g_wave.on = 0;
     else g_wave.next = g_now + s_relGap;
 }
+/* 0.3.6: HE rounds: a blast where each lands (its flight time after the shot) */
+#define HE_Q 32
+static struct { float at[3]; double when; } g_he[HE_Q];
+static unsigned g_heBlasts, g_heDropped;
+static double g_heTokens;
+static void HeQueue(const float from[3], const float at[3])
+{
+    if (s_heRow <= 0) return;
+    for (int i = 0; i < HE_Q; i++)
+        if (g_he[i].when <= 0)
+        {
+            float d = sqrtf(Dist2(from, at)), t = d / (s_roundSpeed > 50 ? s_roundSpeed : 250);
+            memcpy(g_he[i].at, at, 12);
+            g_he[i].when = g_now + (t > 0.5f ? 0.5f : t);
+            return;
+        }
+    g_heDropped++;
+}
+static void HeFrame(double step)
+{
+    g_heTokens += step * s_heRate;
+    if (g_heTokens > s_heRate) g_heTokens = s_heRate;
+    for (int i = 0; i < HE_Q; i++)
+    {
+        if (g_he[i].when <= 0 || g_now < g_he[i].when) continue;
+        g_he[i].when = 0;
+        if (g_heTokens < 1) { g_heDropped++; continue; }
+        unsigned slot = g_ownNext++ % KB_OWN_SLOTS;   /* spares her and the Sinner */
+        memcpy(g_ownPos[slot], g_he[i].at, 12);
+        atomic_store(&g_ownEmp[slot], 0);
+        atomic_store(&g_ownMs[slot], GetTickCount64());
+        if (hf->spawn_explosion(self, (uint32_t)s_heRow, g_he[i].at) == HF_ACT_REQUESTED)
+        {
+            g_heTokens -= 1;
+            if (g_heBlasts++ < 3) Log("HE round: the Orbital Gatling Barrage's blast (row %d) at %.1f %.1f %.1f", s_heRow, (double)g_he[i].at[0], (double)g_he[i].at[1], (double)g_he[i].at[2]);
+        }
+        else { static int told; if (!told++) Log("HE round: blast row %d refused (%s)", s_heRow, hf->last_log ? hf->last_log(self) : ""); }
+    }
+}
 /* shots queued from the Sinner (Kinetic Release's rifle rounds), under max_rounds */
 #define DRIFT_Q 64
 static struct { uint32_t t; int rifle; } g_dq[DRIFT_Q];
@@ -2277,7 +2325,7 @@ static void FullFrame(void)
         float at[3];
         memcpy(at, t[k].q, 12);
         g_arm = !g_arm;
-        if (SinnerShoot(g_arm, t[k].e, at)) fired++;
+        if (SinnerShoot(g_arm, t[k].e, at)) { fired++; if (s_fullHe) HeQueue(g_sinPos, at); }
     }
     if (!fired) return;
     g_fightAt = g_now;
@@ -2337,7 +2385,7 @@ static void DriftFrame(void)
         g_arm = !g_arm;
         int ok = SinnerShoot(g_arm, g_dq[i].t, at);
         g_shootRifle = 0;
-        if (ok) { g_driftShots++; g_shotNext = g_now + 0.05; }
+        if (ok) { g_driftShots++; g_shotNext = g_now + 0.05; if (s_releaseHe) HeQueue(g_sinPos, at); }
     }
 }
 
@@ -2840,6 +2888,9 @@ static void Reset(const char* why)
     if (g_sinner) Log("the Sinner (entity %u) is gone with the mission", g_sinner);
     if (g_turretHits || g_rides || g_releases || g_noDeath)
         Log("%s: the FRV Sinner: %u turret hits, %u rides, %u Kinetic Releases, %u fatal hits survived", why, g_turretHits, g_rides, g_releases, g_noDeath);
+    if (g_heBlasts || g_heDropped) Log("%s: %u HE blasts (%u over he_rate, left out)", why, g_heBlasts, g_heDropped);
+    g_heBlasts = g_heDropped = 0;
+    for (int i = 0; i < HE_Q; i++) g_he[i].when = 0;
     if (g_drifts || g_fulls || g_gearSaved || g_heals)
         Log("%s: %u Drifts, %u Full Speeds, %u of their shots, %u hits on the Sinner stopped in N, %u Gear Shift heals", why, g_drifts, g_fulls, g_driftShots, g_gearSaved, g_heals);
     g_drifts = g_fulls = g_driftShots = g_gearSaved = g_heals = 0;
@@ -3154,6 +3205,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     WaveFrame();
     DriftFrame();
     FullFrame();
+    HeFrame(step);
     GripFrame(step);
     HudFrame();
     Exhaustion();
