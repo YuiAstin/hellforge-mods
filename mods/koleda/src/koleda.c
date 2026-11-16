@@ -50,7 +50,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.12"
+#define VERSION "0.3.13"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -258,7 +258,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; projectile, 241: the Diligence Counter Sniper's) at the nearest\n"
                "; release_targets_s enemies within release_reach m (S+: release_targets_plus within release_reach_plus),\n"
                "; release_rounds_s each (S+: release_rounds_plus), by its gear and her buffs.\n"
-               "; Around it too: release_ring_s rounds (S+: release_ring_plus) evenly all around, landing 0.7 of its reach out.\n"
+               "; Around it too: release_ring_s rounds (S+: release_ring_plus) evenly all around, landing 0.85 of its reach out.\n"
                "; ride_safe 1: in the Sinveiler nothing damages her. sinner_steady 1: hits on the Sinner keep their damage but\n"
                "; lose their stagger and push (the bots' cannons flipped the FRV).\n"
                "release_round = %d\nrelease_rounds_s = %d\nrelease_rounds_plus = %d\nrelease_reach_plus = %g\nrelease_ring_s = %d\nrelease_ring_plus = %d\nride_safe = %d\nsinner_steady = %d\n"
@@ -1701,6 +1701,7 @@ static void RocketRow(void)
 static int g_shootRocket;   /* 0.1.3: this shot is the left arm's rocket */
 static int g_shootRifle;    /* 0.3.2: this shot is Kinetic Release's rifle round (release_round, the vanilla one) */
 static int g_shootHe;       /* 0.3.11: this shot is the HE shell itself (he_round) */
+static double g_heShotAt = -100;   /* 0.3.13: its last HE shell: no blast or impact reaches the Sinner for 2.5 s after */
 static int g_heRoundBad;
 static double g_rocketNext;
 static unsigned g_rocketsFired;
@@ -1769,12 +1770,21 @@ static int SinnerShoot(int arm, uint32_t target, const float at0[3])
     from[0] = p[0] + rt[0] * side + fw[0] * 1.2f;
     from[1] = p[1] + rt[1] * side + fw[1] * 1.2f;
     from[2] = p[2] + 2.4f;
+    if (g_frv)
+    {
+        /* 0.3.13: the FRV is 5 m long with a turret on top: a shell that started 3 m from its middle burst on it
+         * (Kinetic Release's ring destroyed it). Its shots start 3.2 m out toward the target (1.8 m more below) */
+        from[0] = p[0] + fw[0] * 3.2f + rt[0] * side * 0.3f;
+        from[1] = p[1] + fw[1] * 3.2f + rt[1] * side * 0.3f;
+        from[2] = p[2] + 1.6f;
+    }
     AimPoint(target, from, at0, at);
     for (int k = 0; k < 3; k++) d[k] = at[k] - from[k];
     float n = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
     if (!(n > 2.5f)) return 0;
     for (int k = 0; k < 3; k++) { d[k] /= n; from[k] += d[k] * 1.8f; }   /* clear of its own body and arms */
     if (n < 3.2f) return 0;
+    if (g_shootHe) g_heShotAt = g_now;
     uint32_t id;
     if (s_sinSight && WorldId(&id) && QueryIdle())
     {
@@ -2140,7 +2150,7 @@ static void CarSpared(KbHitCall* c)
     uint8_t h[HIT_SIZE];
     if (!car || !c->hit || !c->out || !ReadAt((uintptr_t)c->hit, h, sizeof h) || Word(h + 0x20) != car) return;
     atomic_store(&g_carHitMs, GetTickCount64());   /* 0.3.9: Steady's window */
-    if (!OwnBlast(h, NULL))
+    if (!OwnBlast(h, NULL) && g_now - g_heShotAt >= 0.4)   /* (0.3.13: and nothing in the 0.4 s after its own HE shell left: one that burst on it) */
     {
         /* 0.3.8: anyone else's hit on it: its damage stays, its stagger, push, knockdown and hit reaction go (the
          * result's fields, as the kit base's knockdown guard on her) */
@@ -2356,7 +2366,7 @@ static void KineticRelease(const char* why)
     static unsigned turn;
     for (int i = 0; i < ring && g_dqn < DRIFT_Q; i++)
     {
-        float a = 6.2832f * ((float)i + 0.5f * (float)(turn & 1)) / (float)ring, q[3] = {g_sinPos[0] + cosf(a) * reach * 0.7f, g_sinPos[1] + sinf(a) * reach * 0.7f, g_sinPos[2]}, g[3];
+        float a = 6.2832f * ((float)i + 0.5f * (float)(turn & 1)) / (float)ring, q[3] = {g_sinPos[0] + cosf(a) * reach * 0.85f, g_sinPos[1] + sinf(a) * reach * 0.85f, g_sinPos[2]}, g[3];
         if (!Ground(q, g)) memcpy(g, q, 12);
         g_dq[g_dqn].t = 0; g_dq[g_dqn].rifle = 1; memcpy(g_dq[g_dqn].at, g, 12); g_dqn++;
     }
@@ -2908,6 +2918,14 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
         /* 0.3.0 Gear Shift, either Sinner: none in N; sinner_taken of it, times park_taken standing still; never fatal;
          * a hit heals it (GearFrame) */
         if (Sprinting() || g_gear == GEAR_N) { e->cancel = 1; if (g_gear == GEAR_N) g_gearSaved++; else g_sprintSaved++; return; }
+        /* 0.3.13: its own HE shells (their blast is not always counted as hers) */
+        if ((d->kind == 4 && g_now - g_heShotAt < 2.5) || g_now - g_heShotAt < 0.4)   /* a blast within 2.5 s, anything within 0.4 s */
+        {
+            e->cancel = 1;
+            static atomic_uint told;
+            if (atomic_fetch_add(&told, 1) < 6) Log("a hit on the Sinner right after its own HE shell (kind %u, %d damage) stopped", d->kind, d->amount);
+            return;
+        }
         double m = s_sinTaken * (g_parked ? s_parkTaken : 1.0);
         if (m != 1) ScaleDamage(d, m);
         int32_t hp = atomic_load(&g_sinHpNow) - atomic_load(&g_sharePending);
@@ -3261,6 +3279,8 @@ typedef struct KoledaHud
     float drift_cd;                    /* 0.3.4: seconds left on Drift (-1: no Sinner standing / off) */
     char drift_key[24];                /* (0.3.5: unused) */
     uint32_t mounted;                  /* 0.3.5: in the FRV Sinner: cd / cd_max are Full Speed's, Drift's, The Winner's */
+    float stamina;                     /* 0.3.13: her stamina 0 .. 1 (-1: not now), for the warning */
+    uint32_t hellbomb;                 /* hellbomb_on_exhaustion */
 } KoledaHud;
 static KoledaHud g_hud = {1};
 /* the Sinner, 5 floats (x, y, z over it, health 0..1, gear): 1 while it stands, else 0 */
@@ -3317,6 +3337,8 @@ HF_MOD_EXPORT KoledaHud* koleda_hud_state(void)
     float m[3] = {s_s1Cd, s_s2Cd, s_s3Cd};
     for (int i = 0; i < 3; i++) { g_hud.cd[i] = (float)fmax(0, g_cd[i] - g_now); g_hud.cd_max[i] = m[i]; }
     g_hud.mounted = (uint32_t)Mounted();
+    g_hud.stamina = g_inMission && g_alive ? StaminaNow() : -1;
+    g_hud.hellbomb = (uint32_t)(s_hellbomb != 0);
     if (g_hud.mounted)
     {
         g_hud.cd[0] = (float)fmax(0, g_sprintCdUntil - g_now); g_hud.cd_max[0] = s_sprintCd;

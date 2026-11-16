@@ -27,7 +27,7 @@ end
 
 local ffi = require('ffi')
 pcall(ffi.cdef, [[
-typedef struct kolhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t upshift, upshift_max, gear, sinner; float sinner_hp, sinner_max; uint32_t leash, drive, winner, piloted; float kr_left; uint32_t keys[3]; char key_label[3][24]; uint32_t sinner_kind, frv; float sprint_left, sprint_cd, upshift_pct, kr_mult, share_pct; uint32_t share_on, ems_immune, release_on; float sprint_ram; int32_t frv_pkg; float turbo_left, turbo_mult, post_move, gear_left, winner_cd, upshift_guard, full_speed, full_ram, drift_cd; char drift_key[24]; uint32_t mounted; } kolhud1_state;
+typedef struct kolhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t upshift, upshift_max, gear, sinner; float sinner_hp, sinner_max; uint32_t leash, drive, winner, piloted; float kr_left; uint32_t keys[3]; char key_label[3][24]; uint32_t sinner_kind, frv; float sprint_left, sprint_cd, upshift_pct, kr_mult, share_pct; uint32_t share_on, ems_immune, release_on; float sprint_ram; int32_t frv_pkg; float turbo_left, turbo_mult, post_move, gear_left, winner_cd, upshift_guard, full_speed, full_ram, drift_cd; char drift_key[24]; uint32_t mounted; float stamina; uint32_t hellbomb; } kolhud1_state;
 void *kolhud1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
 void *kolhud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
 ]])
@@ -483,6 +483,24 @@ local function status_bar(d)
     else bits[#bits + 1] = 'SINNER: PATRIOT' end
     heavy(d, table.concat(bits, '   '), cx, y - 6 * s, 20 * s, 'title', rgba(ELECTRIC, 1), 'center')
     buff_row(d, cx, y - 40 * s)
+    -- running dry sets off the Hellbomb: a flashing red warning above it all while her stamina runs low (as the other kits)
+    if state.hellbomb ~= 0 then
+        local st = tonumber(state.stamina)
+        if st and st >= 0 and st < WARN_AT then
+            WARN.t = WARN.t + (WARN.dt or 0)
+            local urgency = 1 - st / WARN_AT
+            local rate = 2 + 6 * urgency
+            local pulse = 0.5 + 0.5 * math.sin(WARN.t * rate * math.pi * 2)
+            local wa = 0.35 + 0.65 * pulse
+            local wy = y - 150 * s
+            heavy(d, 'T-DOLL CATASTROPHIC FAILURE IMMINENT', cx, wy, 24 * s, 'title', rgba(RED, wa), 'center')
+            local ww, wh = 300 * s, 6 * s
+            d:rect(cx - ww / 2, wy + 32 * s, ww, wh, rgba(INK, 0.7), 1)
+            d:rect(cx - ww / 2, wy + 32 * s, ww * math.max(0, st), wh, rgba(RED, wa), 2)
+        else
+            WARN.t = 0
+        end
+    end
     -- the Sinner's health bar
     if sin == 2 then
         local hp, top = tonumber(state.sinner_hp), math.max(1, tonumber(state.sinner_max))
