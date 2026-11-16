@@ -27,7 +27,7 @@ end
 
 local ffi = require('ffi')
 pcall(ffi.cdef, [[
-typedef struct kolhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t upshift, upshift_max, gear, sinner; float sinner_hp, sinner_max; uint32_t leash, drive, winner, piloted; float kr_left; uint32_t keys[3]; char key_label[3][24]; uint32_t sinner_kind, frv; float sprint_left, sprint_cd, upshift_pct, kr_mult, share_pct; uint32_t share_on, ems_immune, release_on; float sprint_ram; int32_t frv_pkg; float turbo_left, turbo_mult, post_move, gear_left, winner_cd, upshift_guard, full_speed, full_ram, drift_cd; char drift_key[24]; } kolhud1_state;
+typedef struct kolhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t upshift, upshift_max, gear, sinner; float sinner_hp, sinner_max; uint32_t leash, drive, winner, piloted; float kr_left; uint32_t keys[3]; char key_label[3][24]; uint32_t sinner_kind, frv; float sprint_left, sprint_cd, upshift_pct, kr_mult, share_pct; uint32_t share_on, ems_immune, release_on; float sprint_ram; int32_t frv_pkg; float turbo_left, turbo_mult, post_move, gear_left, winner_cd, upshift_guard, full_speed, full_ram, drift_cd; char drift_key[24]; uint32_t mounted; } kolhud1_state;
 void *kolhud1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
 void *kolhud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
 ]])
@@ -210,6 +210,9 @@ local function gfl2_step(dt)
 end
 -- kitbase:bindings.lua end
 local SHORT = {'S1', 'S2', 'S3'}
+-- in the FRV Sinner her keys are its skills (Voymastina's way)
+local MOUNT_NAMES = {"LET'S GO FULL SPEED!", "LET'S GO FOR A DRIFT!", 'THE WINNER'}
+local MOUNT_SHORT = {'FS', 'DR', 'W'}
 
 local state, refresh, find_wait = nil, nil, 0
 local function find(dt)
@@ -340,10 +343,11 @@ end
 local function ability(d, i, x, y, size, alpha)
     local s = d.scale
     local left, full = tonumber(state.cd[i - 1]), math.max(0.01, tonumber(state.cd_max[i - 1]))
-    local winner = i == 3 and state.winner ~= 0
+    local mounted = state.mounted ~= 0
+    local winner = not mounted and i == 3 and state.winner ~= 0
     local ready = left <= 0.05 or winner
     local passive = false
-    local on = (i == 2 and tonumber(state.kr_left) > 0.05)
+    local on = not mounted and (i == 2 and tonumber(state.kr_left) > 0.05)
     local a = alpha
     -- the icon's tile, framed like a stratagem's
     local t = math.max(1, 2 * s)
@@ -351,14 +355,15 @@ local function ability(d, i, x, y, size, alpha)
     d:rect(x, y, size, size, rgba(INK, a * 0.9), 1)
     d:rect(x, y, size, t, frame, 2); d:rect(x, y + size - t, size, t, frame, 2)
     d:rect(x, y, t, size, frame, 2); d:rect(x + size - t, y, t, size, frame, 2)
-    if ICONS[i] then
+    local icon = not mounted and ICONS[i]
+    if icon then
         local pad = size * 0.08
-        d:image(ICONS[i], x + pad, y + pad, size - 2 * pad, size - 2 * pad, {z = 3,
+        d:image(icon, x + pad, y + pad, size - 2 * pad, size - 2 * pad, {z = 3,
             colours = ready and {r = rgba(ORANGE, 1), g = {255, 255, 255, 255}} or {r = rgba(GREY, 1), g = {150, 154, 158, 255}},
             colour = {255, 255, 255, math.floor(255 * a + 0.5)}})
     end
-    if not ICONS[i] then
-        heavy(d, SHORT[i], x + size / 2, y + size * 0.3, math.max(17 * s, size * 0.34), 'title', ready and rgba(TEXT, a) or rgba(MUTED, a), 'center')
+    if not icon then
+        heavy(d, mounted and MOUNT_SHORT[i] or SHORT[i], x + size / 2, y + size * 0.3, math.max(17 * s, size * 0.34), 'title', ready and rgba(TEXT, a) or rgba(MUTED, a), 'center')
     end
     if on then
         local txt = ('%.0f'):format(math.ceil(tonumber(state.kr_left)))
@@ -372,7 +377,7 @@ local function ability(d, i, x, y, size, alpha)
     -- the name, and the key where a stratagem shows its code
     local tx = x + size + 10 * s
     local nsize = math.max(17 * s, size * 0.36)
-    heavy(d, winner and 'THE WINNER' or NAMES[i], tx, y + size * 0.02, nsize, 'title', ready and rgba(TEXT, a) or rgba(MUTED, a))
+    heavy(d, mounted and MOUNT_NAMES[i] or winner and 'THE WINNER' or NAMES[i], tx, y + size * 0.02, nsize, 'title', ready and rgba(TEXT, a) or rgba(MUTED, a))
     local label = on and 'KINETIC RECOVERY' or X.labels[i] or ffi.string(state.key_label[i - 1])
     local ksize = math.max(18 * s, size * 0.4)
     heavy(d, label, tx, y + size * 0.5, ksize, 'title', ready and rgba(YELLOW, a) or rgba(MUTED, a))
@@ -429,11 +434,6 @@ local function buff_row(d, cx, y)
     elseif state.frv ~= 0 and state.piloted ~= 0 then
         local cd = tonumber(state.sprint_cd)
         if cd > 0.05 then add(('BURST IN %ds'):format(math.ceil(cd)), MUTED) else add('BURST READY', GREEN) end
-    end
-    local dc = tonumber(state.drift_cd)
-    if dc >= 0 then
-        local dk = ffi.string(state.drift_key)
-        if dc > 0.05 then add(('DRIFT [%s] %ds'):format(dk, math.ceil(dc)), MUTED) else add(('DRIFT READY [%s]'):format(dk), GREEN) end
     end
     local fs = tonumber(state.full_speed)
     if fs > 0 then add(('FULL SPEED %d M/S  RAMS x%.2g'):format(math.floor(fs + 0.5), tonumber(state.full_ram)), YELLOW) end
@@ -513,7 +513,7 @@ local OPTIONS = {
     {'upshift_decay', 'slider', 'Upshift: Decay', 1, 60, 1, 'Seconds without a gain before a stack is lost.'},
     {'gear_seconds', 'slider', 'Gears: Duration', 3, 60, 1, 'Seconds N, S and S+ last before the Sinner goes back to D.', true},
     {'release_every', 'slider', 'Kinetic Release: Interval', 2, 30, 1, 'Seconds between its rifle volleys while it fights in S or S+.'},
-    {'drift_on', 'toggle', "Sinner: Let's Go for a Drift!", 0, 1, 1, 'Its active (key_drift in koleda.ini, B): waves of EMS bursts out from the Sinner into the enemies around it.'},
+    {'drift_on', 'toggle', "Sinner: Let's Go for a Drift!", 0, 1, 1, 'In the FRV, her second key: waves of EMS bursts out from it into the enemies around it.'},
     {'full_on', 'toggle', "Sinner: Let's Go Full Speed!", 0, 1, 1, 'While the FRV moves fast it fires at the enemies ahead, faster the faster it goes, and its rams hit harder.'},
     {'full_min_speed', 'slider', 'Full Speed: From Speed', 0, 30, 1, 'Metres a second it has to move for Full Speed.'},
     {'drift_cooldown', 'slider', 'Drift: Cooldown', 0, 60, 1, 'Seconds before Drift can be used again.'},

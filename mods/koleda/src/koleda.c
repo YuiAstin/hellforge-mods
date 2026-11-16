@@ -20,7 +20,9 @@
  *     its health when hit (at most every sinner_heal_every s).
  *   Kinetic Release (Gear Shift): while it fights in S or S+, every release_every s (and after Tactical Routebook),
  *     rifle rounds from it at the enemies near it (S: release_targets_s within release_reach, S+: more, farther).
- *   Let's Go for a Drift! (0.3.4: active, key_drift, B; drift_cooldown; not in N): waves of EMS bursts out from the Sinner,
+ *   In the FRV Sinner (0.3.5, Voymastina's way): her keys are its skills: key_s1 Let's Go Full Speed! (the burst, at the
+ *     wheel), key_s2 Let's Go for a Drift!, key_s3 The Winner.
+ *   Let's Go for a Drift! (in it, key_s2; drift_cooldown; not in N): waves of EMS bursts out from the Sinner,
  *     drift_rings rings out to drift_radius m, each enemy in reach taking drift_damage once (the stun holds them; nobody
  *     is moved).
  *   Let's Go Full Speed! (not in N): while it moves at full_min_speed m/s or more it fires at the enemies in a cone
@@ -48,7 +50,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.4"
+#define VERSION "0.3.5"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -107,7 +109,6 @@ static int s_driftOn = 1, s_driftRings = 4, s_driftDamage = 800, s_fullOn = 1;
 static float s_driftEvery = 12, s_driftRadius = 20;
 static float s_fullMinSpeed = 5, s_fullRefSpeed = 15, s_fullEvery = 0.15f, s_fullCone = 35, s_fullRange = 30, s_fullRam = 0.06f, s_fullRamMax = 3;
 static int s_cleanse = 1;
-static Key s_driftKey = {'B', 0, "B"};   /* 0.3.4: key_drift */
 /* driving (sinner_drive.h): the probe's numbers; -1 not known */
 static int s_drive = 1, s_driveTest = 0;
 static int s_turnOn = 0;
@@ -180,8 +181,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
     fprintf(f, "; Koleda %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for a\n"
                "; combo (Shift+Q). The game still sees the keys too (Shift sprints, R reloads), so pick ones it leaves alone.\n"
                "key_s1 = %s\nkey_s2 = %s\nkey_s3 = %s\n"
-               "; key_drift: Let's Go for a Drift!, the Sinner's own action (any time it stands).\n"
-               "key_drift = %s\n"
+               "; In the FRV Sinner the same keys are its skills: key_s1 Let's Go Full Speed! (at the wheel), key_s2 Let's Go for\n"
+               "; a Drift!, key_s3 The Winner.\n"
                "; Upshift: at most upshift_max stacks, each +upshift_damage (0.15: 15%%) of her damage; one is lost every\n"
                "; upshift_decay s without a gain. A Sinner action (a volley, Drift, Full Speed) gives one (two in S+), at most one\n"
                "; gain every upshift_every s. At upshift_max she takes upshift_guard (0.3: 30%%) less damage.\n"
@@ -240,7 +241,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; release_targets_s enemies within release_reach m (S+: release_targets_plus within release_reach_plus),\n"
                "; release_rounds_s each (S+: release_rounds_plus), by its gear and her buffs.\n"
                "release_round = %d\nrelease_rounds_s = %d\nrelease_rounds_plus = %d\nrelease_reach_plus = %g\n"
-               "; Let's Go for a Drift! (key_drift, at the top; drift_on 0: off): the Sinner's active, once a press, every\n"
+               "; Let's Go for a Drift! (key_s2 in the FRV Sinner; drift_on 0: off): its active, once a press, every\n"
                "; drift_cooldown s, not in N: waves of EMS bursts out from it: drift_rings rings from drift_inner m out to drift_radius m,\n"
                "; drift_gap s apart, bursts about 5 m apart (at most drift_points a ring); each enemy in reach takes\n"
                "; drift_damage once, release_ap armour penetration (the stun holds them; nobody is moved). release_shell 154:\n"
@@ -281,7 +282,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint. hellbomb_on_exhaustion 1 sets off a\n"
                "; Hellbomb on her if she runs her stamina dry (a T-Doll's price).\n"
                "hp_mult = 1.5\nstamina_mult = 2\nhellbomb_on_exhaustion = 1\n",
-            VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_driftKey.label, s_upMax, (double)s_upDecay, (double)s_upDamage, (double)s_upEvery, (double)s_upGuard,
+            VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_upMax, (double)s_upDecay, (double)s_upDamage, (double)s_upEvery, (double)s_upGuard,
             s_sinOn, s_callMode, (double)s_sharePct, (double)s_shareRange,
             (double)s_leashStart, (double)s_leashStop, (double)s_guardStart, (double)s_leashWarp, (double)s_stuckSeconds, (double)s_pushStep, s_pushSteps, (double)s_slideSpeed,
             (double)s_plusDistance, (double)s_plusLeash, s_warpWalks, s_navPath,
@@ -2313,6 +2314,7 @@ static void GearFrame(void)
         KineticRelease("Kinetic Release");
     }
 }
+static int Mounted(void) { return g_frv && g_sinner && g_landed && g_piloting; }
 static void Drift(void)
 {
     static unsigned told;
@@ -2983,7 +2985,8 @@ typedef struct KoledaHud
     float upshift_guard;               /* % less damage she takes now (full Upshift) */
     float full_speed, full_ram;        /* 0.3.2: Full Speed firing now: its speed m/s (0: not now), its rams' multiplier */
     float drift_cd;                    /* 0.3.4: seconds left on Drift (-1: no Sinner standing / off) */
-    char drift_key[24];
+    char drift_key[24];                /* (0.3.5: unused) */
+    uint32_t mounted;                  /* 0.3.5: in the FRV Sinner: cd / cd_max are Full Speed's, Drift's, The Winner's */
 } KoledaHud;
 static KoledaHud g_hud = {1};
 /* the Sinner, 5 floats (x, y, z over it, health 0..1, gear): 1 while it stands, else 0 */
@@ -3039,6 +3042,13 @@ HF_MOD_EXPORT KoledaHud* koleda_hud_state(void)
     g_hud.in_mission = (uint32_t)(g_inMission && g_alive && kb_kit_on);
     float m[3] = {s_s1Cd, s_s2Cd, s_s3Cd};
     for (int i = 0; i < 3; i++) { g_hud.cd[i] = (float)fmax(0, g_cd[i] - g_now); g_hud.cd_max[i] = m[i]; }
+    g_hud.mounted = (uint32_t)Mounted();
+    if (g_hud.mounted)
+    {
+        g_hud.cd[0] = (float)fmax(0, g_sprintCdUntil - g_now); g_hud.cd_max[0] = s_sprintCd;
+        g_hud.cd[1] = (float)fmax(0, g_driftNext - g_now); g_hud.cd_max[1] = s_driftEvery;
+        g_hud.cd[2] = (float)fmax(0, g_winnerNext - g_now); g_hud.cd_max[2] = s_winnerCd;
+    }
     g_hud.upshift = (uint32_t)g_up;
     g_hud.upshift_max = (uint32_t)s_upMax;
     g_hud.gear = (uint32_t)(g_gear == GEAR_D && g_parked && g_sinner ? 4 : g_gear);   /* 3 D, 4 P */
@@ -3070,7 +3080,6 @@ HF_MOD_EXPORT KoledaHud* koleda_hud_state(void)
     g_hud.full_speed = g_sinner && s_fullOn && g_gear != GEAR_N && g_speed >= s_fullMinSpeed ? g_speed : 0;
     g_hud.full_ram = RamBonus();
     g_hud.drift_cd = s_driftOn && g_sinner && g_landed ? (float)fmax(0, g_driftNext - g_now) : -1;
-    memcpy(g_hud.drift_key, s_driftKey.label, sizeof g_hud.drift_key);
     g_hud.sprint_ram = (float)(s_sprintRam * (g_gear == GEAR_PLUS ? s_sprintRamPlus : g_gear == GEAR_S ? s_sprintRamS : 1.0));
     for (int i = 0; i < 3; i++)
     {
@@ -3116,18 +3125,17 @@ static void Tick(HfMod* mod, float dt, void* user)
         int press = (down && !prev[i]) || (presses >> i & 1);
         if (press && GetTickCount64() - fired[i] > 300 && g_alive && atomic_load(&g_avatar) && (fired[i] = GetTickCount64(), 1))
         {
-            if (i == 0) SnowWolfsEye();
+            if (Mounted())   /* 0.3.5: in the FRV Sinner, its skills */
+            {
+                if (i == 0) { if (SeatIsDriver()) FullSpeedDrive(); else { static unsigned told; if (told++ < 5) Log("Let's Go Full Speed!: only at the wheel"); } }
+                else if (i == 1) Drift();
+                else TheWinner();
+            }
+            else if (i == 0) SnowWolfsEye();
             else if (i == 1) TacticalRoutebook();
             else Spectre();
         }
         prev[i] = down;
-    }
-    {
-        static int prevDrift;
-        int own = s_driftKey.vk == VK_SHIFT ? KM_SHIFT : s_driftKey.vk == VK_CONTROL ? KM_CTRL : s_driftKey.vk == VK_MENU ? KM_ALT : 0;
-        int down = focused && (GetAsyncKeyState(s_driftKey.vk) & 0x8000) != 0 && (mods & ~own) == s_driftKey.mods;
-        if (down && !prevDrift && g_alive && atomic_load(&g_avatar)) Drift();
-        prevDrift = down;
     }
     {
         static double upAt;
@@ -3168,28 +3176,6 @@ static void OptionAfter(const char* name, int changed) { (void)name; (void)chang
 HF_MOD_EXPORT int koleda_option_get(const char* name, double* out) { return OptionGet(name, out); }
 HF_MOD_EXPORT int koleda_option_set(const char* name, double value) { return OptionSet(name, value); }
 
-/* 0.3.4: key_drift, a fourth key beside kitbase's three */
-static void LoadDriftKey(void)
-{
-    char path[MAX_PATH * 2], line[256];
-    snprintf(path, sizeof path, "%s\\%s", hf->mod_folder(self), kb_ini);
-    FILE* f = OpenUtf8(path, L"r");
-    if (!f) return;
-    while (fgets(line, sizeof line, f))
-    {
-        char* c = strchr(line, ';');
-        if (c) *c = 0;
-        char* eq = strchr(line, '=');
-        char key[64];
-        if (!eq) continue;
-        *eq = 0;
-        if (sscanf(line, " %63s", key) != 1 || strcmp(key, "key_drift")) continue;
-        Key parsed;
-        if (ParseKey(eq + 1, &parsed)) s_driftKey = parsed;
-        else Log("key_drift: not a key I know, so B");
-    }
-    fclose(f);
-}
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
@@ -3211,7 +3197,6 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
-    LoadDriftKey();
     RoundsAdd();
     SinnerAdd(api, mod);
     /* (0.2.12: no FRV Sinner call of her own: its package could not be loaded reliably. The M-103 she brings in her
