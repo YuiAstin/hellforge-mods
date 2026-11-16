@@ -50,7 +50,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.0"
+#define VERSION "0.4.1"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -3039,6 +3039,25 @@ static int HitTaken(const uint8_t* h, void* result, unsigned long long now)
 }
 
 /* ---- events ------------------------------------------------------------------------------------------------------ */
+/* 0.4.1: enemies the kit base's test leaves out (Lemuen's): an enemy's turret (an Automaton cannon tower, a War Strider:
+ * a turret that runs a behaviour and is no friend) and anything with the AI's enemy record and health. The Sinveiler
+ * would not shoot a War Strider */
+static int FoeAlso(uint64_t res)
+{
+    uint32_t stride;
+    if (res == AVATAR || hf->component_record("AvatarComponentData", res, &stride) || FriendRes(res)) return 0;
+    int turret = hf->component_record("TurretComponentData", res, &stride) != 0 && hf->component_record("BehaviorComponentData", res, &stride) != 0;
+    int ai = hf->component_record("AiEnemyComponentData", res, &stride) != 0 && hf->component_record("HealthComponentData", res, &stride) != 0;
+    if (turret || ai)
+    {
+        static uint64_t told[12];
+        static unsigned n;
+        int seen = 0;
+        for (unsigned k = 0; k < n; k++) if (told[k] == res) seen = 1;
+        if (!seen && n < 12) { told[n++] = res; Log("an enemy kind the kit base leaves out: %016llx (%s): one of her foes", (unsigned long long)res, turret ? "an enemy turret" : "an AI enemy"); }
+    }
+    return turret || ai;
+}
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
@@ -3071,7 +3090,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
         Log("the FRV Sinveiler: her M-103 (entity %u), its turret entity %u (its network id learned from its first hits)", s->entity, g_turretEnt);
         return;
     }
-    if (s->resource != AVATAR) { if (FoeKind(s->resource)) AddFoe(s->entity, s->resource); return; }
+    if (s->resource != AVATAR) { if (FoeKind(s->resource) || FoeAlso(s->resource)) AddFoe(s->entity, s->resource); return; }
     if (!s->authority) return;
     g_spawnEntity[g_spawnNext % 8] = s->entity;
     g_spawnNet[g_spawnNext % 8] = s->network;
