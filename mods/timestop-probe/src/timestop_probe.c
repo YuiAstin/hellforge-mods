@@ -4,8 +4,11 @@
  * One key (key in timestop-probe.ini, F7) starts a stop of `seconds` on every living enemy within `range` m. Each press
  * takes the next method:
  *   1  stun only: STUN_LARGE on each, again every 0.5 s (the baseline: what the kits can already do)
- *   2  stun, and each enemy's animation state machine switched off for the stop (its pose should stay)
- *   3  the state machine off alone (no stun: do they slide about as statues?)
+ *   2  stun, and each enemy's animation state machine switched off for the stop (its pose stays: 0.1.0's finding)
+ *   3  the state machine off alone
+ * 0.2.0: in 2 and 3 each enemy is also held where it stood (hold 1): 0.1.0's enemies kept their pose and slid on (one
+ * 20 m in 5 s). Its destination is set to its own spot, its velocity zeroed every frame, and it is put back when it has
+ * drifted (the warp setter Koleda's pull uses, on enemies with a navigation record only).
  * This DLL finds the enemies, stuns them and measures how far each moved. The pose part is the HUD mod's
  * (hud-src/timestop_probe.lua, an HD2Runtime mod): the engine's animation calls are only reachable from the game's Lua.
  * It reads the targets from timestop_probe_state() and writes what it found into this log (timestop_probe_log).
@@ -26,7 +29,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.0"
+#define VERSION "0.2.0"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -38,7 +41,7 @@
 
 static Key s_key = {VK_F7, 0, "F7"};
 static float s_range = 50, s_seconds = 5;
-static int s_rareMax = 4, s_method = 0;
+static int s_rareMax = 4, s_method = 0, s_hold = 1;
 
 /* what the HUD mod reads (layout version 1; the same struct in timestop_probe.lua) */
 typedef struct TsTarget { uint32_t entity, unit; uint64_t object; float pos[3]; uint32_t pad; } TsTarget;
@@ -51,7 +54,27 @@ typedef struct TsState
     TsTarget t[TARGETS];
 } TsState;
 static TsState g_state = {.version = 1};
-static double g_until, g_stunAt;
+static double g_until, g_stunAt, g_destAt;
+static unsigned g_pins, g_noNav;
+/* the warp setter and the velocity setter (Voymastina's and Koleda's: game.dll+0x5A2BB0, +0x4A7550) and set_destination
+ * (game.dll+0x5B36C0, as Lost Contact calls it) */
+typedef void (*SetVecFn)(void*, uint32_t, const float*);
+static SetVecFn g_setPosition, g_setVelocity, g_setDest;
+static int Boundary(uintptr_t at)
+{
+    uint8_t b[2];
+    return hf->size >= offsetof(HfApi, read_code) + sizeof hf->read_code && hf->read_code && !hf->read_code(at - 1, b, 2) &&
+           (b[0] == 0xCC || b[0] == 0xC3 || b[0] == 0x90) && b[1] != 0xCC;
+}
+/* an entity with an active navigation record ([game+0x3326418]: map +0x30, records +0x50, 0xA8 each, +0x10 active): the
+ * warp setter crashed on entities without one */
+static int Walks(uint32_t e)
+{
+    uintptr_t m = Pointer(game + 0x3326418), recs;
+    uint32_t index, active = 0;
+    if (!m || !Lookup(m + 0x30, e, 1048576, &index) || index > 65535 || !(recs = Pointer(m + 0x50))) return 0;
+    return ReadAt(recs + 0xA8u * index + 0x10, &active, 4) && (active & 0xFF) != 0;
+}
 static float g_startPos[TARGETS][3];
 static unsigned g_lines;
 
@@ -112,10 +135,11 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; animation state machine off (the pose freeze), 3 the state machine off alone. method: 0 takes them in turn,\n"
                "; 1-3 always that one.\n"
                "key = %s\nrange = %g\nseconds = %g\nmethod = %d\n"
+               "; hold: in methods 2 and 3, 1 also holds each enemy where it stood (0: as 0.1.0, they slide).\nhold = %d\n"
                "; rare_max: when a unit cannot be found by its id, the HUD mod looks for it by its place among unit types with at\n"
                "; most this many units in the world (reading the place of a unit of a mass-instanced type has crashed the game).\n"
                "rare_max = %d\n",
-            VERSION, s_key.label, (double)s_range, (double)s_seconds, s_method, s_rareMax);
+            VERSION, s_key.label, (double)s_range, (double)s_seconds, s_method, s_hold, s_rareMax);
 }
 static void LoadIni(void)
 {
@@ -137,6 +161,7 @@ static void LoadIni(void)
         if (!strcmp(key, "range")) s_range = (float)(v < 5 ? 5 : v > 300 ? 300 : v);
         else if (!strcmp(key, "seconds")) s_seconds = (float)(v < 1 ? 1 : v > 30 ? 30 : v);
         else if (!strcmp(key, "method")) s_method = (int)(v < 0 ? 0 : v > METHODS ? METHODS : v);
+        else if (!strcmp(key, "hold")) s_hold = v != 0;
         else if (!strcmp(key, "rare_max")) s_rareMax = (int)(v < 1 ? 1 : v > 64 ? 64 : v);
     }
     fclose(f);
@@ -179,11 +204,13 @@ static void Start(void)
         memcpy(g_startPos[k], best[k].pos, 12);
     }
     g_until = g_now + s_seconds;
-    g_stunAt = 0;
+    g_stunAt = g_destAt = 0;
+    g_pins = g_noNav = 0;
     g_state.seq++;
     g_state.active = 1;
     Log("stop %u: method %d (%s), %d of %d enemies within %.0f m, for %.1f s; the player's unit %08x (object %p)", g_state.seq, method,
-        method == 1 ? "stun only" : method == 2 ? "stun and the state machine off" : "the state machine off alone", n, seen, (double)s_range,
+        method == 1 ? "stun only" : method == 2 ? (s_hold ? "stun, the state machine off, held in place" : "stun and the state machine off") :
+        s_hold ? "the state machine off, held in place" : "the state machine off alone", n, seen, (double)s_range,
         (double)s_seconds, g_state.player_unit, (void*)(uintptr_t)g_state.player_object);
     for (int k = 0; k < n && k < 12; k++)
         Log("  target %d: entity %u, kind %016llx, unit %08x (object %p), %.1f m away", k, best[k].e, (unsigned long long)best[k].res, best[k].unit,
@@ -206,15 +233,42 @@ static void End(void)
         if (moved < 0.25f) still++;
         if (k < 12) Log("  target %u (entity %u): moved %.2f m in the stop", k, t->entity, (double)moved);
     }
+    if (g_state.method >= 2 && s_hold)
+        Log("the hold: %u put-backs in the stop; %u enemies without a navigation record were not held (the warp setter %s)", g_pins, g_noNav,
+            g_setPosition ? "on" : "off");
     Log("stop %u over (method %u): %d alive (%d moved under 0.25 m; mean %.2f m, most %.2f m), %d dead or gone", g_state.seq, g_state.method, alive,
         still, alive ? (double)(sum / (float)alive) : 0.0, (double)most, gone);
     g_state.active = 0;
+}
+/* 0.2.0: each enemy kept where it stood */
+static void HoldFrame(void)
+{
+    static const float zero[3] = {0, 0, 0};
+    if (!g_setPosition || !QueryIdle()) return;
+    int dest = g_setDest && g_now >= g_destAt;
+    if (dest) g_destAt = g_now + 1.0;
+    unsigned noNav = 0;
+    for (unsigned k = 0; k < g_state.count; k++)
+    {
+        TsTarget* t = &g_state.t[k];
+        uint8_t d[24];
+        float p[3];
+        uint32_t e = t->entity;
+        /* only while it lives, is still the same unit and is this machine's (a dead one crashed the warp setter) */
+        if (!e || e >= 0x400000u || !Descriptor(e, d) || Word(d + 12) != t->unit || !(Word(d + 20) & 1) || !Alive(e) || !UnitNode(t->unit, 0, p)) continue;
+        if (!Walks(e)) { noNav++; continue; }
+        if (dest) g_setDest(NULL, e, g_startPos[k]);
+        g_setVelocity(NULL, e, zero);
+        if (Dist2(p, g_startPos[k]) > 0.03f * 0.03f) { g_setPosition(NULL, e, g_startPos[k]); g_pins++; }
+    }
+    g_noNav = noNav;
 }
 static void StopFrame(void)
 {
     if (!g_state.active) return;
     g_state.left = (float)(g_until - g_now);
     if (g_now >= g_until || !g_alive) { End(); return; }
+    if (g_state.method >= 2 && s_hold) HoldFrame();
     if (g_state.method == 3 || g_now < g_stunAt || !hf->apply_status) return;
     g_stunAt = g_now + 0.5;
     int ok = 0, tried = 0;
@@ -291,6 +345,15 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     if (!g || !x || gameSize != 74727424u || exeSize != 60719104u) { Log("REFUSED: the game's modules are not build " BUILD "'s: the probe stays off"); return; }
     game = g;
     exe = x;
+    if (hf->code_matches(game + 0x5A2BB0, "48 89 5c 24 08 48 89 6c 24 10 56 57 41 54 41 56 41 57 48 83 ec 40") &&
+        hf->code_matches(game + 0x4A7550, "48 89 5c 24 18 57 48 83 ec 20 3b 15 ?? ?? ?? ?? 48 8b 1d"))
+    {
+        g_setPosition = (SetVecFn)(game + 0x5A2BB0);
+        g_setVelocity = (SetVecFn)(game + 0x4A7550);
+    }
+    if (Boundary(game + 0x5B36C0)) g_setDest = (SetVecFn)(game + 0x5B36C0);
+    Log("the hold: the warp setter %s, set_destination %s", g_setPosition ? "ready" : "off (not the reviewed code): enemies are not held in place",
+        g_setDest ? "on" : "off");
     Log("ready: %s stops the enemies within %.0f m for %.1f s (method %s)", s_key.label, (double)s_range, (double)s_seconds,
         s_method ? "fixed" : "1, 2, 3 in turn");
 }
