@@ -1,4 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- 0.2.2: scaled to 0.6 and centred, so the art sits inside the game's booster hexagon (it filled the square) -->
+  <g transform="translate(128 128) scale(0.6) translate(-128 -135.5)">
   <!-- Anchored Boot: a boot driven into the ground by a heavy downward chevron -->
   <g fill="#e8262c">
     <path d="M128 56 l52 -34 v20 l-52 34 l-52 -34 v-20 z"/>
@@ -12,4 +14,5 @@
     <path d="M60 229 l-10 18 h8 l10 -18 z M200 229 l12 18 h-8 l-12 -18 z M128 229 l-4 20 h8 l-4 -20z"/>
   </g>
   <g fill="#000"><rect x="104" y="124" width="40" height="6"/></g>
+  </g>
 </svg>
