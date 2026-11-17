@@ -9,7 +9,9 @@ Scope decided (2026-11-17):
 
 - Three keys, plain cooldowns. **No Magatama gauge.**
 - **No passive**, and no body line (no health or stamina change).
-- Akumetsu deals **5000 damage**, not an instant kill (killing an enemy that still has health risks a crash).
+- Akumetsu deals **5000 damage**, not an instant kill (killing an enemy that still has health risks a crash), to
+  **every enemy in a radius around him**.
+- **Explosions can be parried**, like any other hit.
 - Solo or host, like the other kits.
 - No character model is included.
 
@@ -50,11 +52,12 @@ All numbers are first defaults, each a setting in `hakumen.ini`. Default keys Z,
    (60 m) is held in place and nothing can hurt him.
 3. **Brush strokes.** Black ink strokes sweep across the screen one after another over about a second, and stay until
    the stop ends. The strokes are our own art.
-4. **The cut.** The strokes clear, time resumes, and the attacker takes `akumetsu_damage` (5000) on that frame.
+4. **The cut.** The strokes clear, time resumes, and every enemy within `akumetsu_radius` (25 m) of him takes
+   `akumetsu_damage` (5000) on that frame.
 
 - Cooldown `akumetsu_cooldown` (120 s).
-- Target: **the attacker only**, as in the source. `akumetsu_cone` (0) is there to widen it to enemies in a cone ahead of
-  him if one target feels too narrow among Helldivers' crowds. Open, see below.
+- Target: **a radius around him**, not the attacker alone (the source is a duel; Helldivers fights are crowds). The
+  attacker only triggers the move: if it stands outside the radius it is not cut.
 
 ## How the time stop works
 
@@ -79,9 +82,9 @@ game has a time scale that could slow everything but him.
 ## What counts as a parry
 
 For both counters, a "hit on him" is any enemy damage event aimed at him inside the window: melee, bullets, and by
-default explosions too. `parry_blasts` (1) decides whether explosions and fire count; with 0 they go through as normal
-damage and do not trigger the counter. When the hit has no living attacker (a mine, a fire patch), Yukikaze does nothing
-further and Akumetsu takes the nearest enemy within its range as the target.
+explosions too (decided: explosions are parryable). `parry_blasts` (1) is the setting; with 0 explosions and fire go
+through as normal damage and do not trigger the counter. When the hit has no living attacker (a mine, a fire patch),
+Yukikaze cancels the hit and does nothing further; Akumetsu runs as usual, since it cuts by radius.
 
 ## HUD
 
@@ -91,9 +94,8 @@ further and Akumetsu takes the nearest enemy within its range as the target.
 
 ## Open
 
-- Akumetsu's target: the attacker only (as written), or the attacker and a cone.
 - Whether the Yukikaze dash is wanted at all once the counter works without it.
-- Whether explosions should be parryable by default.
+- Akumetsu's radius (25 m is a first guess) and whether an attacker outside it should still be cut.
 
 ## Build order
 
