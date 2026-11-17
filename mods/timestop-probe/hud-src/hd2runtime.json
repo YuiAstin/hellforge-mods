@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "Time Stop Probe",
+  "resource": "mods/yui/timestop_probe",
+  "guid": "4a030c93-1a6c-5713-a0b3-4d412d80a346",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.30.0",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}
