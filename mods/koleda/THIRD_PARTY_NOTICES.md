@@ -18,7 +18,7 @@ public API. The HUD uses HD2Runtime's public overlay API, and its skill panel fo
 
 The Sinveiler's driving (planned, `src/sinner_drive.h`): how to drive an empty exosuit with the game's own locomotion (its
 stick input, engine and physics mover) follows **Exo Companion by M!ni$try0fSc!eиce**, read from its strings and
-settings; used with her permission (Yui, 2026-11-17). The Sinveiler's fire (rounds of her
+settings. Its method only; none of its code is included, and this part does not run yet. Credit to her. The Sinveiler's fire (rounds of her
 own spawned from its arms) follows the author's Exusiai kit.
 
 The Sinveiler's planned model is **Exosuit Concept Mech - LUT by Killerco** (Killercat;
@@ -31,7 +31,7 @@ behind-the-camera check, used with Th3chef's permission. None of the loader itse
 
 The Sinveiler's walking (hud-src/koleda_hud.lua, 0.1.7) follows Exo Autopilot 1.2 by marti (a Chef Shared Loader mod): an
 EXO-45 walks through its own animation state machine, its walk state and the move_angle / move_speed / yaw variables
-held every frame, and its steering correction. Its method only; none of its code is included. Used with marti's permission (Yui, 2026-11-17).
+held every frame, and its steering correction. Its method only; none of its code is included. Credit to marti.
 
 Koleda is a character of Girls' Frontline 2: Exilium (MICA Team / Sunborn). This is an unofficial fan mod; no character
 model is included. The skill icons (hud-src/images) and the mod icon are Girls' Frontline 2 art, © MICA Team / Sunborn.
