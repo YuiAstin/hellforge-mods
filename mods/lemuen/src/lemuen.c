@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.0"
+#define VERSION "0.2.0-test1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -70,6 +70,7 @@ static float s_s2Cd = 20, s_s2Min = 1.8f, s_s2Max = 4.25f, s_s2Hold = 3.5f, s_s2
 static float s_s3Cd = 90, s_s3Every = 0.35f, s_s3Height = 120;
 static int s_s3Max = 8, s_s3Shell = 194;
 static int s_coopOn = 1, s_coopLoop = 0;   /* 0.2.0: co-op (lemuen_coop.h) */
+static int s_hullHealth = 600;   /* 0.1.13 */
 
 static const KbSetting kSettings[] = {
     KB_F("mark_range", s_markRange, 10, 1000), KB_F("mark_cone", s_markCone, 1, 90), KB_F("mark_seconds", s_markSeconds, 0, 30),
@@ -80,7 +81,7 @@ static const KbSetting kSettings[] = {
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("s2_min", s_s2Min, 1, 20), KB_F("s2_max", s_s2Max, 1, 20), KB_F("s2_hold", s_s2Hold, 0.1, 30),
     KB_F("s2_cone", s_s2Cone, 0.5, 30), KB_I("line_of_sight", s_sight, 0, 1), KB_F("s2_range", s_s2Range, 10, 1000), KB_F("first_person", s_fpDistance, 0.1, 2),
     KB_F("s3_cooldown", s_s3Cd, 0, 3600), KB_F("s3_every", s_s3Every, 0.05, 5), KB_F("s3_height", s_s3Height, 20, 500),
-    KB_I("s3_max", s_s3Max, 1, 32), KB_I("s3_shell", s_s3Shell, 1, 100000), KB_I("coop", s_coopOn, 0, 1), KB_I("coop_loopback", s_coopLoop, 0, 1),
+    KB_I("s3_max", s_s3Max, 1, 32), KB_I("s3_shell", s_s3Shell, 1, 100000), KB_I("hull_health", s_hullHealth, 0, 1000000), KB_I("coop", s_coopOn, 0, 1), KB_I("coop_loopback", s_coopLoop, 0, 1),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
 };
@@ -122,11 +123,13 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Co-op (HellForge 0.4 or later): coop 1 lets a friend's Lemuen play in your lobby and yours in theirs (her state\n"
                "; goes to the host's Lemuen, which applies her skills to her hits and drops her Memento Mori shells; everyone in\n"
                "; the lobby needs this mod). coop_loopback 1 (a test): solo, her kit runs through that same path on this machine.\n"
-               "coop = %d\ncoop_loopback = %d\n",
+               "coop = %d\ncoop_loopback = %d\n"
+               "; hull_health: Honesta Missio also holds a thing that is health alone (a tank's hull) with this much health or\n"
+               "; more (0: never).\nhull_health = %d\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_markRange, (double)s_markCone, (double)s_markSeconds,
             (double)s_markLast, (double)s_markMult, s_markArmour, s_markHealth, s_markMax, (double)s_markAim, (double)s_markRewatch, (double)s_modusAfter, (double)s_modusMult, (double)s_s1Cd,
             (double)s_s1Mult, s_s1AnyGun, (double)s_s2Cd, (double)s_s2Min, (double)s_s2Max, (double)s_s2Hold, (double)s_s2Cone,
-            (double)s_s2Range, (double)s_fpDistance, (double)s_s3Cd, (double)s_s3Every, (double)s_s3Height, s_s3Max, s_s3Shell, (double)s_numbersAt, s_sight, s_coopOn, s_coopLoop);
+            (double)s_s2Range, (double)s_fpDistance, (double)s_s3Cd, (double)s_s3Every, (double)s_s3Height, s_s3Max, s_s3Shell, (double)s_numbersAt, s_sight, s_coopOn, s_coopLoop, s_hullHealth);
 }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
@@ -635,16 +638,44 @@ static uint32_t EntityOfUnit(uint32_t u, uint64_t* res)
 /* something to hold in her scope: no friend, no Helldiver, alive, and a fighting thing (her foes, enemy turrets, or
  * anything with health that runs a behaviour, has a faction or carries seats: 0.1.8, a War Strider's walker is a
  * vehicle its pilot rides, with no behaviour of its own, and it is what her shots hit) */
+/* 0.1.12: what a kind is made of, for the log (B behaviour, T turret, A AI enemy, H health, F faction, S seats, V avatar) */
+static const char* Records(uint64_t res, char out[16])
+{
+    static const struct { const char* name; char c; } r[] = {{"BehaviorComponentData", 'B'}, {"TurretComponentData", 'T'}, {"AiEnemyComponentData", 'A'},
+        {"HealthComponentData", 'H'}, {"FactionComponentData", 'F'}, {"SeatCollectionComponentData", 'S'}, {"AvatarComponentData", 'V'}};
+    uint32_t stride, n = 0;
+    for (unsigned i = 0; i < sizeof r / sizeof r[0]; i++) if (hf->component_record(r[i].name, res, &stride)) out[n++] = r[i].c;
+    out[n] = 0;
+    return n ? out : "none";
+}
+/* 0.1.14: a kind none of whose records are found by its resource */
+static int Unrecorded(uint64_t res)
+{
+    static const char* const r[] = {"BehaviorComponentData", "TurretComponentData", "AiEnemyComponentData", "HealthComponentData", "FactionComponentData",
+        "SeatCollectionComponentData", "AvatarComponentData"};
+    uint32_t stride;
+    for (unsigned i = 0; i < sizeof r / sizeof r[0]; i++) if (hf->component_record(r[i], res, &stride)) return 0;
+    return 1;
+}
+/* 0.1.12: one of her foes (seen spawning as an enemy, or marked by her) */
+static int IsFoe(uint32_t e) { for (int k = 0; k < FOES; k++) if (e && g_foe[k] == e) return 1; return 0; }
+static int HpOr(uint32_t e) { int32_t hp = 0; uint32_t life; return HealthOf(e, &hp, &life) ? hp : -1; }
 static int Holdable(uint32_t e, uint64_t res)
 {
     uint32_t stride, life;
     int32_t hp = 1;
     if (!e || res == AVATAR || FriendRes(res)) return 0;
     if (HealthOf(e, &hp, &life) && hp <= 0) return 0;
-    if (FoeKind(res) || EnemyTurret(res)) return 1;
-    if (!hf->component_record("HealthComponentData", res, &stride)) return 0;
+    if (FoeKind(res) || EnemyTurret(res) || AiEnemy(res) || IsFoe(e)) return 1;
+    /* 0.1.14: a kind whose records are not found by its resource (Yui's log: one she aimed at, a Berserker by her
+     * account, read "records none"): the thing itself is in the game's health table, alive, and no friend */
+    if (!hf->component_record("HealthComponentData", res, &stride)) return Unrecorded(res) && HealthOf(e, &hp, &life) && hp > 0;
+    /* 0.1.13: a tank's hull is health alone (2c1a7790c435fd67, Yui's log: records H): held when it is a big one
+     * (hull_health or more; crates and fences are small) */
+    if (hp >= s_hullHealth && s_hullHealth > 0) return 1;
+    /* 0.1.12: a tank (the Barrager's, the Annihilator's): its hull carries a turret and health (reported 2026-11) */
     return hf->component_record("BehaviorComponentData", res, &stride) || hf->component_record("FactionComponentData", res, &stride) ||
-           hf->component_record("SeatCollectionComponentData", res, &stride);
+           hf->component_record("SeatCollectionComponentData", res, &stride) || hf->component_record("TurretComponentData", res, &stride);
 }
 /* the first thing the ray from the middle of her camera meets (her, leaves and bodies of the dead skipped): the
  * entity when it is one to hold, 0 when it is a wall, the ground or nothing; -1 when the ray cannot be cast */
@@ -710,7 +741,8 @@ static int64_t Crosshair(const float cam[3], const float fwd[3])
                     static unsigned ntold;
                     int seen = 0;
                     for (unsigned t = 0; t < ntold && t < 16; t++) seen |= toldRes[t] == res;
-                    if (!seen && ntold < 16) { toldRes[ntold++] = res; Log("Honesta Missio: entity %u (%016llx) in her crosshair at %.0f m: not one to hold (a friend, a Helldiver, a prop)", e, (unsigned long long)res, (double)(steps[st] + d)); }
+                    char rec[16];
+                    if (!seen && ntold < 16) { toldRes[ntold++] = res; Log("Honesta Missio: entity %u (%016llx) in her crosshair at %.0f m: not one to hold (a friend, a Helldiver, a prop; records %s, friend %d, foe kind %d, enemy turret %d, AI enemy %d, its health %d)", e, (unsigned long long)res, (double)(steps[st] + d), Records(res, rec), FriendRes(res), FoeKind(res), EnemyTurret(res), AiEnemy(res), HpOr(e)); }
                 }
                 return 0;                                                                 /* a friend, a Helldiver, a prop */
             }
@@ -1007,18 +1039,23 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
  * behaviour and is no friend (the kit base's list of Helldiver sentries, emplacements and their mods' copies) is one */
 static int EnemyTurret(uint64_t res)
 {
-    static uint64_t keys[128];
-    static int8_t vals[128];
-    unsigned h = (unsigned)(res ^ (res >> 31)) & 127;
-    for (unsigned i = 0; i < 128; i++)
+    static uint64_t keys[2048];   /* (0.1.13: 2048, not 128: the table filled in a long session and every new kind read as no) */
+    static int8_t vals[2048];
+    static double at[2048];   /* 0.1.12: a no is asked again after 5 s (a kind's records can come later than its first sight) */
+    unsigned h = (unsigned)(res ^ (res >> 31)) & 2047;
+    for (unsigned i = 0; i <= 2048; i++)
     {
-        unsigned k = (h + i) & 127;
-        if (keys[k] == res) return vals[k];
-        if (keys[k]) continue;
+        unsigned k = (h + i) & 2047;
+        int full = i == 2048;   /* no place left: answered, not kept */
+        if (!full && keys[k] == res && (vals[k] || g_now - at[k] < 5.0)) return vals[k];
+        if (!full && keys[k] == res) keys[k] = 0;
+        if (!full && keys[k]) continue;
         uint32_t stride;
         int t = hf->component_record("TurretComponentData", res, &stride) != 0 && hf->component_record("BehaviorComponentData", res, &stride) != 0 &&
                 !hf->component_record("AvatarComponentData", res, &stride) && !FriendRes(res);
+        if (full) return t;
         vals[k] = (int8_t)t;
+        at[k] = g_now;
         keys[k] = res;
         if (t) { static unsigned told; if (told++ < 8) Log("an enemy turret kind: %016llx (markable)", (unsigned long long)res); }
         return t;
@@ -1030,23 +1067,52 @@ static int EnemyTurret(uint64_t res)
  * saw it once Honesta Missio had held it (Yui). Anything with the AI's enemy record and health, and no friend, is one */
 static int AiEnemy(uint64_t res)
 {
-    static uint64_t keys[128];
-    static int8_t vals[128];
-    unsigned h = (unsigned)(res ^ (res >> 27)) & 127;
-    for (unsigned i = 0; i < 128; i++)
+    static uint64_t keys[2048];   /* (0.1.13: 2048, not 128: the table filled in a long session and every new kind read as no) */
+    static int8_t vals[2048];
+    static double at[2048];   /* 0.1.12: a no is asked again after 5 s (a kind's records can come later than its first sight) */
+    unsigned h = (unsigned)(res ^ (res >> 27)) & 2047;
+    for (unsigned i = 0; i <= 2048; i++)
     {
-        unsigned k = (h + i) & 127;
-        if (keys[k] == res) return vals[k];
-        if (keys[k]) continue;
+        unsigned k = (h + i) & 2047;
+        int full = i == 2048;   /* no place left: answered, not kept */
+        if (!full && keys[k] == res && (vals[k] || g_now - at[k] < 5.0)) return vals[k];
+        if (!full && keys[k] == res) keys[k] = 0;
+        if (!full && keys[k]) continue;
         uint32_t stride;
         int t = res != AVATAR && hf->component_record("AiEnemyComponentData", res, &stride) != 0 && hf->component_record("HealthComponentData", res, &stride) != 0 &&
                 !hf->component_record("AvatarComponentData", res, &stride) && !FriendRes(res);
+        if (full) return t;
         vals[k] = (int8_t)t;
+        at[k] = g_now;
         keys[k] = res;
         if (t && !FoeKind(res) && !EnemyTurret(res)) { static unsigned told; if (told++ < 8) Log("an enemy kind the kit base misses: %016llx (one of her foes)", (unsigned long long)res); }
         return t;
     }
     return 0;
+}
+#define LATE 256
+static struct { uint32_t e; uint64_t res; double at; } g_late[LATE];
+static unsigned g_lateNext, g_lateFoes;
+static void LateFrame(void)
+{
+    for (int i = 0; i < LATE; i++)
+    {
+        if (!g_late[i].e || g_now < g_late[i].at) continue;
+        uint32_t e = g_late[i].e;
+        uint64_t res = g_late[i].res;
+        g_late[i].e = 0;
+        uint8_t d[24];
+        int32_t hp = 0;
+        uint32_t life;
+        if (!Descriptor(e, d) || Quad(d) != res || !HealthOf(e, &hp, &life) || hp <= 0) continue;
+        AddFoe(e, res);
+        g_lateFoes++;
+        static uint64_t told[16];
+        static unsigned ntold;
+        int seen = 0;
+        for (unsigned k = 0; k < ntold; k++) if (told[k] == res) seen = 1;
+        if (!seen && ntold < 16) { told[ntold++] = res; Log("an enemy kind without records by its resource: %016llx (entity %u, health %d): one of her foes", (unsigned long long)res, e, hp); }
+    }
 }
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
@@ -1066,7 +1132,18 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
                 hf->component_record("AvatarComponentData", s->resource, &st) != 0, hf->component_record("SeatCollectionComponentData", s->resource, &st) != 0);
         }
     }
-    if (s->resource != AVATAR) { if (FoeKind(s->resource) || EnemyTurret(s->resource) || AiEnemy(s->resource)) AddFoe(s->entity, s->resource); SeeAny(s->entity, s->resource); return; }
+    if (s->resource != AVATAR)
+    {
+        if (FoeKind(s->resource) || EnemyTurret(s->resource) || AiEnemy(s->resource)) AddFoe(s->entity, s->resource);
+        else if (!FriendRes(s->resource) && Unrecorded(s->resource))
+        {
+            /* 0.1.14: its kind's records are not found: asked a second later whether the thing itself has health */
+            unsigned i = g_lateNext++ % LATE;
+            g_late[i].e = s->entity; g_late[i].res = s->resource; g_late[i].at = g_now + 1.0;
+        }
+        SeeAny(s->entity, s->resource);
+        return;
+    }
     if (!s->authority) return;
     g_spawnEntity[g_spawnNext % 8] = s->entity;
     g_spawnNet[g_spawnNext % 8] = s->network;
@@ -1273,6 +1350,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         }
         prev[i] = down;
     }
+    LateFrame();
     if (g_alive)
     {
         MarkFrame();
