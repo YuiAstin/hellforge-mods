@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.15"
+#define VERSION "0.1.16"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -675,7 +675,53 @@ static int Holdable(uint32_t e, uint64_t res)
 }
 /* 0.1.15: of her living foes whose body is within `radius` m of `at` (where a ray met something of theirs), the one
  * nearest the ray itself: 0.1.9 took the one nearest `at`, which in a pack was often the neighbour of the one she aimed at */
-static uint32_t NearAim(const float from[3], const float fwd[3], const float at[3], float radius, uint64_t* nres, float* off)
+/* 0.1.16: what a kind carries: its Mount record's five slots (MountComponentData: each slot's entity is made a child of
+ * it at spawn: a bot's gun, a shield, a tank's turret), read once a kind with get_live (a shared record too). So a thing
+ * in her crosshair that is not one to hold is traced to the enemy that carries it by what the game says, not by how near
+ * they stand */
+static int Slots(uint64_t res, uint64_t out[5])
+{
+    static struct { uint64_t res, slot[5]; int ok; } c[256];
+    unsigned h = (unsigned)(res ^ (res >> 29)) & 255;
+    for (unsigned i = 0; i < 256; i++)
+    {
+        unsigned k = (h + i) & 255;
+        if (c[k].res == res) { memcpy(out, c[k].slot, sizeof c[k].slot); return c[k].ok; }
+        if (c[k].res) continue;
+        static const HfField f[5] = {HF_FIELD(Mount, slot0_entity), HF_FIELD(Mount, slot1_entity), HF_FIELD(Mount, slot2_entity), HF_FIELD(Mount, slot3_entity),
+                                     HF_FIELD(Mount, slot4_entity)};
+        c[k].res = res;
+        c[k].ok = 0;
+        if (hf->size >= offsetof(HfApi, get_live) + sizeof hf->get_live && hf->get_live)
+            for (int s = 0; s < 5; s++)
+            {
+                HfLiveValue v;
+                memset(&v, 0, sizeof v);
+                if (hf->get_live(self, (HfRef)res, &f[s], &v)) { c[k].slot[s] = v.now.u64; if (v.now.u64) c[k].ok = 1; }
+            }
+        if (c[k].ok)
+        {
+            static unsigned told;
+            if (told++ < 24) Log("what kind %016llx carries: %016llx %016llx %016llx %016llx %016llx", (unsigned long long)res, (unsigned long long)c[k].slot[0],
+                                 (unsigned long long)c[k].slot[1], (unsigned long long)c[k].slot[2], (unsigned long long)c[k].slot[3], (unsigned long long)c[k].slot[4]);
+        }
+        memcpy(out, c[k].slot, sizeof c[k].slot);
+        return c[k].ok;
+    }
+    memset(out, 0, 40);
+    return 0;
+}
+/* does a thing of kind `owner` carry one of kind `item`, itself or through what it carries (two deep: a tank, its turret,
+ * the turret's gun)? */
+static int Carries(uint64_t owner, uint64_t item, int depth)
+{
+    uint64_t s[5];
+    if (!owner || !item || !Slots(owner, s)) return 0;
+    for (int i = 0; i < 5; i++) if (s[i] == item) return 1;
+    if (depth < 2) for (int i = 0; i < 5; i++) if (s[i] && Carries(s[i], item, depth + 1)) return 1;
+    return 0;
+}
+static uint32_t NearAim(const float from[3], const float fwd[3], const float at[3], float radius, uint64_t carries, uint64_t* nres, float* off)
 {
     uint32_t closest = 0;
     float best = 1e9f, q[3];
@@ -686,6 +732,7 @@ static uint32_t NearAim(const float from[3], const float fwd[3], const float at[
         if (!f || !TargetPos(f, g_foeRes[k], q)) continue;
         float dx = q[0] - at[0], dy = q[1] - at[1], dz = q[2] - at[2];
         if (dx * dx + dy * dy + dz * dz > radius * radius || (HealthOf(f, &hp, &life) && hp <= 0)) continue;
+        if (carries && !Carries(g_foeRes[k], carries, 0)) continue;
         float v[3] = {q[0] - from[0], q[1] - from[1], q[2] - from[2]}, along = v[0] * fwd[0] + v[1] * fwd[1] + v[2] * fwd[2];
         float px = v[0] - along * fwd[0], py = v[1] - along * fwd[1], pz = v[2] - along * fwd[2], perp = sqrtf(px * px + py * py + pz * pz);
         if (perp < best) { best = perp; closest = f; *nres = g_foeRes[k]; }
@@ -763,25 +810,30 @@ static int64_t Crosshair(const float cam[3], const float fwd[3])
                     if (!seen && ntold < 16) { toldRes[ntold++] = res; Log("Honesta Missio: entity %u (%016llx) in her crosshair at %.0f m: not one to hold (a friend, a Helldiver, a prop; records %s, friend %d, foe kind %d, enemy turret %d, AI enemy %d, its health %d)", e, (unsigned long long)res, (double)(steps[st] + d), Records(res, rec), FriendRes(res), FoeKind(res), EnemyTurret(res), AiEnemy(res), HpOr(e)); }
                 }
                 {
-                    /* 0.1.15: a thing with no health and no records of its own (Yui's log: entities 333 and 1430, "records
-                     * none, its health -1", in the way of the enemy she aimed at): an enemy's gear when one of her foes
-                     * stands within 4 m of where the ray met it, and that enemy is held */
-                    uint32_t life2;
+                    /* 0.1.16: whose is it? Its wielder (the game's own record of who holds an item); else the enemy near
+                     * it whose kind carries its kind (the Mount record); else, 0.1.15's rule, for a thing with no health and
+                     * no records of its own (Yui's log: entities 333 and 1430 in the way of the enemy she aimed at), the
+                     * enemy within 4 m of where the ray met it */
+                    float at[3] = {from[0] + fwd[0] * d, from[1] + fwd[1] * d, from[2] + fwd[2] * d}, off = 0;
+                    uint64_t nres = 0;
+                    uint32_t owner = 0, by = 0, life2;
                     int32_t hp2 = 0;
-                    if (!HealthOf(e, &hp2, &life2) && Unrecorded(res))
+                    const char* how = "";
+                    if (WielderOf(e, &by) && by != e && by != atomic_load(&g_avatar))
                     {
-                        float at[3] = {from[0] + fwd[0] * d, from[1] + fwd[1] * d, from[2] + fwd[2] * d}, off;
-                        uint64_t nres = 0;
-                        uint32_t owner = NearAim(from, fwd, at, 4, &nres, &off);
-                        if (owner)
-                        {
-                            static uint64_t toldG[16];
-                            static unsigned ntoldG;
-                            int seenG = 0;
-                            for (unsigned g = 0; g < ntoldG && g < 16; g++) seenG |= toldG[g] == res;
-                            if (!seenG && ntoldG < 16) { toldG[ntoldG++] = res; Log("Honesta Missio: entity %u (%016llx, no health, no records) in her crosshair, %.1f m off entity %u (%016llx): held as its gear", e, (unsigned long long)res, (double)off, owner, (unsigned long long)nres); }
-                            return owner;
-                        }
+                        uint64_t br = ResOf(by);
+                        if (br && Holdable(by, br)) { owner = by; nres = br; how = "its wielder"; }
+                    }
+                    if (!owner && (owner = NearAim(from, fwd, at, 12, res, &nres, &off))) how = "the enemy that carries its kind";
+                    if (!owner && !HealthOf(e, &hp2, &life2) && Unrecorded(res) && (owner = NearAim(from, fwd, at, 4, 0, &nres, &off))) how = "the enemy within 4 m (by distance)";
+                    if (owner)
+                    {
+                        static uint64_t toldG[24];
+                        static unsigned ntoldG;
+                        int seenG = 0;
+                        for (unsigned g = 0; g < ntoldG && g < 24; g++) seenG |= toldG[g] == res;
+                        if (!seenG && ntoldG < 24) { toldG[ntoldG++] = res; Log("Honesta Missio: entity %u (%016llx) in her crosshair is not one to hold; entity %u (%016llx) is held for it: %s", e, (unsigned long long)res, owner, (unsigned long long)nres, how); }
+                        return owner;
                     }
                 }
                 snprintf(g_chWhy, sizeof g_chWhy, "entity %u (%016llx), not one to hold, at %.0f m", e, (unsigned long long)res, (double)(steps[st] + d));
@@ -796,7 +848,7 @@ static int64_t Crosshair(const float cam[3], const float fwd[3])
                 uint64_t nres = 0;
                 float bd = 0;
                 (void)q;
-                uint32_t closest = NearAim(from, fwd, at, 10, &nres, &bd);   /* 0.1.15: the one nearest her aim, not nearest the part */
+                uint32_t closest = NearAim(from, fwd, at, 10, 0, &nres, &bd);   /* 0.1.15: the one nearest her aim, not nearest the part */
                 if (closest)
                 {
                     static uint64_t toldN[16];
