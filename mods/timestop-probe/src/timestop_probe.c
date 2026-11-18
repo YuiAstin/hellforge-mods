@@ -9,6 +9,10 @@
  * 0.2.0: in 2 and 3 each enemy is also held where it stood (hold 1): 0.1.0's enemies kept their pose and slid on (one
  * 20 m in 5 s). Its destination is set to its own spot, its velocity zeroed every frame, and it is put back when it has
  * drifted (the warp setter Koleda's pull uses, on enemies with a navigation record only).
+ * 0.3.0: what each enemy's AI holds is read at the stop's start, at its end and for 6 s after (its target, whether it
+ * senses the player, its perception entries, its path), and when each moves again: after a stop the bots stood a while
+ * as if restarting, and this is to see what they knew when they did. Lost Contact's reads of the behaviour and
+ * perception records.
  * This DLL finds the enemies, stuns them and measures how far each moved. The pose part is the HUD mod's
  * (hud-src/timestop_probe.lua, an HD2Runtime mod): the engine's animation calls are only reachable from the game's Lua.
  * It reads the targets from timestop_probe_state() and writes what it found into this log (timestop_probe_log).
@@ -29,7 +33,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.0"
+#define VERSION "0.3.0"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -167,12 +171,138 @@ static void LoadIni(void)
     fclose(f);
 }
 
+/* ---- 0.3.0: what the AI holds (Lost Contact's reads: the behaviour records [game+0x3326740], map +0x40, 0x1F8 each,
+ * target +0x18, the record it perceives through +0x68; the perception records [game+0x3326548], map +0x30, 0x13F8 each,
+ * three lists and three single slots of 0x50 entries, entity +0, sense bits +0x4C; the navigation record's destination
+ * +0x60) ------------------------------------------------------------------------------------------------------------- */
+typedef struct AiSnap { int ok, entries, mine, nav; uint32_t target, perceiver, sense; float destD, pos[3]; } AiSnap;
+static uintptr_t Behaviour(uint32_t e)
+{
+    uintptr_t m = Pointer(game + 0x3326740), recs;
+    uint32_t i, count;
+    if (!m || !Lookup(m + 0x40, e, 1048576, &i) || !ReadAt(m + 0x20, &count, 4) || i >= count || i >= 16384 || !(recs = Pointer(m + 0x60))) return 0;
+    return recs + 0x1F8ull * i;
+}
+static uintptr_t Perception(uint32_t e)
+{
+    uintptr_t m = Pointer(game + 0x3326548), recs;
+    uint32_t i;
+    if (!m || !Lookup(m + 0x30, e, 1048576, &i) || i >= 16384 || !(recs = Pointer(m + 0x50))) return 0;
+    return recs + 0x13F8ull * i;
+}
+/* a perception record's entries: how many in all, how many of them are `me`, and the sense bits of those */
+static void Entries(uintptr_t pr, uint32_t me, int* all, int* mine, uint32_t* sense)
+{
+    static const uint32_t counts[3] = {0x310, 0x818, 0xD20}, lists[3] = {0x318, 0x820, 0xD28}, singles[3] = {0x1228, 0x1278, 0x12C8};
+    uint8_t ent[0x50];
+    for (int l = 0; l < 3; l++)
+    {
+        uint32_t n = 0;
+        if (!ReadAt(pr + counts[l], &n, 4) || n > 16) continue;
+        *all += (int)n;
+        for (uint32_t k = 0; k < n; k++)
+            if (ReadAt(pr + lists[l] + 0x50u * k, ent, sizeof ent) && Word(ent) == me) { (*mine)++; *sense |= Word(ent + 0x4C); }
+    }
+    for (int s = 0; s < 3; s++)
+        if (ReadAt(pr + singles[s], ent, sizeof ent) && Word(ent + 0x48))
+        {
+            (*all)++;
+            if (Word(ent) == me) { (*mine)++; *sense |= Word(ent + 0x4C); }
+        }
+}
+static void Snap(const TsTarget* t, uint32_t me, AiSnap* s)
+{
+    uint8_t d[24], b[0xA0];
+    memset(s, 0, sizeof *s);
+    if (!Descriptor(t->entity, d) || Word(d + 12) != t->unit || !Alive(t->entity) || !UnitNode(t->unit, 0, s->pos)) return;
+    s->ok = 1;
+    s->destD = -1;
+    uintptr_t br = Behaviour(t->entity), pr = Perception(t->entity);
+    if (br && ReadAt(br, b, sizeof b)) { s->target = Word(b + 0x18); s->perceiver = Word(b + 0x68); }
+    if (pr) Entries(pr, me, &s->entries, &s->mine, &s->sense);
+    if (s->perceiver && s->perceiver != t->entity && (pr = Perception(s->perceiver))) Entries(pr, me, &s->entries, &s->mine, &s->sense);
+    uintptr_t m = Pointer(game + 0x3326418), recs;
+    uint32_t index, active = 0;
+    float dest[3];
+    if (m && Lookup(m + 0x30, t->entity, 1048576, &index) && index <= 65535 && (recs = Pointer(m + 0x50)) &&
+        ReadAt(recs + 0xA8u * index + 0x10, &active, 4) && (active & 0xFF))
+    {
+        s->nav = 1;
+        if (ReadAt(recs + 0xA8u * index + 0x60, dest, 12) && isfinite(dest[0]) && isfinite(dest[1])) s->destD = sqrtf(Dist2(dest, s->pos));
+    }
+}
+static float g_endPos[TARGETS][3], g_movedAt[TARGETS];
+static double g_endAt;
+static int g_watch;   /* the next sample after the stop, 0 none */
+static const float kSamples[] = {0.25f, 0.5f, 1, 1.5f, 2, 3, 4, 6};
+/* one reading of them all: a line of counts, and the nearest few each */
+static void Reading(const char* when, int after)
+{
+    uint32_t me = atomic_load(&g_avatar);
+    int alive = 0, onMe = 0, onOther = 0, noTarget = 0, sensing = 0, known = 0, nav = 0, moved = 0;
+    for (unsigned k = 0; k < g_state.count; k++)
+    {
+        AiSnap s;
+        Snap(&g_state.t[k], me, &s);
+        if (!s.ok) continue;
+        alive++;
+        if (s.target == me) onMe++; else if (s.target && s.target != UINT32_MAX) onOther++; else noTarget++;
+        if (s.mine) known++;
+        if (s.mine && s.sense) sensing++;
+        if (s.nav) nav++;
+        float m = after ? sqrtf(Dist2(s.pos, g_endPos[k])) : 0;
+        if (after && m > 0.3f) { moved++; if (g_movedAt[k] < 0) g_movedAt[k] = (float)(g_now - g_endAt); }
+        if (k < 6)
+        {
+            char tgt[32], dst[32];
+            if (s.target == me) snprintf(tgt, sizeof tgt, "you");
+            else if (s.target && s.target != UINT32_MAX) snprintf(tgt, sizeof tgt, "entity %u", s.target);
+            else snprintf(tgt, sizeof tgt, "none");
+            if (s.destD >= 0) snprintf(dst, sizeof dst, "%.1f m off", (double)s.destD); else snprintf(dst, sizeof dst, "-");
+            Log("  %s, target %u (entity %u): its target %s; %s (%d entries of you, bits %x; %d in all); path %s, destination %s%s", when, k,
+                g_state.t[k].entity, tgt, s.mine && s.sense ? "senses you" : s.mine ? "knows of you, no sense now" : "has no entry of you", s.mine, s.sense,
+                s.entries, s.nav ? "on" : "off", dst, after ? (m > 0.3f ? "; has moved" : "; still") : "");
+        }
+    }
+    Log("AI %s: %d alive; target you %d, another %d, none %d; sense you %d, know of you %d; path on %d", when, alive, onMe, onOther, noTarget, sensing, known,
+        nav);
+    if (after) Log("AI %s: %d of %d have moved more than 0.3 m since the stop ended", when, moved, alive);
+}
+static void WatchEnd(const char* why)
+{
+    if (!g_watch) return;
+    g_watch = 0;
+    float least = 1e9f, most = 0, sum = 0;
+    int n = 0, never = 0;
+    for (unsigned k = 0; k < g_state.count; k++)
+    {
+        if (g_movedAt[k] < 0) { never++; continue; }
+        n++; sum += g_movedAt[k];
+        if (g_movedAt[k] < least) least = g_movedAt[k];
+        if (g_movedAt[k] > most) most = g_movedAt[k];
+    }
+    if (n) Log("after stop %u (%s): %d moved again, first seen moving %.2f s after it on average (%.2f to %.2f s; read at 0.25, 0.5, 1, 1.5, 2, 3, 4, 6 s); %d "
+               "did not move or were gone", g_state.seq, why, n, (double)(sum / (float)n), (double)least, (double)most, never);
+    else Log("after stop %u (%s): none of its enemies was seen to move again (%d)", g_state.seq, why, never);
+}
+static void WatchFrame(void)
+{
+    if (!g_watch || g_state.active) return;
+    int i = g_watch - 1;
+    if (g_now - g_endAt < kSamples[i]) return;
+    char when[32];
+    snprintf(when, sizeof when, "%.2f s after", (double)kSamples[i]);
+    Reading(when, 1);
+    if (++g_watch > (int)(sizeof kSamples / sizeof kSamples[0])) WatchEnd("6 s watched");
+}
+
 static void Start(void)
 {
     float me[3];
     uint8_t d[24];
     uint32_t avatar = atomic_load(&g_avatar);
     if (!PlayerPose(me, NULL) || !Descriptor(avatar, d)) { Log("no stop: the player's place could not be read"); return; }
+    WatchEnd("the next stop began");
     static int turn;
     int method = s_method ? s_method : 1 + turn++ % METHODS;
     /* the nearest living enemies within range */
@@ -215,6 +345,7 @@ static void Start(void)
     for (int k = 0; k < n && k < 12; k++)
         Log("  target %d: entity %u, kind %016llx, unit %08x (object %p), %.1f m away", k, best[k].e, (unsigned long long)best[k].res, best[k].unit,
             (void*)(uintptr_t)g_state.t[k].object, (double)sqrtf(best[k].d2));
+    Reading("at the start", 0);
 }
 static void End(void)
 {
@@ -239,6 +370,15 @@ static void End(void)
     Log("stop %u over (method %u): %d alive (%d moved under 0.25 m; mean %.2f m, most %.2f m), %d dead or gone", g_state.seq, g_state.method, alive,
         still, alive ? (double)(sum / (float)alive) : 0.0, (double)most, gone);
     g_state.active = 0;
+    /* 0.3.0: what they hold now, and for 6 s */
+    for (unsigned k = 0; k < g_state.count; k++)
+    {
+        g_movedAt[k] = -1;
+        if (!UnitNode(g_state.t[k].unit, 0, g_endPos[k])) memcpy(g_endPos[k], g_startPos[k], 12);
+    }
+    g_endAt = g_now;
+    Reading("at the end", 0);
+    g_watch = 1;
 }
 /* 0.2.0: each enemy kept where it stood */
 static void HoldFrame(void)
@@ -324,6 +464,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     {
         g_inMission = inMission;
         if (g_state.active) { g_state.active = 0; Log("stop %u cut short: the mission ended", g_state.seq); }
+        g_watch = 0;
         if (!inMission) { memset(g_foe, 0, sizeof g_foe); memset(g_foeRes, 0, sizeof g_foeRes); }
     }
     g_state.in_mission = (uint32_t)g_inMission;
@@ -337,6 +478,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (down && !prev && !g_state.active && g_alive && atomic_load(&g_avatar)) Start();
     prev = down;
     StopFrame();
+    WatchFrame();
 }
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {

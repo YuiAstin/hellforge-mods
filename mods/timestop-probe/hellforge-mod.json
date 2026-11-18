@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.timestop-probe",
   "name": "Time Stop Probe",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A probe, not a release: F7 stops the enemies within 50 m for 5 s, each press with the next method (1 stun only, 2 stun, their animation switched off and held in place, 3 the same without the stun), and logs what it found. For the Hakumen plan's time stop. Solo or host. The pose part needs Bingus Shared Loader and HD2Runtime. Settings in timestop-probe.ini.",
   "gameplay": true,
   "code": {

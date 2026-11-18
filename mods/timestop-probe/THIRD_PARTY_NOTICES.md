@@ -8,3 +8,4 @@ Time Stop Probe is a probe, not a release.
 - The Lua half runs as an HD2Runtime mod and uses its public overlay API for its frame callback.
 - Reading a unit's place only among unit types with few units in the world is a finding of **Exo Autopilot** by marti.
   Its finding only; none of its code is included.
+- The behaviour and perception record reads (0.3.0) are those of **Lost Contact**, this repository's own mod.
