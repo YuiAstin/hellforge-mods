@@ -64,20 +64,34 @@ All numbers are first defaults, each a setting in `hakumen.ini`. Default keys Z,
 The game is not paused: a true pause would stop him and the camera too. Time keeps running and everything that is not
 him is stopped, one thing at a time:
 
-- **Enemies:** held with a stun status, their velocity set to zero every frame (the EMS stun and the physics-body
-  control the other kits already use).
+- **Enemies:** their animation switched off (the pose they are in stays) and each held where it stands: see "Probed"
+  below.
 - **Their hits:** every hit on him is cancelled for the duration.
 - **The payoff:** the 5000 lands as time resumes.
 
 Known gaps:
 
-- A held enemy plays its stun animation; it does not freeze mid-stride. The brush strokes cover most of this.
+- Enemies without a navigation record (some flyers, turrets, an enemy mid-leap) keep their pose but are not held in place.
+- A held enemy can still turn on the spot, and nothing yet stops it firing.
 - Projectiles already in flight and stratagem beams keep moving. His immunity makes this harmless to him, not to allies.
 - The game's sound keeps playing.
 - His own pose is whatever the game gives him: there is no slash animation.
 
-To probe before building: whether an enemy's animation speed can be set per unit (a true frozen pose), and whether the
-game has a time scale that could slow everything but him.
+Probed (Time Stop Probe, branch `timestop-probe`, 2026-11-17 and 18):
+
+- **A pose freeze works.** The game's Lua can switch an enemy's animation state machine off and on again
+  (`Unit.disable_animation_state_machine`): it keeps the pose it was in. Every enemy's unit is found from its unit id (a
+  Lua unit value is the id * 4 + 1), crowds of 40 and more included.
+- **They must also be held in place**, or they slide on in their frozen pose (one went 20 m in 5 s). Pointing each one's
+  path at its own spot, zeroing its velocity every frame and putting it back when it drifts (the warp setter of
+  Koleda's pull) holds nearly all of them within 0.25 m. Enemies without a navigation record are not held.
+- **The stun is not needed**: the pose freeze with the hold did as well without it, and without the stun's own animation.
+- **After the stop the bots stand a moment as if restarting.** Nothing switches their AI off; it is a side effect, and
+  it looks natural on them, so it is kept: it is the beat in which the cut lands. Not yet seen on Terminids. Probe 0.3.0
+  logs what each enemy's AI held when it resumed (its target, whether it sensed the player) and how long it took to move.
+
+So Akumetsu's stop is: the animation off, held in place, no stun. Still to probe: whether the game has a time scale that
+could slow everything but him (the names are logged, none called).
 
 ## What counts as a parry
 
