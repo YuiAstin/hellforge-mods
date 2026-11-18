@@ -13,6 +13,8 @@
  * senses the player, its perception entries, its path), and when each moves again: after a stop the bots stood a while
  * as if restarting, and this is to see what they knew when they did. Lost Contact's reads of the behaviour and
  * perception records.
+ * 0.3.1: enemies whose entity id is 0x400000 or more are held too (hold_high 1). 0.2.0 left them out, as Koleda's pull
+ * does; in a long session most enemies have such ids (a slot and a generation), and they slid up to 26 m.
  * This DLL finds the enemies, stuns them and measures how far each moved. The pose part is the HUD mod's
  * (hud-src/timestop_probe.lua, an HD2Runtime mod): the engine's animation calls are only reachable from the game's Lua.
  * It reads the targets from timestop_probe_state() and writes what it found into this log (timestop_probe_log).
@@ -33,7 +35,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.0"
+#define VERSION "0.3.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -45,7 +47,7 @@
 
 static Key s_key = {VK_F7, 0, "F7"};
 static float s_range = 50, s_seconds = 5;
-static int s_rareMax = 4, s_method = 0, s_hold = 1;
+static int s_rareMax = 4, s_method = 0, s_hold = 1, s_holdHigh = 1;
 
 /* what the HUD mod reads (layout version 1; the same struct in timestop_probe.lua) */
 typedef struct TsTarget { uint32_t entity, unit; uint64_t object; float pos[3]; uint32_t pad; } TsTarget;
@@ -139,11 +141,12 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; animation state machine off (the pose freeze), 3 the state machine off alone. method: 0 takes them in turn,\n"
                "; 1-3 always that one.\n"
                "key = %s\nrange = %g\nseconds = %g\nmethod = %d\n"
-               "; hold: in methods 2 and 3, 1 also holds each enemy where it stood (0: as 0.1.0, they slide).\nhold = %d\n"
+               "; hold: in methods 2 and 3, 1 also holds each enemy where it stood (0: as 0.1.0, they slide). hold_high: 1 holds\n"
+               "; those with an entity id of 0x400000 or more too (0: as 0.3.0, they slide).\nhold = %d\nhold_high = %d\n"
                "; rare_max: when a unit cannot be found by its id, the HUD mod looks for it by its place among unit types with at\n"
                "; most this many units in the world (reading the place of a unit of a mass-instanced type has crashed the game).\n"
                "rare_max = %d\n",
-            VERSION, s_key.label, (double)s_range, (double)s_seconds, s_method, s_hold, s_rareMax);
+            VERSION, s_key.label, (double)s_range, (double)s_seconds, s_method, s_hold, s_holdHigh, s_rareMax);
 }
 static void LoadIni(void)
 {
@@ -166,6 +169,7 @@ static void LoadIni(void)
         else if (!strcmp(key, "seconds")) s_seconds = (float)(v < 1 ? 1 : v > 30 ? 30 : v);
         else if (!strcmp(key, "method")) s_method = (int)(v < 0 ? 0 : v > METHODS ? METHODS : v);
         else if (!strcmp(key, "hold")) s_hold = v != 0;
+        else if (!strcmp(key, "hold_high")) s_holdHigh = v != 0;
         else if (!strcmp(key, "rare_max")) s_rareMax = (int)(v < 1 ? 1 : v > 64 ? 64 : v);
     }
     fclose(f);
@@ -395,7 +399,7 @@ static void HoldFrame(void)
         float p[3];
         uint32_t e = t->entity;
         /* only while it lives, is still the same unit and is this machine's (a dead one crashed the warp setter) */
-        if (!e || e >= 0x400000u || !Descriptor(e, d) || Word(d + 12) != t->unit || !(Word(d + 20) & 1) || !Alive(e) || !UnitNode(t->unit, 0, p)) continue;
+        if (!e || (e >= 0x400000u && !s_holdHigh) || !Descriptor(e, d) || Word(d + 12) != t->unit || !(Word(d + 20) & 1) || !Alive(e) || !UnitNode(t->unit, 0, p)) continue;
         if (!Walks(e)) { noNav++; continue; }
         if (dest) g_setDest(NULL, e, g_startPos[k]);
         g_setVelocity(NULL, e, zero);
