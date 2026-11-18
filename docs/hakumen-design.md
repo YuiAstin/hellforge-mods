@@ -48,12 +48,13 @@ All numbers are first defaults, each a setting in `hakumen.ini`. Default keys Z,
 ### Akumetsu (C)
 
 1. **Stance.** A counter window of `akumetsu_window` (1.5 s). If nothing hits him it whiffs and goes on cooldown.
-2. **Time stop.** On a hit: the hit is cancelled and, for `akumetsu_stop` (2.5 s), every enemy within `akumetsu_range`
-   (60 m) is held in place and nothing can hurt him.
+2. **Time stop.** On a hit: the hit is cancelled and every enemy within `akumetsu_range` (60 m) is held in place, and
+   nothing can hurt him. The stop lasts as long as his voice line when there is one (see Voice), else `akumetsu_stop`
+   (2.5 s).
 3. **Brush strokes.** Black ink strokes sweep across the screen one after another over about a second, and stay until
    the stop ends. The strokes are our own art.
 4. **The cut.** The strokes clear, time resumes, and every enemy within `akumetsu_radius` (25 m) of him takes
-   `akumetsu_damage` (5000) on that frame.
+   `akumetsu_damage` (5000) on that frame: with a voice line, on its last syllable.
 
 - Cooldown `akumetsu_cooldown` (120 s).
 - Target: **a radius around him**, not the attacker alone (the source is a duel; Helldivers fights are crowds). The
@@ -74,7 +75,7 @@ Known gaps:
 - Enemies without a navigation record (some flyers, turrets, an enemy mid-leap) keep their pose but are not held in place.
 - A held enemy can still turn on the spot, and nothing yet stops it firing.
 - Projectiles already in flight and stratagem beams keep moving. His immunity makes this harmless to him, not to allies.
-- The game's sound keeps playing.
+- The game's sound keeps playing under his line.
 - His own pose is whatever the game gives him: there is no slash animation.
 
 Probed (Time Stop Probe, branch `timestop-probe`, 2026-11-17 and 18):
@@ -100,6 +101,35 @@ explosions too (decided: explosions are parryable). `parry_blasts` (1) is the se
 through as normal damage and do not trigger the counter. When the hit has no living attacker (a mine, a fire patch),
 Yukikaze cancels the hit and does nothing further; Akumetsu runs as usual, since it cuts by radius.
 
+## Voice
+
+Half of Akumetsu is its line, so the kit is built to carry a voice, and its timing follows the voice.
+
+- The kit plays sound files from a `voice` folder in the mod's folder, when they are there. It plays them itself
+  through Windows audio, not through the game's sound: they ignore the game's volume sliders and have no place in the
+  world, which suits his own voice. `voice_volume` (1.0) sets how loud; `voice` (1) turns them off.
+- The files, all optional, WAV:
+
+| File | Plays |
+|---|---|
+| `shippu.wav` | as Shippu is released |
+| `yukikaze_stance.wav` | as the Yukikaze stance opens |
+| `yukikaze_hit.wav` | when Yukikaze's counter lands |
+| `akumetsu_stance.wav` | as the Akumetsu stance opens |
+| `akumetsu.wav` | when Akumetsu's counter lands: the line of the time stop |
+
+- **The stop follows `akumetsu.wav`.** With the file there, the stop lasts the clip's length (read from the file,
+  between `akumetsu_stop_min` 1.5 s and `akumetsu_stop_max` 8 s) and the cut lands as it ends. `akumetsu_cut_lead`
+  (0 s) lands the cut that much before the clip's end, for a line whose last word should fall on the blow. Without the
+  file the stop is `akumetsu_stop` (2.5 s).
+- The brush strokes are spread over the stop, whatever its length.
+- A missing file is silence, never an error: the kit is whole without any of them.
+
+**What ships is open.** The kit works with whatever is in the folder; which files, if any, come in the download is a
+separate decision. The original game's recordings are Arc System Works' and are not in this repository. The choices:
+ship the folder empty with the file names (players add their own), ship a newly recorded performance, or ship nothing
+and say nothing.
+
 ## HUD
 
 - His three skills beside the stratagem list, with cooldowns, like the other kits.
@@ -108,6 +138,7 @@ Yukikaze cancels the hit and does nothing further; Akumetsu runs as usual, since
 
 ## Open
 
+- What the download's `voice` folder holds (see Voice).
 - Whether the Yukikaze dash is wanted at all once the counter works without it.
 - Akumetsu's radius (25 m is a first guess) and whether an attacker outside it should still be cut.
 
@@ -116,6 +147,6 @@ Yukikaze cancels the hit and does nothing further; Akumetsu runs as usual, since
 1. Probe on its own branch: one key holds every enemy within range for a few seconds; log what animation-speed and
    time-scale reads are found.
 2. Yukikaze without the dash (the counter window and the hit cancel are shared with Akumetsu).
-3. Akumetsu: stance, stop, strokes, cut.
+3. Akumetsu: stance, stop, strokes, cut; the voice folder and the stop that follows its clip.
 4. Shippu.
 5. HUD, then the Yukikaze dash if wanted.
