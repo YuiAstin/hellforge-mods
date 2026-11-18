@@ -86,12 +86,20 @@ Probed (Time Stop Probe, branch `timestop-probe`, 2026-11-17 and 18):
 - **They must also be held in place**, or they slide on in their frozen pose (one went 20 m in 5 s). Pointing each one's
   path at its own spot, zeroing its velocity every frame and putting it back when it drifts (the warp setter of
   Koleda's pull) holds nearly all of them within 0.25 m. Enemies without a navigation record are not held.
-- **The stun is not needed**: the pose freeze with the hold did as well without it, and without the stun's own animation.
+- **The stun stays** (Yui, 2026-11-18): without it an enemy already firing keeps firing through the stop, so the stop
+  with the stun reads as the time stop and the one without does not. Its cost: a stunned enemy's navigation record goes
+  inactive, and the hold only acts on an active one, so a stunned enemy is kept by the stun, not the hold (in one stop
+  all 12 were so; 11 stayed within 0.25 m, one went 6.7 m).
+- **High entity ids are held too** (probe 0.3.1): the first hold skipped ids of 0x400000 and more, most enemies late in a
+  session, and they slid up to 26 m. Holding them has not crashed.
+- **The AI keeps its target through the stop.** As many enemies had the player as target before, during and after. What
+  holds them a while afterwards is the path set to their own spot: they stand until their AI picks a new destination,
+  1 to 2 s on average after a stop without the stun, 3 to 5 s with it.
 - **After the stop the bots stand a moment as if restarting.** Nothing switches their AI off; it is a side effect, and
   it looks natural on them, so it is kept: it is the beat in which the cut lands. Not yet seen on Terminids. Probe 0.3.0
   logs what each enemy's AI held when it resumed (its target, whether it sensed the player) and how long it took to move.
 
-So Akumetsu's stop is: the animation off, held in place, no stun. Still to probe: whether the game has a time scale that
+So Akumetsu's stop is: the stun, the animation off, held in place. Still to probe: whether the game has a time scale that
 could slow everything but him (the names are logged, none called).
 
 ## What counts as a parry
