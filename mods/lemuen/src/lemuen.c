@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.14"
+#define VERSION "0.1.15"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -66,7 +66,7 @@ static float s_modusAfter = 20, s_modusMult = 1.10f;
 static float s_s1Cd = 15, s_s1Mult = 3.1f;
 static int s_s1AnyGun = 0;
 static int s_sight = 1;   /* 0.1.6: marks and Honesta Missio's lock need a clear view (0: through walls, as 0.1.5) */
-static float s_s2Cd = 20, s_s2Min = 1.8f, s_s2Max = 4.25f, s_s2Hold = 3.5f, s_s2Cone = 4, s_s2Range = 600, s_fpDistance = 0.45f;
+static float s_s2Cd = 20, s_s2Min = 1.8f, s_s2Max = 4.25f, s_s2Hold = 3.5f, s_s2Cone = 4, s_s2Assist = 0.75f, s_s2Range = 600, s_fpDistance = 0.45f;
 static float s_s3Cd = 90, s_s3Every = 0.35f, s_s3Height = 120;
 static int s_s3Max = 8, s_s3Shell = 194;
 static int s_hullHealth = 600;   /* 0.1.13 */
@@ -78,7 +78,7 @@ static const KbSetting kSettings[] = {
     KB_F("modus_after", s_modusAfter, 0, 600), KB_F("modus_mult", s_modusMult, 1, 3),
     KB_F("s1_cooldown", s_s1Cd, 0, 600), KB_F("s1_mult", s_s1Mult, 1, 20), KB_I("s1_any_gun", s_s1AnyGun, 0, 1),
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("s2_min", s_s2Min, 1, 20), KB_F("s2_max", s_s2Max, 1, 20), KB_F("s2_hold", s_s2Hold, 0.1, 30),
-    KB_F("s2_cone", s_s2Cone, 0.5, 30), KB_I("line_of_sight", s_sight, 0, 1), KB_F("s2_range", s_s2Range, 10, 1000), KB_F("first_person", s_fpDistance, 0.1, 2),
+    KB_F("s2_cone", s_s2Cone, 0.5, 30), KB_F("s2_assist", s_s2Assist, 0, 5), KB_I("line_of_sight", s_sight, 0, 1), KB_F("s2_range", s_s2Range, 10, 1000), KB_F("first_person", s_fpDistance, 0.1, 2),
     KB_F("s3_cooldown", s_s3Cd, 0, 3600), KB_F("s3_every", s_s3Every, 0.05, 5), KB_F("s3_height", s_s3Height, 20, 500),
     KB_I("s3_max", s_s3Max, 1, 32), KB_I("s3_shell", s_s3Shell, 1, 100000), KB_I("hull_health", s_hullHealth, 0, 1000000),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
@@ -106,8 +106,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Honesta Missio: cooldown; until she reloads, the enemy in the middle of her scope (first person: the first thing\n"
                "; a ray from the middle of her view meets, within s2_range m; s2_cone degrees only without the raycast) builds up:\n"
                "; her next shot on it deals s2_min rising to s2_max times its damage over s2_hold s. first_person: the camera this\n"
-               "; close to her head (m) counts as scoped.\n"
-               "s2_cooldown = %g\ns2_min = %g\ns2_max = %g\ns2_hold = %g\ns2_cone = %g\ns2_range = %g\nfirst_person = %g\n"
+               "; close to her head (m) counts as scoped. s2_assist: when the ray meets nothing to hold (a gap between enemies, the\n"
+               "; ground behind them), the enemy in sight within this many degrees of her crosshair is held (0: none).\n"
+               "s2_cooldown = %g\ns2_min = %g\ns2_max = %g\ns2_hold = %g\ns2_cone = %g\ns2_assist = %g\ns2_range = %g\nfirst_person = %g\n"
                "; Memento Mori: cooldown; an Orbital 120mm HE Barrage shell (s3_shell, 194) falls from s3_height m on every enemy\n"
                "; she has marked, s3_every s apart, at most s3_max.\n"
                "s3_cooldown = %g\ns3_every = %g\ns3_height = %g\ns3_max = %d\ns3_shell = %d\n"
@@ -123,7 +124,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; more (0: never).\nhull_health = %d\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_markRange, (double)s_markCone, (double)s_markSeconds,
             (double)s_markLast, (double)s_markMult, s_markArmour, s_markHealth, s_markMax, (double)s_markAim, (double)s_markRewatch, (double)s_modusAfter, (double)s_modusMult, (double)s_s1Cd,
-            (double)s_s1Mult, s_s1AnyGun, (double)s_s2Cd, (double)s_s2Min, (double)s_s2Max, (double)s_s2Hold, (double)s_s2Cone,
+            (double)s_s1Mult, s_s1AnyGun, (double)s_s2Cd, (double)s_s2Min, (double)s_s2Max, (double)s_s2Hold, (double)s_s2Cone, (double)s_s2Assist,
             (double)s_s2Range, (double)s_fpDistance, (double)s_s3Cd, (double)s_s3Every, (double)s_s3Height, s_s3Max, s_s3Shell, (double)s_numbersAt, s_sight, s_hullHealth);
 }
 
@@ -672,6 +673,28 @@ static int Holdable(uint32_t e, uint64_t res)
     return hf->component_record("BehaviorComponentData", res, &stride) || hf->component_record("FactionComponentData", res, &stride) ||
            hf->component_record("SeatCollectionComponentData", res, &stride) || hf->component_record("TurretComponentData", res, &stride);
 }
+/* 0.1.15: of her living foes whose body is within `radius` m of `at` (where a ray met something of theirs), the one
+ * nearest the ray itself: 0.1.9 took the one nearest `at`, which in a pack was often the neighbour of the one she aimed at */
+static uint32_t NearAim(const float from[3], const float fwd[3], const float at[3], float radius, uint64_t* nres, float* off)
+{
+    uint32_t closest = 0;
+    float best = 1e9f, q[3];
+    for (int k = 0; k < FOES; k++)
+    {
+        uint32_t f = g_foe[k], life;
+        int32_t hp = 1;
+        if (!f || !TargetPos(f, g_foeRes[k], q)) continue;
+        float dx = q[0] - at[0], dy = q[1] - at[1], dz = q[2] - at[2];
+        if (dx * dx + dy * dy + dz * dz > radius * radius || (HealthOf(f, &hp, &life) && hp <= 0)) continue;
+        float v[3] = {q[0] - from[0], q[1] - from[1], q[2] - from[2]}, along = v[0] * fwd[0] + v[1] * fwd[1] + v[2] * fwd[2];
+        float px = v[0] - along * fwd[0], py = v[1] - along * fwd[1], pz = v[2] - along * fwd[2], perp = sqrtf(px * px + py * py + pz * pz);
+        if (perp < best) { best = perp; closest = f; *nres = g_foeRes[k]; }
+    }
+    *off = best;
+    return closest;
+}
+/* 0.1.15: what the last crosshair ray met first when it found nothing to hold, for the log */
+static char g_chWhy[160];
 /* the first thing the ray from the middle of her camera meets (her, leaves and bodies of the dead skipped): the
  * entity when it is one to hold, 0 when it is a wall, the ground or nothing; -1 when the ray cannot be cast */
 static int64_t Crosshair(const float cam[3], const float fwd[3])
@@ -739,6 +762,29 @@ static int64_t Crosshair(const float cam[3], const float fwd[3])
                     char rec[16];
                     if (!seen && ntold < 16) { toldRes[ntold++] = res; Log("Honesta Missio: entity %u (%016llx) in her crosshair at %.0f m: not one to hold (a friend, a Helldiver, a prop; records %s, friend %d, foe kind %d, enemy turret %d, AI enemy %d, its health %d)", e, (unsigned long long)res, (double)(steps[st] + d), Records(res, rec), FriendRes(res), FoeKind(res), EnemyTurret(res), AiEnemy(res), HpOr(e)); }
                 }
+                {
+                    /* 0.1.15: a thing with no health and no records of its own (Yui's log: entities 333 and 1430, "records
+                     * none, its health -1", in the way of the enemy she aimed at): an enemy's gear when one of her foes
+                     * stands within 4 m of where the ray met it, and that enemy is held */
+                    uint32_t life2;
+                    int32_t hp2 = 0;
+                    if (!HealthOf(e, &hp2, &life2) && Unrecorded(res))
+                    {
+                        float at[3] = {from[0] + fwd[0] * d, from[1] + fwd[1] * d, from[2] + fwd[2] * d}, off;
+                        uint64_t nres = 0;
+                        uint32_t owner = NearAim(from, fwd, at, 4, &nres, &off);
+                        if (owner)
+                        {
+                            static uint64_t toldG[16];
+                            static unsigned ntoldG;
+                            int seenG = 0;
+                            for (unsigned g = 0; g < ntoldG && g < 16; g++) seenG |= toldG[g] == res;
+                            if (!seenG && ntoldG < 16) { toldG[ntoldG++] = res; Log("Honesta Missio: entity %u (%016llx, no health, no records) in her crosshair, %.1f m off entity %u (%016llx): held as its gear", e, (unsigned long long)res, (double)off, owner, (unsigned long long)nres); }
+                            return owner;
+                        }
+                    }
+                }
+                snprintf(g_chWhy, sizeof g_chWhy, "entity %u (%016llx), not one to hold, at %.0f m", e, (unsigned long long)res, (double)(steps[st] + d));
                 return 0;                                                                 /* a friend, a Helldiver, a prop */
             }
             if (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u)) continue;             /* a body she does not know */
@@ -747,25 +793,17 @@ static int64_t Crosshair(const float cam[3], const float fwd[3])
                 /* 0.1.9: a part of a big enemy with a unit of its own (a War Strider's legs and armour: filters
                  * e5727f8e, 19dc4f24, 2026-11-08): the enemy whose body is nearest where the ray met it, within 10 m */
                 float at[3] = {from[0] + fwd[0] * d, from[1] + fwd[1] * d, from[2] + fwd[2] * d}, q[3];
-                uint32_t closest = 0;
                 uint64_t nres = 0;
-                float bd = 10.f * 10.f;
-                for (int k = 0; k < FOES; k++)
-                {
-                    uint32_t f = g_foe[k];
-                    if (!f || !TargetPos(f, g_foeRes[k], q)) continue;
-                    float dx = q[0] - at[0], dy = q[1] - at[1], dz = q[2] - at[2], d2 = dx * dx + dy * dy + dz * dz;
-                    uint32_t life;
-                    int32_t hp = 1;
-                    if (d2 < bd && !(HealthOf(f, &hp, &life) && hp <= 0)) { bd = d2; closest = f; nres = g_foeRes[k]; }
-                }
+                float bd = 0;
+                (void)q;
+                uint32_t closest = NearAim(from, fwd, at, 10, &nres, &bd);   /* 0.1.15: the one nearest her aim, not nearest the part */
                 if (closest)
                 {
                     static uint64_t toldN[16];
                     static unsigned ntoldN;
                     int seen = 0;
                     for (unsigned t = 0; t < ntoldN && t < 16; t++) seen |= toldN[t] == nres;
-                    if (!seen && ntoldN < 16) { toldN[ntoldN++] = nres; Log("Honesta Missio: her crosshair meets unit %08x (filter %08x) %.1f m from entity %u (%016llx): held as part of it", hu, filt, (double)sqrtf(bd), closest, (unsigned long long)nres); }
+                    if (!seen && ntoldN < 16) { toldN[ntoldN++] = nres; Log("Honesta Missio: her crosshair meets unit %08x (filter %08x) %.1f m off her aim at entity %u (%016llx): held as part of it", hu, filt, (double)bd, closest, (unsigned long long)nres); }
                     return closest;
                 }
                 /* 0.1.8: a unit no entity she has seen owns: named in the log (a few), to find what a big enemy is made of */
@@ -775,9 +813,11 @@ static int64_t Crosshair(const float cam[3], const float fwd[3])
                 for (unsigned t = 0; t < ntoldU && t < 24; t++) seen |= toldU[t] == hu;
                 if (!seen && ntoldU < 24) { toldU[ntoldU++] = hu; Log("Honesta Missio: her crosshair meets unit %08x (filter %08x) at %.0f m: no entity she knows", hu, filt, (double)(steps[st] + d)); }
             }
+            snprintf(g_chWhy, sizeof g_chWhy, "unit %08x (filter %08x) at %.0f m", hu, filt, (double)(steps[st] + d));
             return 0;                                                                     /* a wall, the ground */
         }
     }
+    snprintf(g_chWhy, sizeof g_chWhy, "nothing within %.0f m", (double)s_s2Range);
     return 0;
 }
 static uint64_t ResOf(uint32_t e)
@@ -801,7 +841,39 @@ static void ScopeFrame(double dt)
     uint32_t best = 0;
     int64_t aimed = Crosshair(cam, fwd);
     if (aimed >= 0) best = (uint32_t)aimed;
-    else
+    if (aimed == 0)
+    {
+        /* 0.1.15: the ray met nothing to hold (a gap between enemies, the ground behind them, a thing in the way): the
+         * living enemy in sight nearest her crosshair, within s2_assist degrees, is held; and what was in the way goes
+         * to the log when an enemy stood within 2 degrees (Yui: some enemies in a pack would not lock) */
+        float bestOff = 2, nearOff = 180, nearD = 0;
+        uint32_t nearE = 0;
+        uint64_t nearRes = 0;
+        for (int k = 0; k < FOES; k++)
+        {
+            uint32_t e = g_foe[k], life;
+            int32_t hp = 1;
+            float d;
+            if (!e || !TargetPos(e, g_foeRes[k], q)) continue;
+            float o = Off(cam, fwd, q, &d);
+            if (o >= bestOff || d > s_s2Range || (HealthOf(e, &hp, &life) && hp <= 0)) continue;
+            bestOff = o; nearE = e; nearRes = g_foeRes[k]; nearOff = o; nearD = d;
+        }
+        static double toldAt;
+        static unsigned told;
+        if (nearE && nearOff < s_s2Assist && TargetPos(nearE, nearRes, q) && InSight(cam, fwd, q, nearE))
+        {
+            best = nearE;
+            if (told < 40 && g_now - toldAt > 1.0) { told++; toldAt = g_now; Log("Honesta Missio: her ray met %s; entity %u (%016llx) %.2f degrees off her crosshair at %.0f m is held (s2_assist %.2f)", g_chWhy, nearE, (unsigned long long)nearRes, (double)nearOff, (double)nearD, (double)s_s2Assist); }
+        }
+        else if (nearE && told < 40 && g_now - toldAt > 1.0)
+        {
+            told++; toldAt = g_now;
+            Log("Honesta Missio: no lock: her ray met %s; the nearest enemy to her crosshair is entity %u (%016llx), %.2f degrees off at %.0f m%s", g_chWhy, nearE,
+                (unsigned long long)nearRes, (double)nearOff, (double)nearD, nearOff < s_s2Assist ? " (not in sight)" : "");
+        }
+    }
+    if (aimed < 0)
     {
         /* no raycast (another build): the enemy nearest the middle, as 0.1.6 */
         float bestOff = s_s2Cone;
