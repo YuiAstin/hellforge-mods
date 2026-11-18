@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "Corpse Probe",
+  "resource": "mods/yui/corpse_probe",
+  "guid": "95fcaae2-9af8-5f91-bc52-36801aaeb17e",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.30.0",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.corpse-probe",
+  "name": "Corpse Probe",
+  "version": "0.1.0",
+  "description": "A probe, not a release: F6 turns a corpse freeze on and off. While on, each enemy that dies has its body's physics switched off 3 s after its death; the log has the frame rate every 5 s, to set a fight with it on beside one with it off. Solo or host. The freeze needs Bingus Shared Loader and HD2Runtime. Settings in corpse-probe.ini.",
+  "gameplay": true,
+  "code": {
+    "dll": "corpse_probe.dll",
+    "sdk": 13
+  }
+}
