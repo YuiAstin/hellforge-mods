@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.17"
+#define VERSION "0.1.18"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -742,6 +742,43 @@ static uint32_t NearAim(const float from[3], const float fwd[3], const float at[
     *off = best;
     return closest;
 }
+/* 0.1.18: one lock for a whole big enemy (Yui: a Factory Strider's body, chin guns and cannon are enemies of their
+ * own, and the lock moved between them, the build-up starting over each time). The enemy an enemy is part of: the
+ * nearest living foe within 30 m whose kind carries its kind (the Mount record, itself or through what it carries);
+ * itself when there is none. Kept a second, so it is not worked out on every frame and every hit */
+static uint32_t RootOf(uint32_t e, uint64_t res)
+{
+    static struct { uint32_t e, root; double at; } c[32];
+    static unsigned next;
+    float p[3], q[3];
+    if (!e || !res) return e;
+    for (int i = 0; i < 32; i++) if (c[i].e == e && g_now - c[i].at < 1.0) return c[i].root;
+    uint32_t root = e;
+    uint64_t rres = 0;
+    if (TargetPos(e, res, p))
+    {
+        float best = 30.f * 30.f;
+        for (int k = 0; k < FOES; k++)
+        {
+            uint32_t f = g_foe[k], life;
+            int32_t hp = 1;
+            if (!f || f == e || g_foeRes[k] == res || !Carries(g_foeRes[k], res, 0) || !TargetPos(f, g_foeRes[k], q)) continue;
+            float d2 = (q[0] - p[0]) * (q[0] - p[0]) + (q[1] - p[1]) * (q[1] - p[1]) + (q[2] - p[2]) * (q[2] - p[2]);
+            if (d2 >= best || (HealthOf(f, &hp, &life) && hp <= 0)) continue;
+            best = d2; root = f; rres = g_foeRes[k];
+        }
+    }
+    if (root != e)
+    {
+        static uint64_t told[16];
+        static unsigned ntold;
+        int seen = 0;
+        for (unsigned g = 0; g < ntold && g < 16; g++) seen |= told[g] == res;
+        if (!seen && ntold < 16) { told[ntold++] = res; Log("Honesta Missio: entity %u (%016llx) is part of entity %u (%016llx): one lock for the whole of it", e, (unsigned long long)res, root, (unsigned long long)rres); }
+    }
+    c[next % 32].e = e; c[next % 32].root = root; c[next % 32].at = g_now; next++;
+    return root;
+}
 /* 0.1.15: what the last crosshair ray met first when it found nothing to hold, for the log */
 static char g_chWhy[160];
 /* the first thing the ray from the middle of her camera meets (her, leaves and bodies of the dead skipped): the
@@ -970,6 +1007,7 @@ static void ScopeFrame(double dt)
             if (o < bestOff && d <= s_s2Range && InSight(cam, fwd, q, e)) { bestOff = o; best = e; }
         }
     }
+    if (best) best = RootOf(best, ResOf(best));   /* 0.1.18: a part of a big enemy is the big enemy */
     if (best && best != g_s2Target && g_s2Target)
     {
         /* 0.1.7: another enemy in the middle (one crossing in front, the aim slipping onto its neighbour): the lock
@@ -1147,13 +1185,14 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     if (IsShot(d))
     {
         if (g_s1On) { mult *= xS1 = s_s1Mult; g_empowered++; }                           /* Salve Etiam */
-        if (g_s2On && d->target && d->target == g_s2PrevTarget && g_now - g_s2PrevAt < 1.5 && g_s2PrevHeld > 0 &&
-            !(d->target == g_s2Target && g_s2Held > 0))
+        uint32_t whole = g_s2On && d->target ? RootOf(d->target, ResOf(d->target)) : d->target;   /* 0.1.18: a hit on a part is a hit on the whole */
+        if (g_s2On && whole && whole == g_s2PrevTarget && g_now - g_s2PrevAt < 1.5 && g_s2PrevHeld > 0 &&
+            !(whole == g_s2Target && g_s2Held > 0))
         {
             /* the lock it just left (see g_s2PrevTarget) */
             g_s2Target = g_s2PrevTarget; g_s2Held = g_s2PrevHeld; g_s2PrevTarget = 0;
         }
-        if (g_s2On && g_s2Target && d->target == g_s2Target && g_s2Held > 0)             /* Honesta Missio */
+        if (g_s2On && g_s2Target && whole == g_s2Target && g_s2Held > 0)                 /* Honesta Missio */
         {
             double x = S2Mult();
             mult *= x;
