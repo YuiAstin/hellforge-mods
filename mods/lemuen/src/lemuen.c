@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.16"
+#define VERSION "0.1.17"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -670,8 +670,10 @@ static int Holdable(uint32_t e, uint64_t res)
      * (hull_health or more; crates and fences are small) */
     if (hp >= s_hullHealth && s_hullHealth > 0) return 1;
     /* 0.1.12: a tank (the Barrager's, the Annihilator's): its hull carries a turret and health (reported 2026-11) */
+    /* 0.1.17: or a gun of its own (Yui's log: the bots' HMG emplacement, a98f8b559c7993d8, health 421, read "records H") */
     return hf->component_record("BehaviorComponentData", res, &stride) || hf->component_record("FactionComponentData", res, &stride) ||
-           hf->component_record("SeatCollectionComponentData", res, &stride) || hf->component_record("TurretComponentData", res, &stride);
+           hf->component_record("SeatCollectionComponentData", res, &stride) || hf->component_record("TurretComponentData", res, &stride) ||
+           hf->component_record("ProjectileWeaponComponentData", res, &stride);
 }
 /* 0.1.15: of her living foes whose body is within `radius` m of `at` (where a ray met something of theirs), the one
  * nearest the ray itself: 0.1.9 took the one nearest `at`, which in a pack was often the neighbour of the one she aimed at */
@@ -836,8 +838,24 @@ static int64_t Crosshair(const float cam[3], const float fwd[3])
                         return owner;
                     }
                 }
+                {
+                    /* 0.1.17: a thing with no health at all is no cover: looked past. Yui's log: a Supply Box
+                     * (a94913ca014f7579) 6 to 21 m from her stopped the ray again and again while she aimed at enemies
+                     * 70 m off, and an Ammo Box (79ccffd281e3f3a9): the ray meets a pickup's reach, far wider than the box */
+                    uint32_t life3;
+                    int32_t hp3 = 0;
+                    if (!HealthOf(e, &hp3, &life3))
+                    {
+                        static uint64_t toldP[16];
+                        static unsigned ntoldP;
+                        int seenP = 0;
+                        for (unsigned g = 0; g < ntoldP && g < 16; g++) seenP |= toldP[g] == res;
+                        if (!seenP && ntoldP < 16) { toldP[ntoldP++] = res; Log("Honesta Missio: entity %u (%016llx) in her crosshair at %.0f m has no health: looked past (a pickup, a marker)", e, (unsigned long long)res, (double)(steps[st] + d)); }
+                        continue;
+                    }
+                }
                 snprintf(g_chWhy, sizeof g_chWhy, "entity %u (%016llx), not one to hold, at %.0f m", e, (unsigned long long)res, (double)(steps[st] + d));
-                return 0;                                                                 /* a friend, a Helldiver, a prop */
+                return 0;                                                                 /* a friend, a Helldiver, a prop with health */
             }
             if (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u)) continue;             /* a body she does not know */
             if (hu && filt && filt != 0xEDC5EBE0u)
@@ -849,6 +867,7 @@ static int64_t Crosshair(const float cam[3], const float fwd[3])
                 float bd = 0;
                 (void)q;
                 uint32_t closest = NearAim(from, fwd, at, 10, 0, &nres, &bd);   /* 0.1.15: the one nearest her aim, not nearest the part */
+                if (closest && bd > 3.5f) closest = 0;                         /* 0.1.17: and no farther than 3.5 m from it (one was held 6.1 m off) */
                 if (closest)
                 {
                     static uint64_t toldN[16];
@@ -864,6 +883,19 @@ static int64_t Crosshair(const float cam[3], const float fwd[3])
                 int seen = 0;
                 for (unsigned t = 0; t < ntoldU && t < 24; t++) seen |= toldU[t] == hu;
                 if (!seen && ntoldU < 24) { toldU[ntoldU++] = hu; Log("Honesta Missio: her crosshair meets unit %08x (filter %08x) at %.0f m: no entity she knows", hu, filt, (double)(steps[st] + d)); }
+            }
+            /* 0.1.17: only the world stops the ray: the ground (no unit) and the level's own rocks, walls and buildings
+             * (filter edc5ebe0, a1ff2f13). Any other unit no entity owns is clutter and looked past: Yui's log has locks
+             * at 230 m and more refused by such units 24 m from her (filter 7d610d33), and others by 5cafbe87, e76094db,
+             * e54b0d81, f2760503 */
+            if (hu && filt != 0xEDC5EBE0u && filt != 0xA1FF2F13u)
+            {
+                static uint32_t toldF[16];
+                static unsigned ntoldF;
+                int seenF = 0;
+                for (unsigned g = 0; g < ntoldF && g < 16; g++) seenF |= toldF[g] == filt;
+                if (!seenF && ntoldF < 16) { toldF[ntoldF++] = filt; Log("Honesta Missio: unit %08x (filter %08x) at %.0f m is no entity's and not the world's: looked past", hu, filt, (double)(steps[st] + d)); }
+                continue;
             }
             snprintf(g_chWhy, sizeof g_chWhy, "unit %08x (filter %08x) at %.0f m", hu, filt, (double)(steps[st] + d));
             return 0;                                                                     /* a wall, the ground */
