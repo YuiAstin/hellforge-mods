@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.18"
+#define VERSION "0.1.19"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -609,27 +609,68 @@ static void SeeAny(uint32_t e, uint64_t res)
     unsigned i = g_anyNext++ % ANY;
     g_any[i] = e; g_anyRes[i] = res;
 }
-/* the entity whose unit this is: her foes first, then everything seen; 0 none */
+/* the entity whose unit this is: her foes first, then everything seen; 0 none.
+ * 0.1.19: from an index of every known entity's unit, rebuilt at most every 0.3 s. Before, each unit a ray met that
+ * was not in the last 32 asked about was looked for among her foes and all 4096 seen entities, a descriptor read each;
+ * since 0.1.17 the ray goes on past clutter, up to 48 units a frame while she is in her scope (Yui: the game lagged
+ * more with her) */
+#define UX 8192
+static struct { uint32_t u, e; uint64_t r; } g_ux[UX];
+static double g_uxAt = -1;
+static void UxPut(uint32_t u, uint32_t e, uint64_t r)
+{
+    if (!u || u == UINT32_MAX) return;
+    unsigned h = (u * 2654435761u) >> 19;
+    for (unsigned i = 0; i < 64; i++)
+    {
+        unsigned k = (h + i) & (UX - 1);
+        if (g_ux[k].u == u) return;                       /* her foes first */
+        if (!g_ux[k].u) { g_ux[k].u = u; g_ux[k].e = e; g_ux[k].r = r; return; }
+    }
+}
 static uint32_t EntityOfUnit(uint32_t u, uint64_t* res)
 {
-    /* the last 32 units asked about, for a second each (the ground and walls are asked about every frame) */
-    static struct { uint32_t u, e; uint64_t r; double at; } c[32];
-    static unsigned cn;
-    for (int i = 0; i < 32; i++) if (c[i].u == u && g_now - c[i].at < 1.0) { *res = c[i].r; return c[i].e; }
-    uint32_t e = 0;
-    uint64_t r = 0;
-    for (int k = 0; k < FOES && !e; k++) if (g_foe[k] && UnitOf(g_foe[k]) == u) { e = g_foe[k]; r = g_foeRes[k]; }
-    for (unsigned i = 0; i < ANY && !e; i++)
-        if (g_any[i] && UnitOf(g_any[i]) == u)
+    if (g_uxAt < 0 || g_now - g_uxAt > 0.3 || g_now < g_uxAt)
+    {
+        g_uxAt = g_now;
+        memset(g_ux, 0, sizeof g_ux);
+        uint8_t d[24];
+        for (int k = 0; k < FOES; k++) if (g_foe[k] && Descriptor(g_foe[k], d)) UxPut(Word(d + 12), g_foe[k], g_foeRes[k]);
+        for (unsigned i = 0; i < ANY; i++)
         {
-            uint8_t d[24];
-            if (Descriptor(g_any[i], d) && Quad(d) == g_anyRes[i]) { e = g_any[i]; r = g_anyRes[i]; }   /* not an id a later spawn took */
-            else g_any[i] = 0;
+            if (!g_any[i]) continue;
+            if (Descriptor(g_any[i], d) && Quad(d) == g_anyRes[i]) UxPut(Word(d + 12), g_any[i], g_anyRes[i]);
+            else g_any[i] = 0;                            /* gone, or an id a later spawn took */
         }
-    unsigned k = cn++ % 32;
-    c[k].u = u; c[k].e = e; c[k].r = r; c[k].at = g_now;
-    *res = r;
-    return e;
+    }
+    unsigned h = (u * 2654435761u) >> 19;
+    for (unsigned i = 0; i < 64; i++)
+    {
+        unsigned k = (h + i) & (UX - 1);
+        if (g_ux[k].u == u) { *res = g_ux[k].r; return g_ux[k].e; }
+        if (!g_ux[k].u) break;
+    }
+    *res = 0;
+    return 0;
+}
+/* 0.1.19: her living foes and where they are, read once a frame at most: the aim helpers each walked all her foes with
+ * a descriptor, a scene-graph and a health read apiece, several times a frame */
+static struct { uint32_t e; uint64_t res; float p[3]; } g_fs[FOES];
+static int g_nfs;
+static double g_fsAt = -1;
+static int TargetPos(uint32_t e, uint64_t res, float out[3]);
+static void Foes(void)
+{
+    if (g_fsAt == g_now) return;
+    g_fsAt = g_now;
+    g_nfs = 0;
+    for (int k = 0; k < FOES; k++)
+    {
+        uint32_t f = g_foe[k], life;
+        int32_t hp = 1;
+        if (!f || !TargetPos(f, g_foeRes[k], g_fs[g_nfs].p) || (HealthOf(f, &hp, &life) && hp <= 0)) continue;
+        g_fs[g_nfs].e = f; g_fs[g_nfs].res = g_foeRes[k]; g_nfs++;
+    }
 }
 /* something to hold in her scope: no friend, no Helldiver, alive, and a fighting thing (her foes, enemy turrets, or
  * anything with health that runs a behaviour, has a faction or carries seats: 0.1.8, a War Strider's walker is a
@@ -726,18 +767,17 @@ static int Carries(uint64_t owner, uint64_t item, int depth)
 static uint32_t NearAim(const float from[3], const float fwd[3], const float at[3], float radius, uint64_t carries, uint64_t* nres, float* off)
 {
     uint32_t closest = 0;
-    float best = 1e9f, q[3];
-    for (int k = 0; k < FOES; k++)
+    float best = 1e9f;
+    Foes();
+    for (int k = 0; k < g_nfs; k++)
     {
-        uint32_t f = g_foe[k], life;
-        int32_t hp = 1;
-        if (!f || !TargetPos(f, g_foeRes[k], q)) continue;
+        const float* q = g_fs[k].p;
         float dx = q[0] - at[0], dy = q[1] - at[1], dz = q[2] - at[2];
-        if (dx * dx + dy * dy + dz * dz > radius * radius || (HealthOf(f, &hp, &life) && hp <= 0)) continue;
-        if (carries && !Carries(g_foeRes[k], carries, 0)) continue;
+        if (dx * dx + dy * dy + dz * dz > radius * radius) continue;
+        if (carries && !Carries(g_fs[k].res, carries, 0)) continue;
         float v[3] = {q[0] - from[0], q[1] - from[1], q[2] - from[2]}, along = v[0] * fwd[0] + v[1] * fwd[1] + v[2] * fwd[2];
         float px = v[0] - along * fwd[0], py = v[1] - along * fwd[1], pz = v[2] - along * fwd[2], perp = sqrtf(px * px + py * py + pz * pz);
-        if (perp < best) { best = perp; closest = f; *nres = g_foeRes[k]; }
+        if (perp < best) { best = perp; closest = g_fs[k].e; *nres = g_fs[k].res; }
     }
     *off = best;
     return closest;
@@ -758,14 +798,15 @@ static uint32_t RootOf(uint32_t e, uint64_t res)
     if (TargetPos(e, res, p))
     {
         float best = 30.f * 30.f;
-        for (int k = 0; k < FOES; k++)
+        Foes();
+        for (int k = 0; k < g_nfs; k++)
         {
-            uint32_t f = g_foe[k], life;
-            int32_t hp = 1;
-            if (!f || f == e || g_foeRes[k] == res || !Carries(g_foeRes[k], res, 0) || !TargetPos(f, g_foeRes[k], q)) continue;
+            uint32_t f = g_fs[k].e;
+            if (f == e || g_fs[k].res == res || !Carries(g_fs[k].res, res, 0)) continue;
+            memcpy(q, g_fs[k].p, 12);
             float d2 = (q[0] - p[0]) * (q[0] - p[0]) + (q[1] - p[1]) * (q[1] - p[1]) + (q[2] - p[2]) * (q[2] - p[2]);
-            if (d2 >= best || (HealthOf(f, &hp, &life) && hp <= 0)) continue;
-            best = d2; root = f; rres = g_foeRes[k];
+            if (d2 >= best) continue;
+            best = d2; root = f; rres = g_fs[k].res;
         }
     }
     if (root != e)
@@ -783,7 +824,16 @@ static uint32_t RootOf(uint32_t e, uint64_t res)
 static char g_chWhy[160];
 /* the first thing the ray from the middle of her camera meets (her, leaves and bodies of the dead skipped): the
  * entity when it is one to hold, 0 when it is a wall, the ground or nothing; -1 when the ray cannot be cast */
+static int64_t CrosshairRay(const float cam[3], const float fwd[3]);
+/* 0.1.19: once a frame (her marks and Honesta Missio each asked) */
 static int64_t Crosshair(const float cam[3], const float fwd[3])
+{
+    static double at = -1;
+    static int64_t was;
+    if (at != g_now) { at = g_now; was = CrosshairRay(cam, fwd); }
+    return was;
+}
+static int64_t CrosshairRay(const float cam[3], const float fwd[3])
 {
     if (!g_raycast || !g_worldId) return -1;
     uintptr_t world = Pointer(game + 0x346BFA0);
@@ -970,15 +1020,13 @@ static void ScopeFrame(double dt)
         float bestOff = 2, nearOff = 180, nearD = 0;
         uint32_t nearE = 0;
         uint64_t nearRes = 0;
-        for (int k = 0; k < FOES; k++)
+        Foes();
+        for (int k = 0; k < g_nfs; k++)
         {
-            uint32_t e = g_foe[k], life;
-            int32_t hp = 1;
             float d;
-            if (!e || !TargetPos(e, g_foeRes[k], q)) continue;
-            float o = Off(cam, fwd, q, &d);
-            if (o >= bestOff || d > s_s2Range || (HealthOf(e, &hp, &life) && hp <= 0)) continue;
-            bestOff = o; nearE = e; nearRes = g_foeRes[k]; nearOff = o; nearD = d;
+            float o = Off(cam, fwd, g_fs[k].p, &d);
+            if (o >= bestOff || d > s_s2Range) continue;
+            bestOff = o; nearE = g_fs[k].e; nearRes = g_fs[k].res; nearOff = o; nearD = d;
         }
         static double toldAt;
         static unsigned told;
@@ -1532,17 +1580,47 @@ static void Tick(HfMod* mod, float dt, void* user)
         }
         prev[i] = down;
     }
+    /* 0.1.19: what her frame costs, in the log every 10 s of a mission (Yui: the game lagged more with her) */
+    static double tSum[3], tMax[3], tAt;
+    static unsigned tN, tTold;
+    LARGE_INTEGER qf, q0, q1, q2, q3;
+    QueryPerformanceFrequency(&qf);
+    QueryPerformanceCounter(&q0);
     LateFrame();
+    q1 = q0; q2 = q0;
     if (g_alive)
     {
         MarkFrame();
+        QueryPerformanceCounter(&q1);
         SpotsFrame();
         ViewFrame();
         ReloadFrame();
+        q2.QuadPart = 0;
+        LARGE_INTEGER qs;
+        QueryPerformanceCounter(&qs);
         ScopeFrame(step);
+        QueryPerformanceCounter(&q2);
+        q2.QuadPart -= qs.QuadPart;
         ShellFrame();
     }
+    else q2.QuadPart = 0;
     Exhaustion();
+    QueryPerformanceCounter(&q3);
+    if (g_inMission && qf.QuadPart > 0)
+    {
+        double ms[3] = {(double)(q3.QuadPart - q0.QuadPart) * 1000.0 / (double)qf.QuadPart, (double)(q1.QuadPart - q0.QuadPart) * 1000.0 / (double)qf.QuadPart,
+                        (double)q2.QuadPart * 1000.0 / (double)qf.QuadPart};
+        for (int i = 0; i < 3; i++) { tSum[i] += ms[i]; if (ms[i] > tMax[i]) tMax[i] = ms[i]; }
+        tN++;
+        if (g_now - tAt >= 10 || g_now < tAt)
+        {
+            if (tN > 1 && tTold++ < 120)
+                Log("her frame: %.3f ms on average, %.2f ms at most (marks %.3f / %.2f, Honesta Missio %.3f / %.2f) over %u frames; %d foes", tSum[0] / tN, tMax[0],
+                    tSum[1] / tN, tMax[1], tSum[2] / tN, tMax[2], tN, g_nfs);
+            tAt = g_now; tN = 0;
+            for (int i = 0; i < 3; i++) tSum[i] = tMax[i] = 0;
+        }
+    }
     atomic_exchange(&g_ownStopped, 0);
     atomic_exchange(&g_kdStopped, 0);
 }
