@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -300,6 +300,61 @@ static int InSight(const float cam[3], const float fwd[3], const float q[3], uin
     }
     return 0;
 }
+/* what her crosshair is on: the living enemy whose body the aim ray meets first; or, when it meets a part that is no
+ * enemy of its own (a big enemy's turret or plate), the living enemy nearest that point */
+static int AimDirect(const float cam[3], const float fwd[3], float range, float at[3], uint32_t* target)
+{
+    uint32_t id;
+    if (!WorldId(&id)) return 0;
+    uint32_t me = UnitOf(atomic_load(&g_avatar));
+    uint8_t hits[16 * 44];
+    memset(hits, 0, sizeof hits);
+    uint32_t n = g_raycast(id, cam, fwd, range, 2, 1, 0, 0x80000009u, me, hits, 16);
+    if (n > 16) n = 16;
+    uint8_t used[16] = {0};
+    float part = -1;
+    for (uint32_t step = 0; step < n; step++)
+    {
+        int b = -1;
+        float bd = range + 1;
+        for (uint32_t i = 0; i < n; i++)
+        {
+            float d;
+            memcpy(&d, hits + 44u * i + 24, 4);
+            if (!used[i] && isfinite(d) && d < bd) { bd = d; b = (int)i; }
+        }
+        if (b < 0) break;
+        used[b] = 1;
+        uint32_t hu = Word(hits + 44u * b + 28);
+        if (bd < 1.2f || (hu && hu == me)) continue;
+        uint32_t filt = ActorFilter(Word(hits + 44u * b + 32), hu);
+        if (filt == FILTER_FOLIAGE || (hu && (filt == 0x236122F0u || filt == 0xD5B33D56u))) continue;
+        if (!hu) break;                                        /* the world: nothing behind it counts */
+        for (int k = 0; k < FOES; k++)
+            if (g_foe[k] && UnitOf(g_foe[k]) == hu && Alive(g_foe[k]))
+            {
+                *target = g_foe[k];
+                for (int j = 0; j < 3; j++) at[j] = cam[j] + fwd[j] * bd;
+                return 1;
+            }
+        if (part < 0) part = bd;
+    }
+    if (part < 0) return 0;
+    float p[3], q[3], best = 12.0f * 12.0f;
+    for (int j = 0; j < 3; j++) p[j] = cam[j] + fwd[j] * part;
+    for (int k = 0; k < FOES; k++)
+    {
+        uint32_t e = g_foe[k];
+        if (!e || !TargetPos(e, g_foeRes[k], q)) continue;
+        float d2 = (q[0] - p[0]) * (q[0] - p[0]) + (q[1] - p[1]) * (q[1] - p[1]) + (q[2] - p[2]) * (q[2] - p[2]);
+        if (d2 >= best || !Alive(e)) continue;
+        best = d2; *target = e;
+    }
+    if (!*target) return 0;
+    memcpy(at, p, 12);
+    return 2;
+}
+static int g_aimHow;                   /* 1 her crosshair on its body, 2 on one of its parts, 0 nearest her crosshair */
 /* where she aims: the living enemy nearest her crosshair (within cone degrees, range m, in sight), else (anyAt) where her
  * aim meets the world. 1 with a target (*target set), 2 with a point only, 0 nothing */
 static unsigned g_aimBlocked;
@@ -310,6 +365,7 @@ static int Aim(float cone, float range, int anyAt, float at[3], uint32_t* target
     int fp;
     *target = 0;
     if (!View(cam, fwd, &fp)) return 0;
+    if ((g_aimHow = AimDirect(cam, fwd, range, at, target)) != 0) return 1;
     float bestOff = cone;
     for (int k = 0; k < FOES; k++)
     {
@@ -494,7 +550,8 @@ static void Portent(void)
     Ignite(target, s_s2Buildup, "Portent of Doom");
     Heat* c = HeatOf(target, 1);
     if (c) c->smolderUntil = g_now + s_smolderSeconds;
-    Log("Portent of Doom: entity %u is on fire and Smolders for %.0f s (fire damage on it x%.2f)", target, (double)s_smolderSeconds, (double)s_smolderMult);
+    Log("Portent of Doom: entity %u (%s) is on fire and Smolders for %.0f s (fire damage on it x%.2f)", target,
+        g_aimHow == 1 ? "her crosshair on its body" : g_aimHow == 2 ? "her crosshair on one of its parts" : "nearest her crosshair", (double)s_smolderSeconds, (double)s_smolderMult);
     Cast(1);
 }
 

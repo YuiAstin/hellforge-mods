@@ -95,3 +95,10 @@ Smolder, Overburn and Accelerant multiply together: a Smoldering, Overburned ene
 - Skill icons, a mod icon.
 - Fire kept off allies near her own bursts (the ally guard Alva has).
 - Co-op, with the others.
+
+## Playtest notes
+
+- 0.1.1: Portent of Doom takes what the crosshair is on first (the body the aim ray meets, or the enemy a hit part belongs
+  to), and only then the enemy nearest the crosshair. Before, a tall enemy could only be picked by aiming at its centre
+  point, which sits in the empty space between its legs.
+- Fire's damage element is 1 (learned in the first run).
