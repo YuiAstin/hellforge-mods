@@ -21,6 +21,7 @@ KB_VAR SRWLOCK g_upLock = SRWLOCK_INIT;
 KB_VAR char g_upOwned[KB_ROSTER_MAX][32];       /* kits that bought One-Handed Grip (under g_upLock) */
 KB_VAR int g_upOwnedN, g_upLoaded;
 KB_VAR _Atomic int g_upBuyWant = -1;            /* the screen's purchase: a hub index */
+KB_VAR _Atomic int g_upGrantWant;               /* the test button: 10 Forge Credits asked for */
 KB_VAR _Atomic int g_upBusy;                    /* a purchase waits for HellForge's answer */
 KB_VAR _Atomic long long g_upBalance = -1;      /* Forge Credits as the game holds them; -1 not known */
 KB_VAR char g_upStatus[96];                     /* the last purchase's outcome, for the screen */
@@ -127,6 +128,31 @@ KB_FN void UpBuy(int hubIndex)
 #endif
 }
 
+/* the test button's grant (SDK 21 grant_currency), on the game thread */
+#ifdef HF_SPEND_GRANTED
+KB_FN void UpGranted(HfMod* mod, uint32_t request, uint32_t result, int64_t balance, void* user)
+{
+    (void)mod; (void)request; (void)user;
+    if (result == HF_SPEND_GRANTED) snprintf(g_upStatus, sizeof g_upStatus, "Test: 10 Forge Credits granted");
+    else snprintf(g_upStatus, sizeof g_upStatus, "Test: the grant failed: see the mod's log");
+    if (balance >= 0) atomic_store(&g_upBalance, balance);
+    Log("upgrades: test grant of 10 Forge Credits: %s", g_upStatus);
+    atomic_store(&g_upBusy, 0);
+}
+#endif
+KB_FN void UpGrant(void)
+{
+#ifdef HF_SPEND_GRANTED
+    if (atomic_load(&g_upBusy) || !UpCanSpend()) return;
+    atomic_store(&g_upBusy, 1);
+    if (!hf->grant_currency(self, KB_UP_CURRENCY, 10, "upgrades tab: test button", UpGranted, NULL))
+    {
+        snprintf(g_upStatus, sizeof g_upStatus, "HellForge refused the grant (the mod's log says why)");
+        atomic_store(&g_upBusy, 0);
+    }
+#endif
+}
+
 /* ---- One-Handed Grip (game thread): the game's Equipment table, as yui.one-hand-test found it ------------------------
  * [[game + 0x346BF98] + 0xF12478 + 8 * 233] -> index rows {u64 resource, u32 record, u32 0} x 688, 232-byte records from
  * +11008; +0xC4 bit 0 is one-handed, +0xC0 the grip. Only records at exactly KB_UP_TWO_HANDED change, and each goes back
@@ -186,6 +212,7 @@ KB_FN void UpTick(void)
     if (!g_upLoaded) UpLoad();
     int want = atomic_exchange(&g_upBuyWant, -1);
     if (want >= 0) UpBuy(want);
+    if (atomic_exchange(&g_upGrantWant, 0)) UpGrant();
     g_upClock += 1.0 / 60;
     if (g_upClock - g_upPolled < 1) return;
     g_upPolled = g_upClock;
@@ -241,6 +268,14 @@ KB_FN void UpDraw(const HfDraw* d, const HfInput* in, float a, float x0, float y
     d->text((bx0 + bx1) / 2, (by0 + by1) / 2, label, 20, HF_FACE_TITLE, HF_ALIGN_CENTRE, owned || !afford ? grey : ink);
     if (over && click && !owned && !busy && afford && view >= 0) atomic_store(&g_upBuyWant, view);
     if (g_upStatus[0]) d->text(cx0, cy1 + 34, g_upStatus, 20, HF_FACE_BODY, HF_ALIGN_LEFT, yellow);
+#ifdef HF_SPEND_GRANTED
+    /* a test: 10 Forge Credits through grant_currency */
+    const float gx0 = cx0, gy0 = cy1 + 64, gx1 = cx0 + 300, gy1 = gy0 + 44;
+    int overGrant = OpIn(in, gx0, gy0, gx1, gy1);
+    d->rect(gx0, gy0, gx1, gy1, busy ? HF_RGBA(60, 63, 66, A) : HF_RGBA(40, 43, 46, A), overGrant && !busy ? yellow : HF_RGBA(90, 94, 98, A), 2);
+    d->text((gx0 + gx1) / 2, (gy0 + gy1) / 2, "+10 FORGE CREDITS (TEST)", 18, HF_FACE_TITLE, HF_ALIGN_CENTRE, busy ? grey : white);
+    if (overGrant && click && !busy) atomic_store(&g_upGrantWant, 1);
+#endif
     const char* help = tip ? tip : over && !owned ? "Takes the Forge Credits from your profile at once; the grip applies while this character is picked." : NULL;
     if (help) d->text(x0 + 28, y1 - 46, help, 19, HF_FACE_BODY, HF_ALIGN_LEFT, white);
     d->text(x0 + 28, y1 - 18, "Bought upgrades: HellForgeMods\\upgrades.ini  |  Esc: close", 17, HF_FACE_BODY, HF_ALIGN_LEFT, grey);
