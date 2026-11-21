@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.9"
+#define VERSION "0.1.10"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -317,8 +317,30 @@ static int InSight(const float cam[3], const float fwd[3], const float q[3], uin
 static uint32_t g_any[ANY];
 static uint64_t g_anyRes[ANY];
 static unsigned g_anyNext;
+/* the game's own faction tag, for the log: each kind's FactionComponentData record, once (0.1.10: to learn where the
+ * tag sits and what bots, bugs, squids and Helldivers read as, so enemies can be told by it) */
+static void FactionNote(uint64_t res)
+{
+    static uint64_t seen[200];
+    static unsigned n;
+    for (unsigned i = 0; i < n; i++) if (seen[i] == res) return;
+    if (n >= 200) return;
+    seen[n++] = res;
+    uint32_t stride = 0;
+    uintptr_t r = hf->component_record("FactionComponentData", res, &stride);
+    uint8_t b[32];
+    memset(b, 0, sizeof b);
+    uint32_t len = stride < 32 ? stride : 32;
+    char hex[80] = "";
+    if (r && len && ReadAt(r, b, len)) for (uint32_t i = 0; i < len; i++) snprintf(hex + 2 * i, 3, "%02x", b[i]);
+    uint32_t st2;
+    Log("faction of kind %016llx%s: %s (record %u bytes)%s%s%s", (unsigned long long)res, FriendRes(res) ? " (a friend)" : res == AVATAR ? " (a Helldiver)" : "",
+        r ? hex : "no faction record", stride, hf->component_record("BehaviorComponentData", res, &st2) ? ", behaviour" : "",
+        hf->component_record("TurretComponentData", res, &st2) ? ", turret" : "", hf->component_record("SeatCollectionComponentData", res, &st2) ? ", seats" : "");
+}
 static void SeeAny(uint32_t e, uint64_t res)
 {
+    if (res) FactionNote(res);
     if (!e || res == AVATAR || FriendRes(res)) return;
     unsigned i = g_anyNext++ % ANY;
     g_any[i] = e; g_anyRes[i] = res;
@@ -1040,6 +1062,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
+    if (s->resource == AVATAR) FactionNote(AVATAR);
     if (s->resource != AVATAR)
     {
         if (FoeKind(s->resource)) AddFoe(s->entity, s->resource);
