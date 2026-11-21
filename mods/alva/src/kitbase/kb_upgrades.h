@@ -5,11 +5,13 @@
  * Code shared by the character kits. Source of truth: kitbase/ at the repo root (tools/kitbase_sync.py writes the copies).
  * Included by kb_options.h. The screen's owner does all of it: the render thread asks for a purchase, the game thread
  * spends and applies, so one kit alone writes the game's Equipment table. What was bought is kept in
- * %LOCALAPPDATA%\HellForgeMods\upgrades.ini ("<kit> = one_hand"); the currency, in the player's profile. */
+ * %LOCALAPPDATA%\HellForgeMods\upgrades.ini ("<kit> = one_hand"); the Forge Credits, in the player's profile. */
 #ifndef KB_UPGRADES_H
 #define KB_UPGRADES_H
 
-#define KB_UP_PRICE 5000                        /* One-Handed Grip, in requisition */
+#define KB_UP_PRICE 100                         /* One-Handed Grip, in Forge Credits */
+#define KB_UP_CURRENCY 0x6C3C83C1u              /* HF_CURRENCY_FORGE_CREDITS */
+#define KB_UP_CURRENCY_NAME "FORGE CREDITS"
 #define KB_UP_GRIP 70u                          /* the one-handed SMGs' grip pose (Knight, Defender, Pummeler) */
 #define KB_UP_TWO_HANDED 0x00010000u            /* Equipment +0xC4 of a two-handed weapon; bit 0 makes it one-handed */
 #define KB_UP_ROWS 688u
@@ -20,7 +22,7 @@ KB_VAR char g_upOwned[KB_ROSTER_MAX][32];       /* kits that bought One-Handed G
 KB_VAR int g_upOwnedN, g_upLoaded;
 KB_VAR _Atomic int g_upBuyWant = -1;            /* the screen's purchase: a hub index */
 KB_VAR _Atomic int g_upBusy;                    /* a purchase waits for HellForge's answer */
-KB_VAR _Atomic long long g_upBalance = -1;      /* requisition as the game holds it; -1 not known */
+KB_VAR _Atomic long long g_upBalance = -1;      /* Forge Credits as the game holds them; -1 not known */
 KB_VAR char g_upStatus[96];                     /* the last purchase's outcome, for the screen */
 KB_VAR char g_upBuyingKit[32], g_upBuyingName[32];
 KB_VAR int g_upTab;                             /* 0 OPTIONS, 1 UPGRADES */
@@ -91,7 +93,7 @@ KB_FN void UpPaid(HfMod* mod, uint32_t request, uint32_t result, int64_t balance
         UpSave();
         snprintf(g_upStatus, sizeof g_upStatus, "%s: One-Handed Grip bought", g_upBuyingName);
     }
-    else if (result == HF_SPEND_TOO_LITTLE) snprintf(g_upStatus, sizeof g_upStatus, "Not enough requisition (%lld)", (long long)balance);
+    else if (result == HF_SPEND_TOO_LITTLE) snprintf(g_upStatus, sizeof g_upStatus, "Not enough Forge Credits (%lld)", (long long)balance);
     else snprintf(g_upStatus, sizeof g_upStatus, "The purchase failed: see the mod's log");
     if (balance >= 0) atomic_store(&g_upBalance, balance);
     Log("upgrades: %s's One-Handed Grip: %s", g_upBuyingKit, g_upStatus);
@@ -115,7 +117,7 @@ KB_FN void UpBuy(int hubIndex)
     char reason[96];
     snprintf(reason, sizeof reason, "%s upgrade: One-Handed Grip", g_upBuyingName);
     atomic_store(&g_upBusy, 1);
-    if (!hf->spend_currency(self, HF_CURRENCY_REQUISITION, KB_UP_PRICE, reason, UpPaid, NULL))
+    if (!hf->spend_currency(self, KB_UP_CURRENCY, KB_UP_PRICE, reason, UpPaid, NULL))
     {
         snprintf(g_upStatus, sizeof g_upStatus, "HellForge refused the purchase (the mod's log says why)");
         atomic_store(&g_upBusy, 0);
@@ -189,7 +191,7 @@ KB_FN void UpTick(void)
     g_upPolled = g_upClock;
 #ifdef HF_SPEND_SPENT
     int64_t held;
-    if (UpCanSpend() && hf->currency_balance(self, HF_CURRENCY_REQUISITION, &held) == 0) atomic_store(&g_upBalance, held);
+    if (UpCanSpend() && hf->currency_balance(self, KB_UP_CURRENCY, &held) == 0) atomic_store(&g_upBalance, held);
 #endif
     KbRoster* r = kb_roster;
     char active[32] = "";
@@ -216,8 +218,8 @@ KB_FN void UpDraw(const HfDraw* d, const HfInput* in, float a, float x0, float y
     d->rect(x0, y0, x1, y0 + 64, yellow, 0, 0);
     d->text(x0 + 28, y0 + 32, title, 34, HF_FACE_TITLE, HF_ALIGN_LEFT, ink);
     long long held = atomic_load(&g_upBalance);
-    if (held >= 0) snprintf(balance, sizeof balance, "REQUISITION  %lld", held);
-    else snprintf(balance, sizeof balance, "REQUISITION  -");
+    if (held >= 0) snprintf(balance, sizeof balance, KB_UP_CURRENCY_NAME "  %lld", held);
+    else snprintf(balance, sizeof balance, KB_UP_CURRENCY_NAME "  -");
     d->text(x1 - 28, y0 + 32, balance, 22, HF_FACE_TITLE, HF_ALIGN_RIGHT, ink);
     if (!UpCanSpend())
     {
@@ -232,14 +234,14 @@ KB_FN void UpDraw(const HfDraw* d, const HfInput* in, float a, float x0, float y
     d->text(cx0 + 22, cy0 + 68, "Every gun is held one-handed, in the one-handed SMGs' grip,", 20, HF_FACE_BODY, HF_ALIGN_LEFT, white);
     d->text(cx0 + 22, cy0 + 94, "while this character is the picked one.", 20, HF_FACE_BODY, HF_ALIGN_LEFT, white);
     char price[48];
-    snprintf(price, sizeof price, "%d REQUISITION", KB_UP_PRICE);
+    snprintf(price, sizeof price, "%d " KB_UP_CURRENCY_NAME, KB_UP_PRICE);
     int over = OpIn(in, bx0, by0, bx1, by1);
     const char* label = owned ? "OWNED" : busy ? "BUYING..." : price;
     d->rect(bx0, by0, bx1, by1, owned ? HF_RGBA(40, 43, 46, A) : afford && !busy ? (over ? yellow : HF_RGBA(255, 232, 0, (uint32_t)(200 * a))) : HF_RGBA(60, 63, 66, A), 0, 0);
     d->text((bx0 + bx1) / 2, (by0 + by1) / 2, label, 20, HF_FACE_TITLE, HF_ALIGN_CENTRE, owned || !afford ? grey : ink);
     if (over && click && !owned && !busy && afford && view >= 0) atomic_store(&g_upBuyWant, view);
     if (g_upStatus[0]) d->text(cx0, cy1 + 34, g_upStatus, 20, HF_FACE_BODY, HF_ALIGN_LEFT, yellow);
-    const char* help = tip ? tip : over && !owned ? "Takes the requisition from your profile at once; the grip applies while this character is picked." : NULL;
+    const char* help = tip ? tip : over && !owned ? "Takes the Forge Credits from your profile at once; the grip applies while this character is picked." : NULL;
     if (help) d->text(x0 + 28, y1 - 46, help, 19, HF_FACE_BODY, HF_ALIGN_LEFT, white);
     d->text(x0 + 28, y1 - 18, "Bought upgrades: HellForgeMods\\upgrades.ini  |  Esc: close", 17, HF_FACE_BODY, HF_ALIGN_LEFT, grey);
 }
