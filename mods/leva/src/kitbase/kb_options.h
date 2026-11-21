@@ -504,6 +504,8 @@ KB_FN void OpBody(const HfDraw* d, const HfInput* in, float dt, const KbOpBox* b
     d->text(x0 + 28, y1 - 18, keys, 17, HF_FACE_BODY, HF_ALIGN_LEFT, grey);
 }
 
+#include "kb_upgrades.h" /* the UPGRADES tab and what it sells */
+
 /* ---- the screen (its owner only) -------------------------------------------------------------------------------- */
 KB_VAR float g_opOpenT, g_opKitsT = 1;
 KB_VAR char g_opView[32];              /* the kit whose rows are shown */
@@ -530,11 +532,13 @@ KB_FN int OpScreenDraw(void* user, const HfDraw* d, const HfInput* in, float dt)
     if (view < 0) for (int k = 0; k < g_opKits.nkit; k++) if (!strncmp(g_opKits.kit[k].id, kb_op_id, 31)) view = k;
     if (view >= 0) snprintf(g_opView, sizeof g_opView, "%s", g_opKits.kit[view].id);
 
-    /* the frame: the rows at the left, the characters in a column at the right */
-    const float gap = 14, colW = g_opKits.n >= 2 ? 330 : 0, y0 = 70, y1 = 1010;
-    float bodyW = d->width - 80 - (colW ? colW + gap : 0);
+    /* the frame: the tabs, the rows at the left, the characters in a column at the right */
+    const float gap = 14, colW = g_opKits.n >= 2 ? 330 : 0, tabW = 170, y0 = 70, y1 = 1010;
+    float bodyW = d->width - 80 - tabW - gap - (colW ? colW + gap : 0);
     if (bodyW > 1180) bodyW = 1180;
-    const float total = bodyW + (colW ? colW + gap : 0), x0 = (d->width - total) / 2, bx1 = x0 + bodyW, cx0 = bx1 + gap, cx1 = cx0 + colW;
+    const float total = tabW + gap + bodyW + (colW ? colW + gap : 0), tx0 = (d->width - total) / 2, x0 = tx0 + tabW + gap, bx1 = x0 + bodyW,
+                cx0 = bx1 + gap, cx1 = cx0 + colW;
+    UpTabs(d, in, a, tx0, y0, tx0 + tabW);
     const char* tip = NULL;
     int overTile = -1;
     if (colW > 0)
@@ -586,7 +590,8 @@ KB_FN int OpScreenDraw(void* user, const HfDraw* d, const HfInput* in, float dt)
         d->text((cx0 + cx1) / 2, y1 - 22, "A pick starts at the next mission", 16, HF_FACE_BODY, HF_ALIGN_CENTRE, grey);
     }
     (void)overTile;
-    if (view >= 0 && g_opKits.kit[view].body)
+    if (g_upTab == 1) UpDraw(d, in, a, x0, y0, bx1, y1, view, tip);
+    else if (view >= 0 && g_opKits.kit[view].body)
     {
         KbOpBox box = {x0, y0, bx1, y1, a, tip};
         g_opKits.kit[view].body(d, in, dt, &box);
@@ -612,6 +617,7 @@ KB_FN void KbOptionsTick(void)
         if (atomic_load(&g_opDirty[i])) { OptionSet(kb_op_rows[i].name, atomic_load(&g_opWant[i])); atomic_store(&g_opDirty[i], 0); }
     if (closed) OpSave();
     if (!g_opOwner) return;
+    UpTick();
     int want = atomic_exchange(&g_opPickWant, -1);
     if (want >= 0 && want < g_opKits.n)
     {
