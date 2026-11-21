@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "Vector HUD",
+  "resource": "mods/yui/vector_hud",
+  "guid": "b0f86635-05b1-5498-8513-934303e3db4a",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.30.0",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}
