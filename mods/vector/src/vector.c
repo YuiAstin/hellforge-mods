@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.1"
+#define VERSION "0.1.2"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -409,7 +409,7 @@ static void Own(const float at[3])
 
 /* ---- heat: what burns, Smolders and is Overburned --------------------------------------------------------------- */
 #define HEAT 256
-typedef struct Heat { uint32_t e; double burnUntil, burnSince, smolderUntil, overburnUntil, burstAt; } Heat;
+typedef struct Heat { uint32_t e; double burnUntil, burnSince, smolderUntil, overburnUntil, burstAt, litAt, tickAt; uint64_t res; } Heat;
 static Heat g_heat[HEAT];
 static Heat* HeatOf(uint32_t e, int make)
 {
@@ -453,11 +453,48 @@ static void IgniteLater(uint32_t e, float buildup)
     unsigned i = atomic_fetch_add(&g_ignIn, 1) % IGNQ;
     g_ign[i].e = e; g_ign[i].buildup = buildup;
 }
+/* did what she set on fire burn? per kind of enemy: how many took fire damage within 2 s of her fire and how many never did */
+static struct { uint64_t res; unsigned caught, missed; } g_took[48];
+static void Took(uint64_t res, int caught)
+{
+    for (int i = 0; i < 48; i++)
+    {
+        if (g_took[i].res != res && (g_took[i].res || g_took[i].caught || g_took[i].missed)) continue;
+        g_took[i].res = res;
+        if (caught) g_took[i].caught++; else g_took[i].missed++;
+        return;
+    }
+}
+static void TookReport(void)
+{
+    for (int i = 0; i < 48; i++)
+        if (g_took[i].caught || g_took[i].missed)
+            Log("her fire on kind %016llx: %u burned, %u took no fire damage", (unsigned long long)g_took[i].res, g_took[i].caught, g_took[i].missed);
+    memset(g_took, 0, sizeof g_took);
+}
+static double g_tookAt;
+static void TookFrame(void)
+{
+    if (g_now - g_tookAt < 0.5) return;
+    g_tookAt = g_now;
+    for (int i = 0; i < HEAT; i++)
+    {
+        Heat* c = &g_heat[i];
+        if (!c->e || c->litAt <= 0 || g_now - c->litAt < 2.0) continue;
+        int caught = c->tickAt >= c->litAt, alive = Alive(c->e);
+        static unsigned told;
+        if (!caught && alive && told++ < 60) Log("entity %u (kind %016llx) took no fire damage in 2 s after her fire", c->e, (unsigned long long)c->res);
+        if (caught || alive) Took(c->res, caught);
+        c->litAt = 0;
+    }
+}
 static void Ignite(uint32_t e, float buildup, const char* what)
 {
-    if (!e || FoeIndex(e) < 0 || !Alive(e)) return;
+    int fk = FoeIndex(e);
+    if (!e || fk < 0 || !Alive(e)) return;
     Status(e, (uint32_t)s_fireStatus, buildup, what);
     Burns(e);
+    { Heat* c = HeatOf(e, 0); if (c && c->litAt <= 0) { c->litAt = g_now; c->res = g_foeRes[fk]; } }
     g_ignitions++;
 }
 /* fire bursts, from the frame too: on an enemy, where it stands */
@@ -471,6 +508,7 @@ static void HeatFrame(void)
     unsigned in = atomic_load(&g_ignIn);
     if (in - g_ignOut > IGNQ) g_ignOut = in - IGNQ;
     for (; g_ignOut != in; g_ignOut++) Ignite(g_ign[g_ignOut % IGNQ].e, g_ign[g_ignOut % IGNQ].buildup, "her fire");
+    TookFrame();
     in = atomic_load(&g_burstIn);
     if (in - g_burstOut > BURSTQ) g_burstOut = in - BURSTQ;
     for (; g_burstOut != in; g_burstOut++)
@@ -679,6 +717,7 @@ static void DamageSeen(HfDamagePreEvent* e, HfDamageEvent* d)
     if (FoeIndex(d->target) < 0) return;
     Burns(d->target);
     Heat* c = HeatOf(d->target, 0);
+    if (c) c->tickAt = g_now;
     double mult = 1;
     if (c && c->smolderUntil > g_now) mult *= s_smolderMult;
     if (c && c->overburnUntil > g_now) mult *= s_overburnMult;
@@ -745,6 +784,8 @@ static void Reset(const char* why)
         Log("%s: casts %u / %u / %u, %u ignitions, %u fire bursts, %u Overburns, %u napalm shells, Confectance spent %u times, +%.0f fire damage from "
             "Smolder, Overburn and Accelerant; on her: %u fire statuses refused, %u fire hits cancelled; fire's element %d",
             why, g_casts[0], g_casts[1], g_casts[2], g_ignitions, g_bursts, g_overburns, g_shells, g_spends, g_fireBonus, g_refusedHer, g_fireOnHer, g_fireElem);
+    TookReport();
+    g_tookAt = 0;
     Body(start);
     if (start && s_hellbomb && s_hellbombRow == 125 && !hf->load_package(self, UINT64_C(0x346D785D6CA13FF4))) Log("the Hellbomb's package could not be loaded ahead");
     g_boomPending = 0;
