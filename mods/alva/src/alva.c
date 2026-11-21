@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.4"
+#define VERSION "0.2.5"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her chill bursts come often */
@@ -1289,6 +1289,7 @@ static const KbOption kOptions[] = {
     {"burst_field_radius", &s_burstFieldRadius, NULL}, {"burst_field_seconds", &s_burstFieldSeconds, NULL}, {"frozen_seconds", &s_frozenSeconds, NULL},
     {"s1_cooldown", &s_s1Cd, NULL}, {"s1_seconds", &s_s1Seconds, NULL}, {"s2_cooldown", &s_s2Cd, NULL}, {"s2_field_seconds", &s_s2FieldSeconds, NULL},
     {"s3_cooldown", &s_s3Cd, NULL}, {"s3_freeze_at", NULL, &s_s3FreezeAt}, {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
+    {"hellbomb_on_exhaustion", NULL, &s_hellbomb},
 };
 static void OptionAfter(const char* name, int changed) { (void)name; (void)changed; }
 HF_MOD_EXPORT int alva_option_get(const char* name, double* out) { return OptionGet(name, out); }
