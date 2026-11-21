@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.11"
+#define VERSION "0.1.12"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -318,30 +318,58 @@ static int InSight(const float cam[3], const float fwd[3], const float q[3], uin
 static uint32_t g_any[ANY];
 static uint64_t g_anyRes[ANY];
 static unsigned g_anyNext;
-/* the game's own faction tag, for the log: each kind's FactionComponentData record, once (0.1.10: to learn where the
- * tag sits and what bots, bugs, squids and Helldivers read as, so enemies can be told by it) */
-static void FactionNote(uint64_t res)
+/* the game's own faction tag (0.1.12, from the game's code: its faction component's manager at game+0x3326DC8, an
+ * entity map at +0x30, a data pointer per index at +0x48; the data holds the entity at +8 and, it seems, the faction
+ * at +0xC). For the log: each kind's, once, to learn what bots, bugs, squids and Helldivers read as */
+static int FactionOf(uint32_t entity, uint8_t out[32])
 {
-    static uint64_t seen[200];
-    static unsigned n;
-    for (unsigned i = 0; i < n; i++) if (seen[i] == res) return;
-    if (n >= 200) return;
-    seen[n++] = res;
-    uint32_t stride = 0;
-    uintptr_t r = hf->component_record("FactionComponentData", res, &stride);
+    uintptr_t m = Pointer(game + 0x3326DC8);
+    uint8_t h[0x58];
+    if (!entity || !m || !ReadAt(m, h, sizeof h)) return 0;
+    uintptr_t buckets = (uintptr_t)Quad(h + 0x30), datas = (uintptr_t)Quad(h + 0x48);
+    uint32_t count = Word(h + 0x18), cap = Word(h + 0x38), empty = Word(h + 0x3C), mult = Word(h + 0x40);
+    if (!buckets || !datas || !cap || cap > 65536 || (cap & (cap - 1)) || count > 4096) return 0;
+    uint32_t start = entity * mult;
+    for (uint32_t k = 0; k < cap; k++)
+    {
+        uint8_t b[8];
+        if (!ReadAt(buckets + 8u * ((start + k) & (cap - 1)), b, 8)) return 0;
+        uint32_t key = Word(b), index = Word(b + 4);
+        if (key != entity) { if (key == empty) return 0; continue; }
+        uintptr_t data = index < 4096 ? Pointer(datas + 8u * index) : 0;
+        return data && ReadAt(data, out, 32) && Word(out + 8) == entity;
+    }
+    return 0;
+}
+static uint64_t g_facSeen[256];
+static unsigned g_facN;
+static void FactionNote(uint32_t e, uint64_t res)
+{
+    if (!e || !res) return;
+    for (unsigned i = 0; i < g_facN; i++) if (g_facSeen[i] == res) return;
     uint8_t b[32];
-    memset(b, 0, sizeof b);
-    uint32_t len = stride < 32 ? stride : 32;
+    if (g_facN >= 256 || !FactionOf(e, b)) return;
+    g_facSeen[g_facN++] = res;
     char hex[80] = "";
-    if (r && len && ReadAt(r, b, len)) for (uint32_t i = 0; i < len; i++) snprintf(hex + 2 * i, 3, "%02x", b[i]);
+    for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", b[i]);
     uint32_t st2;
-    Log("faction of kind %016llx%s: %s (record %u bytes)%s%s%s", (unsigned long long)res, FriendRes(res) ? " (a friend)" : res == AVATAR ? " (a Helldiver)" : "",
-        r ? hex : "no faction record", stride, hf->component_record("BehaviorComponentData", res, &st2) ? ", behaviour" : "",
+    Log("faction of kind %016llx%s: %u (entity %u; data %s)%s%s%s", (unsigned long long)res, res == AVATAR ? " (a Helldiver)" : FriendRes(res) ? " (a friend)" : "",
+        Word(b + 12), e, hex, hf->component_record("BehaviorComponentData", res, &st2) ? ", behaviour" : "",
         hf->component_record("TurretComponentData", res, &st2) ? ", turret" : "", hf->component_record("SeatCollectionComponentData", res, &st2) ? ", seats" : "");
+}
+/* everything spawned, friends too, for the faction log (SeeAny keeps friends out) */
+#define FACQ 2048
+static uint32_t g_facE[FACQ];
+static uint64_t g_facR[FACQ];
+static unsigned g_facIn, g_facAt;
+static void FactionFrame(void)
+{
+    FactionNote(atomic_load(&g_avatar), AVATAR);
+    for (int n = 0; n < 48; n++) { unsigned i = g_facAt++ % FACQ; if (g_facE[i]) FactionNote(g_facE[i], g_facR[i]); }
 }
 static void SeeAny(uint32_t e, uint64_t res)
 {
-    if (res) FactionNote(res);
+    if (e && res) { unsigned q = g_facIn++ % FACQ; g_facE[q] = e; g_facR[q] = res; }
     if (!e || res == AVATAR || FriendRes(res)) return;
     unsigned i = g_anyNext++ % ANY;
     g_any[i] = e; g_anyRes[i] = res;
@@ -808,6 +836,7 @@ static void HeatFrame(void)
     OwnFrame();
     KeepFrame();
     PruneFrame();
+    FactionFrame();
     in = atomic_load(&g_burstIn);
     if (in - g_burstOut > BURSTQ) g_burstOut = in - BURSTQ;
     for (; g_burstOut != in; g_burstOut++)
@@ -1099,7 +1128,6 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
-    if (s->resource == AVATAR) FactionNote(AVATAR);
     if (s->resource != AVATAR)
     {
         if (FoeKind(s->resource)) AddFoe(s->entity, s->resource);
