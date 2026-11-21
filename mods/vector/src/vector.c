@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.10"
+#define VERSION "0.1.11"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -56,7 +56,7 @@ static float s_s2Cd = 15, s_s2Cone = 10, s_s2Range = 150, s_s2Buildup = 300, s_s
 static float s_s3Cd = 90, s_s3Cone = 10, s_s3Range = 150, s_s3Spread = 8, s_s3Height = 60, s_s3Every = 0.3f, s_accSeconds = 15, s_accMult = 1.3f;
 static int s_s3Shell = 234, s_s3Shells = 3, s_s3Refund = 1;
 static int s_fireImmune = 1, s_fireSt[4] = {5, 6, 32, 67}, s_fireElement = -1;
-static float s_firePour = 0, s_fireHeavyStep = 50, s_ownDamage = 12, s_ownEvery = 0.25f, s_ownSeconds = 8;
+static float s_firePour = 0, s_fireHeavyStep = 50, s_ownDamage = 12, s_ownEvery = 0.25f, s_ownSeconds = 8, s_ownPercent = 1;
 static int s_ownBurn = 1;
 static int s_fireHeavy = 32;
 static int s_sight = 1;
@@ -74,7 +74,7 @@ static const KbSetting kSettings[] = {
     KB_I("s3_shells", s_s3Shells, 1, 12), KB_F("s3_spread", s_s3Spread, 0, 40), KB_F("s3_height", s_s3Height, 5, 300), KB_F("s3_every", s_s3Every, 0.05, 5),
     KB_F("accelerant_seconds", s_accSeconds, 0, 120), KB_F("accelerant_mult", s_accMult, 1, 10), KB_I("s3_refund", s_s3Refund, 0, 1),
     KB_I("fire_immune", s_fireImmune, 0, 1), KB_I("fire_status_1", s_fireSt[0], 0, 255), KB_I("fire_status_2", s_fireSt[1], 0, 255),
-    KB_I("fire_status_3", s_fireSt[2], 0, 255), KB_I("fire_status_4", s_fireSt[3], 0, 255), KB_I("fire_element", s_fireElement, -1, 255), KB_F("fire_pour", s_firePour, 0, 30), KB_I("own_burn", s_ownBurn, 0, 1), KB_F("own_burn_damage", s_ownDamage, 0, 10000),
+    KB_I("fire_status_3", s_fireSt[2], 0, 255), KB_I("fire_status_4", s_fireSt[3], 0, 255), KB_I("fire_element", s_fireElement, -1, 255), KB_F("fire_pour", s_firePour, 0, 30), KB_I("own_burn", s_ownBurn, 0, 1), KB_F("own_burn_damage", s_ownDamage, 0, 10000), KB_F("own_burn_percent", s_ownPercent, 0, 100),
     KB_F("own_burn_every", s_ownEvery, 0.05, 10), KB_F("own_burn_seconds", s_ownSeconds, 0.5, 120),
     KB_I("line_of_sight", s_sight, 0, 1), KB_F("first_person", s_fpDistance, 0.1, 2),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
@@ -114,9 +114,10 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; (0: never). A kind this lit is poured on from the start for the rest of the session.\n"
                "fire_pour = %g\n"
                "; Her own burn (own_burn 1): what takes no fire damage from the game's fire (tanks, walkers, gunships) burns by her\n"
-               "; hand instead: own_burn_damage health every own_burn_every s for own_burn_seconds after her fire, past its armour\n"
-               "; (a soldier's burn is 25 a tick; hers on armour is half that). Smolder, Overburn and Accelerant multiply it.\n"
-               "own_burn = %d\nown_burn_damage = %g\nown_burn_every = %g\nown_burn_seconds = %g\n"
+               "; hand instead, past its armour: own_burn_percent of its full health (never less than own_burn_damage) every\n"
+               "; own_burn_every s for own_burn_seconds after her fire. At 1 percent four times a second a full-health enemy burns\n"
+               "; through in 25 s of unbroken burning. Smolder, Overburn and Accelerant multiply it.\n"
+               "own_burn = %d\nown_burn_damage = %g\nown_burn_percent = %g\nown_burn_every = %g\nown_burn_seconds = %g\n"
                "; Aiming: line_of_sight 1, Portent of Doom's target must be in sight. first_person: the camera this close to her\n"
                "; head (m) counts as first person.\nline_of_sight = %d\nfirst_person = %g\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint. hellbomb_on_exhaustion 1 sets off a\n"
@@ -127,7 +128,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_overburnSeconds, (double)s_overburnMult, (double)s_s2Cd, (double)s_s2Cone, (double)s_s2Range, (double)s_s2Buildup,
             (double)s_smolderSeconds, (double)s_smolderMult, (double)s_s3Cd, (double)s_s3Cone, (double)s_s3Range, s_s3Shell, s_s3Shells, (double)s_s3Spread,
             (double)s_s3Height, (double)s_s3Every, (double)s_accSeconds, (double)s_accMult, s_s3Refund, s_fireImmune, s_fireSt[0], s_fireSt[1], s_fireSt[2],
-            s_fireSt[3], s_fireElement, (double)s_firePour, s_ownBurn, (double)s_ownDamage, (double)s_ownEvery, (double)s_ownSeconds, s_sight, (double)s_fpDistance);
+            s_fireSt[3], s_fireElement, (double)s_firePour, s_ownBurn, (double)s_ownDamage, (double)s_ownPercent, (double)s_ownEvery, (double)s_ownSeconds, s_sight, (double)s_fpDistance);
 }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
@@ -490,7 +491,7 @@ static void Own(const float at[3])
 
 /* ---- heat: what burns, Smolders and is Overburned --------------------------------------------------------------- */
 #define HEAT 256
-typedef struct Heat { uint32_t e; double burnUntil, burnSince, smolderUntil, overburnUntil, burstAt, litAt, tickAt; uint64_t res; int stage; float poured; double ownUntil, ownNext, cookAt, cookUntil, ownTotal; int cooked; } Heat;
+typedef struct Heat { uint32_t e; double burnUntil, burnSince, smolderUntil, overburnUntil, burstAt, litAt, tickAt; uint64_t res; int stage; float poured; double ownUntil, ownNext, cookAt, cookUntil, ownTotal; int cooked; int32_t ownMax; double hersUntil; } Heat;
 static Heat g_heat[HEAT];
 static Heat* HeatOf(uint32_t e, int make)
 {
@@ -595,6 +596,17 @@ static uintptr_t HealthAddr(uint32_t entity)
     }
     return 0;
 }
+/* an enemy's full health: its kind's, or what it has now if that is more; kept on its heat entry */
+static int32_t FullHealth(Heat* c, uint64_t res, int32_t hp)
+{
+    if (c->ownMax > 0) return c->ownMax;
+    uint32_t stride = 0;
+    int32_t top = 0;
+    uintptr_t rec = res ? hf->component_record("HealthComponentData", res, &stride) : 0;
+    if (!rec || !ReadAt(rec, &top, 4) || top < 1 || top > 10000000) top = 0;
+    c->ownMax = top > hp ? top : hp;
+    return c->ownMax;
+}
 static unsigned g_ownTicks, g_ownKills;
 static double g_ownDealt;
 static void OwnStart(Heat* c)
@@ -623,7 +635,7 @@ static void OwnFrame(void)
         if (!HealthOf(c->e, &hp) || hp <= 0)
         {
             if (c->ownTotal > 0 && ends++ < 60) Log("entity %u (kind %016llx) died while her own burn was on it (%.0f health burnt off)", c->e, (unsigned long long)c->res, c->ownTotal);
-            c->ownUntil = 0; c->cooked = 0; c->ownTotal = 0;
+            c->ownUntil = 0; c->cooked = 0; c->ownTotal = 0; c->ownMax = 0;
             continue;
         }
         if (c->cooked)
@@ -644,7 +656,12 @@ static void OwnFrame(void)
         if (c->smolderUntil > g_now) mult *= s_smolderMult;
         if (c->overburnUntil > g_now) mult *= s_overburnMult;
         if (g_accUntil > g_now) mult *= s_accMult;
-        int32_t dmg = (int32_t)floor(s_ownDamage * mult + 0.5), want = hp - dmg;
+        /* a share of its full health a tick (its kind's, or what it had when her burn began if that is more), never
+         * less than own_burn_damage: a tank and a walker burn through in the same time */
+        FullHealth(c, c->res, hp);
+        double base = c->ownMax * (double)s_ownPercent / 100.0;
+        if (base < s_ownDamage) base = s_ownDamage;
+        int32_t dmg = (int32_t)floor(base * mult + 0.5), want = hp - dmg;
         if (want < 1) { want = 1; c->cooked = 1; c->cookAt = 0; c->cookUntil = g_now + 6; }
         uintptr_t a = HealthAddr(c->e);
         if (!a || hf->write(a, &want, 4)) { static unsigned told; if (told++ < 4) Log("her own burn: entity %u's health cannot be written", c->e); continue; }
@@ -652,7 +669,7 @@ static void OwnFrame(void)
         g_ownDealt += hp - want;
         c->ownTotal += hp - want;
         static unsigned told;
-        if (told++ < 16 || c->cooked) Log("her own burn on entity %u (kind %016llx): health %d -> %d (x%.2f)%s", c->e, (unsigned long long)c->res, hp, want, mult,
+        if (told++ < 16 || c->cooked) Log("her own burn on entity %u (kind %016llx): health %d -> %d of %d (x%.2f)%s", c->e, (unsigned long long)c->res, hp, want, c->ownMax, mult,
                                           c->cooked ? ": burnt through, the next hit on it kills" : "");
     }
 }
@@ -708,7 +725,7 @@ static void KeepFrame(void)
         Heat* c = &g_heat[i];
         if (!c->e || c->smolderUntil <= g_now + 0.5 || !Alive(c->e)) continue;
         if (c->ownUntil > g_now || (s_ownBurn && c->res && Proof(c->res, 0))) { if (c->ownUntil < c->smolderUntil) c->ownUntil = c->smolderUntil; continue; }
-        if (hf->apply_status && hf->apply_status(self, c->e, (uint32_t)s_fireStatus, s_s2Buildup > 1000 ? 1000 : s_s2Buildup) != 0) { Burns(c->e); g_relit++; }
+        if (hf->apply_status && hf->apply_status(self, c->e, (uint32_t)s_fireStatus, s_s2Buildup > 1000 ? 1000 : s_s2Buildup) != 0) { Burns(c->e); c->hersUntil = g_now + s_burnSeconds + 3; g_relit++; }
     }
 }
 /* the enemy list holds 1024: the dead are taken off it, a part of the list each frame, so a crowded mission does not
@@ -763,6 +780,7 @@ static void Ignite(uint32_t e, float buildup, const char* what)
     if (!e || fk < 0 || !Alive(e)) return;
     Status(e, (uint32_t)s_fireStatus, buildup, what);
     Burns(e);
+    { Heat* hc = HeatOf(e, 0); if (hc) { hc->hersUntil = g_now + s_burnSeconds + 3; if (!hc->res) hc->res = g_foeRes[fk]; } }
     {
         Heat* c = HeatOf(e, 0);
         if (c && c->litAt <= 0)
@@ -1039,6 +1057,25 @@ static void DamageSeen(HfDamagePreEvent* e, HfDamageEvent* d)
     if (c && c->smolderUntil > g_now) mult *= s_smolderMult;
     if (c && c->overburnUntil > g_now) mult *= s_overburnMult;
     if (g_accUntil > g_now) mult *= s_accMult;
+    /* her fire scales with what it burns: a tick of fire she lit (or any fire during Accelerant) is never less than
+     * own_burn_percent of the enemy's full health, so a walker's burn is not a soldier's 25 a tick */
+    if (c && d->kind == 2 && s_ownPercent > 0 && (c->hersUntil > g_now || c->smolderUntil > g_now || c->overburnUntil > g_now || g_accUntil > g_now))
+    {
+        int32_t hp = 0;
+        int k = FoeIndex(d->target);
+        if (k >= 0 && HealthOf(d->target, &hp) && hp > 0)
+        {
+            double floor_ = FullHealth(c, g_foeRes[k], hp) * (double)s_ownPercent / 100.0;
+            if (floor_ > d->amount)
+            {
+                static unsigned told;
+                if (told++ < 12) Log("fire on entity %u (kind %016llx): a tick of %d raised to %.0f (%.2f%% of its %d health)", d->target, (unsigned long long)g_foeRes[k], d->amount,
+                                     floor_, (double)s_ownPercent, c->ownMax);
+                g_fireBonus += floor(floor_ + 0.5) - d->amount;
+                d->amount = (int32_t)floor(floor_ + 0.5);
+            }
+        }
+    }
     if (mult != 1)
     {
         int before = d->amount;
@@ -1302,7 +1339,7 @@ static const KbOption kOptions[] = {
     {"overburn_seconds", &s_overburnSeconds, NULL}, {"overburn_mult", &s_overburnMult, NULL},
     {"s2_cooldown", &s_s2Cd, NULL}, {"smolder_seconds", &s_smolderSeconds, NULL}, {"smolder_mult", &s_smolderMult, NULL},
     {"s3_cooldown", &s_s3Cd, NULL}, {"s3_shells", NULL, &s_s3Shells}, {"s3_spread", &s_s3Spread, NULL}, {"accelerant_seconds", &s_accSeconds, NULL},
-    {"accelerant_mult", &s_accMult, NULL}, {"fire_immune", NULL, &s_fireImmune}, {"own_burn", NULL, &s_ownBurn}, {"own_burn_damage", &s_ownDamage, NULL}, {"own_burn_seconds", &s_ownSeconds, NULL}, {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
+    {"accelerant_mult", &s_accMult, NULL}, {"fire_immune", NULL, &s_fireImmune}, {"own_burn", NULL, &s_ownBurn}, {"own_burn_damage", &s_ownDamage, NULL}, {"own_burn_percent", &s_ownPercent, NULL}, {"own_burn_seconds", &s_ownSeconds, NULL}, {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
 };
 static void OptionAfter(const char* name, int changed) { (void)name; (void)changed; }
 HF_MOD_EXPORT int vector_option_get(const char* name, double* out) { return OptionGet(name, out); }

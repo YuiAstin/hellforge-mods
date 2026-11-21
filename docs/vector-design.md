@@ -108,3 +108,8 @@ Smolder, Overburn and Accelerant multiply together: a Smoldering, Overburned ene
   half a soldier's 25) health every 0.25 s for own_burn_seconds (8), straight off its health past armour ("it cooks the
   crew"), multiplied by Smolder, Overburn and Accelerant. At 1 health a fire burst is set on it and that hit kills it the
   game's way. Fabricators and dropships are left out.
+- 0.1.9: her crosshair takes living things with a behaviour or a turret that the kit base leaves out of her foes (the
+  War Strider, ef570293245a17c2: behaviour and turret) as foes. War Striders burn with the game's own fire.
+- 0.1.11: her fire scales with what it burns. A tick of fire she lit (or any fire during Accelerant), and a tick of her
+  own burn, is never less than own_burn_percent (1) of the enemy's full health; Smolder, Overburn and Accelerant
+  multiply that. The game's faction tag is not under "FactionComponentData" (no kind has that record).
