@@ -19,6 +19,7 @@
  * Research credit: the hit layout, the hooked functions and their guards come from Helldiver Survival Rework 0.3.2 by
  * enochlophobianumerophobia (MIT; see THIRD_PARTY_NOTICES.md), whose research in turn used HD2Runtime by SkyeShade's
  * catalogues (https://github.com/SkyeShade/HD2Runtime). */
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -71,16 +72,41 @@ static int Lookup(uintptr_t at, uint32_t key, uint32_t limit, uint32_t* index)
     return 0;
 }
 
+/* An entity's 24-byte record: its resource (+0), entity (+8), unit (+12), flags (+20, bit 0: this machine's authority).
+ * At the game's own offsets first. A HellForge that makes room for more entities moves the records and rewrites the
+ * game's code to follow (its docs/modding/hooks.md, "Fields a mod moved"; the nightly of 2026-11-22): the offsets then
+ * find nothing, and the game's own lookup (SDK 16: hf->function "EntityDescriptor") is used from the first time it answers. */
+static uint8_t* (*g_recordFn)(uint32_t entity);
+static unsigned g_recordAsks;
+static int g_recordSeen;
+static int EntityRecord(uint32_t entity, uint8_t out[24])
+{
+    if (!entity || entity == UINT32_MAX || entity == 0x7FFF) return 0;
+    if (!g_recordFn)
+    {
+        uintptr_t root = Pointer(game + 0x346BF98);
+        uint32_t index;
+        if (root && Lookup(root + 0xF1AEB0, entity, 1048576, &index) && index < 262144 &&
+            ReadAt(root + 0xF32F18 + 24u * index, out, 24) && Word(out + 8) == entity) { g_recordSeen = 1; return 1; }
+        if (g_recordSeen) return 0;        /* the offsets work here: the entity is gone */
+#if defined(HF_MOD_SDK_VERSION) && HF_MOD_SDK_VERSION >= 16
+        if (g_recordAsks < 6 && hf && self && hf->size >= offsetof(HfApi, function) + sizeof hf->function)
+        {
+            g_recordAsks++;
+            g_recordFn = (uint8_t* (*)(uint32_t))hf->function(self, "EntityDescriptor");
+            if (g_recordFn) hf->log(self, "entities: their records are not at the game's own offsets (HellForge moved them): read through the game's lookup from now on");
+        }
+#endif
+        if (!g_recordFn) return 0;
+    }
+    uint8_t* d = g_recordFn(entity);
+    return d && ReadAt((uintptr_t)d, out, 24) && Word(out + 8) == entity;
+}
 /* A Helldiver this machine simulates (its resource is the avatar's, its authority bit set) */
 static int LocalDiver(uint32_t entity)
 {
-    if (!entity || entity == UINT32_MAX || entity == 0x7FFF) return 0;
-    uintptr_t root = Pointer(game + 0x346BF98);
-    uint32_t index;
     uint8_t id[24];
-    if (!root || !Lookup(root + 0xF1AEB0, entity, 1048576, &index) || index >= 262144) return 0;
-    if (!ReadAt(root + 0xF32F18 + 24u * index, id, sizeof id) || Word(id + 8) != entity) return 0;
-    return Quad(id) == AVATAR && (id[20] & 1);
+    return EntityRecord(entity, id) && Quad(id) == AVATAR && (id[20] & 1);
 }
 
 /* Clears the knockdown flag of a result whose hit lands on a local Helldiver */
@@ -228,7 +254,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches || !api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
-    api->log(mod, "Primed Sure Footed 0.2.0 (SDK %u, game " BUILD "): %s%s", api->version, g_enabled ? "on" : "off in the ini",
+    api->log(mod, "Primed Sure Footed 0.2.1 (SDK %u, game " BUILD "): %s%s", api->version, g_enabled ? "on" : "off in the ini",
         g_enabled && g_needBooster ? " (with Extra Boosters: while its Primed Sure Footed booster is active)" : "");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) { api->log(mod, "REFUSED: the game-loaded event"); return 1; }
     /* registered: from here the DLL stays loaded, so a failure only leaves the mod inert */
