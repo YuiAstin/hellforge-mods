@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.2"
+#define VERSION "0.1.3"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -55,7 +55,7 @@ static int s_s1Burst = 26;
 static float s_s2Cd = 15, s_s2Cone = 10, s_s2Range = 150, s_s2Buildup = 300, s_smolderSeconds = 12, s_smolderMult = 1.5f;
 static float s_s3Cd = 90, s_s3Cone = 10, s_s3Range = 150, s_s3Spread = 8, s_s3Height = 60, s_s3Every = 0.3f, s_accSeconds = 15, s_accMult = 1.3f;
 static int s_s3Shell = 234, s_s3Shells = 3, s_s3Refund = 1;
-static int s_fireImmune = 1, s_fireSt[4] = {5, 6, 32, 67}, s_fireElement = -1;
+static int s_fireImmune = 1, s_fireSt[4] = {5, 6, 32, 67}, s_fireElement = -1, s_fireHeavy = 32;
 static int s_sight = 1;
 static float s_fpDistance = 0.45f;
 
@@ -71,7 +71,7 @@ static const KbSetting kSettings[] = {
     KB_I("s3_shells", s_s3Shells, 1, 12), KB_F("s3_spread", s_s3Spread, 0, 40), KB_F("s3_height", s_s3Height, 5, 300), KB_F("s3_every", s_s3Every, 0.05, 5),
     KB_F("accelerant_seconds", s_accSeconds, 0, 120), KB_F("accelerant_mult", s_accMult, 1, 10), KB_I("s3_refund", s_s3Refund, 0, 1),
     KB_I("fire_immune", s_fireImmune, 0, 1), KB_I("fire_status_1", s_fireSt[0], 0, 255), KB_I("fire_status_2", s_fireSt[1], 0, 255),
-    KB_I("fire_status_3", s_fireSt[2], 0, 255), KB_I("fire_status_4", s_fireSt[3], 0, 255), KB_I("fire_element", s_fireElement, -1, 255),
+    KB_I("fire_status_3", s_fireSt[2], 0, 255), KB_I("fire_status_4", s_fireSt[3], 0, 255), KB_I("fire_element", s_fireElement, -1, 255), KB_I("fire_heavy", s_fireHeavy, 0, 255),
     KB_I("line_of_sight", s_sight, 0, 1), KB_F("first_person", s_fpDistance, 0.1, 2),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
@@ -106,6 +106,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; 32 heavy burning, 67 the flamer's slow) never land on her and fire's damage is cancelled. fire_element: the damage\n"
                "; element of fire (-1: learned from the first burning thing she sees; the log names it).\n"
                "fire_immune = %d\nfire_status_1 = %d\nfire_status_2 = %d\nfire_status_3 = %d\nfire_status_4 = %d\nfire_element = %d\n"
+               "; fire_heavy: the status tried on an enemy her plain fire did not burn within 2 s (32 heavy burning; 0: none).\n"
+               "fire_heavy = %d\n"
                "; Aiming: line_of_sight 1, Portent of Doom's target must be in sight. first_person: the camera this close to her\n"
                "; head (m) counts as first person.\nline_of_sight = %d\nfirst_person = %g\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint. hellbomb_on_exhaustion 1 sets off a\n"
@@ -116,7 +118,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_overburnSeconds, (double)s_overburnMult, (double)s_s2Cd, (double)s_s2Cone, (double)s_s2Range, (double)s_s2Buildup,
             (double)s_smolderSeconds, (double)s_smolderMult, (double)s_s3Cd, (double)s_s3Cone, (double)s_s3Range, s_s3Shell, s_s3Shells, (double)s_s3Spread,
             (double)s_s3Height, (double)s_s3Every, (double)s_accSeconds, (double)s_accMult, s_s3Refund, s_fireImmune, s_fireSt[0], s_fireSt[1], s_fireSt[2],
-            s_fireSt[3], s_fireElement, s_sight, (double)s_fpDistance);
+            s_fireSt[3], s_fireElement, s_fireHeavy, s_sight, (double)s_fpDistance);
 }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
@@ -409,7 +411,7 @@ static void Own(const float at[3])
 
 /* ---- heat: what burns, Smolders and is Overburned --------------------------------------------------------------- */
 #define HEAT 256
-typedef struct Heat { uint32_t e; double burnUntil, burnSince, smolderUntil, overburnUntil, burstAt, litAt, tickAt; uint64_t res; } Heat;
+typedef struct Heat { uint32_t e; double burnUntil, burnSince, smolderUntil, overburnUntil, burstAt, litAt, tickAt; uint64_t res; int stage; } Heat;
 static Heat g_heat[HEAT];
 static Heat* HeatOf(uint32_t e, int make)
 {
@@ -454,22 +456,23 @@ static void IgniteLater(uint32_t e, float buildup)
     g_ign[i].e = e; g_ign[i].buildup = buildup;
 }
 /* did what she set on fire burn? per kind of enemy: how many took fire damage within 2 s of her fire and how many never did */
-static struct { uint64_t res; unsigned caught, missed; } g_took[48];
+static struct { uint64_t res; unsigned caught, heavy, missed; } g_took[48];
 static void Took(uint64_t res, int caught)
 {
     for (int i = 0; i < 48; i++)
     {
-        if (g_took[i].res != res && (g_took[i].res || g_took[i].caught || g_took[i].missed)) continue;
+        if (g_took[i].res != res && (g_took[i].res || g_took[i].caught || g_took[i].heavy || g_took[i].missed)) continue;
         g_took[i].res = res;
-        if (caught) g_took[i].caught++; else g_took[i].missed++;
+        if (caught == 1) g_took[i].caught++; else if (caught == 2) g_took[i].heavy++; else g_took[i].missed++;
         return;
     }
 }
 static void TookReport(void)
 {
     for (int i = 0; i < 48; i++)
-        if (g_took[i].caught || g_took[i].missed)
-            Log("her fire on kind %016llx: %u burned, %u took no fire damage", (unsigned long long)g_took[i].res, g_took[i].caught, g_took[i].missed);
+        if (g_took[i].caught || g_took[i].heavy || g_took[i].missed)
+            Log("her fire on kind %016llx: %u burned, %u burned only with the heavy fire status %d, %u took no fire damage", (unsigned long long)g_took[i].res,
+                g_took[i].caught, g_took[i].heavy, s_fireHeavy, g_took[i].missed);
     memset(g_took, 0, sizeof g_took);
 }
 static double g_tookAt;
@@ -483,9 +486,20 @@ static void TookFrame(void)
         if (!c->e || c->litAt <= 0 || g_now - c->litAt < 2.0) continue;
         int caught = c->tickAt >= c->litAt, alive = Alive(c->e);
         static unsigned told;
-        if (!caught && alive && told++ < 60) Log("entity %u (kind %016llx) took no fire damage in 2 s after her fire", c->e, (unsigned long long)c->res);
-        if (caught || alive) Took(c->res, caught);
+        if (!caught && alive && c->stage == 0 && s_fireHeavy > 0 && s_fireHeavy != s_fireStatus)
+        {
+            /* the plain fire status did not take: the heavy one, once */
+            if (told++ < 60) Log("entity %u (kind %016llx) took no fire damage in 2 s after her fire: trying the heavy fire status %d", c->e, (unsigned long long)c->res, s_fireHeavy);
+            Status(c->e, (uint32_t)s_fireHeavy, 1000, "her heavy fire");
+            c->stage = 1;
+            c->litAt = g_now;
+            continue;
+        }
+        if (!caught && alive && told++ < 60) Log("entity %u (kind %016llx) took no fire damage in 2 s after her %sfire", c->e, (unsigned long long)c->res, c->stage ? "heavy " : "");
+        if (caught && c->stage && told++ < 60) Log("entity %u (kind %016llx) burns with the heavy fire status %d", c->e, (unsigned long long)c->res, s_fireHeavy);
+        if (caught || alive) Took(c->res, caught ? 1 + c->stage : 0);
         c->litAt = 0;
+        c->stage = 0;
     }
 }
 static void Ignite(uint32_t e, float buildup, const char* what)
@@ -678,6 +692,16 @@ static int Refuse(uint32_t e, uint32_t st, float buildup, uint32_t from)
 static void AddStatus(void* m, uint32_t e, uint32_t st, uint32_t r9, float buildup, uint32_t from, uint64_t z)
 {
     if (Refuse(e, st, buildup, from)) return;
+    /* every status the game puts on an enemy, once each: names what an environment's fire uses */
+    {
+        static atomic_uint seen[8];
+        if (st < 256 && e != atomic_load(&g_avatar) && !(atomic_fetch_or(&seen[st >> 5], 1u << (st & 31)) & (1u << (st & 31))))
+        {
+            int k = FoeIndex(e);
+            if (k >= 0) Log("status %u first seen on an enemy: entity %u (kind %016llx), build-up %.1f, from %u", st, e, (unsigned long long)g_foeRes[k], (double)buildup, from);
+            else atomic_fetch_and(&seen[st >> 5], ~(1u << (st & 31)));
+        }
+    }
     original_add(m, e, st, r9, buildup, from, z);
 }
 static void StatusInstall(void)
