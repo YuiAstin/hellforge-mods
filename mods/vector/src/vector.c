@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.13"
+#define VERSION "0.1.14"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -390,8 +390,24 @@ static void FactionDiag(void)
     uint32_t me = atomic_load(&g_avatar);
     Log("faction of her own entity %u: %s", me, FactionOf(me, b) ? "found" : "not found");
 }
+/* Portent of Doom's blast is a gas vent's: its flash and sound live in the vent's own package, which the game only
+ * loads on planets that have vents (0.1.13: the fire patch, the stagger and the damage showed, no blast and no sound).
+ * Asked for at each mission start, and again every second until it is in or refused */
+static int g_ventState = -1;           /* -1 not asked, 0 refused, HF_PACKAGE_... */
+static double g_ventAt;
+static void VentFrame(void)
+{
+    if (s_s2Blast != 120 || g_ventState == 0 || g_ventState == (int)HF_PACKAGE_RESIDENT || g_now < g_ventAt) return;
+    g_ventAt = g_now + 1;
+    int was = g_ventState;
+    g_ventState = hf->load_package(self, UINT64_C(0x1AB4186A06C84078));
+    if (g_ventState != was)
+        Log("the gas vent's package: %s", g_ventState == (int)HF_PACKAGE_RESIDENT ? "loaded, Portent of Doom's blast has its flash and sound"
+                                          : g_ventState ? "loading" : "refused (HellForge's log line above says why): the blast stays without its flash and sound");
+}
 static void FactionFrame(void)
 {
+    VentFrame();
     if (g_facDiagAt > 0 && g_now >= g_facDiagAt) { g_facDiagAt = 0; FactionDiag(); }
     FactionNote(atomic_load(&g_avatar), AVATAR);
     for (int n = 0; n < 48; n++) { unsigned i = g_facAt++ % FACQ; if (g_facE[i]) FactionNote(g_facE[i], g_facR[i]); }
