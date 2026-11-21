@@ -102,3 +102,9 @@ Smolder, Overburn and Accelerant multiply together: a Smoldering, Overburned ene
   to), and only then the enemy nearest the crosshair. Before, a tall enemy could only be picked by aiming at its centre
   point, which sits in the empty space between its legs.
 - Fire's damage element is 1 (learned in the first run).
+- 0.1.7: her own burn. Tanks, the War Strider and gunships take no fire damage from the game's fire (150,000 build-up
+  poured on them changed nothing; soldiers, berserkers and lieutenants burn normally). A kind that takes no fire damage
+  within 2 s of her fire is remembered for the session, and her fire on it burns by her hand instead: own_burn_damage (12,
+  half a soldier's 25) health every 0.25 s for own_burn_seconds (8), straight off its health past armour ("it cooks the
+  crew"), multiplied by Smolder, Overburn and Accelerant. At 1 health a fire burst is set on it and that hit kills it the
+  game's way. Fabricators and dropships are left out.
