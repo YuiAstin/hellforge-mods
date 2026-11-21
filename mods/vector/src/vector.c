@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.5"
+#define VERSION "0.1.6"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -509,6 +509,23 @@ static int Hard(uint64_t res, int add)
     }
     return 0;
 }
+/* the enemy list holds 1024: the dead are taken off it, a part of the list each frame, so a crowded mission does not
+ * push the living off. Only one seen alive before goes (a fresh spawn may have no health yet) */
+static uint32_t g_wasAlive[FOES];
+static int g_pruneAt;
+static unsigned g_pruned, g_foePeak;
+static void PruneFrame(void)
+{
+    for (int n = 0; n < 96; n++)
+    {
+        int k = g_pruneAt++ % FOES;
+        uint32_t e = g_foe[k];
+        if (!e) continue;
+        if (Alive(e)) g_wasAlive[k] = e;
+        else if (g_wasAlive[k] == e) { g_foe[k] = 0; g_wasAlive[k] = 0; g_pruned++; }
+    }
+    if (g_pruneAt % (FOES * 4) < 96) { unsigned c = (unsigned)FoeCount(); if (c > g_foePeak) g_foePeak = c; }
+}
 /* an enemy her fire did not light: fire build-up on it every frame until fire damage shows, s_firePour seconds at most */
 static void PourFrame(void)
 {
@@ -567,6 +584,7 @@ static void HeatFrame(void)
     for (; g_ignOut != in; g_ignOut++) Ignite(g_ign[g_ignOut % IGNQ].e, g_ign[g_ignOut % IGNQ].buildup, "her fire");
     TookFrame();
     PourFrame();
+    PruneFrame();
     in = atomic_load(&g_burstIn);
     if (in - g_burstOut > BURSTQ) g_burstOut = in - BURSTQ;
     for (; g_burstOut != in; g_burstOut++)
@@ -866,6 +884,8 @@ static void Reset(const char* why)
             "Smolder, Overburn and Accelerant; on her: %u fire statuses refused, %u fire hits cancelled; fire's element %d",
             why, g_casts[0], g_casts[1], g_casts[2], g_ignitions, g_bursts, g_overburns, g_shells, g_spends, g_fireBonus, g_refusedHer, g_fireOnHer, g_fireElem);
     TookReport();
+    if (g_pruned || g_foePeak) Log("enemy list: %u at its fullest (it holds %d), %u dead taken off it", g_foePeak, FOES, g_pruned);
+    g_pruned = g_foePeak = 0;
     g_tookAt = 0;
     Body(start);
     if (start && s_hellbomb && s_hellbombRow == 125 && !hf->load_package(self, UINT64_C(0x346D785D6CA13FF4))) Log("the Hellbomb's package could not be loaded ahead");
