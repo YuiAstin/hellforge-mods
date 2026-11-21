@@ -1,5 +1,7 @@
 # Releases: what is out, and what goes up next
 
+What a kit's pages, images, Discord post and in-game options look like: [release-format.md](release-format.md).
+
 hf-mod.com closes: uploads are already shut; downloads end **19 November 2026**; accounts and files are deleted
 **3 December 2026**. Every mod moves to Nexus Mods, GameBanana and Ayaka (Yui, 2026-11-06). Each upload: the zip
 stripped of Arrowhead's bytes (HellForge's *Prepare for sharing* / `package-mod`, on the PC), one changelog entry
