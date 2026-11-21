@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -1444,7 +1444,7 @@ static const KbOption kOptions[] = {
     {"overburn_seconds", &s_overburnSeconds, NULL}, {"overburn_mult", &s_overburnMult, NULL},
     {"s2_cooldown", &s_s2Cd, NULL}, {"smolder_seconds", &s_smolderSeconds, NULL}, {"smolder_mult", &s_smolderMult, NULL},
     {"s3_cooldown", &s_s3Cd, NULL}, {"s3_shells", NULL, &s_s3Shells}, {"s3_spread", &s_s3Spread, NULL}, {"accelerant_seconds", &s_accSeconds, NULL},
-    {"accelerant_mult", &s_accMult, NULL}, {"fire_immune", NULL, &s_fireImmune}, {"own_burn", NULL, &s_ownBurn}, {"own_burn_damage", &s_ownDamage, NULL}, {"own_burn_percent", &s_ownPercent, NULL}, {"own_burn_seconds", &s_ownSeconds, NULL}, {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
+    {"accelerant_mult", &s_accMult, NULL}, {"fire_immune", NULL, &s_fireImmune}, {"own_burn", NULL, &s_ownBurn}, {"own_burn_damage", &s_ownDamage, NULL}, {"own_burn_percent", &s_ownPercent, NULL}, {"own_burn_seconds", &s_ownSeconds, NULL}, {"hellbomb_on_exhaustion", NULL, &s_hellbomb}, {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
 };
 static void OptionAfter(const char* name, int changed) { (void)name; (void)changed; }
 #ifdef HF_SCREEN_MODAL

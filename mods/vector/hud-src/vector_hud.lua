@@ -482,6 +482,7 @@ local OPTIONS = {
     {'own_burn_seconds', 'slider', 'Her Own Burn: Seconds', 1, 30, 1, 'How long her own burn lasts after her fire.', true},
     {'hp_mult', 'slider', 'Body: Health', 0.5, 4, 0.05, 'Her health, times a Helldiver\'s.', true},
     {'stamina_mult', 'slider', 'Body: Stamina', 0.5, 6, 0.1, 'How long she sprints before the bar empties, times a Helldiver\'s.'},
+    {'hellbomb_on_exhaustion', 'slider', 'Body: Hellbomb On Exhaustion', 0, 1, 1, '1: running her stamina dry sets off a Hellbomb on her (a T-Doll\'s price). 0: it does not.'},
 }
 pcall(ffi.cdef, [[
 typedef int (*vecopt_get)(const char *name, double *out);

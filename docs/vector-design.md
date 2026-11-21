@@ -136,3 +136,13 @@ The first kit to move from the Mod Options Menu to a screen of its own, drawn ov
 - The manifest: `add_screen` needs `"sdk": 17`. The repository's manifest stays at 13 while the stable HellForge is
   SDK 16; a copy installed on a HellForge with screens gets 17.
 - To move another kit: copy `vector_options.h`, replace `kOpRows`, the title and the save file's name.
+- 0.2.1, three kinds of row (`OpRow.kind`): a slider (few steps), a switch (0 or 1), and a field to type in with - and +
+  for wide ranges (cooldowns, durations, the own burn's damage). A field's limits are the setting's own in vector.ini,
+  not the Mod Options Menu row's.
+- 0.2.1, the T-Doll's Hellbomb has a row (Body: Hellbomb On Exhaustion), on the screen and on the Mod Options Menu.
+- 0.2.1, the character kits' picker is on the screen: a chip per installed kit and an Off. Off is a kit of its own in the
+  shared roster (`~off`, added by Vector when its screen is there): with it picked no real kit is the picked one, so
+  every kit stands by, and the released kits need no change. The pick is saved to
+  `%LOCALAPPDATA%\HellForgeMods\kits.ini` and set again at the next start, once its kit has joined. It takes effect at
+  the next mission start, as before. Known gap: where the Mod Options Menu is installed too, its own saved pick is also
+  set at start, and the last one set wins. The Off belongs in the kit base (`kb_roster.h`) once more kits get the screen.
