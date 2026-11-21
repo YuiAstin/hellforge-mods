@@ -19,5 +19,8 @@ The words over Smoldering and Overburned enemies: parts adapted from **Chef Shar
 (https://github.com/Th3chef/Chef-Shared-Loader): finding the view camera, projecting a world point to the screen and the
 behind-the-camera check, used with Th3chef's permission. None of the loader itself is included.
 
+Her options screen is drawn through **HellForge**'s screens over the game (SDK 17), where the installed HellForge has
+them.
+
 Vector is a character of Girls' Frontline 2: Exilium (MICA Team / Sunborn). This is an unofficial fan mod; no character
-model or game art is included.
+model is included. The skill icons (hud-src/images) and the mod icon are Girls' Frontline 2 art, © MICA Team / Sunborn.

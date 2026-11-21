@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-21: Vector 0.2.2 (first release) · Alva 0.2.5
+
+### Vector 0.2.2
+- First release: Vector's kit from Girls' Frontline 2 for your Helldiver, a fire support. Solo or host; no character model included.
+- Perception Block: fire does nothing to her. Fire statuses never land on her and fire's damage on her is cancelled.
+- Dead End Meltdown (Z): for 10 s her shots set what they hit on fire. A shot on an enemy that already burns sets off a fire burst and Overburns it (it takes 30% more fire damage for 8 s).
+- Portent of Doom (X): a napalm blast on the enemy under her crosshair. It is set on fire and Smolders for 12 s: it takes 50% more fire damage and stays alight for as long as it Smolders.
+- Searing Finale (C): three napalm shells where she aims, Accelerant (30% more fire damage on everything for 15 s), and her other two skills are ready again.
+- Confectance Index: each skill gives 2 points; at 6 they are spent and her hits deal 25% more for 12 s.
+- Her fire scales with what it burns: a tick of fire she lit is never less than 1% of the enemy's full health, so a walker does not burn like a soldier.
+- Her own burn: tanks, gunships and other machines that the game's fire cannot hurt burn by her hand instead, straight off their health, with the same boosts.
+- T-Doll body: more health and stamina; running her stamina dry sets off a Hellbomb on her (a toggle).
+- HUD: her skills beside the stratagem list with icons and cooldowns, her passive, the Confectance Index, what burns, the low-stamina warning, key bindings in the game's binding pages and every number on the MODS tab.
+- Where your HellForge has screens over the game (not in the current release build), her numbers and the character picker, with an Off, are on a screen of her own (F9).
+- Needs HellForge 0.4 or later; the HUD needs Bingus Shared Loader and HD2Runtime.
+
+### Alva 0.2.5
+- The Hellbomb her exhaustion sets off has its toggle on the MODS tab (Body: Hellbomb When Exhausted), as in the other kits. It was only in alva.ini before.
+
 ## 2026-11-17: Koleda 0.4.1 (first release)
 
 - First release: Koleda's kit from Girls' Frontline 2 (AK-12, a Vanguard) for your Helldiver. Solo or host; no character model included.

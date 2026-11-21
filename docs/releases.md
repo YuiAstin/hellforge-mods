@@ -9,7 +9,8 @@ The released versions are the ones on Yui's PC (the same as on hf-mod.com), as o
 
 | Mod | Released | Next upload | Source of the next | Status |
 |---|---|---|---|---|
-| Alva | 0.2.4 | – | main (merged 2026-11-07) | Nexus 18599 and AyakaMods updated to 0.2.4 (2026-11-07): stamina warning, Hellbomb through her Barrier; played and approved |
+| Alva | 0.2.5 | – | main (merged 2026-11-21 from `alva-hellbomb-toggle`) | UPLOAD PENDING 2026-11-21: Nexus 18599 and AyakaMods from 0.2.4 to 0.2.5: the Hellbomb's toggle on the MODS tab; played by Yui |
+| Vector | 0.2.2 | – | main (merged 2026-11-21 from `vector-kit`) | UPLOAD PENDING 2026-11-21, first release as played by Yui on the release HellForge (manifest "sdk": 13; her options screen needs a HellForge with screens, SDK 17, and a manifest of 17: not in the download) |
 | Lost Contact | 0.4.1 | – | main (merged 2026-11-08 from `lost-contact-sidepass`) | Nexus 18609 and AyakaMods 5926 updated from 0.3.0 to 0.4.1 (2026-11-08): patrols walk past you, pass_by 50 m by default (Yui); played: leaders moved beside you, MODS tab rows on |
 | Lenna | 0.3.1 | – | main (merged 2026-11-16 from `teleport-fit`) | Nexus 18600 and AyakaMods 5919 updated from 0.3.0 to 0.3.1 (2026-11-16): Leaping Pursuit's landing by the game's fit test, zone faces, leaves and bodies no ground; played by Yui. The 0.3.0 zip had carried an old ini (keys Ctrl, Alt, F1; 0.2.9's numbers): 0.3.1 ships the repo's. Both pages were published before this (not drafts, as this table said) |
 | Leva | 0.6.0 | – | main | Nexus 18602 and AyakaMods 5920, published (not a draft, as this table said) |
