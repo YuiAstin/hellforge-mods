@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.12"
+#define VERSION "0.1.13"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -56,6 +56,7 @@ static float s_s2Cd = 15, s_s2Cone = 10, s_s2Range = 150, s_s2Buildup = 300, s_s
 static float s_s3Cd = 90, s_s3Cone = 10, s_s3Range = 150, s_s3Spread = 8, s_s3Height = 60, s_s3Every = 0.3f, s_accSeconds = 15, s_accMult = 1.3f;
 static int s_s3Shell = 234, s_s3Shells = 3, s_s3Refund = 1;
 static int s_fireImmune = 1, s_fireSt[4] = {5, 6, 32, 67}, s_fireElement = -1;
+static int s_s2Blast = 120;
 static float s_firePour = 0, s_fireHeavyStep = 50, s_ownDamage = 12, s_ownEvery = 0.25f, s_ownSeconds = 8, s_ownPercent = 1;
 static int s_ownBurn = 1;
 static int s_fireHeavy = 32;
@@ -74,7 +75,7 @@ static const KbSetting kSettings[] = {
     KB_I("s3_shells", s_s3Shells, 1, 12), KB_F("s3_spread", s_s3Spread, 0, 40), KB_F("s3_height", s_s3Height, 5, 300), KB_F("s3_every", s_s3Every, 0.05, 5),
     KB_F("accelerant_seconds", s_accSeconds, 0, 120), KB_F("accelerant_mult", s_accMult, 1, 10), KB_I("s3_refund", s_s3Refund, 0, 1),
     KB_I("fire_immune", s_fireImmune, 0, 1), KB_I("fire_status_1", s_fireSt[0], 0, 255), KB_I("fire_status_2", s_fireSt[1], 0, 255),
-    KB_I("fire_status_3", s_fireSt[2], 0, 255), KB_I("fire_status_4", s_fireSt[3], 0, 255), KB_I("fire_element", s_fireElement, -1, 255), KB_F("fire_pour", s_firePour, 0, 30), KB_I("own_burn", s_ownBurn, 0, 1), KB_F("own_burn_damage", s_ownDamage, 0, 10000), KB_F("own_burn_percent", s_ownPercent, 0, 100),
+    KB_I("fire_status_3", s_fireSt[2], 0, 255), KB_I("fire_status_4", s_fireSt[3], 0, 255), KB_I("fire_element", s_fireElement, -1, 255), KB_F("fire_pour", s_firePour, 0, 30), KB_I("s2_blast", s_s2Blast, 0, 100000), KB_I("own_burn", s_ownBurn, 0, 1), KB_F("own_burn_damage", s_ownDamage, 0, 10000), KB_F("own_burn_percent", s_ownPercent, 0, 100),
     KB_F("own_burn_every", s_ownEvery, 0.05, 10), KB_F("own_burn_seconds", s_ownSeconds, 0.5, 120),
     KB_I("line_of_sight", s_sight, 0, 1), KB_F("first_person", s_fpDistance, 0.1, 2),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
@@ -118,6 +119,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; own_burn_every s for own_burn_seconds after her fire. At 1 percent four times a second a full-health enemy burns\n"
                "; through in 25 s of unbroken burning. Smolder, Overburn and Accelerant multiply it.\n"
                "own_burn = %d\nown_burn_damage = %g\nown_burn_percent = %g\nown_burn_every = %g\nown_burn_seconds = %g\n"
+               "; s2_blast: the explosion set on Portent of Doom's target as it is cast (120: a gas vent's; 0: none).\n"
+               "s2_blast = %d\n"
                "; Aiming: line_of_sight 1, Portent of Doom's target must be in sight. first_person: the camera this close to her\n"
                "; head (m) counts as first person.\nline_of_sight = %d\nfirst_person = %g\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint. hellbomb_on_exhaustion 1 sets off a\n"
@@ -128,7 +131,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_overburnSeconds, (double)s_overburnMult, (double)s_s2Cd, (double)s_s2Cone, (double)s_s2Range, (double)s_s2Buildup,
             (double)s_smolderSeconds, (double)s_smolderMult, (double)s_s3Cd, (double)s_s3Cone, (double)s_s3Range, s_s3Shell, s_s3Shells, (double)s_s3Spread,
             (double)s_s3Height, (double)s_s3Every, (double)s_accSeconds, (double)s_accMult, s_s3Refund, s_fireImmune, s_fireSt[0], s_fireSt[1], s_fireSt[2],
-            s_fireSt[3], s_fireElement, (double)s_firePour, s_ownBurn, (double)s_ownDamage, (double)s_ownPercent, (double)s_ownEvery, (double)s_ownSeconds, s_sight, (double)s_fpDistance);
+            s_fireSt[3], s_fireElement, (double)s_firePour, s_ownBurn, (double)s_ownDamage, (double)s_ownPercent, (double)s_ownEvery, (double)s_ownSeconds, s_s2Blast, s_sight, (double)s_fpDistance);
 }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
@@ -362,8 +365,34 @@ static void FactionNote(uint32_t e, uint64_t res)
 static uint32_t g_facE[FACQ];
 static uint64_t g_facR[FACQ];
 static unsigned g_facIn, g_facAt;
+/* once a mission, 20 s in: what the manager itself reads as, and its first records (0.1.12's log named no faction) */
+static double g_facDiagAt;
+static void FactionDiag(void)
+{
+    uintptr_t m = Pointer(game + 0x3326DC8);
+    uint8_t h[0x60];
+    if (!m || !ReadAt(m, h, sizeof h)) { Log("faction manager: none (pointer %p)", (void*)m); return; }
+    char hex[200] = "";
+    for (int i = 0; i < 0x60; i++) snprintf(hex + 2 * i, 3, "%02x", h[i]);
+    Log("faction manager at %p: %s", (void*)m, hex);
+    uintptr_t datas = (uintptr_t)Quad(h + 0x48);
+    uint32_t count = Word(h + 0x18);
+    for (uint32_t i = 0; i < count && i < 6; i++)
+    {
+        uintptr_t data = datas ? Pointer(datas + 8u * i) : 0;
+        uint8_t b[32], tid[24];
+        if (!data || !ReadAt(data, b, 32)) { Log("faction record %u: unreadable (%p)", i, (void*)data); continue; }
+        for (int k = 0; k < 32; k++) snprintf(hex + 2 * k, 3, "%02x", b[k]);
+        uint32_t e = Word(b + 8);
+        Log("faction record %u: %s (entity %u, kind %016llx)", i, hex, e, Descriptor(e, tid) ? (unsigned long long)Quad(tid) : 0ull);
+    }
+    uint8_t b[32];
+    uint32_t me = atomic_load(&g_avatar);
+    Log("faction of her own entity %u: %s", me, FactionOf(me, b) ? "found" : "not found");
+}
 static void FactionFrame(void)
 {
+    if (g_facDiagAt > 0 && g_now >= g_facDiagAt) { g_facDiagAt = 0; FactionDiag(); }
     FactionNote(atomic_load(&g_avatar), AVATAR);
     for (int n = 0; n < 48; n++) { unsigned i = g_facAt++ % FACQ; if (g_facE[i]) FactionNote(g_facE[i], g_facR[i]); }
 }
@@ -914,6 +943,15 @@ static void Portent(void)
     }
     g_cd[1] = g_now + s_s2Cd;
     Ignite(target, s_s2Buildup, "Portent of Doom");
+    if (s_s2Blast > 0)
+    {
+        /* seen from afar: a gas vent's blast on it (her own blast: it does nothing to her) */
+        float bp[3];
+        int bk = FoeIndex(target);
+        if (bk < 0 || !TargetPos(target, g_foeRes[bk], bp)) memcpy(bp, at, 12);
+        Own(bp);
+        Act("Portent of Doom's blast", hf->spawn_explosion(self, (uint32_t)s_s2Blast, bp));
+    }
     Heat* c = HeatOf(target, 1);
     if (c) c->smolderUntil = g_now + s_smolderSeconds;
     Log("Portent of Doom: entity %u (%s) is on fire and Smolders for %.0f s (fire damage on it x%.2f)", target,
@@ -1169,6 +1207,7 @@ static void Reset(const char* why)
             "Smolder, Overburn and Accelerant; on her: %u fire statuses refused, %u fire hits cancelled; fire's element %d",
             why, g_casts[0], g_casts[1], g_casts[2], g_ignitions, g_bursts, g_overburns, g_shells, g_spends, g_fireBonus, g_refusedHer, g_fireOnHer, g_fireElem);
     TookReport();
+    g_facDiagAt = start ? g_now + 20 : 0;
     if (g_relit) Log("Smolder kept %u fires alight", g_relit);
     g_relit = 0; g_keepAt = 0;
     if (g_ownTicks) Log("her own burn: %u ticks, %.0f health burnt off past armour, %u kills", g_ownTicks, g_ownDealt, g_ownKills);
