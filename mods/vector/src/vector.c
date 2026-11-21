@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.15"
+#define VERSION "0.1.16"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -56,7 +56,7 @@ static float s_s2Cd = 15, s_s2Cone = 10, s_s2Range = 150, s_s2Buildup = 300, s_s
 static float s_s3Cd = 90, s_s3Cone = 10, s_s3Range = 150, s_s3Spread = 8, s_s3Height = 60, s_s3Every = 0.3f, s_accSeconds = 15, s_accMult = 1.3f;
 static int s_s3Shell = 234, s_s3Shells = 3, s_s3Refund = 1;
 static int s_fireImmune = 1, s_fireSt[4] = {5, 6, 32, 67}, s_fireElement = -1;
-static int s_s2Blast = 120;
+static int s_s2Blast = 359;
 static float s_firePour = 0, s_fireHeavyStep = 50, s_ownDamage = 12, s_ownEvery = 0.25f, s_ownSeconds = 8, s_ownPercent = 1;
 static int s_ownBurn = 1;
 static int s_fireHeavy = 32;
@@ -119,7 +119,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; own_burn_every s for own_burn_seconds after her fire. At 1 percent four times a second a full-health enemy burns\n"
                "; through in 25 s of unbroken burning. Smolder, Overburn and Accelerant multiply it.\n"
                "own_burn = %d\nown_burn_damage = %g\nown_burn_percent = %g\nown_burn_every = %g\nown_burn_seconds = %g\n"
-               "; s2_blast: the explosion set on Portent of Doom's target as it is cast (120: a gas vent's; 0: none).\n"
+               "; s2_blast: the explosion set on Portent of Doom's target as it is cast (359: an Eagle Napalm bomb's; 63: an Orbital\n"
+               "; Napalm shell's; 224: an incendiary grenade's; 0: none).\n"
                "s2_blast = %d\n"
                "; Aiming: line_of_sight 1, Portent of Doom's target must be in sight. first_person: the camera this close to her\n"
                "; head (m) counts as first person.\nline_of_sight = %d\nfirst_person = %g\n"
@@ -868,6 +869,7 @@ static struct { uint32_t e; float p[3]; } g_burst[BURSTQ];
 static atomic_uint g_burstIn;
 static unsigned g_burstOut;
 static double g_burstTokens;
+static void S2BlastFrame(void);
 static void HeatFrame(void)
 {
     unsigned in = atomic_load(&g_ignIn);
@@ -877,6 +879,7 @@ static void HeatFrame(void)
     PourFrame();
     OwnFrame();
     KeepFrame();
+    S2BlastFrame();
     PruneFrame();
     FactionFrame();
     in = atomic_load(&g_burstIn);
@@ -941,6 +944,20 @@ static void MeltdownHit(uint32_t target, const float at[3])
     IgniteLater(target, s_fireBuildup);
 }
 
+/* Portent of Doom's blast: set off from the frame until the game takes it (its package may still be loading on the
+ * first cast of a session: up to 6 s) */
+static float g_s2BlastAt[3];
+static double g_s2BlastUntil;
+static void S2BlastFrame(void)
+{
+    if (g_s2BlastUntil <= 0) return;
+    if (g_now > g_s2BlastUntil || s_s2Blast <= 0) { g_s2BlastUntil = 0; return; }
+    Own(g_s2BlastAt);
+    int r = hf->spawn_explosion(self, (uint32_t)s_s2Blast, g_s2BlastAt);
+    if (r == HF_ACT_WAITING) return;
+    g_s2BlastUntil = 0;
+    Act("Portent of Doom's blast", r);
+}
 /* ---- Portent of Doom -------------------------------------------------------------------------------------------- */
 static void Portent(void)
 {
@@ -962,8 +979,9 @@ static void Portent(void)
         float bp[3];
         int bk = FoeIndex(target);
         if (bk < 0 || !TargetPos(target, g_foeRes[bk], bp)) memcpy(bp, at, 12);
-        Own(bp);
-        Act("Portent of Doom's blast", hf->spawn_explosion(self, (uint32_t)s_s2Blast, bp));
+        memcpy(g_s2BlastAt, bp, 12);
+        g_s2BlastUntil = g_now + 6;
+        S2BlastFrame();
     }
     Heat* c = HeatOf(target, 1);
     if (c) c->smolderUntil = g_now + s_smolderSeconds;
