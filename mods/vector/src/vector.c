@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.4"
+#define VERSION "0.2.5"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */

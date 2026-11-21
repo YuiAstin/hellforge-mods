@@ -55,7 +55,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.1"
+#define VERSION "0.3.2"
 #define BUILD "25480438"
 
 /* S3 sets off a blast on every enemy it hit, 0.1 s apart: room for 12 of his own blasts within the guard's 1.2 s */
