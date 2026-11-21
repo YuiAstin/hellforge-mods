@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.4"
+#define VERSION "0.1.5"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -56,7 +56,8 @@ static float s_s2Cd = 15, s_s2Cone = 10, s_s2Range = 150, s_s2Buildup = 300, s_s
 static float s_s3Cd = 90, s_s3Cone = 10, s_s3Range = 150, s_s3Spread = 8, s_s3Height = 60, s_s3Every = 0.3f, s_accSeconds = 15, s_accMult = 1.3f;
 static int s_s3Shell = 234, s_s3Shells = 3, s_s3Refund = 1;
 static int s_fireImmune = 1, s_fireSt[4] = {5, 6, 32, 67}, s_fireElement = -1;
-static float s_firePour = 3;
+static float s_firePour = 3, s_fireHeavyStep = 50;
+static int s_fireHeavy = 32;
 static int s_sight = 1;
 static float s_fpDistance = 0.45f;
 
@@ -529,7 +530,12 @@ static void PourFrame(void)
             Took(c->res, 0);
             c->stage = 0; c->litAt = 0;
         }
-        else if (hf->apply_status && hf->apply_status(self, c->e, (uint32_t)s_fireStatus, 1000) != 0) c->poured += 1000;
+        else if (hf->apply_status)
+        {
+            /* the plain status in bulk, and the heavy one the way a napalm shell lays it on (50 a tick) */
+            if (hf->apply_status(self, c->e, (uint32_t)s_fireStatus, 1000) != 0) c->poured += 1000;
+            if (s_fireHeavy > 0) hf->apply_status(self, c->e, (uint32_t)s_fireHeavy, s_fireHeavyStep);
+        }
     }
 }
 static void Ignite(uint32_t e, float buildup, const char* what)
@@ -767,6 +773,12 @@ static void DamageSeen(HfDamagePreEvent* e, HfDamageEvent* d)
     {
         g_fireElem = (int)d->element;
         Log("fire's damage element learned: %d (kind 2 on entity %u; fire_element = %d in vector.ini skips the learning)", g_fireElem, d->target, g_fireElem);
+    }
+    /* what lands on an enemy she is pouring fire on: names the damage a hard-to-light enemy's fire deals */
+    {
+        Heat* pc = HeatOf(d->target, 0);
+        static unsigned told;
+        if (pc && pc->stage == 1 && told++ < 40) Log("while pouring: entity %u takes %d (kind %u, element %u)", d->target, d->amount, d->kind, d->element);
     }
     if (!IsFire(d)) return;
     if (d->amount <= 0)

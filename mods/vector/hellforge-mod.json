@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.vector",
   "name": "Vector",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Vector's kit from Girls' Frontline 2 for your Helldiver: a fire support. Fire does nothing to her. Dead End Meltdown makes her shots set enemies on fire, and a shot on a burning enemy sets off a fire burst and Overburns it; Portent of Doom sets the enemy under her crosshair on fire and makes it Smolder (it takes more fire damage); Searing Finale drops napalm shells where she aims, boosts fire damage and readies her other skills. Each skill fills her Confectance Index: full, it is spent for a damage boost. Solo or host. Keys in vector.ini; numbers on the MODS tab (Mod Options Menu). HUD needs Bingus Shared Loader and HD2Runtime. Installs beside the author's other character kits (pick one on the MODS tab). No character model included.",
   "gameplay": true,
   "code": {
