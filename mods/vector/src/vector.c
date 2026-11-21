@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.3"
+#define VERSION "0.2.4"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -189,23 +189,38 @@ static uint32_t UnitOf(uint32_t e)
     return Descriptor(e, d) ? Word(d + 12) : 0;
 }
 /* her camera: where it is and where it looks; fp: it sits at her head */
+/* 0.2.4: why View last failed, for the log (on the nightly of 2026-11-22 her aim was unknown all mission) */
+static char g_viewWhy[200] = "not asked yet";
 static int View(float pos[3], float fwd[3], int* fp)
 {
     uint8_t d[24];
-    if (!Descriptor(atomic_load(&g_avatar), d)) return 0;
+    uint32_t avatar = atomic_load(&g_avatar);
+    if (!Descriptor(avatar, d)) { snprintf(g_viewWhy, sizeof g_viewWhy, "no descriptor for her avatar (entity %u)", avatar); return 0; }
     uint32_t unit = Word(d + 12), slot = unit & 0x3FFFFF, id = 0;
-    uintptr_t registry = Pointer(exe + 0x1A100F0), objects, object, w;
+    uintptr_t registry = Pointer(exe + 0x1A100F0), objects = 0, object = 0, w = 0;
     float m[16], head[3];
     if (!registry || !(objects = Pointer(registry + 0x88)) || !(object = Pointer(objects + 8u * slot)) || !ReadAt(object + 8, &id, 4) || id != unit ||
-        !(w = Pointer(object + 0x18)) || !ReadAt(w + 0x230920, m, 64)) return 0;
-    for (int k = 0; k < 16; k++) if (!isfinite(m[k])) return 0;
-    if (fabsf(m[15] - 1) > 1e-3f) return 0;
+        !(w = Pointer(object + 0x18)) || !ReadAt(w + 0x230920, m, 64))
+    {
+        snprintf(g_viewWhy, sizeof g_viewWhy, "the camera's read stopped: exe %p, registry %p, objects %p, unit %08x (slot %u), object %p, its id %08x, world %p",
+                 (void*)exe, (void*)registry, (void*)objects, unit, slot, (void*)object, id, (void*)w);
+        return 0;
+    }
+    for (int k = 0; k < 16; k++) if (!isfinite(m[k])) { snprintf(g_viewWhy, sizeof g_viewWhy, "the camera's matrix is not finite (world %p)", (void*)w); return 0; }
+    if (fabsf(m[15] - 1) > 1e-3f)
+    {
+        snprintf(g_viewWhy, sizeof g_viewWhy, "not a camera matrix at world %p + 0x230920: rows %.2f %.2f %.2f %.2f | %.2f %.2f %.2f %.2f | %.2f %.2f %.2f %.2f | %.2f %.2f %.2f %.2f",
+                 (void*)w, (double)m[0], (double)m[1], (double)m[2], (double)m[3], (double)m[4], (double)m[5], (double)m[6], (double)m[7], (double)m[8], (double)m[9],
+                 (double)m[10], (double)m[11], (double)m[12], (double)m[13], (double)m[14], (double)m[15]);
+        return 0;
+    }
     memcpy(fwd, m + 4, 12);
     memcpy(pos, m + 12, 12);
     float n = sqrtf(fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]);
-    if (!(n > 0.5f)) return 0;
+    if (!(n > 0.5f)) { snprintf(g_viewWhy, sizeof g_viewWhy, "the camera's forward is too short (%.3f)", (double)n); return 0; }
     for (int k = 0; k < 3; k++) fwd[k] /= n;
     *fp = UnitNode(unit, NODE_HEAD, head) && Dist2(pos, head) < s_fpDistance * s_fpDistance;
+    g_viewWhy[0] = 0;
     return 1;
 }
 static float Off(const float cam[3], const float fwd[3], const float p[3], float* dist)
@@ -975,7 +990,7 @@ static void Portent(void)
     if (Aim(s_s2Cone, s_s2Range, 0, at, &target) != 1)
     {
         static unsigned told;
-        if (told++ < 8) Log("Portent of Doom: no enemy under her crosshair (%u near it but out of sight; %d enemies known)", g_aimBlocked, FoeCount());
+        if (told++ < 8) Log("Portent of Doom: no enemy under her crosshair (%u near it but out of sight; %d enemies known)%s%s", g_aimBlocked, FoeCount(), g_viewWhy[0] ? "; her view: " : "", g_viewWhy);
         return;
     }
     g_cd[1] = g_now + s_s2Cd;
@@ -1010,7 +1025,7 @@ static void Finale(void)
     if (g_now < g_cd[2]) return;
     float at[3];
     uint32_t target;
-    if (!Aim(s_s3Cone, s_s3Range, 1, at, &target)) { static unsigned told; if (told++ < 5) Log("Searing Finale: her aim is unknown"); return; }
+    if (!Aim(s_s3Cone, s_s3Range, 1, at, &target)) { static unsigned told; if (told++ < 5) Log("Searing Finale: her aim is unknown (%s)", g_viewWhy[0] ? g_viewWhy : "no point under her crosshair"); return; }
     g_cd[2] = g_now + s_s3Cd;
     memcpy(g_finAt, at, 12);
     g_finLeft = s_s3Shells;
