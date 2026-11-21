@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.7"
+#define VERSION "0.1.8"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -610,6 +610,22 @@ static int Hard(uint64_t res, int add)
     }
     return 0;
 }
+/* a Smoldering enemy stays on fire for as long as it Smolders: the game's fire goes out sooner, so it is lit again
+ * every second (her own burn, on what the game's fire cannot hurt, is kept up the same way) */
+static double g_keepAt;
+static unsigned g_relit;
+static void KeepFrame(void)
+{
+    if (g_now - g_keepAt < 1.0) return;
+    g_keepAt = g_now;
+    for (int i = 0; i < HEAT; i++)
+    {
+        Heat* c = &g_heat[i];
+        if (!c->e || c->smolderUntil <= g_now + 0.5 || !Alive(c->e)) continue;
+        if (c->ownUntil > g_now || (s_ownBurn && c->res && Proof(c->res, 0))) { if (c->ownUntil < c->smolderUntil) c->ownUntil = c->smolderUntil; continue; }
+        if (hf->apply_status && hf->apply_status(self, c->e, (uint32_t)s_fireStatus, s_s2Buildup > 1000 ? 1000 : s_s2Buildup) != 0) { Burns(c->e); g_relit++; }
+    }
+}
 /* the enemy list holds 1024: the dead are taken off it, a part of the list each frame, so a crowded mission does not
  * push the living off. Only one seen alive before goes (a fresh spawn may have no health yet) */
 static uint32_t g_wasAlive[FOES];
@@ -687,6 +703,7 @@ static void HeatFrame(void)
     TookFrame();
     PourFrame();
     OwnFrame();
+    KeepFrame();
     PruneFrame();
     in = atomic_load(&g_burstIn);
     if (in - g_burstOut > BURSTQ) g_burstOut = in - BURSTQ;
@@ -1000,6 +1017,8 @@ static void Reset(const char* why)
             "Smolder, Overburn and Accelerant; on her: %u fire statuses refused, %u fire hits cancelled; fire's element %d",
             why, g_casts[0], g_casts[1], g_casts[2], g_ignitions, g_bursts, g_overburns, g_shells, g_spends, g_fireBonus, g_refusedHer, g_fireOnHer, g_fireElem);
     TookReport();
+    if (g_relit) Log("Smolder kept %u fires alight", g_relit);
+    g_relit = 0; g_keepAt = 0;
     if (g_ownTicks) Log("her own burn: %u ticks, %.0f health burnt off past armour, %u kills", g_ownTicks, g_ownDealt, g_ownKills);
     g_ownTicks = g_ownKills = 0; g_ownDealt = 0;
     if (g_pruned || g_foePeak) Log("enemy list: %u at its fullest (it holds %d), %u dead taken off it", g_foePeak, FOES, g_pruned);
