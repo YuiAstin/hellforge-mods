@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.14"
+#define VERSION "0.1.15"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -321,74 +321,71 @@ static int InSight(const float cam[3], const float fwd[3], const float q[3], uin
 static uint32_t g_any[ANY];
 static uint64_t g_anyRes[ANY];
 static unsigned g_anyNext;
-/* the game's own faction tag (0.1.12, from the game's code: its faction component's manager at game+0x3326DC8, an
- * entity map at +0x30, a data pointer per index at +0x48; the data holds the entity at +8 and, it seems, the faction
- * at +0xC). For the log: each kind's, once, to learn what bots, bugs, squids and Helldivers read as */
-static int FactionOf(uint32_t entity, uint8_t out[32])
+/* the game's own faction tag (0.1.15, from the game's code: its faction component's manager at game+0x3326CB8, 512
+ * slots: an entity per index at +0xE030 (8 bytes each), an entity map whose header is at +0x12038 (buckets +0x18,
+ * capacity +0x20, empty key +0x24, multiplier +0x28), 112 bytes a slot from +0x10 and 24 more from +0xF030). Where in a
+ * slot the faction sits is not known yet: each kind's slot goes to the log once, to compare bots, bugs, squids and
+ * Helldivers */
+static int FactionIndex(uint32_t entity, uintptr_t* manager)
 {
-    uintptr_t m = Pointer(game + 0x3326DC8);
-    uint8_t h[0x58];
-    if (!entity || !m || !ReadAt(m, h, sizeof h)) return 0;
-    uintptr_t buckets = (uintptr_t)Quad(h + 0x30), datas = (uintptr_t)Quad(h + 0x48);
-    uint32_t count = Word(h + 0x18), cap = Word(h + 0x38), empty = Word(h + 0x3C), mult = Word(h + 0x40);
-    if (!buckets || !datas || !cap || cap > 65536 || (cap & (cap - 1)) || count > 4096) return 0;
+    uintptr_t m = Pointer(game + 0x3326CB8);
+    uint8_t h[0x30];
+    if (!entity || !m || !ReadAt(m + 0x12038, h, sizeof h)) return -1;
+    uintptr_t buckets = (uintptr_t)Quad(h + 0x18);
+    uint32_t cap = Word(h + 0x20), empty = Word(h + 0x24), mult = Word(h + 0x28);
+    if (!buckets || !cap || cap > 65536 || (cap & (cap - 1))) return -1;
     uint32_t start = entity * mult;
     for (uint32_t k = 0; k < cap; k++)
     {
         uint8_t b[8];
-        if (!ReadAt(buckets + 8u * ((start + k) & (cap - 1)), b, 8)) return 0;
+        if (!ReadAt(buckets + 8u * ((start + k) & (cap - 1)), b, 8)) return -1;
         uint32_t key = Word(b), index = Word(b + 4);
-        if (key != entity) { if (key == empty) return 0; continue; }
-        uintptr_t data = index < 4096 ? Pointer(datas + 8u * index) : 0;
-        return data && ReadAt(data, out, 32) && Word(out + 8) == entity;
+        if (key != entity) { if (key == empty) return -1; continue; }
+        if (index >= 512) return -1;
+        *manager = m;
+        return (int)index;
     }
-    return 0;
+    return -1;
 }
+static void Hex(char* out, const uint8_t* b, int n) { for (int i = 0; i < n; i++) snprintf(out + 2 * i, 3, "%02x", b[i]); }
 static uint64_t g_facSeen[256];
 static unsigned g_facN;
 static void FactionNote(uint32_t e, uint64_t res)
 {
     if (!e || !res) return;
     for (unsigned i = 0; i < g_facN; i++) if (g_facSeen[i] == res) return;
-    uint8_t b[32];
-    if (g_facN >= 256 || !FactionOf(e, b)) return;
+    uintptr_t m = 0;
+    int idx = g_facN < 256 ? FactionIndex(e, &m) : -1;
+    if (idx < 0) return;
     g_facSeen[g_facN++] = res;
-    char hex[80] = "";
-    for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", b[i]);
+    uint8_t a[8], slot[112], tail[24];
+    char ha[20] = "", hs[230] = "", ht[52] = "";
+    if (ReadAt(m + 0xE030 + 8u * (unsigned)idx, a, 8)) Hex(ha, a, 8);
+    if (ReadAt(m + 0x10 + 112u * (unsigned)idx, slot, 112)) Hex(hs, slot, 112);
+    if (ReadAt(m + 0xF030 + 24u * (unsigned)idx, tail, 24)) Hex(ht, tail, 24);
     uint32_t st2;
-    Log("faction of kind %016llx%s: %u (entity %u; data %s)%s%s%s", (unsigned long long)res, res == AVATAR ? " (a Helldiver)" : FriendRes(res) ? " (a friend)" : "",
-        Word(b + 12), e, hex, hf->component_record("BehaviorComponentData", res, &st2) ? ", behaviour" : "",
-        hf->component_record("TurretComponentData", res, &st2) ? ", turret" : "", hf->component_record("SeatCollectionComponentData", res, &st2) ? ", seats" : "");
+    Log("faction slot of kind %016llx%s%s%s (entity %u, index %d): entity %s | slot %s | tail %s", (unsigned long long)res,
+        res == AVATAR ? " (a Helldiver)" : FriendRes(res) ? " (a friend)" : "", hf->component_record("BehaviorComponentData", res, &st2) ? ", behaviour" : "",
+        hf->component_record("TurretComponentData", res, &st2) ? ", turret" : "", e, idx, ha, hs, ht);
 }
 /* everything spawned, friends too, for the faction log (SeeAny keeps friends out) */
 #define FACQ 2048
 static uint32_t g_facE[FACQ];
 static uint64_t g_facR[FACQ];
 static unsigned g_facIn, g_facAt;
-/* once a mission, 20 s in: what the manager itself reads as, and its first records (0.1.12's log named no faction) */
+/* once a mission, 20 s in: the manager's own numbers (0.1.13's first guess, game+0x3326DC8, was another component:
+ * empty, 16 slots) */
 static double g_facDiagAt;
 static void FactionDiag(void)
 {
-    uintptr_t m = Pointer(game + 0x3326DC8);
-    uint8_t h[0x60];
-    if (!m || !ReadAt(m, h, sizeof h)) { Log("faction manager: none (pointer %p)", (void*)m); return; }
-    char hex[200] = "";
-    for (int i = 0; i < 0x60; i++) snprintf(hex + 2 * i, 3, "%02x", h[i]);
-    Log("faction manager at %p: %s", (void*)m, hex);
-    uintptr_t datas = (uintptr_t)Quad(h + 0x48);
-    uint32_t count = Word(h + 0x18);
-    for (uint32_t i = 0; i < count && i < 6; i++)
-    {
-        uintptr_t data = datas ? Pointer(datas + 8u * i) : 0;
-        uint8_t b[32], tid[24];
-        if (!data || !ReadAt(data, b, 32)) { Log("faction record %u: unreadable (%p)", i, (void*)data); continue; }
-        for (int k = 0; k < 32; k++) snprintf(hex + 2 * k, 3, "%02x", b[k]);
-        uint32_t e = Word(b + 8);
-        Log("faction record %u: %s (entity %u, kind %016llx)", i, hex, e, Descriptor(e, tid) ? (unsigned long long)Quad(tid) : 0ull);
-    }
-    uint8_t b[32];
+    uintptr_t m = Pointer(game + 0x3326CB8);
+    uint8_t h[0x70], pre[0x30];
+    char hex[230] = "", hp[100] = "";
+    if (!m || !ReadAt(m + 0x12030, h, sizeof h) || !ReadAt(m + 0xE000, pre, sizeof pre)) { Log("faction manager: none (pointer %p)", (void*)m); return; }
+    Hex(hex, h, 0x70); Hex(hp, pre, 0x30);
+    uintptr_t mm = 0;
     uint32_t me = atomic_load(&g_avatar);
-    Log("faction of her own entity %u: %s", me, FactionOf(me, b) ? "found" : "not found");
+    Log("faction manager at %p: +0xE000 %s | +0x12030 %s | her own entity %u: index %d", (void*)m, hp, hex, me, FactionIndex(me, &mm));
 }
 /* Portent of Doom's blast is a gas vent's: its flash and sound live in the vent's own package, which the game only
  * loads on planets that have vents (0.1.13: the fire patch, the stagger and the damage showed, no blast and no sound).
