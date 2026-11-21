@@ -475,14 +475,14 @@ local OPTIONS = {
     {'s3_spread', 'slider', 'Searing Finale: Spread', 0, 30, 1, 'Metres around her aim the shells after the first land in.'},
     {'accelerant_seconds', 'slider', 'Accelerant: Duration', 0, 60, 1, 'Seconds of Accelerant after Searing Finale.'},
     {'accelerant_mult', 'slider', 'Accelerant: Fire Damage', 1, 3, 0.05, 'Fire damage on enemies during Accelerant, times.'},
-    {'fire_immune', 'slider', 'Perception Block: Fireproof', 0, 1, 1, '1: fire does nothing to her. 0: she burns like anyone.', true},
-    {'own_burn', 'slider', 'Her Own Burn On Armour', 0, 1, 1, '1: tanks, walkers and gunships, which the game\'s fire cannot hurt, burn by her hand. 0: they stay fireproof.', true},
+    {'fire_immune', 'toggle', 'Perception Block: Fireproof', nil, nil, nil, 'Fire does nothing to her. Off: she burns like anyone.', true},
+    {'own_burn', 'toggle', 'Her Own Burn On Armour', nil, nil, nil, 'Tanks, walkers and gunships, which the game\'s fire cannot hurt, burn by her hand. Off: they stay fireproof.', true},
     {'own_burn_damage', 'slider', 'Her Own Burn: Damage A Tick', 1, 100, 1, 'Health burnt off armoured enemies four times a second, past their armour. A soldier\'s burn is 25.', true},
     {'own_burn_percent', 'slider', 'Her Own Burn: Percent Of Health A Tick', 0, 10, 0.25, 'Share of the enemy\'s full health burnt off four times a second. 1: burnt through in 25 s of unbroken burning. 0: the flat damage only.', true},
     {'own_burn_seconds', 'slider', 'Her Own Burn: Seconds', 1, 30, 1, 'How long her own burn lasts after her fire.', true},
     {'hp_mult', 'slider', 'Body: Health', 0.5, 4, 0.05, 'Her health, times a Helldiver\'s.', true},
     {'stamina_mult', 'slider', 'Body: Stamina', 0.5, 6, 0.1, 'How long she sprints before the bar empties, times a Helldiver\'s.'},
-    {'hellbomb_on_exhaustion', 'slider', 'Body: Hellbomb On Exhaustion', 0, 1, 1, '1: running her stamina dry sets off a Hellbomb on her (a T-Doll\'s price). 0: it does not.'},
+    {'hellbomb_on_exhaustion', 'toggle', 'Body: Hellbomb When Exhausted', nil, nil, nil, 'Running her stamina dry sets off a Hellbomb on her. For fun.'},
 }
 pcall(ffi.cdef, [[
 typedef int (*vecopt_get)(const char *name, double *out);

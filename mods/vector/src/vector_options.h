@@ -61,7 +61,7 @@ static const OpRow kOpRows[] = {
      "Her health, times a Helldiver's."},
     {"stamina_mult", "Body", "Stamina", OP_SLIDER, 0.5, 6, 0.1,
      "How long she sprints before the bar empties, times a Helldiver's."},
-    {"hellbomb_on_exhaustion", "Body", "Hellbomb On Exhaustion", OP_TOGGLE, 0, 1, 1,
+    {"hellbomb_on_exhaustion", "Body", "Hellbomb When Exhausted", OP_TOGGLE, 0, 1, 1,
      "On: running her stamina dry sets off a Hellbomb on her (a T-Doll's price). Off: it does not."}
 };
 #define OPROWS (int)(sizeof kOpRows / sizeof kOpRows[0])
