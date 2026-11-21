@@ -584,6 +584,7 @@ local OPTIONS = {
 pcall(ffi.cdef, [[
 typedef int (*kolopt_get)(const char *name, double *out);
 typedef int (*kolopt_set)(const char *name, double value);
+typedef int (*kolopt_screen)(unsigned version);
 ]])
 local O = {done = false, wait = 0}
 local function options_step(dt)
@@ -595,6 +596,13 @@ local function options_step(dt)
     if not menu or menu.api ~= 1 then return end
     local module = k32.kolhud1_GetModuleHandleA('koleda.dll')
     if module == nil then return end
+    -- with the character kits' options screen there (HellForge's screens over the game) her rows stay off this menu
+    local op = k32.kolhud1_GetProcAddress(module, 'koleda_options_screen')
+    if op ~= nil and ffi.cast('kolopt_screen', op)(1) == 1 then
+        O.done = true
+        log('[Koleda HUD] options: on the character kits\' options screen (F9), not on the Mod Options Menu')
+        return
+    end
     local gp, sp = k32.kolhud1_GetProcAddress(module, 'koleda_option_get'), k32.kolhud1_GetProcAddress(module, 'koleda_option_set')
     if gp == nil or sp == nil then O.done = true; log('[Koleda HUD] options: this koleda.dll has no options (update Koleda)') return end
     O.done = true

@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.5"
+#define VERSION "0.2.6"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her chill bursts come often */
@@ -49,9 +49,11 @@
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
+#include "kitbase/kb_options.h"
 #include "kitbase/kb_roster.h"
 
 KB_ROSTER_EXPORTS(alva)
+KB_OPTIONS_EXPORTS(alva)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static float s_shieldAmount = 500, s_shieldRange = 30, s_shieldEvery = 20;
@@ -1239,6 +1241,7 @@ HF_MOD_EXPORT int alva_key(unsigned version, int skill, int* vk, int* mods)
 /* ---- the frame -------------------------------------------------------------------------------------------------- */
 static void Tick(HfMod* mod, float dt, void* user)
 {
+    KbOptionsTick();   /* the options screen's changes, in a mission or not */
     double step = dt > 0 && dt < 1 ? dt : 0;
     g_now += step;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
@@ -1295,6 +1298,8 @@ static void OptionAfter(const char* name, int changed) { (void)name; (void)chang
 HF_MOD_EXPORT int alva_option_get(const char* name, double* out) { return OptionGet(name, out); }
 HF_MOD_EXPORT int alva_option_set(const char* name, double value) { return OptionSet(name, value); }
 
+#include "kit_options.h"   /* kOpRows: the options screen's rows (kitbase/kb_options.h) */
+#include "kit_icon.h"      /* kOpIcon, KB_OP_ACCENT */
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
@@ -1314,6 +1319,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
+    KbOptionsStart(api, mod, "alva", "Alva", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, -1);
     api->log(mod, "Alva %s: keys %s / %s / %s (Snow Wolf's Heart, Frosted Echo, Nix Requiem); shields %.0f on allies within %.0f m", VERSION,
              s_keys[0].label, s_keys[1].label, s_keys[2].label, (double)s_shieldAmount, (double)s_shieldRange);
     if (s_badKey) api->log(mod, "alva.ini: a key could not be read (bits %d: s1, s2, s3); its default stays", s_badKey);

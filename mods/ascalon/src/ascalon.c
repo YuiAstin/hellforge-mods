@@ -147,7 +147,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.7.0"
+#define VERSION "0.7.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -157,9 +157,11 @@
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
+#include "kitbase/kb_options.h"
 #include "kitbase/kb_roster.h"
 
 KB_ROSTER_EXPORTS(ascalon)
+KB_OPTIONS_EXPORTS(ascalon)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static float s_areaRadius = 15, s_areaMult = 1, s_areaEvery = 0.25f, s_pursuitMult = 2.1f, s_pursuitEvery = 7, s_pursuitSlow = 100;
@@ -1939,6 +1941,7 @@ HF_MOD_EXPORT AscalonHud* ascalon_hud_state(void)
 /* ---- the frame -------------------------------------------------------------------------------------------------- */
 static void Tick(HfMod* mod, float dt, void* user)
 {
+    KbOptionsTick();   /* the options screen's changes, in a mission or not */
     g_now += dt > 0 && dt < 1 ? dt : 0;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
@@ -1999,6 +2002,8 @@ HF_MOD_EXPORT int ascalon_key(unsigned version, int skill, int* vk, int* mods)
 HF_MOD_EXPORT int ascalon_option_get(const char* name, double* out) { return OptionGet(name, out); }
 HF_MOD_EXPORT int ascalon_option_set(const char* name, double value) { return OptionSet(name, value); }
 
+#include "kit_options.h"   /* kOpRows: the options screen's rows (kitbase/kb_options.h) */
+#include "kit_icon.h"      /* kOpIcon, KB_OP_ACCENT */
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
@@ -2020,6 +2025,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
+    KbOptionsStart(api, mod, "ascalon", "Ascalon", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, -1);
     ParrySoundInit();
     api->log(mod, "Ascalon %s: hidden until she makes noise; her hits strike everyone within %.0f m; Pursuit; Endowment %s, Descent %s", VERSION,
              (double)s_areaRadius, s_keys[1].label, s_keys[2].label);

@@ -466,6 +466,7 @@ local OPTIONS = {
 pcall(ffi.cdef, [[
 typedef int (*ascopt_get)(const char *name, double *out);
 typedef int (*ascopt_set)(const char *name, double value);
+typedef int (*ascopt_screen)(unsigned version);
 ]])
 local O = {done = false, wait = 0}
 local function options_step(dt)
@@ -477,6 +478,13 @@ local function options_step(dt)
     if not menu or menu.api ~= 1 then return end
     local module = k32.aschud1_GetModuleHandleA('ascalon.dll')
     if module == nil then return end
+    -- with the character kits' options screen there (HellForge's screens over the game) her rows stay off this menu
+    local op = k32.aschud1_GetProcAddress(module, 'ascalon_options_screen')
+    if op ~= nil and ffi.cast('ascopt_screen', op)(1) == 1 then
+        O.done = true
+        log('[Ascalon HUD] options: on the character kits\' options screen (F9), not on the Mod Options Menu')
+        return
+    end
     local gp, sp = k32.aschud1_GetProcAddress(module, 'ascalon_option_get'), k32.aschud1_GetProcAddress(module, 'ascalon_option_set')
     if gp == nil or sp == nil then O.done = true; log('[Ascalon HUD] options: this ascalon.dll has no options (update Ascalon)') return end
     O.done = true

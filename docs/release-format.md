@@ -124,14 +124,17 @@ Where a kit's numbers are changed in game.
 
 | Decision | What was chosen |
 |---|---|
-| Direction | The kits move from the Mod Options Menu to a screen of their own, drawn by HellForge's screens over the game (SDK 17, `add_screen`: the kind of overlay the F8 editor is). Vector is the first (`mods/vector/src/vector_options.h`). |
+| Direction | The kits move from the Mod Options Menu to one screen of their own, drawn by HellForge's screens over the game (SDK 17, `add_screen`: the kind of overlay the F8 editor is). It is in the kit base (`kitbase/kb_options.h`), so every kit has it: Vector was the first (0.2.0), the other ten followed on `kits-options-screen`. |
 | Until the release HellForge has screens | The Mod Options Menu stays, with the same rows. A released zip's manifest asks for the SDK the release HellForge has (13 today), so the screen's code ships but stays off; a copy installed on a HellForge with screens gets `"sdk": 17`. One source for both. |
-| Its key | `options_key` in the kit's .ini (F9). Never F5 or F8. |
+| Its key | F9 for all the kits (`options_key` in `HellForgeMods\kits.ini` changes it; Vector's .ini has one too). Never F5 or F8. |
+| One screen, many kits | The kits share it through a small block of shared memory: the first kit HellForge lets add a screen owns the key, the frame and the column, and calls the shown kit's own code for its rows. |
+| A kit's rows | Generated from its HUD's `OPTIONS` table by `tools/optgen.py` (`src/kit_options.h`), so the screen and the Mod Options Menu never differ; its icon too (`src/kit_icon.h`). Vector's are hand-written. |
+| A choice (Koleda's Patriot or FRV) | One button a choice, the chosen one lit. |
 | On/off settings | A switch, never a 0 to 1 slider: on the screen and as `toggle` rows on the Mod Options Menu. |
 | Wide ranges (cooldowns, durations, flat damage) | A field to type in, with - and +. Its limits are the setting's own in the .ini. |
 | Few steps (multipliers, counts, percents) | A slider. |
 | The T-Doll's Hellbomb | Every GFL2 kit has the row `Body: Hellbomb When Exhausted`, a toggle, with the tip `Running her stamina dry sets off a Hellbomb on her. For fun.` |
 | Reset | Right click or Backspace puts a row back to the .ini's value; a tick on a slider shows where that is. |
 | Saving | When the screen closes, what differs from the .ini goes to `%LOCALAPPDATA%\HellForgeMods\<kit>.ini` (HellForge redirects that folder to `<installation>\userdata\environment\Local`); mod folders are read-only while the game runs. |
-| Character selection | On the screen: a chip for each installed kit and an Off. Off is a kit of its own in the shared roster (`~off`), so the released kits need no change. Saved to `HellForgeMods\kits.ini`. A pick takes effect at the next mission start. |
-| Still open | The Off only exists where a kit with the screen is installed; it belongs in the kit base once more kits have the screen. With both the screen and the Mod Options Menu installed, each sets its own saved character at start. |
+| Character selection | A column at the right of the screen: each installed kit with its mod icon (`icon.png`), and an Off. A click picks the kit (from the next mission start) and shows its numbers at the left. Off is a kit of its own in the shared roster (`~off`), so kits without the screen need no change; such a kit is listed by its initial, without rows. Saved to `HellForgeMods\kits.ini`. |
+| Still open | With both the screen and the Mod Options Menu installed, each sets its own saved character at start (the kits' rows leave that menu, its Active Character row does not). |

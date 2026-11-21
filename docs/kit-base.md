@@ -37,6 +37,7 @@ kitbase/                 source of truth (header-only)
   kb_damage.h            layer 1: HellForge's damage event routed to the kit, with shared helpers
   kb_settings.h          layer 1: the settings table, .ini loader, skill keys and Mod Options Menu calls
   kb_roster.h            several kits installed together: the shared roster and the active kit
+  kb_options.h           the kits' options screen over the game (HellForge's screens, SDK 17): rows, picker, Off
   hud/bindings.lua       HUD: key bindings (Mod Bindings Menu) the always-show-cooldowns option and the roster picker
   hud/list.lua           HUD: finding the open stratagem list to sit beside
   ...                    later layers as they are extracted
@@ -172,3 +173,18 @@ There is no base mod to install. Each kit joins a roster kept in named shared me
   as a grid with icon and name, the picked one marked, the rest of the roster unchanged (`<id>_roster` / `<id>_pick`).
 - **Later:** standing-by kits still write the shared hit-holder diagnostic (`kb_player.h`, "a hit dealt by entity ...");
   log only from the kit that acts.
+
+### The options screen (kb_options.h)
+
+One screen for all the installed kits, on a HellForge with screens over the game (SDK 17; the manifest of the kit that adds
+it must ask for 17). F9 opens it. At the left, the shown kit's settings: switches, sliders, fields to type in, a choice's
+buttons. At the right, the characters with their mod icons and an Off; a click picks the kit and shows its settings.
+
+- The kits meet in a hub, a second block of shared memory (`Local\yui.kitbase.options.<pid>`): each puts in its icon and
+  the function that draws its rows. The first kit HellForge lets add a screen owns it; a refused kit leaves it to the next.
+- A kit's rows and icon are generated: `python tools/optgen.py <kit>` writes `src/kit_options.h` from the `OPTIONS` table
+  of its HUD and `src/kit_icon.h` from `icon.png`. `--check` says when they are stale.
+- Nothing is drawn or called on the game thread's behalf from the render thread: changes wait and `KbOptionsTick` sets
+  them. Choices are saved to `%LOCALAPPDATA%\HellForgeMods\<kit>.ini` at the screen's close, the pick to `kits.ini`.
+- A kit on the screen answers 1 from `<kit>_options_screen(1)`, and its HUD then leaves its rows off the Mod Options Menu.
+- On a HellForge without screens nothing changes: the Mod Options Menu, as released.

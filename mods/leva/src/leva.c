@@ -42,7 +42,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.6.0"
+#define VERSION "0.6.1"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 64
@@ -53,10 +53,12 @@
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
+#include "kitbase/kb_options.h"
 #include "kitbase/kb_roster.h"
 
 /* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
 KB_ROSTER_EXPORTS(leva)
+KB_OPTIONS_EXPORTS(leva)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static int s_nativeRows = 1, s_nativeArc = 1, s_burstRequest = 1;
@@ -1882,6 +1884,7 @@ HF_MOD_EXPORT int leva_key(unsigned version, int skill, int* vk, int* mods)
 }
 static void Tick(HfMod* mod, float dt, void* user)
 {
+    KbOptionsTick();   /* the options screen's changes, in a mission or not */
     g_now += dt > 0 && dt < 1 ? dt : 0;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
@@ -1988,6 +1991,8 @@ HF_MOD_EXPORT int leva_option_set(const char* name, double value)
     return OptionSet(name, value);
 }
 
+#include "kit_options.h"   /* kOpRows: the options screen's rows (kitbase/kb_options.h) */
+#include "kit_icon.h"      /* kOpIcon, KB_OP_ACCENT */
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
@@ -2006,6 +2011,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
+    KbOptionsStart(api, mod, "leva", "Leva", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, -1);
     api->log(mod, "Leva %s: keys %s / %s / %s (Rational Suppression, Orderly Disruption, Quantum Calculation and Superconduct Blitz)",
         VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label);
     if (s_badKey) api->log(mod, "leva.ini: a key could not be read (bits %d: suppress, disrupt, ult); its default stays", s_badKey);

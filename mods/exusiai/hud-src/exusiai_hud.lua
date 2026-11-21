@@ -438,6 +438,7 @@ local OPTIONS = {
 pcall(ffi.cdef, [[
 typedef int (*exuopt_get)(const char *name, double *out);
 typedef int (*exuopt_set)(const char *name, double value);
+typedef int (*exuopt_screen)(unsigned version);
 ]])
 local O = {done = false, wait = 0}
 local function options_step(dt)
@@ -449,6 +450,13 @@ local function options_step(dt)
     if not menu or menu.api ~= 1 then return end
     local module = k32.exuhud1_GetModuleHandleA('exusiai.dll')
     if module == nil then return end
+    -- with the character kits' options screen there (HellForge's screens over the game) her rows stay off this menu
+    local op = k32.exuhud1_GetProcAddress(module, 'exusiai_options_screen')
+    if op ~= nil and ffi.cast('exuopt_screen', op)(1) == 1 then
+        O.done = true
+        log('[Exusiai HUD] options: on the character kits\' options screen (F9), not on the Mod Options Menu')
+        return
+    end
     local gp, sp = k32.exuhud1_GetProcAddress(module, 'exusiai_option_get'), k32.exuhud1_GetProcAddress(module, 'exusiai_option_set')
     if gp == nil or sp == nil then O.done = true; log('[Exusiai HUD] options: this exusiai.dll has no options (update Exusiai)') return end
     O.done = true

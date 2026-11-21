@@ -40,7 +40,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.1"
+#define VERSION "0.4.2"
 #define BUILD "25480438"
 
 #define KB_STEADY 1
@@ -51,11 +51,13 @@
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
+#include "kitbase/kb_options.h"
 #include "kitbase/kb_roster.h"
 #include "kitbase/kb_fit.h"
 
 /* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
 KB_ROSTER_EXPORTS(faelynn)
+KB_OPTIONS_EXPORTS(faelynn)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static int s_cpMax = 3, s_htMax = 10, s_acidRow = 177, s_gasImmune = 1;
@@ -1162,6 +1164,7 @@ HF_MOD_EXPORT int faelynn_key(unsigned version, int skill, int* vk, int* mods)
 }
 static void Tick(HfMod* mod, float dt, void* user)
 {
+    KbOptionsTick();   /* the options screen's changes, in a mission or not */
     g_now += dt > 0 && dt < 1 ? dt : 0;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
@@ -1285,6 +1288,8 @@ static int HellbombVeto(void) { return g_dying; }
 /* Her hits, before the game reads them: the Shred's armour penetration (put back after) */
 static void HitBefore(KbHitCall* c) { c->restore = Shred(c->hit, c->saved) > 0; }
 
+#include "kit_options.h"   /* kOpRows: the options screen's rows (kitbase/kb_options.h) */
+#include "kit_icon.h"      /* kOpIcon, KB_OP_ACCENT */
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
@@ -1305,6 +1310,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
+    KbOptionsStart(api, mod, "faelynn", "Faelynn", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, -1);
     api->log(mod, "Faelynn %s: keys %s / %s / %s (Triple Maul and Pursuit, Knife-Eared Hunt, Loyal Dash); Combo Pounce up to %d", VERSION,
         s_keys[0].label, s_keys[1].label, s_keys[2].label, s_cpMax);
     if (s_badKey) api->log(mod, "faelynn.ini: a key could not be read (bits %d: maul, hunt, ult); its default stays", s_badKey);

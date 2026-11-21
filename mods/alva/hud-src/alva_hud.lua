@@ -470,6 +470,7 @@ local OPTIONS = {
 pcall(ffi.cdef, [[
 typedef int (*alvopt_get)(const char *name, double *out);
 typedef int (*alvopt_set)(const char *name, double value);
+typedef int (*alvopt_screen)(unsigned version);
 ]])
 local O = {done = false, wait = 0}
 local function options_step(dt)
@@ -481,6 +482,13 @@ local function options_step(dt)
     if not menu or menu.api ~= 1 then return end
     local module = k32.alvhud1_GetModuleHandleA('alva.dll')
     if module == nil then return end
+    -- with the character kits' options screen there (HellForge's screens over the game) her rows stay off this menu
+    local op = k32.alvhud1_GetProcAddress(module, 'alva_options_screen')
+    if op ~= nil and ffi.cast('alvopt_screen', op)(1) == 1 then
+        O.done = true
+        log('[Alva HUD] options: on the character kits\' options screen (F9), not on the Mod Options Menu')
+        return
+    end
     local gp, sp = k32.alvhud1_GetProcAddress(module, 'alva_option_get'), k32.alvhud1_GetProcAddress(module, 'alva_option_set')
     if gp == nil or sp == nil then O.done = true; log('[Alva HUD] options: this alva.dll has no options (update Alva)') return end
     O.done = true

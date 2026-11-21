@@ -40,7 +40,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.3"
+#define VERSION "0.4.4"
 static int HerRide(uint32_t target);
 /* her two kits (p8): the Sinbreaker's GFL2 kit, the AK-15 kit on foot */
 static void AkHit(HfDamageEvent* d);
@@ -62,11 +62,13 @@ static double HowlImmuneUntil(void);
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
+#include "kitbase/kb_options.h"
 #include "kitbase/kb_roster.h"
 #include "kitbase/kb_fit.h"
 
 /* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
 KB_ROSTER_EXPORTS(voymastina)
+KB_OPTIONS_EXPORTS(voymastina)
 
 /* ---- 0.4.2 (test): where the time goes. A player's Sinbreaker (the free one, an Emancipator) brought steady stutter
  * from its call-in, and piloting it was unplayable (2026-11-08). Each part of the game-thread update and each hit hook is
@@ -3133,6 +3135,7 @@ static void FistBoltReady(HfMod* mod, HfEvent event, void* user)
 }
 static void Tick(HfMod* mod, float dt, void* user)
 {
+    KbOptionsTick();   /* the options screen's changes, in a mission or not */
     float step = dt > 0 && dt < 1 ? dt : 0;
     g_now += step;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
@@ -3350,6 +3353,8 @@ static int HitTaken(const uint8_t* h, void* result, unsigned long long now)
 
 /* 0.4.2: the hit hook, timed (its slowest call shows in the perf lines; hits come on the game thread) */
 static void OnDamagePreTimed(HfMod* mod, const HfEventInfo* info, void* user) { PF(PF_HIT, OnDamagePre(mod, info, user)); }
+#include "kit_options.h"   /* kOpRows: the options screen's rows (kitbase/kb_options.h) */
+#include "kit_icon.h"      /* kOpIcon, KB_OP_ACCENT */
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
@@ -3371,6 +3376,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
+    KbOptionsStart(api, mod, "voymastina", "Voymastina", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, -1);
     g_stab = s_stabMax;
     SinbreakerInit(api, mod);
     api->log(mod, "Voymastina %s: keys %s / %s / %s (Sirius Fall, Eye of the White Mastiff, Pile Bunker); explosions %d / %d / %d (fallback %d); "

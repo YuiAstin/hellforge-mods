@@ -55,7 +55,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.0"
+#define VERSION "0.3.1"
 #define BUILD "25480438"
 
 /* S3 sets off a blast on every enemy it hit, 0.1 s apart: room for 12 of his own blasts within the guard's 1.2 s */
@@ -68,10 +68,12 @@
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
+#include "kitbase/kb_options.h"
 #include "kitbase/kb_roster.h"
 
 /* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
 KB_ROSTER_EXPORTS(executor)
+KB_OPTIONS_EXPORTS(executor)
 
 /* an SDK call this HellForge has (the struct is as long as the SDK that built it) */
 #define HAS(fn) (hf->size >= offsetof(HfApi, fn) + sizeof hf->fn && hf->fn)
@@ -1297,6 +1299,7 @@ HF_MOD_EXPORT int executor_key(unsigned version, int skill, int* vk, int* mods)
 /* ---- the frame -------------------------------------------------------------------------------------------------- */
 static void Tick(HfMod* mod, float dt, void* user)
 {
+    KbOptionsTick();   /* the options screen's changes, in a mission or not */
     g_now += dt > 0 && dt < 1 ? dt : 0;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
@@ -1354,6 +1357,8 @@ HF_MOD_EXPORT int executor_option_set(const char* name, double value)
     return OptionSet(name, value);
 }
 
+#include "kit_options.h"   /* kOpRows: the options screen's rows (kitbase/kb_options.h) */
+#include "kit_icon.h"      /* kOpIcon, KB_OP_ACCENT */
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
@@ -1377,6 +1382,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
+    KbOptionsStart(api, mod, "executor", "Executor", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, -1);
     if (api->add_projectile)
     {
         HfProjectile p;

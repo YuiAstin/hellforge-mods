@@ -38,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.1"
+#define VERSION "0.3.2"
 
 #include <stdatomic.h>
 /* rounds the mod itself spawned since the shot counter was last read (her guns', her free bursts'): the game counts them
@@ -54,11 +54,13 @@ static double g_ownAt = -100;
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
+#include "kitbase/kb_options.h"
 #include "kitbase/kb_roster.h"
 #include "weapon_sounds.h"
 
 /* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
 KB_ROSTER_EXPORTS(exusiai)
+KB_OPTIONS_EXPORTS(exusiai)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static float s_fireRate = 1.15f, s_blessMult = 1.08f;
@@ -1250,6 +1252,7 @@ HF_MOD_EXPORT int exusiai_key(unsigned version, int skill, int* vk, int* mods)
 /* ---- the frame -------------------------------------------------------------------------------------------------- */
 static void Tick(HfMod* mod, float dt, void* user)
 {
+    KbOptionsTick();   /* the options screen's changes, in a mission or not */
     g_now += dt > 0 && dt < 1 ? dt : 0;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
@@ -1303,6 +1306,8 @@ HF_MOD_EXPORT int exusiai_option_set(const char* name, double value)
     return OptionSet(name, value);
 }
 
+#include "kit_options.h"   /* kOpRows: the options screen's rows (kitbase/kb_options.h) */
+#include "kit_icon.h"      /* kOpIcon, KB_OP_ACCENT */
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
@@ -1325,6 +1330,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
+    KbOptionsStart(api, mod, "exusiai", "Exusiai", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, -1);
     RoundsAdd();
     api->log(mod, "Exusiai %s: keys %s / %s / %s (Charging Mode, Shooting Mode, Overloading Mode)", VERSION, s_keys[0].label,
              s_keys[1].label, s_keys[2].label);

@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.2"
+#define VERSION "0.2.3"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -41,9 +41,11 @@
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
+#include "kitbase/kb_options.h"
 #include "kitbase/kb_roster.h"
 
 KB_ROSTER_EXPORTS(vector)
+KB_OPTIONS_EXPORTS(vector)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static int s_confMax = 6, s_confCast = 2;
@@ -1398,14 +1400,13 @@ HF_MOD_EXPORT int vector_key(unsigned version, int skill, int* vk, int* mods)
 }
 
 /* ---- the frame -------------------------------------------------------------------------------------------------- */
-static void OptionsTick(void);
 static void Tick(HfMod* mod, float dt, void* user)
 {
+    KbOptionsTick();   /* the options screen's changes, in a mission or not */
     double step = dt > 0 && dt < 1 ? dt : 0;
     g_now += step;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
-    OptionsTick();
     if (!g_inMission || !kb_kit_on) return;
     MyItems();
     static int prev[3];
@@ -1447,16 +1448,8 @@ static const KbOption kOptions[] = {
     {"accelerant_mult", &s_accMult, NULL}, {"fire_immune", NULL, &s_fireImmune}, {"own_burn", NULL, &s_ownBurn}, {"own_burn_damage", &s_ownDamage, NULL}, {"own_burn_percent", &s_ownPercent, NULL}, {"own_burn_seconds", &s_ownSeconds, NULL}, {"hellbomb_on_exhaustion", NULL, &s_hellbomb}, {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
 };
 static void OptionAfter(const char* name, int changed) { (void)name; (void)changed; }
-#ifdef HF_SCREEN_MODAL
-#include "vector_options.h"
-#else
-static int g_opScreen;
-static void OptionsLoad(void) {}
-static void OptionsTick(void) {}
-static void OptionsInit(const HfApi* api, HfMod* mod) { api->log(mod, "options screen: built without screens over the game (SDK 17); her numbers stay on the MODS tab"); }
-#endif
-/* 1 while her own options screen is there: the HUD then leaves her rows off the Mod Options Menu */
-HF_MOD_EXPORT int vector_options_screen(unsigned version) { return version == 1 && g_opScreen != 0; }
+#include "kit_options.h"   /* kOpRows: the options screen's rows (kitbase/kb_options.h) */
+#include "kit_icon.h"      /* kOpIcon, KB_OP_ACCENT */
 HF_MOD_EXPORT int vector_option_get(const char* name, double* out) { return OptionGet(name, out); }
 HF_MOD_EXPORT int vector_option_set(const char* name, double value) { return OptionSet(name, value); }
 
@@ -1477,8 +1470,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
-    OptionsLoad();
-    OptionsInit(api, mod);
+    KbOptionsStart(api, mod, "vector", "Vector", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, s_optionsKey);
     g_fireElem = s_fireElement;
     api->log(mod, "Vector %s: keys %s / %s / %s (Dead End Meltdown, Portent of Doom, Searing Finale); fire does %s to her", VERSION, s_keys[0].label,
              s_keys[1].label, s_keys[2].label, s_fireImmune ? "nothing" : "what it does to anyone");

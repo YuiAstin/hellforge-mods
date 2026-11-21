@@ -50,7 +50,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.1"
+#define VERSION "0.4.2"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -61,11 +61,13 @@
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
+#include "kitbase/kb_options.h"
 #include "kitbase/kb_roster.h"
 #include "weapon_sounds.h"
 
 /* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
 KB_ROSTER_EXPORTS(koleda)
+KB_OPTIONS_EXPORTS(koleda)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 /* Upshift */
@@ -3421,6 +3423,7 @@ HF_MOD_EXPORT int koleda_key(unsigned version, int skill, int* vk, int* mods)
 /* ---- the frame -------------------------------------------------------------------------------------------------- */
 static void Tick(HfMod* mod, float dt, void* user)
 {
+    KbOptionsTick();   /* the options screen's changes, in a mission or not */
     double step = dt > 0 && dt < 1 ? dt : 0;
     g_now += step;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
@@ -3493,6 +3496,8 @@ static void OptionAfter(const char* name, int changed) { (void)name; (void)chang
 HF_MOD_EXPORT int koleda_option_get(const char* name, double* out) { return OptionGet(name, out); }
 HF_MOD_EXPORT int koleda_option_set(const char* name, double value) { return OptionSet(name, value); }
 
+#include "kit_options.h"   /* kOpRows: the options screen's rows (kitbase/kb_options.h) */
+#include "kit_icon.h"      /* kOpIcon, KB_OP_ACCENT */
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
@@ -3514,6 +3519,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
+    KbOptionsStart(api, mod, "koleda", "Koleda", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, -1);
     RoundsAdd();
     SinnerAdd(api, mod);
     /* (0.2.12: no FRV Sinveiler call of her own: its package could not be loaded reliably. The M-103 she brings in her

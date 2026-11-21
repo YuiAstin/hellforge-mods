@@ -491,6 +491,7 @@ local OPTIONS = {
 pcall(ffi.cdef, [[
 typedef int (*levaopt_get)(const char *name, double *out);
 typedef int (*levaopt_set)(const char *name, double value);
+typedef int (*levaopt_screen)(unsigned version);
 ]])
 local O = {done = false, wait = 0}
 local function options_step(dt)
@@ -502,6 +503,13 @@ local function options_step(dt)
     if not menu or menu.api ~= 1 then return end
     local module = k32.levahud1_GetModuleHandleA('leva.dll')
     if module == nil then return end
+    -- with the character kits' options screen there (HellForge's screens over the game) her rows stay off this menu
+    local op = k32.levahud1_GetProcAddress(module, 'leva_options_screen')
+    if op ~= nil and ffi.cast('levaopt_screen', op)(1) == 1 then
+        O.done = true
+        log('[Leva HUD] options: on the character kits\' options screen (F9), not on the Mod Options Menu')
+        return
+    end
     local gp, sp = k32.levahud1_GetProcAddress(module, 'leva_option_get'), k32.levahud1_GetProcAddress(module, 'leva_option_set')
     if gp == nil or sp == nil then O.done = true; log('[Leva HUD] options: this leva.dll has no options (update Leva)') return end
     O.done = true

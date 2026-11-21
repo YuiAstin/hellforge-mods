@@ -37,7 +37,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.11"
+#define VERSION "0.1.12"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -47,10 +47,12 @@
 #include "kitbase/kb_hits.h"
 #include "kitbase/kb_damage.h"
 #include "kitbase/kb_settings.h"
+#include "kitbase/kb_options.h"
 #include "kitbase/kb_roster.h"
 
 /* with other character kits installed: the HUD's roster and picker calls (kitbase/kb_roster.h) */
 KB_ROSTER_EXPORTS(lemuen)
+KB_OPTIONS_EXPORTS(lemuen)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 /* 0.1.4: a damage number only for a hit the on-hit multipliers (mark, Honesta Missio; 0.1.5: not Modus) raised to numbers_at times
@@ -1235,6 +1237,7 @@ HF_MOD_EXPORT int lemuen_key(unsigned version, int skill, int* vk, int* mods)
 /* ---- the frame -------------------------------------------------------------------------------------------------- */
 static void Tick(HfMod* mod, float dt, void* user)
 {
+    KbOptionsTick();   /* the options screen's changes, in a mission or not */
     double step = dt > 0 && dt < 1 ? dt : 0;
     g_now += step;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
@@ -1291,6 +1294,8 @@ HF_MOD_EXPORT int lemuen_option_set(const char* name, double value)
     return OptionSet(name, value);
 }
 
+#include "kit_options.h"   /* kOpRows: the options screen's rows (kitbase/kb_options.h) */
+#include "kit_icon.h"      /* kOpIcon, KB_OP_ACCENT */
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
@@ -1312,6 +1317,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
+    KbOptionsStart(api, mod, "lemuen", "Lemuen", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, -1);
     api->log(mod, "Lemuen %s: keys %s / %s / %s (Salve Etiam, Honesta Missio, Memento Mori)", VERSION, s_keys[0].label, s_keys[1].label,
              s_keys[2].label);
     if (s_badKey) api->log(mod, "lemuen.ini: a key could not be read (bits %d: s1, s2, s3); its default stays", s_badKey);

@@ -492,6 +492,7 @@ local OPTIONS = {
 pcall(ffi.cdef, [[
 typedef int (*faelynnopt_get)(const char *name, double *out);
 typedef int (*faelynnopt_set)(const char *name, double value);
+typedef int (*faelynnopt_screen)(unsigned version);
 ]])
 local O = {done = false, wait = 0}
 local function options_step(dt)
@@ -503,6 +504,13 @@ local function options_step(dt)
     if not menu or menu.api ~= 1 then return end
     local module = k32.faehud1_GetModuleHandleA('faelynn.dll')
     if module == nil then return end
+    -- with the character kits' options screen there (HellForge's screens over the game) her rows stay off this menu
+    local op = k32.faehud1_GetProcAddress(module, 'faelynn_options_screen')
+    if op ~= nil and ffi.cast('faelynnopt_screen', op)(1) == 1 then
+        O.done = true
+        log('[Faelynn HUD] options: on the character kits\' options screen (F9), not on the Mod Options Menu')
+        return
+    end
     local gp, sp = k32.faehud1_GetProcAddress(module, 'faelynn_option_get'), k32.faehud1_GetProcAddress(module, 'faelynn_option_set')
     if gp == nil or sp == nil then O.done = true; log('[Faelynn HUD] options: this faelynn.dll has no options (update Faelynn)') return end
     O.done = true
