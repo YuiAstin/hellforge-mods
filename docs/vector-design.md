@@ -116,3 +116,23 @@ Smolder, Overburn and Accelerant multiply together: a Smoldering, Overburned ene
 - 0.1.16: Portent of Doom sets an Eagle Napalm bomb's explosion (359) on its target as it is cast (s2_blast). A gas
   vent's (120) was tried first: its package is not one HellForge loads, so it had no flash and no sound.
 - 0.1.17: skill, passive and mod icons. The faction tag is parked: docs/faction-research.md.
+
+## Her own options screen (0.2.0)
+
+The first kit to move from the Mod Options Menu to a screen of its own, drawn over the game by HellForge's overlay host
+(SDK 17: `add_screen`, the kind of overlay the F8 editor is). Code: `mods/vector/src/vector_options.h`.
+
+- Key: `options_key` in vector.ini, a Windows virtual-key number (120: F9). Never F5 or F8.
+- A modal panel: groups (one per skill or state), a slider a row, the value at the right, a grey tick where vector.ini's
+  value is, the row's explanation at the bottom. Drag, arrow keys, mouse wheel; right click or Backspace puts a row back.
+- The same numbers and names as vector.ini and the Mod Options Menu rows (`kOpRows` mirrors the HUD's `OPTIONS`).
+- Threads: the screen draws on the host's render thread and never calls the game. A change waits in `g_opWant`; the game
+  thread sets it (`OptionsTick` -> `OptionSet`).
+- Saved when the screen closes, to `%LOCALAPPDATA%\HellForgeMods\vector.ini` (only what differs from the mod's
+  vector.ini; mod folders are read-only while the game runs), and read after vector.ini at the next start.
+- Where HellForge has no screens (SDK 16, the stable build today): the code is compiled out (`HF_SCREEN_MODAL`) or
+  `add_screen` is not there, and her numbers stay on the Mod Options Menu. With the screen, the HUD leaves her rows off
+  that menu (`vector_options_screen`).
+- The manifest: `add_screen` needs `"sdk": 17`. The repository's manifest stays at 13 while the stable HellForge is
+  SDK 16; a copy installed on a HellForge with screens gets 17.
+- To move another kit: copy `vector_options.h`, replace `kOpRows`, the title and the save file's name.

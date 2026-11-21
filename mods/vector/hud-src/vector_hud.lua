@@ -486,6 +486,7 @@ local OPTIONS = {
 pcall(ffi.cdef, [[
 typedef int (*vecopt_get)(const char *name, double *out);
 typedef int (*vecopt_set)(const char *name, double value);
+typedef int (*vecopt_screen)(unsigned version);
 ]])
 local O = {done = false, wait = 0}
 local function options_step(dt)
@@ -497,6 +498,13 @@ local function options_step(dt)
     if not menu or menu.api ~= 1 then return end
     local module = k32.vechud1_GetModuleHandleA('vector.dll')
     if module == nil then return end
+    -- 0.2.0: with her own options screen (HellForge's screens over the game) her rows stay off this menu
+    local op = k32.vechud1_GetProcAddress(module, 'vector_options_screen')
+    if op ~= nil and ffi.cast('vecopt_screen', op)(1) == 1 then
+        O.done = true
+        log('[Vector HUD] options: on her own screen (vector.ini: options_key), not on the Mod Options Menu')
+        return
+    end
     local gp, sp = k32.vechud1_GetProcAddress(module, 'vector_option_get'), k32.vechud1_GetProcAddress(module, 'vector_option_set')
     if gp == nil or sp == nil then O.done = true; log('[Vector HUD] options: this vector.dll has no options (update Vector)') return end
     O.done = true

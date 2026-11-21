@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.17"
+#define VERSION "0.2.0"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -57,6 +57,7 @@ static float s_s3Cd = 90, s_s3Cone = 10, s_s3Range = 150, s_s3Spread = 8, s_s3He
 static int s_s3Shell = 234, s_s3Shells = 3, s_s3Refund = 1;
 static int s_fireImmune = 1, s_fireSt[4] = {5, 6, 32, 67}, s_fireElement = -1;
 static int s_s2Blast = 359;
+static int s_optionsKey = 0x78;        /* options_key: the virtual key that opens her options screen (120: F9; 0: none) */
 static float s_firePour = 0, s_fireHeavyStep = 50, s_ownDamage = 12, s_ownEvery = 0.25f, s_ownSeconds = 8, s_ownPercent = 1;
 static int s_ownBurn = 1;
 static int s_fireHeavy = 32;
@@ -75,7 +76,7 @@ static const KbSetting kSettings[] = {
     KB_I("s3_shells", s_s3Shells, 1, 12), KB_F("s3_spread", s_s3Spread, 0, 40), KB_F("s3_height", s_s3Height, 5, 300), KB_F("s3_every", s_s3Every, 0.05, 5),
     KB_F("accelerant_seconds", s_accSeconds, 0, 120), KB_F("accelerant_mult", s_accMult, 1, 10), KB_I("s3_refund", s_s3Refund, 0, 1),
     KB_I("fire_immune", s_fireImmune, 0, 1), KB_I("fire_status_1", s_fireSt[0], 0, 255), KB_I("fire_status_2", s_fireSt[1], 0, 255),
-    KB_I("fire_status_3", s_fireSt[2], 0, 255), KB_I("fire_status_4", s_fireSt[3], 0, 255), KB_I("fire_element", s_fireElement, -1, 255), KB_F("fire_pour", s_firePour, 0, 30), KB_I("s2_blast", s_s2Blast, 0, 100000), KB_I("own_burn", s_ownBurn, 0, 1), KB_F("own_burn_damage", s_ownDamage, 0, 10000), KB_F("own_burn_percent", s_ownPercent, 0, 100),
+    KB_I("fire_status_3", s_fireSt[2], 0, 255), KB_I("fire_status_4", s_fireSt[3], 0, 255), KB_I("fire_element", s_fireElement, -1, 255), KB_F("fire_pour", s_firePour, 0, 30), KB_I("s2_blast", s_s2Blast, 0, 100000), KB_I("options_key", s_optionsKey, 0, 255), KB_I("own_burn", s_ownBurn, 0, 1), KB_F("own_burn_damage", s_ownDamage, 0, 10000), KB_F("own_burn_percent", s_ownPercent, 0, 100),
     KB_F("own_burn_every", s_ownEvery, 0.05, 10), KB_F("own_burn_seconds", s_ownSeconds, 0.5, 120),
     KB_I("line_of_sight", s_sight, 0, 1), KB_F("first_person", s_fpDistance, 0.1, 2),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
@@ -122,6 +123,10 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; s2_blast: the explosion set on Portent of Doom's target as it is cast (359: an Eagle Napalm bomb's; 63: an Orbital\n"
                "; Napalm shell's; 224: an incendiary grenade's; 0: none).\n"
                "s2_blast = %d\n"
+               "; options_key: the key that opens her options screen over the game, as a Windows virtual-key number (120: F9,\n"
+               "; 121: F10, 118: F7; 0: no screen). The screen needs a HellForge with screens over the game (SDK 17); without one\n"
+               "; her numbers are on the MODS tab (Mod Options Menu).\n"
+               "options_key = %d\n"
                "; Aiming: line_of_sight 1, Portent of Doom's target must be in sight. first_person: the camera this close to her\n"
                "; head (m) counts as first person.\nline_of_sight = %d\nfirst_person = %g\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint. hellbomb_on_exhaustion 1 sets off a\n"
@@ -132,7 +137,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
             (double)s_overburnSeconds, (double)s_overburnMult, (double)s_s2Cd, (double)s_s2Cone, (double)s_s2Range, (double)s_s2Buildup,
             (double)s_smolderSeconds, (double)s_smolderMult, (double)s_s3Cd, (double)s_s3Cone, (double)s_s3Range, s_s3Shell, s_s3Shells, (double)s_s3Spread,
             (double)s_s3Height, (double)s_s3Every, (double)s_accSeconds, (double)s_accMult, s_s3Refund, s_fireImmune, s_fireSt[0], s_fireSt[1], s_fireSt[2],
-            s_fireSt[3], s_fireElement, (double)s_firePour, s_ownBurn, (double)s_ownDamage, (double)s_ownPercent, (double)s_ownEvery, (double)s_ownSeconds, s_s2Blast, s_sight, (double)s_fpDistance);
+            s_fireSt[3], s_fireElement, (double)s_firePour, s_ownBurn, (double)s_ownDamage, (double)s_ownPercent, (double)s_ownEvery, (double)s_ownSeconds, s_s2Blast, s_optionsKey, s_sight, (double)s_fpDistance);
 }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
@@ -1393,12 +1398,14 @@ HF_MOD_EXPORT int vector_key(unsigned version, int skill, int* vk, int* mods)
 }
 
 /* ---- the frame -------------------------------------------------------------------------------------------------- */
+static void OptionsTick(void);
 static void Tick(HfMod* mod, float dt, void* user)
 {
     double step = dt > 0 && dt < 1 ? dt : 0;
     g_now += step;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
+    OptionsTick();
     if (!g_inMission || !kb_kit_on) return;
     MyItems();
     static int prev[3];
@@ -1440,6 +1447,16 @@ static const KbOption kOptions[] = {
     {"accelerant_mult", &s_accMult, NULL}, {"fire_immune", NULL, &s_fireImmune}, {"own_burn", NULL, &s_ownBurn}, {"own_burn_damage", &s_ownDamage, NULL}, {"own_burn_percent", &s_ownPercent, NULL}, {"own_burn_seconds", &s_ownSeconds, NULL}, {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
 };
 static void OptionAfter(const char* name, int changed) { (void)name; (void)changed; }
+#ifdef HF_SCREEN_MODAL
+#include "vector_options.h"
+#else
+static int g_opScreen;
+static void OptionsLoad(void) {}
+static void OptionsTick(void) {}
+static void OptionsInit(const HfApi* api, HfMod* mod) { api->log(mod, "options screen: built without screens over the game (SDK 17); her numbers stay on the MODS tab"); }
+#endif
+/* 1 while her own options screen is there: the HUD then leaves her rows off the Mod Options Menu */
+HF_MOD_EXPORT int vector_options_screen(unsigned version) { return version == 1 && g_opScreen != 0; }
 HF_MOD_EXPORT int vector_option_get(const char* name, double* out) { return OptionGet(name, out); }
 HF_MOD_EXPORT int vector_option_set(const char* name, double value) { return OptionSet(name, value); }
 
@@ -1460,6 +1477,8 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
+    OptionsLoad();
+    OptionsInit(api, mod);
     g_fireElem = s_fireElement;
     api->log(mod, "Vector %s: keys %s / %s / %s (Dead End Meltdown, Portent of Doom, Searing Finale); fire does %s to her", VERSION, s_keys[0].label,
              s_keys[1].label, s_keys[2].label, s_fireImmune ? "nothing" : "what it does to anyone");
