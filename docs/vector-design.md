@@ -113,3 +113,6 @@ Smolder, Overburn and Accelerant multiply together: a Smoldering, Overburned ene
 - 0.1.11: her fire scales with what it burns. A tick of fire she lit (or any fire during Accelerant), and a tick of her
   own burn, is never less than own_burn_percent (1) of the enemy's full health; Smolder, Overburn and Accelerant
   multiply that. The game's faction tag is not under "FactionComponentData" (no kind has that record).
+- 0.1.16: Portent of Doom sets an Eagle Napalm bomb's explosion (359) on its target as it is cast (s2_blast). A gas
+  vent's (120) was tried first: its package is not one HellForge loads, so it had no flash and no sound.
+- 0.1.17: skill, passive and mod icons. The faction tag is parked: docs/faction-research.md.

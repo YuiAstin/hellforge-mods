@@ -248,8 +248,11 @@ local ORANGE, GREY = {255, 138, 36}, {120, 124, 128}
 local ICONS = {}
 for i, id in ipairs({'vector_s1', 'vector_s2', 'vector_s3'}) do
     local okI, handle = pcall(hd2.resources.image, id)
-    if okI and handle then ICONS[i] = handle end   -- (no images yet: the tiles show short names)
+    if okI and handle then ICONS[i] = handle end   -- (without an image the tile shows a short name)
 end
+-- Perception Block's icon, beside the Confectance Index: lit while fire does nothing to her
+local okP, PASSIVE_ICON = pcall(hd2.resources.image, 'vector_passive')
+if not okP then PASSIVE_ICON = nil end
 
 -- kitbase:list.lua begin. Shared by the GFL2 kits' HUDs: written by tools/kitbase_sync.py from kitbase/hud/list.lua, so edit
 -- it there (the kit names itself in KIT, above).
@@ -416,6 +419,12 @@ local function status_bar(d)
         local x = cx - total / 2 + (i - 1) * (pw + gap)
         d:rect(x, y + 20 * s, pw, 8 * s, rgba(INK, 0.7), 1)
         if boost or i <= n then d:rect(x, y + 20 * s, pw, 8 * s, rgba(boost and YELLOW or ICE, 1), 2) end
+    end
+    if PASSIVE_ICON then
+        local sz = 36 * s
+        local on = state.fire_immune ~= 0
+        d:image(PASSIVE_ICON, cx - total / 2 - sz - 12 * s, y + 24 * s - sz / 2, sz, sz, {z = 3,
+            colours = {r = rgba(ORANGE, 1), g = {255, 255, 255, 255}}, colour = {255, 255, 255, on and 255 or 80}})
     end
     local bits = {boost and ('CONFECTANCE x%.2f %.0fs'):format(tonumber(state.conf_mult), math.ceil(tonumber(state.conf_left))) or ('CONFECTANCE %d/%d'):format(n, max)}
     if state.s1_on ~= 0 then bits[#bits + 1] = ('MELTDOWN %.0fs'):format(math.ceil(tonumber(state.s1_left))) end
