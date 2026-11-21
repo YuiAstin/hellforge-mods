@@ -30,7 +30,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.8"
+#define VERSION "0.1.9"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 32   /* her fire bursts come often */
@@ -311,6 +311,45 @@ static int InSight(const float cam[3], const float fwd[3], const float q[3], uin
     }
     return 0;
 }
+/* everything spawned that is no friend, her foes or not: the kit base leaves some big enemies out of her foes (the War
+ * Strider among them: anything with a turret or seats), and her crosshair finds those by their unit */
+#define ANY 4096
+static uint32_t g_any[ANY];
+static uint64_t g_anyRes[ANY];
+static unsigned g_anyNext;
+static void SeeAny(uint32_t e, uint64_t res)
+{
+    if (!e || res == AVATAR || FriendRes(res)) return;
+    unsigned i = g_anyNext++ % ANY;
+    g_any[i] = e; g_anyRes[i] = res;
+}
+static int FoeIndex(uint32_t e);
+static int HasPart(uint64_t res, const char* component) { uint32_t stride; return hf->component_record(component, res, &stride) != 0; }
+/* the living, healthy thing whose unit her aim met, made her foe from now on; 0 none. Only what thinks or shoots (a
+ * behaviour or a turret): props and objectives with health stay out */
+static uint32_t AdoptUnit(uint32_t hu)
+{
+    uint8_t d[24];
+    for (unsigned i = 0; i < ANY; i++)
+    {
+        uint32_t e = g_any[i];
+        if (!e || !Descriptor(e, d) || Quad(d) != g_anyRes[i] || Word(d + 12) != hu) continue;
+        if (!Alive(e)) return 0;
+        if (!HasPart(g_anyRes[i], "BehaviorComponentData") && !HasPart(g_anyRes[i], "TurretComponentData"))
+        {
+            static uint64_t toldRes[8]; static unsigned told;
+            int seen = 0;
+            for (int t = 0; t < 8; t++) if (toldRes[t] == g_anyRes[i]) seen = 1;
+            if (!seen && told < 8) { toldRes[told++] = g_anyRes[i]; Log("her crosshair on entity %u (kind %016llx): no behaviour and no turret, not taken as a foe", e, (unsigned long long)g_anyRes[i]); }
+            return 0;
+        }
+        AddFoe(e, g_anyRes[i]);
+        if (FoeIndex(e) < 0) return 0;
+        Log("her crosshair on entity %u (kind %016llx), not one of her foes until now: taken as one", e, (unsigned long long)g_anyRes[i]);
+        return e;
+    }
+    return 0;
+}
 /* what her crosshair is on: the living enemy whose body the aim ray meets first; or, when it meets a part that is no
  * enemy of its own (a big enemy's turret or plate), the living enemy nearest that point */
 static int AimDirect(const float cam[3], const float fwd[3], float range, float at[3], uint32_t* target)
@@ -348,6 +387,15 @@ static int AimDirect(const float cam[3], const float fwd[3], float range, float 
                 for (int j = 0; j < 3; j++) at[j] = cam[j] + fwd[j] * bd;
                 return 1;
             }
+        {
+            uint32_t e = AdoptUnit(hu);
+            if (e)
+            {
+                *target = e;
+                for (int j = 0; j < 3; j++) at[j] = cam[j] + fwd[j] * bd;
+                return 1;
+            }
+        }
         if (part < 0) part = bd;
     }
     if (part < 0) return 0;
@@ -420,7 +468,7 @@ static void Own(const float at[3])
 
 /* ---- heat: what burns, Smolders and is Overburned --------------------------------------------------------------- */
 #define HEAT 256
-typedef struct Heat { uint32_t e; double burnUntil, burnSince, smolderUntil, overburnUntil, burstAt, litAt, tickAt; uint64_t res; int stage; float poured; double ownUntil, ownNext, cookAt, cookUntil; int cooked; } Heat;
+typedef struct Heat { uint32_t e; double burnUntil, burnSince, smolderUntil, overburnUntil, burstAt, litAt, tickAt; uint64_t res; int stage; float poured; double ownUntil, ownNext, cookAt, cookUntil, ownTotal; int cooked; } Heat;
 static Heat g_heat[HEAT];
 static Heat* HeatOf(uint32_t e, int make)
 {
@@ -501,6 +549,7 @@ static int Proof(uint64_t res, int add)
 /* never hers to burn down: fabricators and dropships (structures and transports die their own way) */
 static int NoOwn(uint64_t res)
 {
+    if (!HasPart(res, "BehaviorComponentData") && !HasPart(res, "TurretComponentData")) return 1;
     return res == UINT64_C(0xd37e8d120d2836e3) || res == UINT64_C(0x4fb8eb356ac8553e) || res == UINT64_C(0xdb90077e76faa025);
 }
 static uintptr_t HealthAddr(uint32_t entity)
@@ -539,9 +588,22 @@ static void OwnFrame(void)
     for (int i = 0; i < HEAT; i++)
     {
         Heat* c = &g_heat[i];
-        if (!c->e || (c->ownUntil <= g_now && !c->cooked)) continue;
+        if (!c->e) continue;
         int32_t hp;
-        if (!HealthOf(c->e, &hp) || hp <= 0) { c->ownUntil = 0; c->cooked = 0; continue; }
+        static unsigned ends;
+        if (c->ownTotal > 0 && c->ownUntil <= g_now && !c->cooked)
+        {
+            int ok = HealthOf(c->e, &hp);
+            if (ends++ < 60) Log("her own burn on entity %u (kind %016llx) ended: %.0f health burnt off, %d left", c->e, (unsigned long long)c->res, c->ownTotal, ok ? hp : 0);
+            c->ownTotal = 0;
+        }
+        if (c->ownUntil <= g_now && !c->cooked) continue;
+        if (!HealthOf(c->e, &hp) || hp <= 0)
+        {
+            if (c->ownTotal > 0 && ends++ < 60) Log("entity %u (kind %016llx) died while her own burn was on it (%.0f health burnt off)", c->e, (unsigned long long)c->res, c->ownTotal);
+            c->ownUntil = 0; c->cooked = 0; c->ownTotal = 0;
+            continue;
+        }
         if (c->cooked)
         {
             /* at 1 health: a fire burst on it, whose hit the damage listener turns into the kill */
@@ -566,6 +628,7 @@ static void OwnFrame(void)
         if (!a || hf->write(a, &want, 4)) { static unsigned told; if (told++ < 4) Log("her own burn: entity %u's health cannot be written", c->e); continue; }
         g_ownTicks++;
         g_ownDealt += hp - want;
+        c->ownTotal += hp - want;
         static unsigned told;
         if (told++ < 16 || c->cooked) Log("her own burn on entity %u (kind %016llx): health %d -> %d (x%.2f)%s", c->e, (unsigned long long)c->res, hp, want, mult,
                                           c->cooked ? ": burnt through, the next hit on it kills" : "");
@@ -980,6 +1043,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     if (s->resource != AVATAR)
     {
         if (FoeKind(s->resource)) AddFoe(s->entity, s->resource);
+        SeeAny(s->entity, s->resource);
         return;
     }
     if (!s->authority) return;
