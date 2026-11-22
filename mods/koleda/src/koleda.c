@@ -51,7 +51,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.12"
+#define VERSION "0.4.13"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -688,7 +688,7 @@ static int Walks(uint32_t e)
     if (!m || !Lookup(m + 0x30, e, 1048576, &index) || index > 65535 || !(recs = Pointer(m + 0x50))) return 0;
     return ReadAt(recs + 0xA8u * index + 0x10, &active, 4) && (active & 0xFF) != 0;
 }
-/* whether the warp setter may move this entity: this machine's, numbered under 0x400000, alive, and (warp_needs_walks)
+/* whether the warp setter may move this entity: this machine's, with a motion record (0.4.13; before: numbered under 0x400000), alive, and (warp_needs_walks)
  * with a navigation record. why: the reason when not */
 static uint32_t g_doomed, g_doomedUnit;     /* 0.4.7: the Sinveiler let go by its self-destruct, to blow up */
 static int Movable(uint32_t e, const char** why)
@@ -697,7 +697,18 @@ static int Movable(uint32_t e, const char** why)
     *why = "";
     if (!g_setPosition) { *why = "the warp setter is off (not the reviewed code)"; return 0; }
     if (!Descriptor(e, d)) { *why = "it is gone"; return 0; }
-    if (!(Word(d + 20) & 1) || e >= 0x400000u) { *why = "it is not simulated here"; return 0; }
+    if (!(Word(d + 20) & 1)) { *why = "it is not simulated here"; return 0; }
+    /* 0.4.13: what the setter itself needs, read from its code (game+0x5A2BB0, build 25480438): it looks the entity up
+     * in the motion manager's map ([game+0x3326558] + 0x48A0) and, finding none, goes on with index -1 and writes far
+     * outside its records. That was the crash of 2026-11-05, on two enemies with no motion record; they happened to be
+     * numbered 0x400000 and up, and the number was guarded against since. A high-numbered Sinveiler was refused for
+     * it (no far warp, no push through an obstacle) though it has its record like any other. */
+    {
+        uintptr_t mm = Pointer(game + 0x3326558u), descs = mm ? Pointer(mm + 0x48B8) : 0, md = 0;
+        uint32_t index = 0, named = 0;
+        if (!mm || !descs || !Lookup(mm + 0x48A0, e, 1048576, &index) || !(md = Pointer(descs + 8u * (uintptr_t)index)) || !ReadAt(md + 8, &named, 4) || named != e)
+        { *why = "it has no motion record (the setter would write outside its records)"; return 0; }
+    }
     if (!Alive(e)) { *why = "it is down"; return 0; }
     /* 0.1.1: the Sinveiler is exempt (our own spawn, simulated here; the Drive Probe found it has no navigation record,
      * so 0.1.0 never moved it): warp_needs_walks guards the others (a strider's pilot crashed the setter) */
