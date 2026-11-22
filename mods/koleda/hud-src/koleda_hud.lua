@@ -560,6 +560,8 @@ local OPTIONS = {
     {'s3_cooldown', 'slider', 'Spectre: Cooldown', 0, 600, 5, 'Seconds before another Sinveiler call.', true},
     {'winner_cooldown', 'slider', 'The Winner: Cooldown', 0, 300, 5, 'Seconds between The Winner (Spectre while the Sinveiler stands: full health, gear N).'},
     {'share_pct', 'slider', 'Sinveiler: Damage Taken For Her', 0, 100, 5, 'Percent of each hit on her the Sinveiler takes instead.'},
+    {'self_destruct', 'toggle', 'Sinveiler: Self-Destruct Stratagem', nil, nil, nil, 'While a Sinveiler is out she has a stratagem that blows it up with a Hellbomb\'s blast and drops a fresh one.'},
+    {'self_destruct_cooldown', 'slider', 'Sinveiler: Self-Destruct Cooldown', 0, 600, 5, 'Seconds from one self-destruct to the next being granted.'},
     {'upshift_max', 'slider', 'Upshift: Most', 1, 10, 1, 'The most Upshift stacks she holds.', true},
     {'upshift_damage', 'slider', 'Upshift: Damage Per Stack', 0, 0.3, 0.01, 'Her damage bonus per stack (0.15: 15%).'},
     {'upshift_decay', 'slider', 'Upshift: Decay', 1, 60, 1, 'Seconds without a gain before a stack is lost.'},

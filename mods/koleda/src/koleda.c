@@ -51,7 +51,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.6"
+#define VERSION "0.4.7"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -77,6 +77,8 @@ static float s_upDecay = 10, s_upDamage = 0.15f, s_upEvery = 3, s_upGuard = 0.3f
 /* the Sinveiler: its call, the damage share */
 static int s_sinOn = 1, s_callMode = 1;
 static float s_sharePct = 80, s_shareRange = 60;
+static int s_sdOn = 1;                    /* 0.4.7: self_destruct: the Sinveiler Self-Destruct stratagem while one is out */
+static float s_sdCd = 60;                  /* self_destruct_cooldown: seconds from one self-destruct to the next being granted */
 /* the leash */
 /* 0.1.13: it keeps follow_distance m from her (beside and behind), never closer than personal_space m (it walked into
  * her and crushed her); leash_start / leash_stop / guard_start: how far from that point it starts and stops moving */
@@ -156,6 +158,7 @@ static float s_sprintSeconds = 6, s_sprintCd = 20, s_sprintRam = 3, s_sprintRamS
 static const KbSetting kSettings[] = {
     KB_I("upshift_max", s_upMax, 1, 20), KB_F("upshift_decay", s_upDecay, 1, 600), KB_F("upshift_damage", s_upDamage, 0, 1), KB_F("upshift_every", s_upEvery, 0, 60), KB_F("upshift_guard", s_upGuard, 0, 1),
     KB_I("sinner", s_sinOn, 0, 1), KB_I("call_mode", s_callMode, 0, 1), KB_F("share_pct", s_sharePct, 0, 100), KB_F("share_range", s_shareRange, 1, 1000),
+    KB_I("self_destruct", s_sdOn, 0, 1), KB_F("self_destruct_cooldown", s_sdCd, 0, 3600),
     KB_F("leash_start", s_leashStart, 2, 100), KB_F("leash_stop", s_leashStop, 1, 100), KB_F("guard_start", s_guardStart, 2, 100),
     KB_F("leash_warp", s_leashWarp, 10, 500), KB_F("stuck_seconds", s_stuckSeconds, 0.5, 60), KB_F("push_step", s_pushStep, 0.5, 5), KB_I("push_steps", s_pushSteps, 0, 50), KB_F("slide_speed", s_slideSpeed, 0.5, 20),
     KB_F("plus_distance", s_plusDistance, 1, 100), KB_F("plus_leash", s_plusLeash, 5, 200), KB_I("warp_needs_walks", s_warpWalks, 0, 1), KB_I("nav_path", s_navPath, 0, 1),
@@ -213,6 +216,10 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; share_pct of each hit on her goes to the Sinveiler instead (never below 1 from that), while it stands within\n"
                "; share_range m.\n"
                "sinner = %d\ncall_mode = %d\nshare_pct = %g\nshare_range = %g\n"
+               "; self_destruct 1: while a Sinveiler is out she has the Sinveiler Self-Destruct stratagem (RRLLR; RRLLL for the FRV):\n"
+               "; thrown, the Sinveiler she has blows up with a Hellbomb's blast as the fresh one it calls arrives. Granted again\n"
+               "; self_destruct_cooldown s after its use, once the fresh one has landed.\n"
+               "self_destruct = %d\nself_destruct_cooldown = %g\n"
                "; The leash: it walks to her beyond leash_start m and stops within leash_stop (in N gear: within guard_start);\n"
                "; beyond leash_warp m it is warped beside her (the last resort). Stuck (walking, but under 0.5 m/s for\n"
                "; stuck_seconds) it is pushed through: stepped push_step m along its way, put on the ground each time, until it\n"
@@ -320,7 +327,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Hellbomb on her if she runs her stamina dry (a T-Doll's price).\n"
                "hp_mult = 1.5\nstamina_mult = 2\nhellbomb_on_exhaustion = 1\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_upMax, (double)s_upDecay, (double)s_upDamage, (double)s_upEvery, (double)s_upGuard,
-            s_sinOn, s_callMode, (double)s_sharePct, (double)s_shareRange,
+            s_sinOn, s_callMode, (double)s_sharePct, (double)s_shareRange, s_sdOn, (double)s_sdCd,
             (double)s_leashStart, (double)s_leashStop, (double)s_guardStart, (double)s_leashWarp, (double)s_stuckSeconds, (double)s_pushStep, s_pushSteps, (double)s_slideSpeed,
             (double)s_plusDistance, (double)s_plusLeash, s_warpWalks, s_navPath,
             s_sinFire, (double)s_deadAfter, s_sinSight, s_roundN, s_roundS, s_roundPlus, s_roundRocket, s_roundFallback, (double)s_gunEvery, (double)s_plusRate, (double)s_guardRange,
@@ -902,6 +909,52 @@ HF_MOD_EXPORT int koleda_hud_log(unsigned version, const char* text)
     return 1;
 }
 /* the call Spectre grants: the picked Sinveiler's (the FRV's only with its package resident) */
+/* ---- 0.4.7: the Sinveiler Self-Destruct ---------------------------------------------------------------------------
+ * While a Sinveiler is out (the Patriot or the FRV) she holds one more stratagem. It is a Sinveiler call of its own
+ * (the same payload as the Sinveiler's, or a copy of the M-103's for the FRV: its package is in memory while an FRV is
+ * out), so the fresh one comes down where its beacon lands. When that fresh one spawns and the stratagem's one use is
+ * spent, the one she had is let go and blown up with a Hellbomb's blast (hellbomb_explosion, the T-Doll's), and the fresh
+ * one is the Sinveiler. A worn Sinveiler's wheels and doors do not come back (The Winner mends its health only): this is
+ * how she gets a whole one. The blast is not one of her own: it reaches her. */
+static uint32_t g_sdType, g_sdFrvType;      /* the two stratagems (0: not added) */
+static uint32_t g_sdGranted;                /* the one in her list with its use left, for the Sinveiler that is out */
+static double g_sdNext;                     /* not granted before this (self_destruct_cooldown) */
+static uint32_t g_doomed, g_doomedUnit;     /* the one let go, to blow up */
+static double g_doomAt, g_doomCheck;
+static int g_doomTries;
+static unsigned g_selfDestructs;
+static void SelfDestructAdd(const HfApi* api, HfMod* mod)
+{
+    if (!s_sinOn || !s_sdOn || api->size < offsetof(HfApi, add_stratagem) + sizeof api->add_stratagem || !api->add_stratagem) return;
+    if (g_sinRes)
+    {
+        static uint64_t payload[2];
+        payload[0] = g_sinRes;
+        payload[1] = HF_ENTITY_PELICAN_TRANSPORT;
+        HfStratagem st = {sizeof st};
+        st.base = HF_STRATAGEM_EXO45_PATRIOT;
+        st.name = "yui/koleda/sinner_self_destruct";
+        st.title = "Sinveiler Self-Destruct";
+        st.description = "Orders the Sinveiler to blow itself up with a Hellbomb's blast. A fresh one is dropped where this lands.";
+        st.code = "RRLLR";
+        st.cooldown = 1;
+        st.uses = 1;
+        st.payload = payload;
+        st.payload_count = 2;
+        st.package = 0x22749A294788AF66ull;
+        g_sdType = api->add_stratagem(mod, &st);
+    }
+    HfStratagem fr = {sizeof fr};
+    fr.base = FRV_STRATAGEM;
+    fr.name = "yui/koleda/frv_sinner_self_destruct";
+    fr.title = "FRV Sinveiler Self-Destruct";
+    fr.description = "Orders the FRV Sinveiler to blow itself up with a Hellbomb's blast. A fresh one is dropped where this lands.";
+    fr.code = "RRLLL";
+    fr.cooldown = 1;
+    fr.uses = 1;
+    g_sdFrvType = api->add_stratagem(mod, &fr);
+    api->log(mod, "the Sinveiler Self-Destruct: stratagem %u (RRLLR), for the FRV %u (RRLLL, a copy of the M-103 Supply FRV's)", g_sdType, g_sdFrvType);
+}
 static uint32_t CallType(void) { return s_frvOn && g_frvType && FrvReady() ? g_frvType : g_sinType; }
 
 /* her rounds: the Sinveiler's by gear and Snow Wolf's Eye's (copies, add_projectile; the vanilla round without one) */
@@ -1069,6 +1122,93 @@ static void GrantFrame(void)
     if (++g_grantTries > 20) { g_grantDone = 1; Log("Sinveiler call: her stratagem record never became readable"); return; }
     int r = GrantCall(CallType(), -1);
     if (r >= 0) g_grantDone = 1;
+}
+/* a stratagem's uses left in her list: -1 her record unreadable, -2 not in it */
+static int StratagemUses(uint32_t type)
+{
+    if (!type || !GrantPins()) return -1;
+    uintptr_t st = LocalStratagems();
+    uint32_t count = 0;
+    if (!st || !ReadAt(st + 0x788, &count, 4) || count > 16) return -1;
+    for (uint32_t i = 0; i < count; i++)
+    {
+        uint32_t e[2];
+        if (ReadAt(st + 0x188 + i * 0x30u, e, 8) && e[0] == type) return e[1] > 0x7FFFFFFFu ? 0x7FFFFFFF : (int)e[1];
+    }
+    return -2;
+}
+/* the self-destruct's one use is spent (or its entry went with it): the Sinveiler spawning now is the one it called */
+static int SelfDestructUsed(void)
+{
+    if (!g_sdGranted) return 0;
+    int uses = StratagemUses(g_sdGranted);
+    return uses == 0 || uses == -2;
+}
+/* the Sinveiler she had is let go, to blow up on the next frames (called as the fresh one spawns) */
+static void SinnerLost(const char* why);
+static void SelfDestructOrder(void)
+{
+    g_doomed = g_sinner;
+    g_doomedUnit = g_sinUnit;
+    g_doomAt = g_now;
+    g_doomCheck = 0;
+    g_doomTries = 0;
+    g_sdGranted = 0;
+    g_sdNext = g_now + s_sdCd;
+    g_selfDestructs++;
+    Log("Sinveiler Self-Destruct: ordered: entity %u blows up, the fresh one is on its way (granted again %.0f s from now, once that one has landed)", g_doomed, (double)s_sdCd);
+    SinnerLost("its self-destruct was ordered");
+}
+static void SelfDestructFrame(void)
+{
+    /* the blast, and a second one if the first did not end it */
+    if (g_doomed && g_now >= g_doomAt)
+    {
+        float p[3];
+        int32_t hp = 0; uint32_t life = 0;
+        uint8_t d[24];
+        int there = Descriptor(g_doomed, d) && Word(d + 12) == g_doomedUnit && HealthOf(g_doomed, &hp, &life) && hp > 0 && life == 0;
+        if (!there) { Log("Sinveiler Self-Destruct: entity %u is gone%s", g_doomed, g_doomTries ? " (blown up)" : " (it went before the blast)"); g_doomed = 0; }
+        else if (g_doomCheck > 0 && g_now < g_doomCheck) {}
+        else if (g_doomTries >= 3) { Log("Sinveiler Self-Destruct: entity %u still stands after three blasts (health %d): left as it is", g_doomed, hp); g_doomed = 0; }
+        else if (UnitNode(g_doomedUnit, 0, p))
+        {
+            int r = hf->spawn_explosion(self, (uint32_t)s_hellbombRow, p);
+            g_doomTries++;
+            g_doomCheck = g_now + 1.5;
+            Log("Sinveiler Self-Destruct: a Hellbomb's blast (explosion %d) on entity %u at %.0f %.0f %.0f (health %d): %s", s_hellbombRow, g_doomed, (double)p[0],
+                (double)p[1], (double)p[2], hp, r == HF_ACT_REQUESTED ? "requested" : "refused");
+        }
+        else g_doomed = 0;
+    }
+    if (!s_sdOn || !kb_kit_on) return;
+    /* with no Sinveiler out the stratagem has no use left; one out and landed: its one use, after the cooldown */
+    if (!g_sinner)
+    {
+        if (g_sdGranted) { if (StratagemUses(g_sdGranted) > 0) GrantCall(g_sdGranted, 0); g_sdGranted = 0; }
+        return;
+    }
+    if (g_sdGranted)
+    {
+        /* its use spent (or its entry gone) and no fresh Sinveiler within 90 s: not a self-destruct after all (her
+         * stratagems were rebuilt, or the beacon was never thrown): granted anew */
+        static double usedAt;
+        int uses = StratagemUses(g_sdGranted);
+        if (uses > 0 || uses == -1) usedAt = 0;
+        else if (usedAt <= 0) usedAt = g_now;
+        else if (g_now - usedAt > 90) { usedAt = 0; g_sdGranted = 0; Log("Sinveiler Self-Destruct: its use went and no fresh Sinveiler came in 90 s: granted anew"); }
+        return;
+    }
+    if (!g_landed || g_now < g_sdNext) return;
+    uint32_t type = g_frv ? g_sdFrvType : g_sdType;
+    static double tried;
+    if (!type || g_now - tried < 1) return;
+    tried = g_now;
+    if (GrantCall(type, 1) > 0)
+    {
+        g_sdGranted = type;
+        Log("Sinveiler Self-Destruct: in her stratagems (%s): it blows up the Sinveiler she has and drops a fresh one", g_frv ? "RRLLL" : "RRLLR");
+    }
 }
 /* the call's package, held for the session (a call outside the loadout lands as a purple question mark without it) */
 static int g_pkgStates[2];
@@ -2032,6 +2172,7 @@ static void SinnerFrame(void)
 {
     SinPackage();
     GrantFrame();
+    SelfDestructFrame();
     if (!g_sinner) return;
     uint8_t d[24];
     int32_t hp = 0;
@@ -3166,6 +3307,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     if (g_sinRes && s->resource == g_sinRes)
     {
         if (!g_inMission || !kb_kit_on || !s->authority) return;
+        if (g_sinner && SelfDestructUsed()) SelfDestructOrder();
         if (g_callPending || !s_callMode || !g_sinner) Adopt(s->entity);
         return;
     }
@@ -3178,8 +3320,11 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     if (s->resource == FRV_RES)
     {
         /* 0.2.0: her M-103, with it in her loadout and no Sinveiler standing: the FRV Sinveiler */
-        if (!g_inMission || !kb_kit_on || !s->authority || !s_frvOn || !s_sinOn || g_sinner) return;
-        if (!g_callPending && HasStratagem(FRV_STRATAGEM) <= 0 && HasStratagem(g_frvType) <= 0) return;
+        if (!g_inMission || !kb_kit_on || !s->authority || !s_frvOn || !s_sinOn) return;
+        int fresh = g_sinner && g_frv && SelfDestructUsed();   /* 0.4.7: the one her self-destruct called */
+        if (g_sinner && !fresh) return;
+        if (fresh) SelfDestructOrder();
+        else if (!g_callPending && HasStratagem(FRV_STRATAGEM) <= 0 && HasStratagem(g_frvType) <= 0) return;
         Adopt(s->entity);
         g_frv = 1;
         g_frvNet = s->network;
@@ -3234,7 +3379,7 @@ static void Reset(const char* why)
             why, g_gapBins[0], g_gapBins[1], g_gapBins[2], g_gapBins[3], g_gapBins[4], (double)g_gapMin);
     g_gapHits = 0; memset(g_gapBins, 0, sizeof g_gapBins); g_gapMin = 1e9f;
     Body(start);
-    if (start && s_hellbomb && s_hellbombRow == 125 && !hf->load_package(self, UINT64_C(0x346D785D6CA13FF4))) Log("the Hellbomb's package could not be loaded ahead");
+    if (start && (s_hellbomb || s_sdOn) && s_hellbombRow == 125 && !hf->load_package(self, UINT64_C(0x346D785D6CA13FF4))) Log("the Hellbomb's package could not be loaded ahead");
     g_boomPending = 0;
     g_boomArmed = 0;
     if (g_sinner) Log("the Sinveiler (entity %u) is gone with the mission", g_sinner);
@@ -3275,6 +3420,9 @@ static void Reset(const char* why)
     g_callPending = 0;
     g_grantDone = g_grantTries = 0;
     g_grantAt = 0;
+    g_sdGranted = g_doomed = g_doomedUnit = 0;
+    g_sdNext = g_doomAt = g_doomCheck = 0;
+    g_doomTries = 0;
     memset(g_cd, 0, sizeof g_cd);
     memset(g_casts, 0, sizeof g_casts);
     g_volleys = g_eyeRounds = g_winners = g_warps = g_pulls = g_upGained = g_shareHits = g_healthWrites = g_slides = g_spared = 0;
@@ -3586,7 +3734,7 @@ static const KbOption kOptions[] = {
     {"upshift_damage", &s_upDamage, NULL}, {"upshift_decay", &s_upDecay, NULL}, {"leash_start", &s_leashStart, NULL}, {"leash_stop", &s_leashStop, NULL},
     {"leash_warp", &s_leashWarp, NULL}, {"slide_speed", &s_slideSpeed, NULL}, {"gun_every", &s_gunEvery, NULL}, {"plus_rate", &s_plusRate, NULL},
     {"fire_range", &s_fireRange, NULL}, {"guard_range", &s_guardRange, NULL}, {"sinner_fire", NULL, &s_sinFire}, {"drift_on", NULL, &s_driftOn}, {"full_on", NULL, &s_fullOn}, {"full_min_speed", &s_fullMinSpeed, NULL},
-    {"gear_seconds", &s_gearSeconds, NULL}, {"winner_cooldown", &s_winnerCd, NULL}, {"release_every", &s_releaseEvery, NULL}, {"drift_cooldown", &s_driftEvery, NULL},
+    {"gear_seconds", &s_gearSeconds, NULL}, {"winner_cooldown", &s_winnerCd, NULL}, {"self_destruct", NULL, &s_sdOn}, {"self_destruct_cooldown", &s_sdCd, NULL}, {"release_every", &s_releaseEvery, NULL}, {"drift_cooldown", &s_driftEvery, NULL},
     {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
 };
 static void OptionAfter(const char* name, int changed) { (void)name; (void)changed; }
@@ -3619,6 +3767,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     KbOptionsStart(api, mod, "koleda", "Koleda", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, -1);
     RoundsAdd();
     SinnerAdd(api, mod);
+    SelfDestructAdd(api, mod);
     /* (0.2.12: no FRV Sinveiler call of her own: its package could not be loaded reliably. The M-103 she brings in her
      * loadout is the FRV Sinveiler) */
     api->log(mod, "Koleda %s: keys %s / %s / %s (Snow Wolf's Eye, Tactical Routebook, Spectre); the Sinveiler takes %.0f%% of her hits",
