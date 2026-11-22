@@ -51,7 +51,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.11"
+#define VERSION "0.4.12"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -78,7 +78,7 @@ static float s_upDecay = 10, s_upDamage = 0.15f, s_upEvery = 3, s_upGuard = 0.3f
 static int s_sinOn = 1, s_callMode = 1;
 static float s_sharePct = 80, s_shareRange = 60;
 static int s_sdOn = 1;                    /* 0.4.7: self_destruct: the Sinveiler Self-Destruct stratagem while one is out */
-static float s_sdRushRange = 40, s_sdRushSpeed = 12, s_sdRushSeconds = 8;   /* 0.4.9: the doomed exosuit rushes the nearest enemy within this */
+static float s_sdRushRange = 40, s_sdRushSpeed = 12, s_sdRushSeconds = 12;   /* 0.4.9: the doomed exosuit rushes the nearest enemy within this */
 static float s_sdFuse = 5;                  /* 0.4.10: self_destruct_fuse: seconds before one that blows up where it stands does */
 static float s_sdCd = 60;                  /* self_destruct_cooldown: seconds from one self-destruct to the next being granted */
 /* the leash */
@@ -1596,7 +1596,14 @@ static int DoomRush(void)
     last = g_now;
     float p[3], at[3];
     const char* no;
-    if (!UnitNode(g_doomedUnit, 0, p) || !Movable(g_doomed, &no)) { g_doomRush = 0; return 0; }
+    /* 0.4.12: walking needs no warp setter, so an exosuit the setter refuses (numbered 0x400000 and up: two of them
+     * blew up at once in the log of 2026-11-22, with no run and no fuse) runs all the same; only the slide asks Movable */
+    if (!UnitNode(g_doomedUnit, 0, p) || !Alive(g_doomed))
+    {
+        if (g_doomRush == 1) g_doomAt = g_now + s_sdFuse;
+        g_doomRush = 0;
+        return 0;
+    }
     memcpy(g_doomPos, p, 12);
     int k = FoeIndex(g_doomTarget);
     if (!g_doomTarget || k < 0 || !Alive(g_doomTarget) || !TargetPos(g_doomTarget, g_foeRes[k], at))
@@ -1636,6 +1643,12 @@ static int DoomRush(void)
     /* 0.4.11: it runs on its own legs (her HUD walks it, as it walks the Sinveiler at her side: koleda_walk gives the
      * doomed one and the enemy as its goal). The slide is only for a HUD that does not answer within a second. */
     if (g_now - g_walkAckAt <= 0.6 || g_now - g_doomRushAt < 1.0) return 1;
+    if (!Movable(g_doomed, &no))
+    {
+        static uint32_t toldNo;
+        if (toldNo != g_doomed) { toldNo = g_doomed; Log("Sinveiler Self-Destruct: her HUD is not walking it and it cannot be slid (%s): it stands until its %.0f s are over", no, (double)s_sdRushSeconds); }
+        return 1;
+    }
     { static uint32_t told; if (told != g_doomed) { told = g_doomed; Log("Sinveiler Self-Destruct: her HUD is not walking it: it slides to the enemy instead"); } }
     float step = s_sdRushSpeed * (float)dt, dir[3] = {(at[0] - p[0]) / h, (at[1] - p[1]) / h, 0};
     if (step > h - 3.0f) step = h - 3.0f;
