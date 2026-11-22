@@ -40,6 +40,7 @@
 #include <math.h>
 #include <stdarg.h>
 #include <ctype.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,7 +51,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.3"
+#define VERSION "0.4.4"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -1141,6 +1142,36 @@ static int SinnerSetHealth(int32_t want, const char* why)
     if (want > top) want = top;
     if (want < 1) want = 1;
     if (want == hp) return 1;
+    /* 0.4.4: a heal goes through the game's own heal (SDK 16: "AddHealthFraction", to its health and every part).
+     * Written into the record alone, a heal lasted until the FRV's next hit: the game then put back what it had
+     * before, less the hit (the log of 2026-11-22: 1359 -> 1959 written, 1340 read 7 s later), so the HUD showed
+     * health it did not have. The write stays for a HellForge without the function, and for the damage share. */
+    if (want > hp && top > 0)
+    {
+#if defined(HF_MOD_SDK_VERSION) && HF_MOD_SDK_VERSION >= 16
+        static void (*heal)(void* manager, uint32_t entity, float fraction);
+        static unsigned asked;
+        if (!heal && asked < 4 && hf->size >= offsetof(HfApi, function) + sizeof hf->function)
+        {
+            asked++;
+            heal = (void (*)(void*, uint32_t, float))hf->function(self, "AddHealthFraction");
+        }
+        uintptr_t m = Pointer(game + 53634696u);
+        if (heal && m)
+        {
+            heal((void*)m, g_sinner, (float)(want - hp) / (float)top);
+            int32_t now = 0;
+            ReadAt(r + 20, &now, 4);
+            if (now > hp)
+            {
+                g_healthWrites++;
+                Log("%s: the Sinveiler healed by the game's own heal (its health and every part): %d -> %d of %d (asked for %d)", why, hp, now, top, want);
+                return 1;
+            }
+            Log("%s: the game's own heal left the Sinveiler at %d (asked for %d): written instead", why, now, want);
+        }
+#endif
+    }
     if (hf->write(r + 20, &want, 4)) { Log("%s: the Sinveiler's health write failed", why); return 0; }
     int32_t back = 0;
     ReadAt(r + 20, &back, 4);
