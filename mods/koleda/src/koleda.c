@@ -51,7 +51,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.9"
+#define VERSION "0.4.10"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -79,6 +79,7 @@ static int s_sinOn = 1, s_callMode = 1;
 static float s_sharePct = 80, s_shareRange = 60;
 static int s_sdOn = 1;                    /* 0.4.7: self_destruct: the Sinveiler Self-Destruct stratagem while one is out */
 static float s_sdRushRange = 40, s_sdRushSpeed = 12, s_sdRushSeconds = 8;   /* 0.4.9: the doomed exosuit rushes the nearest enemy within this */
+static float s_sdFuse = 5;                  /* 0.4.10: self_destruct_fuse: seconds before one that blows up where it stands does */
 static float s_sdCd = 60;                  /* self_destruct_cooldown: seconds from one self-destruct to the next being granted */
 /* the leash */
 /* 0.1.13: it keeps follow_distance m from her (beside and behind), never closer than personal_space m (it walked into
@@ -160,7 +161,7 @@ static const KbSetting kSettings[] = {
     KB_I("upshift_max", s_upMax, 1, 20), KB_F("upshift_decay", s_upDecay, 1, 600), KB_F("upshift_damage", s_upDamage, 0, 1), KB_F("upshift_every", s_upEvery, 0, 60), KB_F("upshift_guard", s_upGuard, 0, 1),
     KB_I("sinner", s_sinOn, 0, 1), KB_I("call_mode", s_callMode, 0, 1), KB_F("share_pct", s_sharePct, 0, 100), KB_F("share_range", s_shareRange, 1, 1000),
     KB_I("self_destruct", s_sdOn, 0, 1), KB_F("self_destruct_cooldown", s_sdCd, 0, 3600),
-    KB_F("self_destruct_rush_range", s_sdRushRange, 0, 200), KB_F("self_destruct_rush_speed", s_sdRushSpeed, 1, 40), KB_F("self_destruct_rush_seconds", s_sdRushSeconds, 1, 30),
+    KB_F("self_destruct_rush_range", s_sdRushRange, 0, 200), KB_F("self_destruct_rush_speed", s_sdRushSpeed, 1, 40), KB_F("self_destruct_rush_seconds", s_sdRushSeconds, 1, 30), KB_F("self_destruct_fuse", s_sdFuse, 0, 60),
     KB_F("leash_start", s_leashStart, 2, 100), KB_F("leash_stop", s_leashStop, 1, 100), KB_F("guard_start", s_guardStart, 2, 100),
     KB_F("leash_warp", s_leashWarp, 10, 500), KB_F("stuck_seconds", s_stuckSeconds, 0.5, 60), KB_F("push_step", s_pushStep, 0.5, 5), KB_I("push_steps", s_pushSteps, 0, 50), KB_F("slide_speed", s_slideSpeed, 0.5, 20),
     KB_F("plus_distance", s_plusDistance, 1, 100), KB_F("plus_leash", s_plusLeash, 5, 200), KB_I("warp_needs_walks", s_warpWalks, 0, 1), KB_I("nav_path", s_navPath, 0, 1),
@@ -224,8 +225,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "self_destruct = %d\nself_destruct_cooldown = %g\n"
                "; The exosuit ordered to blow up rushes the nearest enemy within self_destruct_rush_range m of it (0: never), at\n"
                "; self_destruct_rush_speed m/s, and blows up beside it, or after self_destruct_rush_seconds. With no enemy that\n"
-               "; near it blows up where it stands. The FRV always blows up where it stands.\n"
-               "self_destruct_rush_range = %g\nself_destruct_rush_speed = %g\nself_destruct_rush_seconds = %g\n"
+               "; near it blows up where it stands. The FRV always blows up where it stands. One that blows up where it stands\n"
+               "; waits self_destruct_fuse s first, for her to get clear.\n"
+               "self_destruct_rush_range = %g\nself_destruct_rush_speed = %g\nself_destruct_rush_seconds = %g\nself_destruct_fuse = %g\n"
                "; The leash: it walks to her beyond leash_start m and stops within leash_stop (in N gear: within guard_start);\n"
                "; beyond leash_warp m it is warped beside her (the last resort). Stuck (walking, but under 0.5 m/s for\n"
                "; stuck_seconds) it is pushed through: stepped push_step m along its way, put on the ground each time, until it\n"
@@ -333,7 +335,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Hellbomb on her if she runs her stamina dry (a T-Doll's price).\n"
                "hp_mult = 1.5\nstamina_mult = 2\nhellbomb_on_exhaustion = 1\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_upMax, (double)s_upDecay, (double)s_upDamage, (double)s_upEvery, (double)s_upGuard,
-            s_sinOn, s_callMode, (double)s_sharePct, (double)s_shareRange, s_sdOn, (double)s_sdCd, (double)s_sdRushRange, (double)s_sdRushSpeed, (double)s_sdRushSeconds,
+            s_sinOn, s_callMode, (double)s_sharePct, (double)s_shareRange, s_sdOn, (double)s_sdCd, (double)s_sdRushRange, (double)s_sdRushSpeed, (double)s_sdRushSeconds, (double)s_sdFuse,
             (double)s_leashStart, (double)s_leashStop, (double)s_guardStart, (double)s_leashWarp, (double)s_stuckSeconds, (double)s_pushStep, s_pushSteps, (double)s_slideSpeed,
             (double)s_plusDistance, (double)s_plusLeash, s_warpWalks, s_navPath,
             s_sinFire, (double)s_deadAfter, s_sinSight, s_roundN, s_roundS, s_roundPlus, s_roundRocket, s_roundFallback, (double)s_gunEvery, (double)s_plusRate, (double)s_guardRange,
@@ -1162,6 +1164,11 @@ static void SelfDestructOrder(void)
     g_doomedUnit = g_sinUnit;
     g_doomAt = g_now;
     g_doomRush = !g_frv && s_sdRushRange > 0 ? 1 : 0;   /* 1: look for an enemy to rush on the next frame */
+    if (!g_doomRush)
+    {
+        g_doomAt = g_now + s_sdFuse;                    /* 0.4.10: where it stands, after the fuse */
+        Log("Sinveiler Self-Destruct: it blows up where it stands in %.0f s (self_destruct_fuse)", (double)s_sdFuse);
+    }
     g_doomTarget = 0;
     g_doomUntil = g_now + s_sdRushSeconds;
     g_doomCheck = 0;
@@ -1598,7 +1605,13 @@ static int DoomRush(void)
         }
         if (!found)
         {
-            Log("Sinveiler Self-Destruct: %s: it blows up where it stands", g_doomRush == 2 ? "the enemy it ran at is dead and none other is near" : "no enemy within self_destruct_rush_range");
+            /* 0.4.10: one that never ran waits the fuse out, rooted, for her to get clear; one that ran is away from her */
+            if (g_doomRush == 1)
+            {
+                g_doomAt = g_now + s_sdFuse;
+                Log("Sinveiler Self-Destruct: no enemy within self_destruct_rush_range: it blows up where it stands in %.0f s (self_destruct_fuse)", (double)s_sdFuse);
+            }
+            else Log("Sinveiler Self-Destruct: the enemy it ran at is dead and none other is near: it blows up where it stands");
             g_doomRush = 0;
             return 0;
         }
