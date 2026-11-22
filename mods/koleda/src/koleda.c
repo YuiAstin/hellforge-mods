@@ -51,7 +51,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.10"
+#define VERSION "0.4.11"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -935,6 +935,9 @@ static int g_doomRush;                      /* 0.4.9: 0 blows up where it stands
 static uint32_t g_doomTarget;
 static double g_doomUntil;
 static int DoomRush(void);                  /* 1 while it is still on its way */
+static int g_doomExo;                       /* 0.4.11: the doomed one is the exosuit: her HUD walks it (or stands it still) to its end */
+static float g_doomPos[3], g_doomTo[3];
+static double g_doomRushAt;
 static void SelfDestructAdd(const HfApi* api, HfMod* mod)
 {
     if (!s_sinOn || !s_sdOn || api->size < offsetof(HfApi, add_stratagem) + sizeof api->add_stratagem || !api->add_stratagem) return;
@@ -1164,6 +1167,10 @@ static void SelfDestructOrder(void)
     g_doomedUnit = g_sinUnit;
     g_doomAt = g_now;
     g_doomRush = !g_frv && s_sdRushRange > 0 ? 1 : 0;   /* 1: look for an enemy to rush on the next frame */
+    g_doomExo = !g_frv;
+    memcpy(g_doomPos, g_sinPos, 12);
+    memcpy(g_doomTo, g_sinPos, 12);
+    g_doomRushAt = g_now;
     if (!g_doomRush)
     {
         g_doomAt = g_now + s_sdFuse;                    /* 0.4.10: where it stands, after the fuse */
@@ -1590,6 +1597,7 @@ static int DoomRush(void)
     float p[3], at[3];
     const char* no;
     if (!UnitNode(g_doomedUnit, 0, p) || !Movable(g_doomed, &no)) { g_doomRush = 0; return 0; }
+    memcpy(g_doomPos, p, 12);
     int k = FoeIndex(g_doomTarget);
     if (!g_doomTarget || k < 0 || !Alive(g_doomTarget) || !TargetPos(g_doomTarget, g_foeRes[k], at))
     {
@@ -1616,13 +1624,19 @@ static int DoomRush(void)
             return 0;
         }
         if (g_doomRush == 1 || found != g_doomTarget) Log("Sinveiler Self-Destruct: entity %u runs at the nearest enemy (entity %u, %.0f m away)", g_doomed, found, (double)sqrtf(best));
+        if (g_doomRush == 1) g_doomRushAt = g_now;
         g_doomTarget = found;
         g_doomRush = 2;
     }
+    memcpy(g_doomTo, at, 12);
     float h = Flat(p, at);
     if (h < 4.0f) { Log("Sinveiler Self-Destruct: beside the enemy (%.1f m): it blows up", (double)h); g_doomRush = 0; return 0; }
     if (g_now >= g_doomUntil) { Log("Sinveiler Self-Destruct: %.0f s of running are over (%.0f m short): it blows up", (double)s_sdRushSeconds, (double)h); g_doomRush = 0; return 0; }
     if (dt <= 0 || dt > 0.1) return 1;
+    /* 0.4.11: it runs on its own legs (her HUD walks it, as it walks the Sinveiler at her side: koleda_walk gives the
+     * doomed one and the enemy as its goal). The slide is only for a HUD that does not answer within a second. */
+    if (g_now - g_walkAckAt <= 0.6 || g_now - g_doomRushAt < 1.0) return 1;
+    { static uint32_t told; if (told != g_doomed) { told = g_doomed; Log("Sinveiler Self-Destruct: her HUD is not walking it: it slides to the enemy instead"); } }
     float step = s_sdRushSpeed * (float)dt, dir[3] = {(at[0] - p[0]) / h, (at[1] - p[1]) / h, 0};
     if (step > h - 3.0f) step = h - 3.0f;
     /* the rays leave out the unit in g_sinUnit: the doomed one's for these (the fresh one has that name by now) */
@@ -3506,6 +3520,7 @@ static void Reset(const char* why)
     g_grantDone = g_grantTries = 0;
     g_grantAt = 0;
     g_sdGranted = g_doomed = g_doomedUnit = 0;
+    g_doomExo = g_doomRush = 0;
     g_sdNext = g_doomAt = g_doomCheck = 0;
     g_doomTries = 0;
     memset(g_cd, 0, sizeof g_cd);
@@ -3652,6 +3667,16 @@ HF_MOD_EXPORT int koleda_walk(unsigned version, float* out)
 {
     if (version != 1 || !out) return 0;
     memset(out, 0, 12 * sizeof(float));
+    /* 0.4.11: the exosuit ordered to blow up comes first, to its end: walked at the enemy, or stood still (the walk it
+     * was in when ordered is stopped: left alone it kept walking) */
+    if (g_inMission && kb_kit_on && g_doomed && g_doomExo)
+    {
+        out[0] = 1;
+        out[1] = g_doomRush == 2 ? 1.0f : 0.0f;
+        memcpy(out + 2, g_doomTo, 12);
+        memcpy(out + 5, g_doomPos, 12);
+        return 1;
+    }
     int active = g_inMission && kb_kit_on && g_sinner && g_landed && !g_piloting && g_sinPosOk && !g_frv;
     out[0] = (float)active;
     if (!active) return 1;
