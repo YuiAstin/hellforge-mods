@@ -51,7 +51,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.7"
+#define VERSION "0.4.8"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -1302,6 +1302,9 @@ static int SinnerSetHealth(int32_t want, const char* why)
         uintptr_t m = Pointer(game + 53634696u);
         if (heal && m && (up || !noDown))
         {
+            /* 0.4.8: at full health the game's function takes nothing off (both misses in the logs were at 2400 of
+             * 2400): one point is written off first, so it has something to work from */
+            if (!up && hp >= top) { int32_t under = top - 1; if (!hf->write(r + 20, &under, 4)) hp = under; if (want >= hp) return 1; }
             heal((void*)m, g_sinner, (float)(want - hp) / (float)top);
             int32_t now = 0;
             ReadAt(r + 20, &now, 4);
