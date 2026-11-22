@@ -562,6 +562,7 @@ local OPTIONS = {
     {'share_pct', 'slider', 'Sinveiler: Damage Taken For Her', 0, 100, 5, 'Percent of each hit on her the Sinveiler takes instead.'},
     {'self_destruct', 'toggle', 'Sinveiler: Self-Destruct Stratagem', nil, nil, nil, 'While a Sinveiler is out she has a stratagem that blows it up with a Hellbomb\'s blast and drops a fresh one.'},
     {'self_destruct_cooldown', 'slider', 'Sinveiler: Self-Destruct Cooldown', 0, 600, 5, 'Seconds from one self-destruct to the next being granted.'},
+    {'self_destruct_rush_range', 'slider', 'Sinveiler: Self-Destruct Rush Range', 0, 100, 5, 'The exosuit ordered to blow up runs at the nearest enemy within this many metres and blows up beside it. 0, or no enemy that near: it blows up where it stands.'},
     {'upshift_max', 'slider', 'Upshift: Most', 1, 10, 1, 'The most Upshift stacks she holds.', true},
     {'upshift_damage', 'slider', 'Upshift: Damage Per Stack', 0, 0.3, 0.01, 'Her damage bonus per stack (0.15: 15%).'},
     {'upshift_decay', 'slider', 'Upshift: Decay', 1, 60, 1, 'Seconds without a gain before a stack is lost.'},

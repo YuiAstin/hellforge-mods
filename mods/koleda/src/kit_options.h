@@ -8,6 +8,8 @@ static const OpRow kOpRows[] = {
      "While a Sinveiler is out she has a stratagem that blows it up with a Hellbomb's blast and drops a fresh one."},
     {"self_destruct_cooldown", "Sinveiler", "Self-Destruct Cooldown", OP_FIELD, 0, 600, 5,
      "Seconds from one self-destruct to the next being granted."},
+    {"self_destruct_rush_range", "Sinveiler", "Self-Destruct Rush Range", OP_SLIDER, 0, 100, 5,
+     "The exosuit ordered to blow up runs at the nearest enemy within this many metres and blows up beside it. 0, or no enemy that near: it blows up where it stands."},
     {"drift_on", "Sinveiler", "Let's Go for a Drift!", OP_TOGGLE, 0, 1, 1,
      "In the FRV, her second key: waves of EMS bursts out from it into the enemies around it."},
     {"full_on", "Sinveiler", "Let's Go Full Speed!", OP_TOGGLE, 0, 1, 1,

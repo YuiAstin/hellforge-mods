@@ -51,7 +51,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.8"
+#define VERSION "0.4.9"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -78,6 +78,7 @@ static float s_upDecay = 10, s_upDamage = 0.15f, s_upEvery = 3, s_upGuard = 0.3f
 static int s_sinOn = 1, s_callMode = 1;
 static float s_sharePct = 80, s_shareRange = 60;
 static int s_sdOn = 1;                    /* 0.4.7: self_destruct: the Sinveiler Self-Destruct stratagem while one is out */
+static float s_sdRushRange = 40, s_sdRushSpeed = 12, s_sdRushSeconds = 8;   /* 0.4.9: the doomed exosuit rushes the nearest enemy within this */
 static float s_sdCd = 60;                  /* self_destruct_cooldown: seconds from one self-destruct to the next being granted */
 /* the leash */
 /* 0.1.13: it keeps follow_distance m from her (beside and behind), never closer than personal_space m (it walked into
@@ -159,6 +160,7 @@ static const KbSetting kSettings[] = {
     KB_I("upshift_max", s_upMax, 1, 20), KB_F("upshift_decay", s_upDecay, 1, 600), KB_F("upshift_damage", s_upDamage, 0, 1), KB_F("upshift_every", s_upEvery, 0, 60), KB_F("upshift_guard", s_upGuard, 0, 1),
     KB_I("sinner", s_sinOn, 0, 1), KB_I("call_mode", s_callMode, 0, 1), KB_F("share_pct", s_sharePct, 0, 100), KB_F("share_range", s_shareRange, 1, 1000),
     KB_I("self_destruct", s_sdOn, 0, 1), KB_F("self_destruct_cooldown", s_sdCd, 0, 3600),
+    KB_F("self_destruct_rush_range", s_sdRushRange, 0, 200), KB_F("self_destruct_rush_speed", s_sdRushSpeed, 1, 40), KB_F("self_destruct_rush_seconds", s_sdRushSeconds, 1, 30),
     KB_F("leash_start", s_leashStart, 2, 100), KB_F("leash_stop", s_leashStop, 1, 100), KB_F("guard_start", s_guardStart, 2, 100),
     KB_F("leash_warp", s_leashWarp, 10, 500), KB_F("stuck_seconds", s_stuckSeconds, 0.5, 60), KB_F("push_step", s_pushStep, 0.5, 5), KB_I("push_steps", s_pushSteps, 0, 50), KB_F("slide_speed", s_slideSpeed, 0.5, 20),
     KB_F("plus_distance", s_plusDistance, 1, 100), KB_F("plus_leash", s_plusLeash, 5, 200), KB_I("warp_needs_walks", s_warpWalks, 0, 1), KB_I("nav_path", s_navPath, 0, 1),
@@ -220,6 +222,10 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; thrown, the Sinveiler she has blows up with a Hellbomb's blast as the fresh one it calls arrives. Granted again\n"
                "; self_destruct_cooldown s after its use, once the fresh one has landed.\n"
                "self_destruct = %d\nself_destruct_cooldown = %g\n"
+               "; The exosuit ordered to blow up rushes the nearest enemy within self_destruct_rush_range m of it (0: never), at\n"
+               "; self_destruct_rush_speed m/s, and blows up beside it, or after self_destruct_rush_seconds. With no enemy that\n"
+               "; near it blows up where it stands. The FRV always blows up where it stands.\n"
+               "self_destruct_rush_range = %g\nself_destruct_rush_speed = %g\nself_destruct_rush_seconds = %g\n"
                "; The leash: it walks to her beyond leash_start m and stops within leash_stop (in N gear: within guard_start);\n"
                "; beyond leash_warp m it is warped beside her (the last resort). Stuck (walking, but under 0.5 m/s for\n"
                "; stuck_seconds) it is pushed through: stepped push_step m along its way, put on the ground each time, until it\n"
@@ -327,7 +333,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Hellbomb on her if she runs her stamina dry (a T-Doll's price).\n"
                "hp_mult = 1.5\nstamina_mult = 2\nhellbomb_on_exhaustion = 1\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_upMax, (double)s_upDecay, (double)s_upDamage, (double)s_upEvery, (double)s_upGuard,
-            s_sinOn, s_callMode, (double)s_sharePct, (double)s_shareRange, s_sdOn, (double)s_sdCd,
+            s_sinOn, s_callMode, (double)s_sharePct, (double)s_shareRange, s_sdOn, (double)s_sdCd, (double)s_sdRushRange, (double)s_sdRushSpeed, (double)s_sdRushSeconds,
             (double)s_leashStart, (double)s_leashStop, (double)s_guardStart, (double)s_leashWarp, (double)s_stuckSeconds, (double)s_pushStep, s_pushSteps, (double)s_slideSpeed,
             (double)s_plusDistance, (double)s_plusLeash, s_warpWalks, s_navPath,
             s_sinFire, (double)s_deadAfter, s_sinSight, s_roundN, s_roundS, s_roundPlus, s_roundRocket, s_roundFallback, (double)s_gunEvery, (double)s_plusRate, (double)s_guardRange,
@@ -692,7 +698,7 @@ static int Movable(uint32_t e, const char** why)
     if (!Alive(e)) { *why = "it is down"; return 0; }
     /* 0.1.1: the Sinveiler is exempt (our own spawn, simulated here; the Drive Probe found it has no navigation record,
      * so 0.1.0 never moved it): warp_needs_walks guards the others (a strider's pilot crashed the setter) */
-    if (s_warpWalks && e != g_sinner && !Walks(e)) { *why = "it has no navigation record (warp_needs_walks 1)"; return 0; }
+    if (s_warpWalks && e != g_sinner && e != g_doomed && !Walks(e)) { *why = "it has no navigation record (warp_needs_walks 1)"; return 0; }
     return 1;
 }
 
@@ -923,6 +929,10 @@ static uint32_t g_doomed, g_doomedUnit;     /* the one let go, to blow up */
 static double g_doomAt, g_doomCheck;
 static int g_doomTries;
 static unsigned g_selfDestructs;
+static int g_doomRush;                      /* 0.4.9: 0 blows up where it stands, 1 looking for an enemy, 2 rushing one */
+static uint32_t g_doomTarget;
+static double g_doomUntil;
+static int DoomRush(void);                  /* 1 while it is still on its way */
 static void SelfDestructAdd(const HfApi* api, HfMod* mod)
 {
     if (!s_sinOn || !s_sdOn || api->size < offsetof(HfApi, add_stratagem) + sizeof api->add_stratagem || !api->add_stratagem) return;
@@ -1151,6 +1161,9 @@ static void SelfDestructOrder(void)
     g_doomed = g_sinner;
     g_doomedUnit = g_sinUnit;
     g_doomAt = g_now;
+    g_doomRush = !g_frv && s_sdRushRange > 0 ? 1 : 0;   /* 1: look for an enemy to rush on the next frame */
+    g_doomTarget = 0;
+    g_doomUntil = g_now + s_sdRushSeconds;
     g_doomCheck = 0;
     g_doomTries = 0;
     g_sdGranted = 0;
@@ -1162,7 +1175,8 @@ static void SelfDestructOrder(void)
 static void SelfDestructFrame(void)
 {
     /* the blast, and a second one if the first did not end it */
-    if (g_doomed && g_now >= g_doomAt)
+    if (g_doomed && g_doomRush && DoomRush()) {}
+    else if (g_doomed && g_now >= g_doomAt)
     {
         float p[3];
         int32_t hp = 0; uint32_t life = 0;
@@ -1556,6 +1570,61 @@ static int Slide(const float p[3], const float to[3], double dt)
     g_setPosition(NULL, g_sinner, g);
     g_moveDir[0] = dir[0]; g_moveDir[1] = dir[1];
     if (g_slides++ == 0) Log("the Sinveiler slides (the warp setter; its own locomotion is not driven yet)");
+    return 1;
+}
+/* 0.4.9: the exosuit ordered to blow up rushes the nearest living enemy within self_destruct_rush_range of it: slid
+ * along the ground as the leash slides it, faster, until it is beside the enemy, the enemy is dead and none other is
+ * near, or self_destruct_rush_seconds are over. 1 while it is on its way (the blast waits), 0 when it is to blow up. */
+static int DoomRush(void)
+{
+    static double last;
+    double dt = g_now - last;
+    last = g_now;
+    float p[3], at[3];
+    const char* no;
+    if (!UnitNode(g_doomedUnit, 0, p) || !Movable(g_doomed, &no)) { g_doomRush = 0; return 0; }
+    int k = FoeIndex(g_doomTarget);
+    if (!g_doomTarget || k < 0 || !Alive(g_doomTarget) || !TargetPos(g_doomTarget, g_foeRes[k], at))
+    {
+        /* the nearest one within range (again, when the one it ran at died on the way) */
+        float best = s_sdRushRange * s_sdRushRange;
+        uint32_t found = 0;
+        for (int i = 0; i < FOES; i++)
+        {
+            float q[3], d2;
+            uint32_t e = g_foe[i];
+            if (!e || !Alive(e) || !TargetPos(e, g_foeRes[i], q) || (d2 = Dist2(q, p)) > best) continue;
+            best = d2; found = e; memcpy(at, q, 12);
+        }
+        if (!found)
+        {
+            Log("Sinveiler Self-Destruct: %s: it blows up where it stands", g_doomRush == 2 ? "the enemy it ran at is dead and none other is near" : "no enemy within self_destruct_rush_range");
+            g_doomRush = 0;
+            return 0;
+        }
+        if (g_doomRush == 1 || found != g_doomTarget) Log("Sinveiler Self-Destruct: entity %u runs at the nearest enemy (entity %u, %.0f m away)", g_doomed, found, (double)sqrtf(best));
+        g_doomTarget = found;
+        g_doomRush = 2;
+    }
+    float h = Flat(p, at);
+    if (h < 4.0f) { Log("Sinveiler Self-Destruct: beside the enemy (%.1f m): it blows up", (double)h); g_doomRush = 0; return 0; }
+    if (g_now >= g_doomUntil) { Log("Sinveiler Self-Destruct: %.0f s of running are over (%.0f m short): it blows up", (double)s_sdRushSeconds, (double)h); g_doomRush = 0; return 0; }
+    if (dt <= 0 || dt > 0.1) return 1;
+    float step = s_sdRushSpeed * (float)dt, dir[3] = {(at[0] - p[0]) / h, (at[1] - p[1]) / h, 0};
+    if (step > h - 3.0f) step = h - 3.0f;
+    /* the rays leave out the unit in g_sinUnit: the doomed one's for these (the fresh one has that name by now) */
+    uint32_t keep = g_sinUnit;
+    g_sinUnit = g_doomedUnit;
+    int clear = 1;
+    for (int r = 0; r < 2 && clear; r++)
+    {
+        float from[3] = {p[0], p[1], p[2] + (r ? 2.4f : 1.0f)};
+        float w = SinRay(from, dir, step + 1.5f);
+        if (w >= 0 && w <= step + 1.5f) clear = 0;      /* something in the way: it waits there (a wall, or the enemy itself) */
+    }
+    float dest[3] = {p[0] + dir[0] * step, p[1] + dir[1] * step, p[2]}, g[3];
+    if (clear && Ground(dest, g) && g[2] - p[2] <= 0.5f && p[2] - g[2] <= 3.0f) g_setPosition(NULL, g_doomed, g);
+    g_sinUnit = keep;
     return 1;
 }
 /* stuck: walking, but its own speed (pushes left out) under 0.5 m/s for stuck_seconds: pushed through the obstacle a
@@ -3737,7 +3806,7 @@ static const KbOption kOptions[] = {
     {"upshift_damage", &s_upDamage, NULL}, {"upshift_decay", &s_upDecay, NULL}, {"leash_start", &s_leashStart, NULL}, {"leash_stop", &s_leashStop, NULL},
     {"leash_warp", &s_leashWarp, NULL}, {"slide_speed", &s_slideSpeed, NULL}, {"gun_every", &s_gunEvery, NULL}, {"plus_rate", &s_plusRate, NULL},
     {"fire_range", &s_fireRange, NULL}, {"guard_range", &s_guardRange, NULL}, {"sinner_fire", NULL, &s_sinFire}, {"drift_on", NULL, &s_driftOn}, {"full_on", NULL, &s_fullOn}, {"full_min_speed", &s_fullMinSpeed, NULL},
-    {"gear_seconds", &s_gearSeconds, NULL}, {"winner_cooldown", &s_winnerCd, NULL}, {"self_destruct", NULL, &s_sdOn}, {"self_destruct_cooldown", &s_sdCd, NULL}, {"release_every", &s_releaseEvery, NULL}, {"drift_cooldown", &s_driftEvery, NULL},
+    {"gear_seconds", &s_gearSeconds, NULL}, {"winner_cooldown", &s_winnerCd, NULL}, {"self_destruct", NULL, &s_sdOn}, {"self_destruct_cooldown", &s_sdCd, NULL}, {"self_destruct_rush_range", &s_sdRushRange, NULL}, {"release_every", &s_releaseEvery, NULL}, {"drift_cooldown", &s_driftEvery, NULL},
     {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
 };
 static void OptionAfter(const char* name, int changed) { (void)name; (void)changed; }
