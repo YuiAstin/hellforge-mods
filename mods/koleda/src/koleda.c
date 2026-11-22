@@ -688,6 +688,7 @@ static int Walks(uint32_t e)
 }
 /* whether the warp setter may move this entity: this machine's, numbered under 0x400000, alive, and (warp_needs_walks)
  * with a navigation record. why: the reason when not */
+static uint32_t g_doomed, g_doomedUnit;     /* 0.4.7: the Sinveiler let go by its self-destruct, to blow up */
 static int Movable(uint32_t e, const char** why)
 {
     uint8_t d[24];
@@ -925,7 +926,6 @@ HF_MOD_EXPORT int koleda_hud_log(unsigned version, const char* text)
 static uint32_t g_sdType, g_sdFrvType;      /* the two stratagems (0: not added) */
 static uint32_t g_sdGranted;                /* the one in her list with its use left, for the Sinveiler that is out */
 static double g_sdNext;                     /* not granted before this (self_destruct_cooldown) */
-static uint32_t g_doomed, g_doomedUnit;     /* the one let go, to blow up */
 static double g_doomAt, g_doomCheck;
 static int g_doomTries;
 static unsigned g_selfDestructs;
