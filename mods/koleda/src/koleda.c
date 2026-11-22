@@ -51,7 +51,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.5"
+#define VERSION "0.4.6"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -1152,7 +1152,7 @@ static int SinnerSetHealth(int32_t want, const char* why)
     {
 #if defined(HF_MOD_SDK_VERSION) && HF_MOD_SDK_VERSION >= 16
         static void (*heal)(void* manager, uint32_t entity, float fraction);
-        static unsigned asked, toldDown, noDown;
+        static unsigned asked, toldDown, noDown, missed;
         int up = want > hp;
         if (!heal && asked < 4 && hf->size >= offsetof(HfApi, function) + sizeof hf->function)
         {
@@ -1169,10 +1169,12 @@ static int SinnerSetHealth(int32_t want, const char* why)
             {
                 g_healthWrites++;
                 if (up) Log("%s: the Sinveiler healed by the game's own heal (its health and every part): %d -> %d of %d (asked for %d)", why, hp, now, top, want);
-                else if (toldDown++ < 16) Log("%s: taken off the Sinveiler by the game's own function (its health and every part): %d -> %d of %d (asked for %d)", why, hp, now, top, want);
+                if (!up) missed = 0;
+                if (!up && toldDown++ < 16) Log("%s: taken off the Sinveiler by the game's own function (its health and every part): %d -> %d of %d (asked for %d)", why, hp, now, top, want);
                 return 1;
             }
-            if (!up) { noDown = 1; Log("%s: the game's function took nothing off the Sinveiler (%d, asked for %d): written from now on (the game undoes that at its next hit)", why, now, want); }
+            if (!up && ++missed >= 3) { noDown = 1; Log("%s: the game's function took nothing off the Sinveiler three times (%d, asked for %d): written from now on (the game undoes that at its next hit)", why, now, want); }
+            else if (!up) return 1;        /* one miss (0.4.5's log: once, while it took no damage): let go */
             else Log("%s: the game's own heal left the Sinveiler at %d (asked for %d): written instead", why, now, want);
             if (now < 1) { int32_t one = 1; hf->write(r + 20, &one, 4); }
         }
@@ -2867,6 +2869,63 @@ static void TacticalRoutebook(void)
     }
     KineticRelease("Tactical Routebook's Kinetic Release");
 }
+/* 0.4.6: The Winner mends the Sinveiler's parts too (a tyre shot out, a door off). The game's heal fills every part's
+ * health and leaves a broken one broken: its state is 2 bits a part in the health record (+0x20). The game's own
+ * RestoreZone (SDK 16; what a stim's limb mend calls) fills one part and clears its state. A part is a damage zone of
+ * its HealthComponentData: 38 at most, 0x228 bytes each from +0x208, its name's hash at +0x60, its full health at +0xE8;
+ * in the record its health is at +0xF8 + 4 x zone (game+0x65B2D0 and 0x921A80, build 25480438). Only a named part that
+ * is short of health or not intact is mended; RestoreZone is never given a name the entity does not have (it does not
+ * check). How many it mended, -1 not available. */
+static int MendParts(uint32_t entity, const char* why)
+{
+#if defined(HF_MOD_SDK_VERSION) && HF_MOD_SDK_VERSION >= 16
+    static void* (*settingsOf)(void* descriptor);
+    static void (*restore)(void* unused, uint32_t entity, uint32_t zone);
+    static unsigned asked;
+    if ((!settingsOf || !restore) && asked < 4 && hf->size >= offsetof(HfApi, function) + sizeof hf->function)
+    {
+        asked++;
+        settingsOf = (void* (*)(void*))hf->function(self, "HealthSettings");
+        restore = (void (*)(void*, uint32_t, uint32_t))hf->function(self, "RestoreZone");
+    }
+    uintptr_t m = Pointer(game + 53634696u), rec = HealthRec(entity), records = m ? Pointer(m + 0x1058) : 0, descs = m ? Pointer(m + 0x1048) : 0;
+    if (!settingsOf || !restore || !rec || !records || !descs || rec < records || (rec - records) % 440u) return -1;
+    uintptr_t desc = Pointer(descs + 8u * (uintptr_t)((rec - records) / 440u));
+    uint8_t d[24];
+    if (!desc || !ReadAt(desc, d, 24) || Word(d + 8) != entity) return -1;
+    uintptr_t set = (uintptr_t)settingsOf((void*)desc);
+    if (!AddressOk(set, 0x208 + 38 * 0x228)) return -1;
+    int mended = 0, named = 0;
+    char list[200] = "";
+    for (uint32_t z = 0; z < 38; z++)
+    {
+        uint32_t name = 0;
+        int32_t full = 0, now = 0;
+        uint64_t bits = 0;
+        if (!ReadAt(set + 0x268 + 0x228u * z, &name, 4) || !ReadAt(set + 0x2F0 + 0x228u * z, &full, 4) || !name || full <= 0) continue;
+        if (!ReadAt(rec + 0xF8 + 4u * z, &now, 4) || !ReadAt(rec + 0x20 + 8u * (z >> 5), &bits, 8)) continue;
+        named++;
+        unsigned state = (unsigned)((bits >> (2 * (z & 31))) & 3);
+        if (now >= full && !state) continue;
+        /* a later part with the same name would be found as the first by the game's lookup: only the first is mended */
+        int first = 1;
+        for (uint32_t y = 0; y < z && first; y++) { uint32_t other = 0; if (ReadAt(set + 0x268 + 0x228u * y, &other, 4) && other == name) first = 0; }
+        if (!first) continue;
+        restore(NULL, entity, name);
+        int32_t after = 0;
+        ReadAt(rec + 0xF8 + 4u * z, &after, 4);
+        ReadAt(rec + 0x20 + 8u * (z >> 5), &bits, 8);
+        size_t n = strlen(list);
+        if (n < sizeof list - 48) snprintf(list + n, sizeof list - n, "%s%u (%08x): %d -> %d of %d, state %u -> %u", n ? "; " : "", z, name, now, after, full, state,
+                                           (unsigned)((bits >> (2 * (z & 31))) & 3));
+        mended++;
+    }
+    Log("%s: %d of the Sinveiler's %d parts mended%s%s", why, mended, named, mended ? ": part " : "", list);
+    return mended;
+#else
+    return -1;
+#endif
+}
 static void TheWinner(void)
 {
     if (!g_landed) { static unsigned told; if (told++ < 5) Log("The Winner: the Sinveiler has not landed yet"); return; }
@@ -2876,6 +2935,7 @@ static void TheWinner(void)
     g_casts[2]++;
     int max = g_sinMax > 0 ? g_sinMax : SinnerMaxRead();
     int ok = max > 0 && SinnerSetHealth(max, "The Winner");
+    if (MendParts(g_sinner, "The Winner") < 0) Log("The Winner: the Sinveiler's parts could not be mended (the game's functions are not available here)");
     int cleansed = Cleanse(g_sinner);
     Log("The Winner: the Sinveiler restored (%s), %s", ok ? "full health" : "its health could not be written",
         cleansed < 0 ? "no cleanse (not available)" : "its debuffs cleansed");
