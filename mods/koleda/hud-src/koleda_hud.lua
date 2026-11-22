@@ -583,6 +583,7 @@ local OPTIONS = {
     {'sinner_fire', 'toggle', 'Sinveiler: Fires', 0, 1, 1, 'Whether the Sinveiler shoots at all.'},
     {'hp_mult', 'slider', 'Body: Health', 0.5, 4, 0.05, "Her health, times a Helldiver's.", true},
     {'stamina_mult', 'slider', 'Body: Stamina', 0.5, 6, 0.1, "How long she sprints before the bar empties, times a Helldiver's."},
+    {'hellbomb_on_exhaustion', 'toggle', 'Body: Hellbomb When Exhausted', nil, nil, nil, 'Running her stamina dry sets off a Hellbomb on her. For fun.'},
 }
 pcall(ffi.cdef, [[
 typedef int (*kolopt_get)(const char *name, double *out);

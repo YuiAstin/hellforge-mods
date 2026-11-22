@@ -51,7 +51,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.13"
+#define VERSION "0.4.14"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -3868,7 +3868,7 @@ static const KbOption kOptions[] = {
     {"upshift_damage", &s_upDamage, NULL}, {"upshift_decay", &s_upDecay, NULL}, {"leash_start", &s_leashStart, NULL}, {"leash_stop", &s_leashStop, NULL},
     {"leash_warp", &s_leashWarp, NULL}, {"slide_speed", &s_slideSpeed, NULL}, {"gun_every", &s_gunEvery, NULL}, {"plus_rate", &s_plusRate, NULL},
     {"fire_range", &s_fireRange, NULL}, {"guard_range", &s_guardRange, NULL}, {"sinner_fire", NULL, &s_sinFire}, {"drift_on", NULL, &s_driftOn}, {"full_on", NULL, &s_fullOn}, {"full_min_speed", &s_fullMinSpeed, NULL},
-    {"gear_seconds", &s_gearSeconds, NULL}, {"winner_cooldown", &s_winnerCd, NULL}, {"self_destruct", NULL, &s_sdOn}, {"self_destruct_cooldown", &s_sdCd, NULL}, {"self_destruct_rush_range", &s_sdRushRange, NULL}, {"release_every", &s_releaseEvery, NULL}, {"drift_cooldown", &s_driftEvery, NULL},
+    {"gear_seconds", &s_gearSeconds, NULL}, {"winner_cooldown", &s_winnerCd, NULL}, {"self_destruct", NULL, &s_sdOn}, {"hellbomb_on_exhaustion", NULL, &s_hellbomb}, {"self_destruct_cooldown", &s_sdCd, NULL}, {"self_destruct_rush_range", &s_sdRushRange, NULL}, {"release_every", &s_releaseEvery, NULL}, {"drift_cooldown", &s_driftEvery, NULL},
     {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL},
 };
 static void OptionAfter(const char* name, int changed) { (void)name; (void)changed; }

@@ -64,4 +64,6 @@ static const OpRow kOpRows[] = {
      "Her health, times a Helldiver's."},
     {"stamina_mult", "Body", "Stamina", OP_SLIDER, 0.5f, 6, 0.1f,
      "How long she sprints before the bar empties, times a Helldiver's."},
+    {"hellbomb_on_exhaustion", "Body", "Hellbomb When Exhausted", OP_TOGGLE, 0, 1, 1,
+     "Running her stamina dry sets off a Hellbomb on her. For fun."},
 };
