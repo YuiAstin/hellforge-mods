@@ -51,7 +51,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.14"
+#define VERSION "0.4.15"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -656,6 +656,27 @@ static int InSight(const float cam[3], const float fwd[3], const float q[3], uin
 }
 /* the living enemy nearest her crosshair (within cone degrees, range m, in sight): 1 with *target and at */
 static unsigned g_aimBlocked;
+/* 0.4.15: a foe on the list is still the thing that was put there. The list is never emptied, and an entity's number is
+ * given out again in the next world (the ship, then a mission): a number listed on the ship named her own M-103 in the
+ * mission of 2026-11-23, and Snow Wolf's Eye and the Sinveiler's rockets took it for an enemy. An entry whose entity is
+ * now of another kind is dropped: 96 entries a frame, and the one Aim is about to give. */
+static unsigned g_foesStale;
+static int FoeTrue(int k)
+{
+    uint8_t d[24];
+    uint32_t e = g_foe[k];
+    if (!e || !Descriptor(e, d) || Quad(d) == g_foeRes[k]) return 1;      /* gone ones are left to Alive(), as before */
+    if (g_foesStale++ < 12)
+        Log("a listed enemy's number now names another thing (entity %u: listed as kind %016llx, now %016llx%s): off the list", e, (unsigned long long)g_foeRes[k],
+            (unsigned long long)Quad(d), FriendRes(Quad(d)) ? ", a friend" : "");
+    g_foe[k] = 0;
+    return 0;
+}
+static void FoesTrueFrame(void)
+{
+    static unsigned at;
+    for (int n = 0; n < 96; n++) FoeTrue((int)(at++ % FOES));
+}
 static int Aim(float cone, float range, float at[3], uint32_t* target)
 {
     float cam[3], fwd[3], q[3];
@@ -668,7 +689,7 @@ static int Aim(float cone, float range, float at[3], uint32_t* target)
         uint32_t e = g_foe[k];
         float d, o;
         if (!e || !TargetPos(e, g_foeRes[k], q) || (o = Off(cam, fwd, q, &d)) >= bestOff || d > range) continue;
-        if (!Alive(e)) continue;
+        if (!Alive(e) || !FoeTrue(k)) continue;
         if (!InSight(cam, fwd, q, e)) { g_aimBlocked++; continue; }
         bestOff = o; *target = e; memcpy(at, q, 12);
     }
@@ -2296,6 +2317,7 @@ static void SinnerFrame(void)
     SinPackage();
     GrantFrame();
     SelfDestructFrame();
+    FoesTrueFrame();
     if (!g_sinner) return;
     uint8_t d[24];
     int32_t hp = 0;
