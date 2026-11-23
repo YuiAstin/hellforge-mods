@@ -51,7 +51,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.19"
+#define VERSION "0.4.20"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -982,7 +982,7 @@ static void SelfDestructAdd(const HfApi* api, HfMod* mod)
         st.base = HF_STRATAGEM_EXO45_PATRIOT;
         st.name = "yui/koleda/sinner_self_destruct";
         st.title = "Sinveiler Self-Destruct";
-        st.description = "Orders the Sinveiler to blow itself up with a Hellbomb's blast. A fresh one is dropped where this lands.";
+        st.description = "Koleda's, granted in a mission while her Sinveiler is out: it blows the Sinveiler up with a Hellbomb's blast and drops a fresh one. Picked in a loadout it does nothing.";
         st.code = "RRLLR";
         st.cooldown = 1;
         st.uses = 1;
@@ -995,7 +995,7 @@ static void SelfDestructAdd(const HfApi* api, HfMod* mod)
     fr.base = FRV_STRATAGEM;
     fr.name = "yui/koleda/frv_sinner_self_destruct";
     fr.title = "FRV Sinveiler Self-Destruct";
-    fr.description = "Orders the FRV Sinveiler to blow itself up with a Hellbomb's blast. A fresh one is dropped where this lands.";
+    fr.description = "Koleda's, granted in a mission while her FRV Sinveiler is out: it blows the FRV up with a Hellbomb's blast and drops a fresh one. Picked in a loadout it does nothing.";
     fr.code = "RRLLL";
     fr.cooldown = 1;
     fr.uses = 1;
@@ -1240,6 +1240,23 @@ static void SelfDestructFrame(void)
                 (double)p[1], (double)p[2], hp, r == HF_ACT_REQUESTED ? "requested" : "refused");
         }
         else g_doomed = 0;
+    }
+    /* 0.4.20: HellForge lists every mod stratagem in the selection screen, so either self-destruct can be picked into a
+     * loadout: there it would be a Sinveiler call of its own. Any use it has that she was not granted is taken away. */
+    if (g_inMission && kb_kit_on)
+    {
+        static double swept;
+        if (g_now - swept >= 1)
+        {
+            swept = g_now;
+            uint32_t types[2] = {g_sdType, g_sdFrvType};
+            for (int t = 0; t < 2; t++)
+                if (types[t] && types[t] != g_sdGranted && StratagemUses(types[t]) > 0 && GrantCall(types[t], 0) > 0)
+                {
+                    static unsigned told;
+                    if (told++ < 4) Log("Sinveiler Self-Destruct: stratagem %u was in her loadout: emptied (it is granted while a Sinveiler is out)", types[t]);
+                }
+        }
     }
     if (!s_sdOn || !kb_kit_on) return;
     /* with no Sinveiler out the stratagem has no use left; one out and landed: its one use, after the cooldown */
