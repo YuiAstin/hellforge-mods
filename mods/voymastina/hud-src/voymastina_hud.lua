@@ -88,11 +88,38 @@ local function gfl2_dll(name)
     return p ~= nil and p or nil
 end
 -- "<Kit>: Always Show Cooldowns" on the MODS tab (its own GFL2 KITS HUD entry: each kit's own entry is full)
+pcall(ffi.cdef, [[
+typedef int (*gfl2opt_screen)(unsigned int version);
+typedef int (*gfl2opt_get)(const char *name, double *out);
+]])
+-- the character kits' options screen (HellForge's screens over the game) is there: nothing on the Mod Options Menu,
+-- "Always Show Cooldowns" read from the screen's HUD row once a second
+local function gfl2_screen()
+    if X.screen == nil then
+        local sp, gp = gfl2_dll(X.id .. '_options_screen'), gfl2_dll(X.id .. '_option_get')
+        if not sp then return false end                             -- its DLL not loaded yet, or from before the screen
+        X.screen = ffi.cast('gfl2opt_screen', sp)(1) == 1 and gp ~= nil
+        if X.screen then X.get, X.out = ffi.cast('gfl2opt_get', gp), ffi.new('double[1]') end
+    end
+    return X.screen
+end
 local function gfl2_options(dt)
+    if X.opt_done == 'screen' then
+        X.opt_wait = X.opt_wait - dt
+        if X.opt_wait > 0 then return end
+        X.opt_wait = 1
+        if X.get('hud_cooldowns', X.out) == 1 then X.always = X.out[0] ~= 0 end
+        return
+    end
     if X.opt_done then return end
     X.opt_wait = X.opt_wait - dt
     if X.opt_wait > 0 then return end
     X.opt_wait = 2
+    if gfl2_screen() then
+        X.opt_done = 'screen'
+        log('[' .. X.kit .. ' HUD] the GFL2 Kits HUD rows (cooldowns, the character picker) are on the options screen, not the Mod Options Menu')
+        return
+    end
     local menu = rawget(_G, 'ModOptionsMenu')
     if not menu or menu.api ~= 1 then return end
     X.opt_done = true
@@ -175,6 +202,7 @@ local function gfl2_roster(dt)
     R.wait = R.wait - dt
     if R.wait > 0 then return end
     R.wait = 2
+    if gfl2_screen() then R.done = true return end                  -- the screen's character column picks
     local menu = rawget(_G, 'ModOptionsMenu')
     if not menu or menu.api ~= 1 then return end
     local tp, pp = gfl2_dll(X.id .. '_roster'), gfl2_dll(X.id .. '_pick')

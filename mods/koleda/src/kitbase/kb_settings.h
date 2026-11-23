@@ -36,9 +36,13 @@ KB_VAR const KbOption* kb_options;
 KB_VAR unsigned kb_noptions;
 KB_VAR void (*kb_option_after)(const char* name, int changed);
 
+/* the HUD's "Always Show Cooldowns" (the options screen's HUD row; the Mod Options Menu keeps its own on stable) */
+KB_VAR int kb_hud_cooldowns = 1;
+
 /* One setting by name: clamped to its range; an unknown name does nothing */
 KB_FN void Setting(const char* key, double v)
 {
+    if (!strcmp(key, "hud_cooldowns")) { kb_hud_cooldowns = v >= 0.5; return; }
     for (unsigned n = 0; n < kb_nsettings; n++)
     {
         const KbSetting* s = &kb_settings[n];
@@ -94,6 +98,7 @@ KB_FN void LoadSettings(void)
 KB_FN int OptionGet(const char* name, double* out)
 {
     if (!name || !out) return 0;
+    if (!strcmp(name, "hud_cooldowns")) { *out = kb_hud_cooldowns; return 1; }
     for (unsigned k = 0; k < kb_noptions; k++)
         if (!strcmp(kb_options[k].name, name)) { *out = kb_options[k].f ? (double)*kb_options[k].f : (double)*kb_options[k].i; return 1; }
     for (unsigned k = 0; k < kb_nsettings; k++)

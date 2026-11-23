@@ -833,8 +833,22 @@ KB_FN void KbOptionsTick(void)
 KB_FN void KbOptionsStart_(const HfApi* api, HfMod* mod, const char* id, const char* name, const char* version, const OpRow* rows, int nrows,
                           const unsigned char* icon, int iconSize, unsigned accent, int key)
 {
-    kb_op_rows = rows;
-    kb_op_n = nrows > KB_OP_MAX ? KB_OP_MAX : nrows;
+    /* the kit's rows, and the HUD's own after its main ones (before the Advanced section) */
+    static OpRow all[KB_OP_MAX];
+    int n = 0, put = 0;
+    if (nrows > KB_OP_MAX - 1) nrows = KB_OP_MAX - 1;
+    for (int i = 0; i <= nrows; i++)
+    {
+        if (!put && (i == nrows || rows[i].adv))
+        {
+            all[n++] = (OpRow){"hud_cooldowns", "HUD", "Always Show Cooldowns", OP_TOGGLE, 0, 1, 1,
+                               "Her skills on cooldown stay on screen while the stratagem list is closed.", NULL, 0, OP_LIVE};
+            put = 1;
+        }
+        if (i < nrows) all[n++] = rows[i];
+    }
+    kb_op_rows = all;
+    kb_op_n = n;
     kb_op_id = id;
     kb_op_accent = accent;
     snprintf(kb_op_title, sizeof kb_op_title, "%s", name);

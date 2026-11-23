@@ -39,6 +39,7 @@ kitbase/                 source of truth (header-only)
   kb_roster.h            several kits installed together: the shared roster and the active kit
   kb_options.h           the kits' options screen over the game (HellForge's screens, SDK 17): rows, picker, Off
   hud/bindings.lua       HUD: key bindings (Mod Bindings Menu) the always-show-cooldowns option and the roster picker
+                         (both left off the Mod Options Menu when the options screen is there: its HUD row and character column)
   hud/list.lua           HUD: finding the open stratagem list to sit beside
   ...                    later layers as they are extracted
 mods/<kit>/src/kitbase/  copies, kept in sync by tools/kitbase_sync.py
