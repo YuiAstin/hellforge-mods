@@ -1,0 +1,222 @@
+{
+ "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
+ "when": {},
+ "advanced": [
+  [
+   "grenades_max",
+   "Stacks",
+   "Grenades At Most",
+   "Most Grenade points she holds."
+  ],
+  [
+   "grenade_mult",
+   "Stacks",
+   "Per Grenade",
+   "Each Grenade a stage of Annihilation Directive spends adds this to its damage (0.4: +40%)."
+  ],
+  [
+   "frenzy_start",
+   "Stacks",
+   "Frenzy At Mission Start",
+   "Frenzy stacks she starts a mission with."
+  ],
+  [
+   "frenzy_max",
+   "Stacks",
+   "Frenzy At Most",
+   "Most Frenzy stacks she holds."
+  ],
+  [
+   "frenzy_mult",
+   "Stacks",
+   "Per Frenzy",
+   "A skill that spends a Frenzy stack deals this much more (0.6: +60%)."
+  ],
+  [
+   "mech_range",
+   "Sangvis Ferri",
+   "Range",
+   "Metres: enemies this close count for her damage bonus."
+  ],
+  [
+   "mech_each",
+   "Sangvis Ferri",
+   "Per Enemy",
+   "Each one adds this to her skill damage (0.05: +5%)."
+  ],
+  [
+   "mech_max",
+   "Sangvis Ferri",
+   "At Most",
+   "The most that bonus can be (0.5: +50%)."
+  ],
+  [
+   "mech_hp",
+   "Sangvis Ferri",
+   "Health Share",
+   "Her skill hits add this share of the health of an enemy that is not boss-sized."
+  ],
+  [
+   "mech_taken",
+   "Sangvis Ferri",
+   "Damage Taken Less",
+   "She takes this much less damage (0.3: 30%)."
+  ],
+  [
+   "boss_armour",
+   "Sangvis Ferri",
+   "Boss-Sized From Armour",
+   "Armour this high or above is boss-sized (4: heavy)."
+  ],
+  [
+   "denied_seconds",
+   "Denied Exit",
+   "Protection",
+   "Seconds nothing hurts her after a denied killing hit."
+  ],
+  [
+   "s1_radius",
+   "Annihilation Directive",
+   "Blast Radius",
+   "Metres around each blast its enemies are hit."
+  ],
+  [
+   "s1_window",
+   "Annihilation Directive",
+   "Stage Window",
+   "Seconds the next stage stays open after a hit."
+  ],
+  [
+   "s1_line",
+   "Annihilation Directive",
+   "Line Length",
+   "Metres the line of blasts reaches."
+  ],
+  [
+   "s1_cone",
+   "Annihilation Directive",
+   "Cone Length",
+   "Metres the cone of blasts reaches."
+  ],
+  [
+   "s1_triple",
+   "Annihilation Directive",
+   "Triple Bonus",
+   "An enemy all three stages hit takes this many times the cone's damage more."
+  ],
+  [
+   "s1_haste",
+   "Annihilation Directive",
+   "Haste",
+   "Seconds of faster sprint after a stage that hits."
+  ],
+  [
+   "haste_mult",
+   "Annihilation Directive",
+   "Haste Speed",
+   "Her jog and sprint, times this, during Haste."
+  ],
+  [
+   "s1_stagger_1",
+   "Annihilation Directive",
+   "Line Push",
+   "The line's stagger and push, times the explosion's own."
+  ],
+  [
+   "s1_stagger_2",
+   "Annihilation Directive",
+   "Cone Push",
+   "The cone's stagger and push, times the explosion's own."
+  ],
+  [
+   "s1_shield",
+   "Annihilation Directive",
+   "No Knockdown",
+   "Seconds without knockdown after each stage."
+  ],
+  [
+   "s2_length",
+   "Doom Barrage",
+   "Box Length",
+   "Metres ahead the box reaches."
+  ],
+  [
+   "s2_width",
+   "Doom Barrage",
+   "Box Width",
+   "Metres across."
+  ],
+  [
+   "s2_grenade",
+   "Doom Barrage",
+   "Per Grenade",
+   "Each Grenade spent adds this to its damage (0.2: +20%)."
+  ],
+  [
+   "s2_crit",
+   "Doom Barrage",
+   "Critical",
+   "With 3 or more Grenades spent its damage is times this."
+  ],
+  [
+   "s2_step",
+   "Doom Barrage",
+   "Row Interval",
+   "Seconds between its rows."
+  ],
+  [
+   "s3_width",
+   "Party Time",
+   "Path Width",
+   "Metres across the path its blasts cover."
+  ],
+  [
+   "frenzy_range",
+   "Ammo Frenzy",
+   "Target Range",
+   "Metres: how far the target may be."
+  ],
+  [
+   "frenzy_cone",
+   "Ammo Frenzy",
+   "Aim Cone",
+   "Degrees off her crosshair the target may be."
+  ],
+  [
+   "frenzy_ring",
+   "Ammo Frenzy",
+   "Ring Blasts",
+   "Extra blasts on a ring around the first."
+  ],
+  [
+   "hunting_taken",
+   "Ammo Frenzy",
+   "Hunting Order Damage",
+   "Enemies under Hunting Order take this much more of her damage (0.2: +20%)."
+  ],
+  [
+   "frenzy_refund",
+   "Ammo Frenzy",
+   "Cooldown Refund",
+   "Seconds it takes off her other cooldowns."
+  ],
+  [
+   "leap_climb",
+   "Leaps",
+   "Climb At Most",
+   "Metres higher a leap may land."
+  ],
+  [
+   "leap_drop",
+   "Leaps",
+   "Drop At Most",
+   "Metres lower a leap may land."
+  ]
+ ],
+ "hidden": [
+  "explosion_small",
+  "explosion_big",
+  "hellbomb_explosion",
+  "hellbomb_hold"
+ ]
+}

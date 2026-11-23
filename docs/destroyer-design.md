@@ -112,6 +112,23 @@ Its own key (proposed, as Ascalon's dash got Z) so a full Fang bar never blocks 
   not the row.
 - **The health price:** tuned in play tests (first defaults: 20% and 30%, floor 10%).
 
+## Built (0.1.0, 2026-11-23, not yet played)
+
+`mods/destroyer` on branch `destroyer`. What the first build does differently from the plan above:
+
+- **Solo or host only.** The co-op message path is not in yet (Lemuen's co-op branch is still untested).
+- **Automatons** are told by mission, not by enemy: once one of the Automaton kinds the SDK's catalogue names has
+  spawned, every enemy of that mission counts as mechanical (`mech` 1). `mech` 2 counts every mission, 0 none.
+- **Her blasts' damage** is set in the damage event: an enemy within the skill's radius of a blast is paid once at the
+  skill's damage, the row's other hits on enemies are cancelled, and its hits on anything that is not a known enemy
+  kind (walls, nests) are left as the row's own.
+- **The push** raises the Orbital Precision Strike's own stagger and push for the moment a pushing blast goes off
+  (`s1_stagger_1`, `s1_stagger_2`), then puts them back.
+- **Ammo Frenzy's key** (`key_frenzy`, default B) is read from destroyer.ini only: the options screen and Mod Bindings
+  Menu know three keys.
+- **Not built:** Hunting Order's extra armour piercing, Claw Mark.
+- The mod icon and the four skill icons are placeholders.
+
 ## Still open
 
 - **Telling Automatons from the rest.** By faction record or by a list of their kinds (as the friend list is); to check
