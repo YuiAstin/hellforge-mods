@@ -1,0 +1,101 @@
+{
+ "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
+ "rename": {
+  "own_burn": [
+   "Her Own Burn",
+   "On Armour"
+  ]
+ },
+ "advanced": [
+  [
+   "conf_cast",
+   "Confectance",
+   "Per Skill",
+   "Confectance points each skill she uses gives."
+  ],
+  [
+   "burn_seconds",
+   "Dead End Meltdown",
+   "Counts As Burning",
+   "Seconds an enemy counts as burning after fire on it."
+  ],
+  [
+   "burst_rate",
+   "Dead End Meltdown",
+   "Bursts A Second",
+   "At most this many fire bursts a second in all."
+  ],
+  [
+   "s2_cone",
+   "Portent of Doom",
+   "Aim Cone",
+   "Degrees off her crosshair its target may be."
+  ],
+  [
+   "s2_range",
+   "Portent of Doom",
+   "Range",
+   "Metres: how far its target may be."
+  ],
+  [
+   "s2_buildup",
+   "Portent of Doom",
+   "Fire Build-up",
+   "How hard it sets its target on fire (100: one full hit)."
+  ],
+  [
+   "s3_cone",
+   "Searing Finale",
+   "Aim Cone",
+   "Degrees off her crosshair its target may be."
+  ],
+  [
+   "s3_range",
+   "Searing Finale",
+   "Range",
+   "Metres: how far its target may be."
+  ],
+  [
+   "s3_height",
+   "Searing Finale",
+   "Shell Height",
+   "Metres above the target the shells fall from."
+  ],
+  [
+   "s3_every",
+   "Searing Finale",
+   "Shell Interval",
+   "Seconds between its shells."
+  ],
+  [
+   "s3_refund",
+   "Searing Finale",
+   "Readies Her Other Skills",
+   "It readies Dead End Meltdown and Portent of Doom again."
+  ],
+  [
+   "own_burn_every",
+   "Her Own Burn",
+   "Tick Interval",
+   "Seconds between its ticks."
+  ]
+ ],
+ "hidden": [
+  "fire_status",
+  "fire_buildup",
+  "s1_burst",
+  "s3_shell",
+  "fire_status_1",
+  "fire_status_2",
+  "fire_status_3",
+  "fire_status_4",
+  "fire_element",
+  "fire_pour",
+  "s2_blast",
+  "options_key",
+  "line_of_sight",
+  "first_person",
+  "hellbomb_explosion",
+  "hellbomb_hold"
+ ]
+}

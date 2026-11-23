@@ -1,0 +1,84 @@
+{
+ "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
+ "advanced": [
+  [
+   "ch_gap",
+   "Charging Mode",
+   "Burst Pause",
+   "Seconds: a pause longer than this ends a burst."
+  ],
+  [
+   "ch_spread",
+   "Charging Mode",
+   "Free Round Spread",
+   "Degrees the free rounds spread."
+  ],
+  [
+   "pair_rate",
+   "Shooting Mode",
+   "At Her Fire Rate",
+   "The pair fire at her primary's rate, alternating; off: once every gun interval."
+  ],
+  [
+   "pair_hold",
+   "Shooting Mode",
+   "Keep Firing For",
+   "Seconds the pair keep firing at what she last hit."
+  ],
+  [
+   "pair_primary",
+   "Shooting Mode",
+   "Fire Her Primary's Round",
+   "The pair fire her primary's own round."
+  ],
+  [
+   "every_nearest",
+   "Guns",
+   "Shotgun Interval",
+   "Seconds between the nearest-enemy gun's shots (0: the guns' usual)."
+  ],
+  [
+   "every_armoured",
+   "Guns",
+   "Heavy Gun Interval",
+   "Seconds between the armour hunter's shots (0: the guns' usual)."
+  ],
+  [
+   "every_attacker",
+   "Guns",
+   "Stagger Gun Interval",
+   "Seconds between the attacker gun's shots (0: the guns' usual)."
+  ],
+  [
+   "every_weakest",
+   "Guns",
+   "Finisher Interval",
+   "Seconds between the weakest-enemy gun's shots (0: the guns' usual)."
+  ],
+  [
+   "pellets",
+   "Guns",
+   "Shotgun Pellets",
+   "Pellets in each of the shotgun's shots."
+  ],
+  [
+   "pellet_spread",
+   "Guns",
+   "Shotgun Spread",
+   "Degrees the shotgun's pellets spread."
+  ]
+ ],
+ "hidden": [
+  "round_pair",
+  "round_nearest",
+  "round_armoured",
+  "round_attacker",
+  "round_weakest",
+  "max_rounds",
+  "round_speed",
+  "gun_round",
+  "hellbomb_on_exhaustion",
+  "hellbomb_explosion",
+  "hellbomb_hold"
+ ]
+}

@@ -38,7 +38,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.4"
+#define VERSION "0.3.5"
 
 #include <stdatomic.h>
 /* rounds the mod itself spawned since the shot counter was last read (her guns', her free bursts'): the game counts them

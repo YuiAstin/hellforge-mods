@@ -1,0 +1,93 @@
+{
+ "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
+ "advanced": [
+  [
+   "dash_move",
+   "General",
+   "Dash Follows Movement",
+   "Her dash goes the way she moves; off: always the way she faces."
+  ],
+  [
+   "we_hits",
+   "Wild Extinction",
+   "Hits At Most",
+   "At most this many of her hits are boosted (0: no limit)."
+  ],
+  [
+   "arc_step",
+   "Wild Extinction",
+   "Arc Interval",
+   "Seconds: at most one arc from her hits this often."
+  ],
+  [
+   "arc_rate",
+   "Wild Extinction",
+   "Arcs A Second",
+   "At most this many of her arcs a second in all."
+  ],
+  [
+   "lp_climb",
+   "Leaping Pursuit",
+   "Climb At Most",
+   "Metres higher she may land."
+  ],
+  [
+   "lp_drop",
+   "Leaping Pursuit",
+   "Drop At Most",
+   "Metres lower she may land."
+  ],
+  [
+   "lp_burst_radius",
+   "Leaping Pursuit",
+   "Stun Radius",
+   "Metres: enemies this close to where she left and landed are stunned."
+  ],
+  [
+   "lp_land",
+   "Leaping Pursuit",
+   "Landing Time",
+   "Seconds her landing takes."
+  ],
+  [
+   "lp_reach",
+   "Leaping Pursuit",
+   "Stun Reach",
+   "Metres the landing stun reaches."
+  ],
+  [
+   "hs_pulse_step",
+   "Hunting Strategy",
+   "Zap Interval",
+   "Seconds between its zaps."
+  ],
+  [
+   "hs_stun_every",
+   "Hunting Strategy",
+   "Stun Renewal",
+   "Seconds: a zapped enemy's stun is renewed this often."
+  ],
+  [
+   "hs_arcs_max",
+   "Hunting Strategy",
+   "Arc Blasts At Most",
+   "At most this many arc blasts a zap (the rest are still stunned)."
+  ],
+  [
+   "hs_ci_cap",
+   "Hunting Strategy",
+   "CI Per Cast At Most",
+   "At most this much CI from one cast."
+  ]
+ ],
+ "hidden": [
+  "ems_explosion",
+  "arc_explosion",
+  "arc_blast",
+  "hellbomb_explosion",
+  "hellbomb_hold",
+  "lp_up",
+  "lp_forward",
+  "lp_lift"
+ ]
+}

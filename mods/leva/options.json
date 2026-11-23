@@ -1,0 +1,162 @@
+{
+ "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
+ "advanced": [
+  [
+   "aim_camera",
+   "Arcs",
+   "Follow the Camera",
+   "Her lines and fields follow the camera, where the reticle is; off: her head, smoothed."
+  ],
+  [
+   "aim_smooth",
+   "Arcs",
+   "Aim Smoothing",
+   "Seconds her head's aim is averaged over (with Follow the Camera off)."
+  ],
+  [
+   "arc_reach",
+   "Arcs",
+   "Enemy Reach",
+   "Metres: points with an enemy this close get their arcs first."
+  ],
+  [
+   "lp_climb",
+   "Arcs",
+   "Ground Above",
+   "Metres above her height her arcs look for the ground."
+  ],
+  [
+   "lp_drop",
+   "Arcs",
+   "Ground Below",
+   "Metres below her height her arcs look for the ground."
+  ],
+  [
+   "rs_columns",
+   "Rational Suppression",
+   "Columns",
+   "Points across its field."
+  ],
+  [
+   "rs_rows",
+   "Rational Suppression",
+   "Rows",
+   "Points along its field."
+  ],
+  [
+   "rs_depth",
+   "Rational Suppression",
+   "Depth",
+   "Metres: how deep its field reaches."
+  ],
+  [
+   "rs_sweep",
+   "Rational Suppression",
+   "Sweep Per Column",
+   "Seconds it takes to sweep in each column."
+  ],
+  [
+   "rs_pulse",
+   "Rational Suppression",
+   "Pulse Interval",
+   "Seconds between its pulses."
+  ],
+  [
+   "rs_hold",
+   "Rational Suppression",
+   "Hold Per Pulse",
+   "Seconds each pulse holds the enemies in it."
+  ],
+  [
+   "od_step",
+   "Orderly Disruption",
+   "Arc Interval",
+   "Seconds: at most one arc from her bullets this often."
+  ],
+  [
+   "od_charged",
+   "Orderly Disruption",
+   "On Charged Enemies",
+   "Its arcs deal this many times on charged enemies."
+  ],
+  [
+   "ult_arcs_max",
+   "Quantum Calculation",
+   "Arcs At Most",
+   "At most this many arcs on enemies."
+  ],
+  [
+   "blitz_step",
+   "Superconduct Blitz",
+   "Arc Spacing",
+   "Metres between the arcs along its line."
+  ],
+  [
+   "fs_radius",
+   "The Fox's Scheme",
+   "Radius",
+   "Metres: newly charged enemies this close get Wise Support arcs."
+  ],
+  [
+   "fs_every",
+   "The Fox's Scheme",
+   "Interval",
+   "Seconds its limit counts over."
+  ],
+  [
+   "elite_mult",
+   "Negative Charge",
+   "Her Shots On Charged",
+   "Her shots on charged enemies deal this many times."
+  ],
+  [
+   "pc_every",
+   "Positive Charge",
+   "Heal Interval",
+   "Seconds between its heals."
+  ],
+  [
+   "pc_mult",
+   "Positive Charge",
+   "Arc Damage",
+   "Her arcs on charged enemies, this many times again."
+  ],
+  [
+   "code_max",
+   "Superconduct Code",
+   "Stacks At Most",
+   "The most Code stacks."
+  ],
+  [
+   "link_mult",
+   "Superconduct Code",
+   "Superconduct Link",
+   "Damage times this at full Code."
+  ],
+  [
+   "vz_radius",
+   "Voltage",
+   "Zone Radius",
+   "Metres: each Voltage zone's size."
+  ],
+  [
+   "vz_arm",
+   "Voltage",
+   "Arming Time",
+   "Seconds before a zone can burst."
+  ]
+ ],
+ "hidden": [
+  "arc_grenade",
+  "arc_shell",
+  "arc_explosion",
+  "native_rows",
+  "native_arc",
+  "burst_request",
+  "arc_burst",
+  "arc_chain",
+  "arc_split",
+  "hellbomb_explosion",
+  "hellbomb_hold"
+ ]
+}

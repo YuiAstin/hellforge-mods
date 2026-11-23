@@ -1,0 +1,341 @@
+{
+ "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
+ "when": {
+  "sin_on": "restart",
+  "sin_cooldown": "restart",
+  "sin_uses": "restart"
+ },
+ "advanced": [
+  [
+   "sf_window",
+   "Sirius Fall",
+   "Window",
+   "Seconds Sirius Fall's window lasts."
+  ],
+  [
+   "sf_range",
+   "Sirius Fall",
+   "Range",
+   "Metres: how far its targets may be."
+  ],
+  [
+   "eye_every",
+   "Eye of the White Mastiff",
+   "Blast Interval",
+   "Seconds: at most one Lock On blast on an enemy this often."
+  ],
+  [
+   "eye_immune",
+   "Eye of the White Mastiff",
+   "Untouchable",
+   "Nothing hurts her while it lasts."
+  ],
+  [
+   "drop_radius",
+   "Drop-in",
+   "Radius",
+   "Metres: the nearest enemies this close to where she lands take a blast."
+  ],
+  [
+   "drop_shield",
+   "Drop-in",
+   "Protection At Most",
+   "Seconds at most nothing hurts her while the blasts go off."
+  ],
+  [
+   "pb_points",
+   "Pile Bunker",
+   "Blasts",
+   "Blasts ahead of her lunge."
+  ],
+  [
+   "pb_step",
+   "Pile Bunker",
+   "Blast Spacing",
+   "Metres between those blasts."
+  ],
+  [
+   "pb_climb",
+   "Pile Bunker",
+   "Climb At Most",
+   "Metres higher her lunge may end."
+  ],
+  [
+   "pbp_step",
+   "Charge",
+   "Blast Spacing",
+   "Metres between the charge's blasts."
+  ],
+  [
+   "unshaken",
+   "Mastiff's Pledge",
+   "Never Knocked Down",
+   "Nothing knocks her down."
+  ],
+  [
+   "no_stamina_hits",
+   "Mastiff's Pledge",
+   "Hits Spare Stamina",
+   "Hits on her take none of her stamina."
+  ],
+  [
+   "stab_min_hit",
+   "Stability",
+   "Drain At Least",
+   "A hit drains at least this much Stability."
+  ],
+  [
+   "pp_per",
+   "Predation",
+   "Per Skill",
+   "Predation each skill adds."
+  ],
+  [
+   "pp_ap",
+   "Predation",
+   "Armour Penetration",
+   "Armour penetration her empowered skill's blasts gain."
+  ],
+  [
+   "pp_armor",
+   "Predation",
+   "Her Armour",
+   "Her armour value while it waits (4: heavy)."
+  ],
+  [
+   "pp_armor_equal",
+   "Predation",
+   "Equal Penetration Taken",
+   "Part of a hit taken when its penetration equals her armour."
+  ],
+  [
+   "pp_armor_after",
+   "Predation",
+   "Armour Lasts After",
+   "Seconds her heavy armour holds after the empowered skill."
+  ],
+  [
+   "lp_climb",
+   "Pile Bunker",
+   "Teleport Climb At Most",
+   "Metres higher her teleports may land."
+  ],
+  [
+   "lp_drop",
+   "Pile Bunker",
+   "Teleport Drop At Most",
+   "Metres lower her teleports may land."
+  ],
+  [
+   "sin_on",
+   "Sinbreaker",
+   "Sinbreaker",
+   "Her exosuit stratagem. Stratagems are set up at the game's start."
+  ],
+  [
+   "sin_cooldown",
+   "Sinbreaker",
+   "Cooldown",
+   "Seconds the Sinbreaker's stratagem takes to recharge."
+  ],
+  [
+   "sin_uses",
+   "Sinbreaker",
+   "Uses",
+   "Calls a mission (-1: unlimited)."
+  ],
+  [
+   "mech_lunge",
+   "Sinbreaker",
+   "Lunge",
+   "Metres Pile Bunker's lunge goes in the Sinbreaker."
+  ],
+  [
+   "sin_turn",
+   "Sinbreaker",
+   "Turning",
+   "Its turning, times this."
+  ],
+  [
+   "sin_speed",
+   "Sinbreaker",
+   "Walking Speed",
+   "Its walking, times this."
+  ],
+  [
+   "sin_armor",
+   "Sinbreaker",
+   "Armour",
+   "Its armour value (0: unchanged)."
+  ],
+  [
+   "mpb_on",
+   "Sinbreaker",
+   "Pile Bunker Follow-up",
+   "After Pile Bunker kills a heavily armoured enemy, its key again sends a precision-strike line."
+  ],
+  [
+   "mpb_length",
+   "Sinbreaker",
+   "Follow-up Length",
+   "Metres the line reaches along her aim."
+  ],
+  [
+   "mpb_width",
+   "Sinbreaker",
+   "Follow-up Width",
+   "Metres wide the line is."
+  ],
+  [
+   "mpb_drag",
+   "Sinbreaker",
+   "Follow-up Drags At Most",
+   "Enemies the line drags along."
+  ],
+  [
+   "mpb_hold",
+   "Sinbreaker",
+   "Follow-up Hold",
+   "Seconds the dragged enemies are held."
+  ],
+  [
+   "mpb_delay",
+   "Sinbreaker",
+   "Follow-up Delay",
+   "Seconds after the shield bash the strikes start."
+  ],
+  [
+   "rage_chance",
+   "On Foot",
+   "Rage Chance",
+   "Chance a hit of hers sets off Rage."
+  ],
+  [
+   "rage_seconds",
+   "On Foot",
+   "Rage Duration",
+   "Seconds Rage lasts."
+  ],
+  [
+   "rage_bonus",
+   "On Foot",
+   "Rage Damage",
+   "How much harder her hits are in Rage (0.4: 40%)."
+  ],
+  [
+   "ak_recoil",
+   "On Foot",
+   "Recoil",
+   "Her guns' recoil on foot, times this."
+  ],
+  [
+   "ak_eye_seconds",
+   "On Foot",
+   "Eye Duration",
+   "Seconds Eye of the White Mastiff monitors on foot."
+  ],
+  [
+   "ak_eye_cooldown",
+   "On Foot",
+   "Eye Cooldown",
+   "Seconds before it can be used again."
+  ],
+  [
+   "ak_eye_range",
+   "On Foot",
+   "Eye Range",
+   "Metres: enemies this close are monitored."
+  ],
+  [
+   "ak_eye_bonus",
+   "On Foot",
+   "Eye Damage",
+   "Her hits on monitored enemies deal this much more."
+  ],
+  [
+   "ak_eye_evasion",
+   "On Foot",
+   "Eye Evasion",
+   "Hits on her deal this much less."
+  ],
+  [
+   "overload_max",
+   "On Foot",
+   "Overload At Most",
+   "At this Overload the Eye ends."
+  ],
+  [
+   "overload_seconds",
+   "On Foot",
+   "Overload Penalty Duration",
+   "Seconds her damage stays down after Overload."
+  ],
+  [
+   "overload_penalty",
+   "On Foot",
+   "Overload Penalty",
+   "How much her damage drops after Overload."
+  ],
+  [
+   "howl_targets",
+   "Howl",
+   "Monitored To Howl",
+   "More monitored enemies than this sets off her Howl."
+  ],
+  [
+   "howl_immune",
+   "Howl",
+   "Immune For",
+   "Seconds nothing hurts her after it."
+  ],
+  [
+   "howl_from_control",
+   "Howl",
+   "Count From Control",
+   "After her Sinbreaker is destroyed, the immunity counts from when she can act again."
+  ],
+  [
+   "howl_range",
+   "Howl",
+   "Range",
+   "Metres: the strongest enemy this close gets a railcannon strike."
+  ]
+ ],
+ "hidden": [
+  "sf_explosion",
+  "sa_explosion",
+  "eye_explosion",
+  "drop_explosion",
+  "pb_explosion",
+  "pb_fallback",
+  "rail_explosion",
+  "pbp_explosion",
+  "hellbomb_explosion",
+  "hellbomb_hold",
+  "sin_grant",
+  "sin_loadout",
+  "sin_fallback",
+  "sin_free_base",
+  "mech_any",
+  "mpb_unlock",
+  "mpb_explosion",
+  "mpb_fallback",
+  "howl_explosion",
+  "bare",
+  "bare_damage",
+  "bare_stagger",
+  "bare_ap",
+  "bare_demolition",
+  "bare_speed",
+  "bare_reach",
+  "bare_blast",
+  "bare_blast_every",
+  "bare_bolt",
+  "pbp_distance",
+  "pb_ripple",
+  "dash_move",
+  "ak_zero_test",
+  "ak_ergo",
+  "ak_reload"
+ ]
+}

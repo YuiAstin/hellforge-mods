@@ -217,9 +217,7 @@ KB_FN void OpKeyText(const Key* k, char out[40])
     int vk = k->vk;
     if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) snprintf(name, sizeof name, "%c", vk);
     else if (vk >= VK_F1 && vk <= VK_F24) snprintf(name, sizeof name, "F%d", vk - VK_F1 + 1);
-    else if (vk == VK_MBUTTON) snprintf(name, sizeof name, "Mouse3");
-    else if (vk == VK_XBUTTON1) snprintf(name, sizeof name, "Mouse4");
-    else if (vk == VK_XBUTTON2) snprintf(name, sizeof name, "Mouse5");
+    else if (KbKeyOf(vk)) snprintf(name, sizeof name, "%s", KbKeyOf(vk)->text);   /* Space, Num0, Mouse4 ... */
     else if (vk == VK_SHIFT) snprintf(name, sizeof name, "Shift");
     else if (vk == VK_CONTROL) snprintf(name, sizeof name, "Ctrl");
     else if (vk == VK_MENU) snprintf(name, sizeof name, "Alt");

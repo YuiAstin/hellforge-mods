@@ -1,0 +1,64 @@
+{
+ "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
+ "advanced": [
+  [
+   "dash_move",
+   "General",
+   "Dash Follows Movement",
+   "Her dash goes the way she moves; off: always the way she faces."
+  ],
+  [
+   "ht_seconds",
+   "Hunt Tracking",
+   "Stacks Last",
+   "Seconds after her last stack before Hunt Tracking is lost."
+  ],
+  [
+   "pursuit_hold",
+   "Pursuit",
+   "Bonus Lasts",
+   "Seconds Pursuit Instinct's bonus and speed hold."
+  ],
+  [
+   "ld_step",
+   "Loyal Dash",
+   "Blast Spacing",
+   "Metres between the blasts along her dash."
+  ],
+  [
+   "ld_window",
+   "Loyal Dash",
+   "Protected Window",
+   "Seconds she is protected after it."
+  ],
+  [
+   "lp_climb",
+   "Loyal Dash",
+   "Climb At Most",
+   "Metres higher she may land."
+  ],
+  [
+   "lp_drop",
+   "Loyal Dash",
+   "Drop At Most",
+   "Metres lower she may land."
+  ],
+  [
+   "mist_radius",
+   "Toxic Mist",
+   "Radius",
+   "Metres: each mist zone's size."
+  ],
+  [
+   "bark_radius",
+   "Last Bark",
+   "Ring Radius",
+   "Metres: the ring of gas where she goes down."
+  ]
+ ],
+ "hidden": [
+  "gas_explosion",
+  "hellbomb_explosion",
+  "hellbomb_hold"
+ ]
+}

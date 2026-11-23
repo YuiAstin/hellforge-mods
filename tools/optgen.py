@@ -77,8 +77,13 @@ def rows(kit):
     for r in out:
         if r[1] not in order:
             order.append(r[1])
-    out = [r + (0,) for g in order for r in out if r[1] == g]
     spec = options_spec(kit)
+    # options.json's "rename": a row's group and label on the screen (the Mod Options Menu keeps the HUD's)
+    for name, (g, l) in (spec or {}).get('rename', {}).items():
+        out = [(r[0], g, l) + r[3:] if r[0] == name else r for r in out]
+        if g not in order:
+            order.append(g)
+    out = [r + (0,) for g in order for r in out if r[1] == g]
     if not spec:
         return [r + (0,) for r in out]
     when = {'mission': 'OP_NEXT_MISSION', 'restart': 'OP_RESTART'}

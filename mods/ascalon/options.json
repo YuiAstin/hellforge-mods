@@ -1,0 +1,135 @@
+{
+ "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
+ "advanced": [
+  [
+   "area_max",
+   "Ambusher",
+   "Enemies At Most",
+   "At most this many enemies struck a volley."
+  ],
+  [
+   "area_every",
+   "Ambusher",
+   "Volley Interval",
+   "Seconds: at most one volley this often."
+  ],
+  [
+   "pursuit_slow",
+   "Pursuit",
+   "Slow",
+   "How much a charged hit slows (100: a full dose)."
+  ],
+  [
+   "parry_invuln",
+   "Parry",
+   "Untouchable For",
+   "Seconds nothing hits her after a parry."
+  ],
+  [
+   "parry_behind",
+   "Parry",
+   "Behind By",
+   "Metres behind the attacker she is set."
+  ],
+  [
+   "parry_stun",
+   "Parry",
+   "Stun",
+   "How hard the attacker is stunned."
+  ],
+  [
+   "dash_width",
+   "Dash",
+   "Strike Width",
+   "Metres either side of her path the dash strikes."
+  ],
+  [
+   "e_radius",
+   "Endowment",
+   "Slow Radius",
+   "Metres: enemies this close are slowed."
+  ],
+  [
+   "e_slow",
+   "Endowment",
+   "Slow",
+   "How much each dose slows (twice a second)."
+  ],
+  [
+   "e_spread",
+   "Endowment",
+   "Stack Spread",
+   "Metres: an enemy dying near her marks every enemy this close to it."
+  ],
+  [
+   "d_per_kill",
+   "Descent",
+   "Per Kill",
+   "Seconds each kill near her adds."
+  ],
+  [
+   "d_cap",
+   "Descent",
+   "At Most",
+   "Seconds left at most."
+  ],
+  [
+   "d_grace",
+   "Descent",
+   "Hidden Again After",
+   "Seconds after it before she is hidden again."
+  ],
+  [
+   "mi_slow",
+   "Mortal Interrogation",
+   "Slow Per Stack",
+   "How much each stack slows (100: a full dose)."
+  ],
+  [
+   "forget_every",
+   "Hidden",
+   "Forget Interval",
+   "Seconds: enemies still targeting her forget her this often."
+  ],
+  [
+   "forget_range",
+   "Hidden",
+   "Forget Range",
+   "Metres: enemies this close forget her."
+  ],
+  [
+   "reveal_hold",
+   "Hidden",
+   "Revealed For",
+   "Seconds she stays revealed after an enemy senses her."
+  ],
+  [
+   "noise_window",
+   "Hidden",
+   "Shot Heard Within",
+   "Seconds after her shot an enemy picking her up counts as having heard it."
+  ],
+  [
+   "heard_hold",
+   "Hidden",
+   "Heard For",
+   "Seconds an enemy that heard her keeps her."
+  ],
+  [
+   "gear_rule",
+   "Hidden",
+   "Gear Reveals Her",
+   "With a backpack on or a support weapon in her hands she is not hidden."
+  ]
+ ],
+ "hidden": [
+  "area_round",
+  "melee_key_code",
+  "game_fit",
+  "mi_status",
+  "mi_status_buildup",
+  "hellbomb_on_exhaustion",
+  "hellbomb_explosion",
+  "hellbomb_hold"
+ ]
+}

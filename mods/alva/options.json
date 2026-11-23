@@ -1,0 +1,173 @@
+{
+ "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
+ "advanced": [
+  [
+   "shield_on_cast",
+   "Brumal Barrier",
+   "Shield On Each Skill",
+   "Each skill she uses also shields every ally in range (besides the timed shields)."
+  ],
+  [
+   "conf_every",
+   "Confectance",
+   "Gain Interval",
+   "Seconds: at most one Confectance point from her hits this often."
+  ],
+  [
+   "prep_max",
+   "Confectance",
+   "Battle Prep",
+   "Skills used until the one with the longest cooldown left is ready again (0: off)."
+  ],
+  [
+   "chill_hit",
+   "Freeze",
+   "Chill Per Shot",
+   "Chill (out of 100) each of her shots puts on an enemy."
+  ],
+  [
+   "chill_shot",
+   "Freeze",
+   "Chill Per Interception",
+   "Chill each interception shot puts on an enemy."
+  ],
+  [
+   "chill_burst",
+   "Freeze",
+   "Chill Per EMS Burst",
+   "Chill each of her EMS bursts puts on an enemy."
+  ],
+  [
+   "chill_s3",
+   "Freeze",
+   "Chill Per Nix Requiem Round",
+   "Chill each Nix Requiem round puts on an enemy."
+  ],
+  [
+   "stun_buildup",
+   "Freeze",
+   "Freeze Stun Strength",
+   "How strong the stun is when an enemy freezes."
+  ],
+  [
+   "slow_buildup",
+   "Freeze",
+   "Chill Slow Strength",
+   "How much each chill slows an enemy."
+  ],
+  [
+   "chill_fx",
+   "Freeze",
+   "Chill Bursts",
+   "Every chill also sets off a small EMS burst on the enemy (it stuns too; her allies are spared)."
+  ],
+  [
+   "chill_fx_every",
+   "Freeze",
+   "Chill Burst Interval",
+   "Seconds: at most one chill burst on an enemy this often."
+  ],
+  [
+   "chill_fx_rate",
+   "Freeze",
+   "Chill Bursts A Second",
+   "At most this many chill bursts a second in all."
+  ],
+  [
+   "ally_guard",
+   "Brumal Barrier",
+   "Spare Allies",
+   "A status from her own blasts never lands on an ally."
+  ],
+  [
+   "ems_immune",
+   "Body",
+   "EMS Immune",
+   "No EMS stun on her, from anyone."
+  ],
+  [
+   "s1_range",
+   "Snow Wolf's Heart",
+   "Ally Range",
+   "Metres: an enemy hitting an ally this close to her gets an interception shot."
+  ],
+  [
+   "s1_reach",
+   "Snow Wolf's Heart",
+   "Enemy Reach",
+   "Metres: how far the enemy may be."
+  ],
+  [
+   "s1_every",
+   "Snow Wolf's Heart",
+   "Shot Interval",
+   "Seconds between interception shots."
+  ],
+  [
+   "s2_every",
+   "Frosted Echo",
+   "Burst Interval",
+   "Seconds between its EMS bursts."
+  ],
+  [
+   "s2_spread",
+   "Frosted Echo",
+   "Burst Spread",
+   "Metres its bursts spread apart."
+  ],
+  [
+   "s2_field_radius",
+   "Frosted Echo",
+   "Field Radius",
+   "Metres: the nitrogen field's size."
+  ],
+  [
+   "s2_cone",
+   "Frosted Echo",
+   "Aim Cone",
+   "Degrees off her crosshair its target may be."
+  ],
+  [
+   "s2_range",
+   "Frosted Echo",
+   "Range",
+   "Metres: how far its target may be."
+  ],
+  [
+   "s3_every",
+   "Nix Requiem",
+   "Round Interval",
+   "Seconds between its heavy rounds."
+  ],
+  [
+   "s3_cone",
+   "Nix Requiem",
+   "Aim Cone",
+   "Degrees off her crosshair its target may be."
+  ],
+  [
+   "s3_range",
+   "Nix Requiem",
+   "Range",
+   "Metres: how far its target may be."
+  ]
+ ],
+ "hidden": [
+  "chill_fx_explosion",
+  "ems_shell",
+  "ems_shell_height",
+  "ems_status_1",
+  "ems_status_2",
+  "ems_status_3",
+  "ems_status_4",
+  "ems_explosion_1",
+  "ems_explosion_2",
+  "s1_round",
+  "s2_explosion",
+  "s3_round",
+  "line_of_sight",
+  "first_person",
+  "hellbomb_explosion",
+  "hellbomb_hold"
+ ]
+}

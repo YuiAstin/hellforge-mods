@@ -166,7 +166,40 @@ KB_FN int WielderOf(uint32_t e, uint32_t* by)
     if (!e || !m || !Lookup(m + 24, e, 1048576, &i) || i >= 0x10000 || !(arr = Pointer(m + 56))) return 0;
     return ReadAt(arr + 4u * i, by, 4) && *by;
 }
-/* "Shift+Q", "Ctrl+Alt+F", "F5", "Mouse4", "5", or a Windows virtual-key code ("#81") */
+/* keys by name: what the .ini takes (text, any case) and what the HUD and the options screen show (label) */
+typedef struct KbKeyName { int vk; const char* text; const char* label; } KbKeyName;
+static const KbKeyName kb_key_table[] = {
+    {VK_SPACE, "Space", "Space"}, {VK_TAB, "Tab", "Tab"}, {VK_RETURN, "Enter", "Enter"}, {VK_CAPITAL, "CapsLock", "Caps"},
+    {VK_BACK, "Backspace", "Bksp"}, {VK_INSERT, "Insert", "Ins"}, {VK_DELETE, "Delete", "Del"}, {VK_HOME, "Home", "Home"},
+    {VK_END, "End", "End"}, {VK_PRIOR, "PageUp", "PgUp"}, {VK_NEXT, "PageDown", "PgDn"}, {VK_UP, "Up", "Up"},
+    {VK_DOWN, "Down", "Down"}, {VK_LEFT, "Left", "Left"}, {VK_RIGHT, "Right", "Right"},
+    {VK_NUMPAD0, "Num0", "Num0"}, {VK_NUMPAD1, "Num1", "Num1"}, {VK_NUMPAD2, "Num2", "Num2"}, {VK_NUMPAD3, "Num3", "Num3"},
+    {VK_NUMPAD4, "Num4", "Num4"}, {VK_NUMPAD5, "Num5", "Num5"}, {VK_NUMPAD6, "Num6", "Num6"}, {VK_NUMPAD7, "Num7", "Num7"},
+    {VK_NUMPAD8, "Num8", "Num8"}, {VK_NUMPAD9, "Num9", "Num9"}, {VK_MULTIPLY, "NumMultiply", "Num*"}, {VK_ADD, "NumPlus", "Num+"},
+    {VK_SUBTRACT, "NumMinus", "Num-"}, {VK_DECIMAL, "NumPeriod", "Num."}, {VK_DIVIDE, "NumSlash", "Num/"},
+    {VK_OEM_1, "Semicolon", ";"}, {VK_OEM_PLUS, "Equals", "="}, {VK_OEM_COMMA, "Comma", ","}, {VK_OEM_MINUS, "Minus", "-"},
+    {VK_OEM_PERIOD, "Period", "."}, {VK_OEM_2, "Slash", "/"}, {VK_OEM_3, "Backquote", "`"}, {VK_OEM_4, "LeftBracket", "["},
+    {VK_OEM_5, "Backslash", "\\"}, {VK_OEM_6, "RightBracket", "]"}, {VK_OEM_7, "Quote", "'"},
+    {VK_MBUTTON, "Mouse3", "M3"}, {VK_XBUTTON1, "Mouse4", "M4"}, {VK_XBUTTON2, "Mouse5", "M5"},
+};
+/* an upper-cased token against a name, any case */
+KB_FN int KbKeyIs(const char* upper, const char* name)
+{
+    for (; *upper && *name; upper++, name++) if (*upper != toupper((unsigned char)*name)) return 0;
+    return !*upper && !*name;
+}
+KB_FN int KbKeyByName(const char* upper)
+{
+    for (size_t i = 0; i < sizeof kb_key_table / sizeof kb_key_table[0]; i++) if (KbKeyIs(upper, kb_key_table[i].text)) return kb_key_table[i].vk;
+    return 0;
+}
+KB_FN const KbKeyName* KbKeyOf(int vk)
+{
+    for (size_t i = 0; i < sizeof kb_key_table / sizeof kb_key_table[0]; i++) if (kb_key_table[i].vk == vk) return &kb_key_table[i];
+    return NULL;
+}
+
+/* "Shift+Q", "Ctrl+Alt+F", "F5", "Mouse4", "Space", "Num0", "5", or a Windows virtual-key code ("#81") */
 KB_FN int ParseKey(const char* text, Key* out)
 {
     Key k = {0, 0, ""};
@@ -184,6 +217,7 @@ KB_FN int ParseKey(const char* text, Key* out)
         else if (k.vk) return 0;  /* two main keys */
         else if (n == 1 && ((t[0] >= 'A' && t[0] <= 'Z') || (t[0] >= '0' && t[0] <= '9'))) k.vk = t[0];
         else if (t[0] == 'F' && n <= 3 && atoi(t + 1) >= 1 && atoi(t + 1) <= 24) k.vk = VK_F1 + atoi(t + 1) - 1;
+        else if (KbKeyByName(t)) k.vk = KbKeyByName(t);
         else if (!strcmp(t, "MOUSE4")) k.vk = VK_XBUTTON1;
         else if (!strcmp(t, "MOUSE5")) k.vk = VK_XBUTTON2;
         else if (!strcmp(t, "MOUSE3") || !strcmp(t, "MIDDLEMOUSE")) k.vk = VK_MBUTTON;
@@ -202,6 +236,7 @@ KB_FN int ParseKey(const char* text, Key* out)
     char name[24];
     if ((k.vk >= 'A' && k.vk <= 'Z') || (k.vk >= '0' && k.vk <= '9')) snprintf(name, sizeof name, "%c", k.vk);
     else if (k.vk >= VK_F1 && k.vk <= VK_F24) snprintf(name, sizeof name, "F%d", k.vk - VK_F1 + 1);
+    else if (KbKeyOf(k.vk)) snprintf(name, sizeof name, "%s", KbKeyOf(k.vk)->label);
     else if (k.vk == VK_XBUTTON1) snprintf(name, sizeof name, "M4");
     else if (k.vk == VK_XBUTTON2) snprintf(name, sizeof name, "M5");
     else if (k.vk == VK_MBUTTON) snprintf(name, sizeof name, "M3");

@@ -1,0 +1,69 @@
+{
+ "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
+ "advanced": [
+  [
+   "heal_limbs",
+   "Trait",
+   "Heals Mend Limbs",
+   "Each heal also mends every injured limb in full."
+  ],
+  [
+   "chosen_delay",
+   "The Chosen One",
+   "Free Round Delay",
+   "Seconds after the shot its free round fires."
+  ],
+  [
+   "chosen_spread",
+   "The Chosen One",
+   "Free Round Spread",
+   "Degrees the free round's pellets spread."
+  ],
+  [
+   "area_pellets",
+   "Area Rounds",
+   "Pellets At Most",
+   "At most this many of his gun's pellets in each area round (0: all)."
+  ],
+  [
+   "s2_dodge_dot",
+   "Close Combat",
+   "Dodge Damage Over Time",
+   "Its dodge can negate damage over time too."
+  ],
+  [
+   "s3_step",
+   "Damnatus Ex Foedere",
+   "Per Round Spent",
+   "Its damage grows by this for each round spent."
+  ],
+  [
+   "s3_stacks",
+   "Damnatus Ex Foedere",
+   "Rounds At Most",
+   "That growth stops after this many rounds."
+  ],
+  [
+   "s3_every",
+   "Damnatus Ex Foedere",
+   "Blast Interval",
+   "Seconds between the blasts on the enemies it hit when it ends."
+  ],
+  [
+   "numbers_at",
+   "Damage Numbers",
+   "Shown From",
+   "A number shows over hits his skills raised this many times or more (0: every hit)."
+  ]
+ ],
+ "hidden": [
+  "shot_gap",
+  "free_round_fallback",
+  "max_rounds",
+  "no_projectile_round",
+  "s3_explosion",
+  "hellbomb_on_exhaustion",
+  "hellbomb_explosion",
+  "hellbomb_hold"
+ ]
+}
