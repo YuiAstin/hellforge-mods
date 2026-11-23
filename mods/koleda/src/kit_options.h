@@ -193,3 +193,4 @@ static const OpRow kOpRows[] = {
     {"drift_gap", "Drift", "Ring Gap", OP_SLIDER, 0, 2, 0.01f,
      "Seconds between the waves.", NULL, 1, OP_LIVE},
 };
+static const char* const kOpKeyLabels[3] = {"Snow Wolf's Eye", "Tactical Routebook", "Spectre"};

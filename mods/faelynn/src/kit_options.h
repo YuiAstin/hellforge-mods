@@ -65,3 +65,4 @@ static const OpRow kOpRows[] = {
     {"bark_damage", "Last Bark", "Gas Damage", OP_FIELD, 0, 5000, 100,
      "Least damage each hit of her dying gas deals. 0: the gas's own."},
 };
+static const char* const kOpKeyLabels[3] = {"Triple Maul", "Knife-Eared Hunt", "Loyal Dash"};

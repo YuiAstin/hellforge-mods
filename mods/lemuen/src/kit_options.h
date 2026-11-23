@@ -31,3 +31,4 @@ static const OpRow kOpRows[] = {
     {"stamina_mult", "Body", "Stamina", OP_SLIDER, 0.5f, 6, 0.1f,
      "How long she sprints before the bar empties, times a Helldiver's."},
 };
+static const char* const kOpKeyLabels[3] = {"Salve Etiam", "Honesta Missio", "Memento Mori"};

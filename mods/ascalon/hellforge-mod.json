@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.ascalon",
   "name": "Ascalon",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "icon": "icon.png",
   "description": "Ascalon's kit from Arknights for your Helldiver. Hidden until she makes noise: enemies see her far less and forget her, half the hits on her miss, and her body and gear shimmer out of sight. Ambusher: every hit of hers also strikes every enemy within 15 m. Mortal Interrogation: her hits mark enemies (3 stacks, 25 s) with a bleed every second that goes through armour, and a slow. Pursuit (by itself, 3 charges): 210%, lands twice, slows. Endowment (X): 35 s of +130% damage, enemies around her slowed, kills spread marks. Descent (C): she steps out of hiding, no hit on her lands, +50% damage, a wider reach, faster swings, each kill extends it. Parry: with a melee weapon in hand, a right-click just before a hit nulls it, puts her behind the attacker and counters. Dash (Z): through the enemies in the way, striking them. With a backpack on or a support weapon in hand she is not hidden. Solo or host. Keys in ascalon.ini or the game's binding pages; numbers on the MODS tab (Mod Options Menu). The look, the skill panel and the damage numbers need Bingus Shared Loader and HD2Runtime. No character model included.",
   "gameplay": true,

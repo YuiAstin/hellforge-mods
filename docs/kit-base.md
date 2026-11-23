@@ -188,7 +188,11 @@ buttons. At the right, the characters with their mod icons and an Off; a click p
   player may change, with its group, label and tip, and the ones left off the screen (`hidden`: projectile and explosion
   ids, probes, physics workarounds, diagnostics). Every setting of the kit's settings table must be on the screen, advanced
   or hidden: `optgen.py` stops and names the rest. `when` marks a setting that takes effect only at the next mission or
-  after a restart; the screen says so beside it. Keys are not on the screen yet. Koleda's is the first (0.4.16).
+  after a restart; the screen says so beside it. Koleda's is the first (0.4.16).
+- Her three skill keys head the list (every kit): click the box, press the key (Shift, Ctrl or Alt held for a combo;
+  Mouse3/4/5). Another of her skills' keys is swapped; F5, F8 and the screen's own key are refused; a key the game uses
+  too is allowed with a note. Saved like the other choices (`key_s1 = Shift+Q`). The rows' names are the HUD's skill
+  names (optgen.py; Ascalon's first key is her dash). Mod Bindings Menu bindings are separate and keep working.
 - Nothing is drawn or called on the game thread's behalf from the render thread: changes wait and `KbOptionsTick` sets
   them. Choices are saved to `%LOCALAPPDATA%\HellForgeMods\<kit>.ini` at the screen's close, the pick to `kits.ini`.
 - A kit on the screen answers 1 from `<kit>_options_screen(1)`, and its HUD then leaves its rows off the Mod Options Menu.

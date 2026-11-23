@@ -45,8 +45,12 @@ KB_VAR int g_opOn;                     /* this kit's rows are in the hub */
 KB_FN int KbOptionsOn(void);           /* and a screen shows them: its HUD then leaves its rows off the Mod Options Menu */
 #define KB_OPTIONS_EXPORTS(kit) HF_MOD_EXPORT int kit##_options_screen(unsigned version) { return version == 1 && KbOptionsOn(); }
 
+/* her three skill keys' names on the screen: kOpKeyLabels, from kit_options.h (tools/optgen.py: the HUD's skill names) */
+KB_VAR const char* const* kb_op_keys;
+#define KbOptionsStart(...) do { kb_op_keys = kOpKeyLabels; KbOptionsStart_(__VA_ARGS__); } while (0)
+
 #ifndef HF_SCREEN_MODAL
-KB_FN void KbOptionsStart(const HfApi* api, HfMod* mod, const char* id, const char* name, const char* version, const OpRow* rows, int nrows,
+KB_FN void KbOptionsStart_(const HfApi* api, HfMod* mod, const char* id, const char* name, const char* version, const OpRow* rows, int nrows,
                           const unsigned char* icon, int iconSize, unsigned accent, int key)
 {
     api->log(mod, "options screen: built without screens over the game (SDK 17); the numbers stay on the MODS tab");
@@ -192,8 +196,114 @@ KB_FN void OpKitsSave(const char* id)
 
 /* ---- loading and saving ----------------------------------------------------------------------------------------- */
 /* after the kit's .ini: its values kept as each row's reset, then the screen's saved choices */
+/* ---- her three skill keys (s_keys, kb_key_names: kb_settings.h) ----------------------------------------------------
+ * A row each at the top of her list: click it, press the key (with Shift, Ctrl or Alt for a combo; Mouse3, Mouse4 or
+ * Mouse5 too). The render thread asks (g_opKeyWant), KbOptionsTick sets s_keys on the game thread, and a key that differs
+ * from the .ini's is saved like the other choices, as the .ini writes it (key_s1 = Shift+Q). A key another of her skills
+ * has is swapped with it. F5 and F8 (HellForge's) and this screen's own key are refused. */
+KB_VAR float g_opScroll, g_opT;
+KB_VAR Key g_opKeyIni[3], g_opKeyWant[3];
+KB_VAR atomic_uint g_opKeyDirty[3];
+KB_VAR int g_opKeyEdit = -1, g_opKeyHeld, g_opKeyX1, g_opKeyX2;
+KB_VAR char g_opKeyMsg[160];
+KB_VAR float g_opKeyMsgUntil;
+KB_FN int OpKeys(void) { int n = 0; while (n < 3 && kb_key_names[n]) n++; return n; }
+KB_FN int OpKeySame(const Key* a, const Key* b) { return a->vk == b->vk && a->mods == b->mods; }
+KB_FN Key OpKeyShown(int k) { return atomic_load(&g_opKeyDirty[k]) ? g_opKeyWant[k] : s_keys[k]; }
+/* as the .ini writes it: ParseKey reads it back */
+KB_FN void OpKeyText(const Key* k, char out[40])
+{
+    char name[16];
+    int vk = k->vk;
+    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) snprintf(name, sizeof name, "%c", vk);
+    else if (vk >= VK_F1 && vk <= VK_F24) snprintf(name, sizeof name, "F%d", vk - VK_F1 + 1);
+    else if (vk == VK_MBUTTON) snprintf(name, sizeof name, "Mouse3");
+    else if (vk == VK_XBUTTON1) snprintf(name, sizeof name, "Mouse4");
+    else if (vk == VK_XBUTTON2) snprintf(name, sizeof name, "Mouse5");
+    else if (vk == VK_SHIFT) snprintf(name, sizeof name, "Shift");
+    else if (vk == VK_CONTROL) snprintf(name, sizeof name, "Ctrl");
+    else if (vk == VK_MENU) snprintf(name, sizeof name, "Alt");
+    else snprintf(name, sizeof name, "#%d", vk);
+    snprintf(out, 40, "%s%s%s%s", k->mods & KM_CTRL ? "Ctrl+" : "", k->mods & KM_ALT ? "Alt+" : "", k->mods & KM_SHIFT ? "Shift+" : "", name);
+}
+/* a key the game itself answers to, unmodified: the game does both */
+KB_FN const char* OpGameKey(const Key* k)
+{
+    if (k->mods) return NULL;
+    switch (k->vk)
+    {
+    case 'W': case 'A': case 'S': case 'D': return "to move";
+    case 'R': return "to reload";
+    case 'E': return "to interact";
+    case 'F': return "for the flashlight and melee";
+    case 'G': return "to throw";
+    case VK_SPACE: return "to jump and dive";
+    case VK_SHIFT: return "to sprint";
+    case VK_CONTROL: return "for stratagems";
+    case VK_TAB: return "for the map";
+    case '1': case '2': case '3': case '4': return "for weapons";
+    }
+    return NULL;
+}
+KB_FN void OpKeyAsk(int k, Key key)
+{
+    Key was = OpKeyShown(k);
+    char a[40], b[40];
+    g_opKeyMsg[0] = 0;
+    for (int j = 0; j < OpKeys(); j++)
+    {
+        Key other = OpKeyShown(j);
+        if (j == k || !OpKeySame(&other, &key)) continue;
+        g_opKeyWant[j] = was;
+        atomic_store(&g_opKeyDirty[j], 1);
+        OpKeyText(&key, a); OpKeyText(&was, b);
+        snprintf(g_opKeyMsg, sizeof g_opKeyMsg, "%s was on %s: swapped, it is on %s now.", a, kb_op_keys && kb_op_keys[j] ? kb_op_keys[j] : kb_key_names[j], b);
+    }
+    g_opKeyWant[k] = key;
+    atomic_store(&g_opKeyDirty[k], 1);
+    const char* game = OpGameKey(&key);
+    if (game && !g_opKeyMsg[0]) { OpKeyText(&key, a); snprintf(g_opKeyMsg, sizeof g_opKeyMsg, "The game uses %s %s too: a press does both.", a, game); }
+    g_opKeyMsgUntil = g_opT + 5;
+}
+/* capturing: the next key pressed (or a modifier let go alone) is the key */
+KB_FN void OpKeyCapture(const HfInput* in)
+{
+    int k = g_opKeyEdit, vk = 0, cancel = 0;
+    int mods = ((GetAsyncKeyState(VK_SHIFT) & 0x8000) ? KM_SHIFT : 0) | ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? KM_CTRL : 0) |
+               ((GetAsyncKeyState(VK_MENU) & 0x8000) ? KM_ALT : 0);
+    for (uint32_t i = 0; i < in->key_count && i < 16; i++)
+    {
+        uint32_t key = in->keys[i];
+        if (key == VK_BACK || key == VK_ESCAPE) cancel = 1;
+        else if (key == VK_SHIFT || key == VK_LSHIFT || key == VK_RSHIFT) g_opKeyHeld = VK_SHIFT;
+        else if (key == VK_CONTROL || key == VK_LCONTROL || key == VK_RCONTROL) g_opKeyHeld = VK_CONTROL;
+        else if (key == VK_MENU || key == VK_LMENU || key == VK_RMENU) g_opKeyHeld = VK_MENU;
+        else if (key > VK_XBUTTON2) vk = (int)key;
+    }
+    if (in->pressed & HF_MOUSE_MIDDLE) vk = VK_MBUTTON;
+    int x1 = (GetAsyncKeyState(VK_XBUTTON1) & 0x8000) != 0, x2 = (GetAsyncKeyState(VK_XBUTTON2) & 0x8000) != 0;
+    if (x1 && !g_opKeyX1) vk = VK_XBUTTON1;
+    if (x2 && !g_opKeyX2) vk = VK_XBUTTON2;
+    g_opKeyX1 = x1; g_opKeyX2 = x2;
+    if (!vk && g_opKeyHeld && !(GetAsyncKeyState(g_opKeyHeld) & 0x8000)) { vk = g_opKeyHeld; mods = 0; }   /* a modifier alone */
+    if (cancel) { g_opKeyEdit = -1; g_opKeyHeld = 0; return; }
+    if (!vk) return;
+    g_opKeyEdit = -1;
+    g_opKeyHeld = 0;
+    Key key;
+    char t[48];
+    Key probe = {vk, mods, ""};
+    OpKeyText(&probe, t);
+    if (vk == VK_F5 || vk == VK_F8) snprintf(g_opKeyMsg, sizeof g_opKeyMsg, "F5 and F8 are HellForge's: pick another key.");
+    else if (vk == g_opKey) snprintf(g_opKeyMsg, sizeof g_opKeyMsg, "%s opens this screen: pick another key.", t);
+    else if (!ParseKey(t, &key)) snprintf(g_opKeyMsg, sizeof g_opKeyMsg, "That key cannot be used: pick another.");
+    else { OpKeyAsk(k, key); return; }
+    g_opKeyMsgUntil = g_opT + 5;
+}
+
 KB_FN void OpLoad(void)
 {
+    for (int k = 0; k < OpKeys(); k++) g_opKeyIni[k] = s_keys[k];
     for (int i = 0; i < kb_op_n; i++)
     {
         g_opIni[i] = OpNow(i);
@@ -221,6 +331,10 @@ KB_FN void OpLoad(void)
             if (!eq) continue;
             *eq = 0;
             if (sscanf(line, " %63s", key) != 1) continue;
+            int isKey = 0;
+            for (int k = 0; k < OpKeys(); k++)
+                if (!strcmp(key, kb_key_names[k])) { Key p; isKey = 1; if (ParseKey(eq + 1, &p)) { s_keys[k] = p; s_badKey &= ~(1 << k); got++; } }
+            if (isKey) continue;
             double v = strtod(eq + 1, &end);
             if (end == eq + 1) continue;
             for (int i = 0; i < kb_op_n; i++) if (!strcmp(key, kb_op_rows[i].name)) { Setting(key, v); got++; break; }
@@ -248,6 +362,7 @@ KB_FN void OpSave(void)
     if (!g_opPath[0]) return;
     int n = 0;
     for (int i = 0; i < kb_op_n; i++) if (fabs(OpNow(i) - g_opIni[i]) > 1e-6) n++;
+    for (int k = 0; k < OpKeys(); k++) if (!OpKeySame(&s_keys[k], &g_opKeyIni[k])) n++;
     static int had = -1;
     if (had < 0) { FILE* t = fopen(g_opPath, "r"); had = t != NULL; if (t) fclose(t); }
     if (!n && !had) return;            /* nothing chosen, and no file to bring up to date */
@@ -257,13 +372,14 @@ KB_FN void OpSave(void)
     fprintf(o, "; %s: the options screen's choices (read after the mod's %s). Delete this file to go back to it.\n", kb_op_title, kb_ini);
     for (int i = 0; i < kb_op_n; i++)
         if (fabs(OpNow(i) - g_opIni[i]) > 1e-6) fprintf(o, "%s = %g\n", kb_op_rows[i].name, OpNow(i));
+    for (int k = 0; k < OpKeys(); k++)
+        if (!OpKeySame(&s_keys[k], &g_opKeyIni[k])) { char t[40]; OpKeyText(&s_keys[k], t); fprintf(o, "%s = %s\n", kb_key_names[k], t); }
     fclose(o);
     had = 1;
     Log("options screen: %d choice(s) saved to %s", n, g_opPath);
 }
 
 /* ---- this kit's rows (called by the screen's owner, on the render thread) --------------------------------------- */
-KB_VAR float g_opScroll, g_opT;
 KB_VAR int g_opDrag = -1, g_opSel = -1;
 KB_VAR int g_opEdit = -1;              /* the field being typed in */
 KB_VAR char g_opText[16];
@@ -304,7 +420,7 @@ KB_FN void OpBody(const HfDraw* d, const HfInput* in, float dt, const KbOpBox* b
     const int firstAdv = OpFirstAdv(), hasAdv = firstAdv < kb_op_n;
     const int N = g_opAdvOpen ? kb_op_n : firstAdv;   /* the rows shown */
     KbOpHub* hub = kb_ophub;
-    if (hub && hub->opens != g_opOpens) { g_opOpens = hub->opens; g_opDrag = -1; g_opEdit = -1; g_opT = 0; }
+    if (hub && hub->opens != g_opOpens) { g_opOpens = hub->opens; g_opDrag = -1; g_opEdit = -1; g_opKeyEdit = -1; g_opT = 0; g_opKeyMsgUntil = 0; }
     g_opT += dt;
     float a = box->alpha;
     uint32_t A = (uint32_t)(a * 255);
@@ -325,11 +441,16 @@ KB_FN void OpBody(const HfDraw* d, const HfInput* in, float dt, const KbOpBox* b
     float content = 0;
     for (int i = 0; i < N; i++) content += rowH + (OpHead(i) ? headH : 0);
     if (hasAdv) content += advH;
+    const int nkeys = OpKeys();
+    const float keysH = nkeys ? headH + nkeys * rowH : 0;
+    content += keysH;
+    const int capturing = g_opKeyEdit >= 0;
+    if (capturing) OpKeyCapture(in);
     float maxScroll = content - (bottom - top);
     if (maxScroll < 0) maxScroll = 0;
     if (in->x < x1) g_opScroll -= in->wheel * rowH * 2;
     int keyMoved = 0;
-    for (uint32_t k = 0; k < in->key_count; k++)
+    for (uint32_t k = 0; !capturing && k < in->key_count; k++)   /* a key being bound takes the keys */
     {
         uint32_t key = in->keys[k];
         if (g_opEdit >= 0)
@@ -367,6 +488,7 @@ KB_FN void OpBody(const HfDraw* d, const HfInput* in, float dt, const KbOpBox* b
     if (keyMoved && g_opSel >= 0)
     {
         float y = 0;
+        y += keysH;
         for (int i = 0; i <= g_opSel; i++) { if (hasAdv && i == firstAdv) y += advH; if (OpHead(i)) y += headH; if (i < g_opSel) y += rowH; }
         if (y - headH < g_opScroll) g_opScroll = y - headH;
         if (y + rowH > g_opScroll + (bottom - top)) g_opScroll = y + rowH - (bottom - top);
@@ -376,7 +498,42 @@ KB_FN void OpBody(const HfDraw* d, const HfInput* in, float dt, const KbOpBox* b
 
     d->clip_push(x0 + 2, top, x1 - 2, bottom);
     float y = top - g_opScroll;
-    int overAdv = 0;
+    int overAdv = 0, overKey = -1, clickedKey = 0;
+    /* her keys first: a row each, its key in a box; click the box, then press the key */
+    if (nkeys)
+    {
+        if (y + headH > top && y < bottom)
+        {
+            d->text(lx - 16, y + headH * 0.58f, "Keys", 22, HF_FACE_TITLE, HF_ALIGN_LEFT, yellow);
+            d->rect(lx - 16, y + headH - 5, x1 - 28, y + headH - 3, HF_RGBA(255, 232, 0, (uint32_t)(70 * a)), 0, 0);
+        }
+        y += headH;
+        for (int k = 0; k < nkeys; k++, y += rowH)
+        {
+            if (y + rowH <= top || y >= bottom) continue;
+            const float cy = y + rowH / 2, bx1 = vx, bx0 = vx - 238, by0 = cy - 17, by1 = cy + 17;
+            int over = inList && g_opDrag < 0 && in->y >= y && in->y < y + rowH, overBox = over && OpIn(in, bx0, by0, bx1, by1), editing = g_opKeyEdit == k;
+            if (over) overKey = k;
+            if (over || editing) d->rect(x0 + 14, y + 2, x1 - 14, y + rowH - 2, HF_RGBA(255, 255, 255, (uint32_t)(22 * a)), 0, 0);
+            Key shown = OpKeyShown(k);
+            int changed = !OpKeySame(&shown, &g_opKeyIni[k]);
+            d->text(lx, cy, kb_op_keys && kb_op_keys[k] ? kb_op_keys[k] : kb_key_names[k], 22, HF_FACE_BODY, HF_ALIGN_LEFT, white);
+            d->rect(bx0, by0, bx1, by1, HF_RGBA(24, 26, 28, A), editing ? yellow : overBox ? white : grey, 2);
+            if (editing) d->text((bx0 + bx1) / 2, cy, fmodf(g_opT, 1.0f) < 0.6f ? "PRESS A KEY" : "", 19, HF_FACE_TITLE, HF_ALIGN_CENTRE, yellow);
+            else d->text((bx0 + bx1) / 2, cy, shown.label, 22, HF_FACE_TITLE, HF_ALIGN_CENTRE, changed ? yellow : white);
+            if (overBox && click && !capturing)
+            {
+                OpEditCommit();
+                g_opKeyEdit = k; g_opKeyHeld = 0;
+                g_opKeyX1 = (GetAsyncKeyState(VK_XBUTTON1) & 0x8000) != 0; g_opKeyX2 = (GetAsyncKeyState(VK_XBUTTON2) & 0x8000) != 0;
+                g_opKeyMsgUntil = 0;
+                clickedKey = 1;
+            }
+            if (over && (in->pressed & HF_MOUSE_RIGHT)) { if (editing) g_opKeyEdit = -1; OpKeyAsk(k, g_opKeyIni[k]); g_opKeyMsgUntil = 0; }
+        }
+    }
+    else y += keysH;
+    if (capturing && click && !clickedKey) g_opKeyEdit = -1;   /* a click elsewhere: no new key */
     for (int i = 0; i <= N; i++)
     {
         /* the Advanced section's bar: before its first row, open or closed */
@@ -506,6 +663,11 @@ KB_FN void OpBody(const HfDraw* d, const HfInput* in, float dt, const KbOpBox* b
     int tipRow = hover >= 0 ? hover : g_opDrag >= 0 ? g_opDrag : g_opEdit >= 0 ? g_opEdit : g_opSel;
     if (tipRow >= N) tipRow = -1;
     if (!tip && tipRow >= 0) tip = rows[tipRow].tip;
+    if (overKey >= 0 && !box->tip)
+        tip = "Click the box, then press the key. Picking another of her skills' keys swaps the two. Right click: back to the .ini's key.";
+    if (g_opKeyEdit >= 0 && !box->tip)
+        tip = "Press the key for it: a letter, digit, F1-F24 or Mouse3/4/5, with Shift, Ctrl or Alt held for a combo. Backspace or a click elsewhere: no change.";
+    if (g_opKeyMsg[0] && g_opT < g_opKeyMsgUntil) tip = g_opKeyMsg;
     if (!tip && overAdv)
         tip = g_opAdvOpen ? "The rest of her settings from the .ini. Saved the same way; right click puts one back."
                           : "The rest of her settings from the .ini: finer numbers for her skills and her Sinveiler. Leave them be unless you want to tune her.";
@@ -643,6 +805,15 @@ KB_FN void KbOptionsTick(void)
     if (closed) { g_opCloses = closes; OpEditCommit(); }
     for (int i = 0; i < kb_op_n; i++)
         if (atomic_load(&g_opDirty[i])) { OptionSet(kb_op_rows[i].name, atomic_load(&g_opWant[i])); atomic_store(&g_opDirty[i], 0); }
+    for (int k = 0; k < OpKeys(); k++)
+        if (atomic_load(&g_opKeyDirty[k]))
+        {
+            Key was = s_keys[k];
+            s_keys[k] = g_opKeyWant[k];
+            s_badKey &= ~(1 << k);
+            atomic_store(&g_opKeyDirty[k], 0);
+            if (!OpKeySame(&was, &s_keys[k])) Log("key %s: %s -> %s (options)", kb_key_names[k], was.label, s_keys[k].label);
+        }
     if (closed) OpSave();
     if (!g_opOwner) return;
     int want = atomic_exchange(&g_opPickWant, -1);
@@ -661,7 +832,7 @@ KB_FN void KbOptionsTick(void)
 }
 
 /* at init, after the settings: this kit's rows join the hub, and the screen is added by the first kit that may */
-KB_FN void KbOptionsStart(const HfApi* api, HfMod* mod, const char* id, const char* name, const char* version, const OpRow* rows, int nrows,
+KB_FN void KbOptionsStart_(const HfApi* api, HfMod* mod, const char* id, const char* name, const char* version, const OpRow* rows, int nrows,
                           const unsigned char* icon, int iconSize, unsigned accent, int key)
 {
     kb_op_rows = rows;

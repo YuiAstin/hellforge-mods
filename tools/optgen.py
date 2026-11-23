@@ -130,6 +130,32 @@ def settings_table(kit):
     return out
 
 
+# which of the HUD's skill names (NAMES, 1-based) each of the kit's three keys (s_keys[0..2]) fires
+KEY_SKILLS = {'ascalon': (3, 1, 2)}
+SMALL = {'of', 'the', 'ex', 'a', 'an', 'and', 'to', 'for', 'in', 'on'}
+
+
+def nice(name):
+    words = re.split(r'([ -])', name.lower())
+    out = []
+    for i, w in enumerate(words):
+        out.append(w if (w in SMALL and i) or w in (' ', '-') else w[:1].upper() + w[1:])
+    return ''.join(out)
+
+
+def key_labels(kit):
+    spec = options_spec(kit) or {}
+    if 'keys' in spec:
+        return spec['keys']
+    text = open(os.path.join(ROOT, 'mods', kit, 'hud-src', kit + '_hud.lua'), encoding='utf-8').read()
+    m = re.search(r'^local NAMES = (\{[^\n]*\})', text, re.M)
+    if not m:
+        return [None, None, None]
+    t = lupa.LuaRuntime(unpack_returned_tuples=True).eval(m.group(1))
+    names = [t[i] for i in sorted(t.keys())]
+    return [nice(names[n - 1]) for n in KEY_SKILLS.get(kit, (1, 2, 3))]
+
+
 def rows_text(kit):
     lines = ['/* %s: the options screen\'s rows. Written by tools/optgen.py from hud-src/%s_hud.lua (OPTIONS) and options.json: edit those, then run it. */' % (kit, kit),
              'static const OpRow kOpRows[] = {']
@@ -141,6 +167,7 @@ def rows_text(kit):
             tail += ', %d, %s' % (adv, when or 'OP_LIVE')
         lines.append('    {%s, %s, %s, %s, %s, %s, %s,\n     %s%s},' % (cstr(name), cstr(group), cstr(label), kind, num(lo), num(hi), num(step), cstr(tip), tail))
     lines.append('};')
+    lines.append('static const char* const kOpKeyLabels[3] = {%s};' % ', '.join(cstr(n) if n else 'NULL' for n in key_labels(kit)))
     return '\n'.join(lines) + '\n'
 
 

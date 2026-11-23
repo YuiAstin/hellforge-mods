@@ -63,3 +63,4 @@ static const OpRow kOpRows[] = {
     {"hellbomb_on_exhaustion", "Body", "Hellbomb When Exhausted", OP_TOGGLE, 0, 1, 1,
      "Running her stamina dry sets off a Hellbomb on her. For fun."},
 };
+static const char* const kOpKeyLabels[3] = {"Sirius Fall", "Eye of the White Mastiff", "Pile Bunker"};

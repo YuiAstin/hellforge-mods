@@ -65,3 +65,4 @@ static const OpRow kOpRows[] = {
     {"steady", "Body", "Never Knocked Down", OP_TOGGLE, 0, 1, 1,
      "She is never knocked down or ragdolled."},
 };
+static const char* const kOpKeyLabels[3] = {"Rational Suppression", "Orderly Disruption", "Quantum Calculation"};
