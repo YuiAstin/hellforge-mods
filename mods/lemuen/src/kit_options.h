@@ -1,4 +1,4 @@
-/* lemuen: the options screen's rows. Written by tools/optgen.py from hud-src/lemuen_hud.lua (OPTIONS): edit that, then run it. */
+/* lemuen: the options screen's rows. Written by tools/optgen.py from hud-src/lemuen_hud.lua (OPTIONS) and options.json: edit those, then run it. */
 static const OpRow kOpRows[] = {
     {"mark_range", "Persecution", "Range", OP_FIELD, 20, 300, 10,
      "Metres within which she marks the enemies she watches."},

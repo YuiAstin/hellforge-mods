@@ -1,4 +1,4 @@
-/* leva: the options screen's rows. Written by tools/optgen.py from hud-src/leva_hud.lua (OPTIONS): edit that, then run it. */
+/* leva: the options screen's rows. Written by tools/optgen.py from hud-src/leva_hud.lua (OPTIONS) and options.json: edit those, then run it. */
 static const OpRow kOpRows[] = {
     {"rs_cooldown", "Rational Suppression", "Cooldown", OP_FIELD, 0, 60, 1,
      "Seconds before Rational Suppression can be used again."},

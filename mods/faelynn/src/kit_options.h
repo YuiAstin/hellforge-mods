@@ -1,4 +1,4 @@
-/* faelynn: the options screen's rows. Written by tools/optgen.py from hud-src/faelynn_hud.lua (OPTIONS): edit that, then run it. */
+/* faelynn: the options screen's rows. Written by tools/optgen.py from hud-src/faelynn_hud.lua (OPTIONS) and options.json: edit those, then run it. */
 static const OpRow kOpRows[] = {
     {"cp_max", "General", "Max Combo Pounce", OP_SLIDER, 1, 6, 1,
      "Most Combo Pounce stacks she holds. Each Pursuit Instinct dash spends one."},

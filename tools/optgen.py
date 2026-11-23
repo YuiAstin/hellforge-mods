@@ -8,11 +8,18 @@
     python tools/optgen.py                   every kit that includes kitbase/kb_options.h
     python tools/optgen.py --check           exit 1 if a written file would change
 
+Its options.json (mods/<kit>/options.json), when it has one, adds the Advanced section: every other setting of the kit's
+.ini that a player may change, with its group, label and tip ("advanced"), and the settings left off the screen ("hidden":
+ids, probes, workarounds; they stay in the .ini). Every setting of the kit's settings table (KB_F / KB_I in its .c) must be
+on the screen, advanced or hidden, or the run stops and names the rest. "when" marks settings that take effect only at the
+next mission or after a restart. An Advanced row's limits are the setting's own; an on/off one is a switch, a span over
+100 a field, the rest a slider (its step chosen from the span, or "step" in its entry).
+
 A row "Group: Label" goes under the heading Group. An on/off row is a switch, a choice a row of buttons. A slider row becomes a field to type in
 when its range is wide: a cooldown, a duration (a tip that starts with "Seconds"), or a span over 100 (flat damage, points); the field's
 limits are then the setting's own (kSettings). A kit_options.h whose first line says "hand-written" is left alone.
 """
-import glob, os, re, sys
+import glob, json, os, re, sys
 from PIL import Image
 import lupa
 
@@ -70,15 +77,69 @@ def rows(kit):
     for r in out:
         if r[1] not in order:
             order.append(r[1])
-    return [r for g in order for r in out if r[1] == g]
+    out = [r + (0,) for g in order for r in out if r[1] == g]
+    spec = options_spec(kit)
+    if not spec:
+        return [r + (0,) for r in out]
+    when = {'mission': 'OP_NEXT_MISSION', 'restart': 'OP_RESTART'}
+    marks = spec.get('when', {})
+    out = [r + (when[marks[r[0]]] if r[0] in marks else 0,) for r in out]
+    table = settings_table(kit)
+    shown = {r[0] for r in out}
+    adv = []
+    for e in spec.get('advanced', []):
+        name, group, label, tip = e[0], e[1], e[2], e[3]
+        extra = e[4] if len(e) > 4 else {}
+        if name not in table:
+            raise SystemExit('%s: options.json names %s, which is not in its settings table' % (kit, name))
+        if name in shown:
+            raise SystemExit('%s: %s is on the screen already (its HUD\'s OPTIONS)' % (kit, name))
+        typ, lo, hi = table[name]
+        lo, hi = extra.get('lo', lo), extra.get('hi', hi)
+        if typ == 'I' and lo == 0 and hi == 1:
+            row = (name, group, label, 'OP_TOGGLE', 0, 1, 1, tip, '')
+        elif hi - lo > 100 and 'step' not in extra:
+            row = (name, group, label, 'OP_FIELD', lo, hi, 1, tip, '')
+        else:
+            step = extra.get('step') or (1 if typ == 'I' else next(x for x in (0.01, 0.05, 0.1, 0.5, 1, 5, 10) if x >= (hi - lo) / 200.0))
+            row = (name, group, label, 'OP_SLIDER', lo, hi, step, tip, '')
+        adv.append(row + (1, when[marks[name]] if name in marks else 0))
+        shown.add(name)
+    hidden = set(spec.get('hidden', []))
+    missing = [n for n in table if n not in shown and n not in hidden]
+    if missing:
+        raise SystemExit('%s: settings neither on the screen nor hidden in options.json: %s' % (kit, ' '.join(missing)))
+    order = []
+    for r in adv:
+        if r[1] not in order:
+            order.append(r[1])
+    return out + [r for g in order for r in adv if r[1] == g]
+
+
+def options_spec(kit):
+    path = os.path.join(ROOT, 'mods', kit, 'options.json')
+    return json.load(open(path, encoding='utf-8')) if os.path.exists(path) else None
+
+
+def settings_table(kit):
+    """name -> ('F' or 'I', lo, hi) from KB_F / KB_I in the kit's .c files"""
+    out = {}
+    for c in glob.glob(os.path.join(ROOT, 'mods', kit, 'src', '*.c')):
+        for typ, name, lo, hi in re.findall(r'KB_([FI])\("([a-z0-9_]+)",\s*[^,]+,\s*([-0-9.e]+)f?,\s*([-0-9.e]+)f?\)', open(c, encoding='utf-8', errors='replace').read()):
+            out[name] = (typ, float(lo), float(hi))
+    return out
 
 
 def rows_text(kit):
-    lines = ['/* %s: the options screen\'s rows. Written by tools/optgen.py from hud-src/%s_hud.lua (OPTIONS): edit that, then run it. */' % (kit, kit),
+    lines = ['/* %s: the options screen\'s rows. Written by tools/optgen.py from hud-src/%s_hud.lua (OPTIONS) and options.json: edit those, then run it. */' % (kit, kit),
              'static const OpRow kOpRows[] = {']
-    for name, group, label, kind, lo, hi, step, tip, choices in rows(kit):
-        lines.append('    {%s, %s, %s, %s, %s, %s, %s,\n     %s%s},' % (cstr(name), cstr(group), cstr(label), kind, num(lo), num(hi), num(step), cstr(tip),
-                                                                     ', ' + cstr(choices) if choices else ''))
+    for name, group, label, kind, lo, hi, step, tip, choices, adv, when in rows(kit):
+        tail = ''
+        if choices or adv or when:
+            tail = ', %s' % (cstr(choices) if choices else 'NULL')
+        if adv or when:
+            tail += ', %d, %s' % (adv, when or 'OP_LIVE')
+        lines.append('    {%s, %s, %s, %s, %s, %s, %s,\n     %s%s},' % (cstr(name), cstr(group), cstr(label), kind, num(lo), num(hi), num(step), cstr(tip), tail))
     lines.append('};')
     return '\n'.join(lines) + '\n'
 

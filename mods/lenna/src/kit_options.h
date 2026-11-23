@@ -1,4 +1,4 @@
-/* lenna: the options screen's rows. Written by tools/optgen.py from hud-src/lenna_hud.lua (OPTIONS): edit that, then run it. */
+/* lenna: the options screen's rows. Written by tools/optgen.py from hud-src/lenna_hud.lua (OPTIONS) and options.json: edit those, then run it. */
 static const OpRow kOpRows[] = {
     {"ci_max", "General", "Max CI", OP_SLIDER, 3, 12, 1,
      "Most CI she holds. Enhanced abilities spend 3."},

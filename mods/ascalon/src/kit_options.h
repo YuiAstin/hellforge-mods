@@ -1,4 +1,4 @@
-/* ascalon: the options screen's rows. Written by tools/optgen.py from hud-src/ascalon_hud.lua (OPTIONS): edit that, then run it. */
+/* ascalon: the options screen's rows. Written by tools/optgen.py from hud-src/ascalon_hud.lua (OPTIONS) and options.json: edit those, then run it. */
 static const OpRow kOpRows[] = {
     {"area_radius", "Ambusher", "Radius", OP_SLIDER, 5, 30, 1,
      "Metres around her each of her hits also strikes every enemy in."},

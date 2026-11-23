@@ -1,4 +1,4 @@
-/* executor: the options screen's rows. Written by tools/optgen.py from hud-src/executor_hud.lua (OPTIONS): edit that, then run it. */
+/* executor: the options screen's rows. Written by tools/optgen.py from hud-src/executor_hud.lua (OPTIONS) and options.json: edit those, then run it. */
 static const OpRow kOpRows[] = {
     {"heal_pct", "Trait", "Heal a Hit", OP_SLIDER, 0, 100, 5,
      "Each enemy his shot hits heals him this % of his maximum health."},

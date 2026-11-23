@@ -130,6 +130,7 @@ Where a kit's numbers are changed in game.
 | One screen, many kits | The kits share it through a small block of shared memory: the first kit HellForge lets add a screen owns the key, the frame and the column, and calls the shown kit's own code for its rows. |
 | A kit's rows | Generated from its HUD's `OPTIONS` table by `tools/optgen.py` (`src/kit_options.h`), so the screen and the Mod Options Menu never differ; its icon too (`src/kit_icon.h`). Vector's are hand-written. |
 | A choice (Koleda's Patriot or FRV) | One button a choice, the chosen one lit. |
+| The rest of the .ini | In a collapsed Advanced section, from the kit's `options.json`. Settings that could break the kit (ids, probes, workarounds, diagnostics) stay in the .ini only. One that applies later says "next mission" or "after restart". |
 | On/off settings | A switch, never a 0 to 1 slider: on the screen and as `toggle` rows on the Mod Options Menu. |
 | Wide ranges (cooldowns, durations, flat damage) | A field to type in, with - and +. Its limits are the setting's own in the .ini. |
 | Few steps (multipliers, counts, percents) | A slider. |

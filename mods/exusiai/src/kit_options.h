@@ -1,4 +1,4 @@
-/* exusiai: the options screen's rows. Written by tools/optgen.py from hud-src/exusiai_hud.lua (OPTIONS): edit that, then run it. */
+/* exusiai: the options screen's rows. Written by tools/optgen.py from hud-src/exusiai_hud.lua (OPTIONS) and options.json: edit those, then run it. */
 static const OpRow kOpRows[] = {
     {"fire_rate", "Fast Cartridge", "Fire Rate", OP_SLIDER, 1, 2, 0.05f,
      "Her guns fire this many times faster (from when she next equips each one)."},

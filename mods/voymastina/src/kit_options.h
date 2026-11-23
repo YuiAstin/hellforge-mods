@@ -1,4 +1,4 @@
-/* voymastina: the options screen's rows. Written by tools/optgen.py from hud-src/voymastina_hud.lua (OPTIONS): edit that, then run it. */
+/* voymastina: the options screen's rows. Written by tools/optgen.py from hud-src/voymastina_hud.lua (OPTIONS) and options.json: edit those, then run it. */
 static const OpRow kOpRows[] = {
     {"sf_cooldown", "Sirius Fall", "Cooldown", OP_FIELD, 0, 60, 1,
      "Seconds before Sirius Fall can be used again."},

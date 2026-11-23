@@ -184,6 +184,11 @@ buttons. At the right, the characters with their mod icons and an Off; a click p
   the function that draws its rows. The first kit HellForge lets add a screen owns it; a refused kit leaves it to the next.
 - A kit's rows and icon are generated: `python tools/optgen.py <kit>` writes `src/kit_options.h` from the `OPTIONS` table
   of its HUD and `src/kit_icon.h` from `icon.png`. `--check` says when they are stale.
+- The Advanced section (collapsed under its own bar): a kit's `options.json` lists every other setting of its .ini that a
+  player may change, with its group, label and tip, and the ones left off the screen (`hidden`: projectile and explosion
+  ids, probes, physics workarounds, diagnostics). Every setting of the kit's settings table must be on the screen, advanced
+  or hidden: `optgen.py` stops and names the rest. `when` marks a setting that takes effect only at the next mission or
+  after a restart; the screen says so beside it. Keys are not on the screen yet. Koleda's is the first (0.4.16).
 - Nothing is drawn or called on the game thread's behalf from the render thread: changes wait and `KbOptionsTick` sets
   them. Choices are saved to `%LOCALAPPDATA%\HellForgeMods\<kit>.ini` at the screen's close, the pick to `kits.ini`.
 - A kit on the screen answers 1 from `<kit>_options_screen(1)`, and its HUD then leaves its rows off the Mod Options Menu.

@@ -1,0 +1,95 @@
+{
+  "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in koleda.ini only.",
+  "when": {
+    "sinner": "restart",
+    "call_mode": "restart",
+    "self_destruct": "restart"
+  },
+  "advanced": [
+    ["sinner", "Sinveiler", "Sinveiler", "Off: no Sinveiler at all, Spectre has nothing to call. Her stratagems are set up at the game's start."],
+    ["call_mode", "Sinveiler", "One Call Per Spectre", "On: each Spectre puts one Sinveiler call in her stratagems. Off: one call at the drop, used as often as its own cooldown allows."],
+    ["share_range", "Sinveiler", "Damage Share Range", "Metres: the Sinveiler takes its share of her hits only while it is this close to her."],
+    ["ems_immune", "Sinveiler", "EMS Immune", "No EMS stun on her or on the Sinveiler (her own Drift bursts included)."],
+    ["ride_safe", "Sinveiler", "Safe While Riding", "While she rides the FRV Sinveiler nothing damages her."],
+    ["ride_range", "Sinveiler", "Ride Range", "Metres: how far from the FRV Sinveiler Let's Go For a Spin! still puts her in a seat."],
+    ["follow_distance", "Sinveiler", "Follow Distance", "Metres it keeps from her, beside and behind."],
+    ["personal_space", "Sinveiler", "Personal Space", "Metres: closer to her than this, it steps away."],
+    ["guard_start", "Sinveiler", "N Gear Follow From", "Metres: in N gear it walks to her only beyond this."],
+    ["plus_distance", "Sinveiler", "S+ Distance From Target", "Metres short of her target it stands in S+."],
+    ["plus_leash", "Sinveiler", "S+ Most From Her", "Metres: in S+ it never goes further than this from her."],
+
+    ["self_destruct_fuse", "Self-Destruct", "Fuse", "Seconds a Sinveiler that blows up where it stands waits first, for her to get clear."],
+    ["self_destruct_rush_seconds", "Self-Destruct", "Rush Time", "Seconds the exosuit runs at the enemy before it blows up wherever it got to."],
+    ["self_destruct_rush_speed", "Self-Destruct", "Rush Slide Speed", "Metres a second, only when her HUD cannot walk it and it is slid instead."],
+
+    ["upshift_every", "Upshift", "Gain Interval", "Seconds: at most one Upshift gain from the Sinveiler's actions this often.", {"step": 0.5}],
+    ["upshift_guard", "Upshift", "Guard At Most", "At most stacks she takes this much less damage (0.3: 30%)."],
+
+    ["s1_range", "Snow Wolf's Eye", "Range", "Metres: how far her crosshair's target may be."],
+    ["s1_cone", "Snow Wolf's Eye", "Aim Cone", "Degrees off her crosshair a target may be."],
+    ["s1_every", "Snow Wolf's Eye", "Round Interval", "Seconds between its heavy rounds."],
+    ["s1_stack", "Snow Wolf's Eye", "Per Upshift Stack", "Each heavy round deals this much more per Upshift stack (0.15: 15%)."],
+    ["turbo_seconds", "Snow Wolf's Eye", "Turbo Boost Duration", "Seconds of Turbo Boost after it."],
+    ["turbo_mult", "Snow Wolf's Eye", "Turbo Boost Damage", "Her damage and the Sinveiler's, times this during Turbo Boost."],
+
+    ["kr_heal", "Kinetic Recovery", "Heals Her", "Health she gets back at Tactical Routebook (0: none)."],
+    ["kr_sinner_heal", "Kinetic Recovery", "Heals the Sinveiler", "Part of its health the Sinveiler gets back at Tactical Routebook (0.25: a quarter)."],
+
+    ["gear_damage_d", "Gears", "D Damage", "The Sinveiler's damage in D, before her buffs."],
+    ["gear_damage_s", "Gears", "S Damage", "The Sinveiler's damage in S, before her buffs."],
+    ["gear_damage_plus", "Gears", "S+ Damage", "The Sinveiler's damage in S+, before her buffs."],
+    ["gear_damage_n", "Gears", "N Damage", "The Sinveiler's damage in N, before her buffs."],
+    ["post_move", "Gears", "Post-Move Support", "While it stands still, her damage and its, times this."],
+    ["sinner_taken", "Gears", "Gear Shift Damage Taken", "Part of the damage the Sinveiler takes in a gear (N: none)."],
+    ["park_taken", "Gears", "Taken While Parked", "Standing still, that is times this as well."],
+    ["sinner_heal", "Gears", "Heal On Hit", "A hit on the Sinveiler heals this part of its health."],
+    ["sinner_heal_every", "Gears", "Heal On Hit Interval", "Seconds: at most one heal on hit this often."],
+
+    ["release_reach", "Kinetic Release", "Reach", "Metres: S fires at enemies this close to the Sinveiler."],
+    ["release_reach_plus", "Kinetic Release", "S+ Reach", "Metres: S+ fires at enemies this close to the Sinveiler."],
+    ["release_targets_s", "Kinetic Release", "Targets", "How many of the nearest enemies S fires at."],
+    ["release_targets_plus", "Kinetic Release", "S+ Targets", "How many of the nearest enemies S+ fires at."],
+    ["release_rounds_s", "Kinetic Release", "Rounds Each", "Heavy rounds at each enemy in S."],
+    ["release_rounds_plus", "Kinetic Release", "S+ Rounds Each", "Heavy rounds at each enemy in S+."],
+    ["release_ring_s", "Kinetic Release", "Ring Rounds", "Rounds sent out evenly all around the Sinveiler in S."],
+    ["release_ring_plus", "Kinetic Release", "S+ Ring Rounds", "Rounds sent out evenly all around the Sinveiler in S+."],
+    ["release_ap", "Kinetic Release", "Armour Penetration", "Kinetic Release's and Drift's armour penetration."],
+
+    ["full_he", "HE Rounds", "Full Speed's", "Let's Go Full Speed!'s rounds burst with high explosive where they land."],
+    ["release_he", "HE Rounds", "Kinetic Release's", "Kinetic Release's rounds burst with high explosive where they land."],
+    ["he_rate", "HE Rounds", "Most A Second", "At most this many high-explosive bursts a second."],
+
+    ["full_range", "Full Speed", "Range", "Metres ahead it fires at enemies."],
+    ["full_cone", "Full Speed", "Cone", "Degrees either side of its way it fires at enemies."],
+    ["full_shots", "Full Speed", "Shots", "Shots spread among the enemies ahead each time."],
+    ["full_every", "Full Speed", "Interval", "Seconds between those, at the reference speed (faster: more often)."],
+    ["full_ref_speed", "Full Speed", "Reference Speed", "Metres a second the interval is set for."],
+    ["full_tracers", "Full Speed", "Tracers", "At speed it also sprays tracer rounds across the cone, enemies or not."],
+    ["full_ram", "Full Speed", "Ram Per Speed", "Its rams deal this much more for each m/s over the starting speed."],
+    ["full_ram_max", "Full Speed", "Ram At Most", "Its rams deal at most this many times their damage."],
+
+    ["sprint_seconds", "Full Speed Burst", "Duration", "Seconds it and she take no damage (Snow Wolf's Eye's key at the wheel)."],
+    ["sprint_cooldown", "Full Speed Burst", "Cooldown", "Seconds before it can be used again."],
+    ["sprint_ram", "Full Speed Burst", "Ram", "Its rams deal this many times more during it."],
+    ["sprint_ram_s", "Full Speed Burst", "Ram In S", "And this many times more in S."],
+    ["sprint_ram_plus", "Full Speed Burst", "Ram In S+", "And this many times more in S+."],
+
+    ["drift_damage", "Drift", "Damage", "Each enemy in reach takes this once."],
+    ["drift_radius", "Drift", "Radius", "Metres out from it the last ring reaches."],
+    ["drift_inner", "Drift", "Inner Radius", "Metres out from it the first ring starts."],
+    ["drift_rings", "Drift", "Rings", "Waves of bursts, from the inner radius out."],
+    ["drift_gap", "Drift", "Ring Gap", "Seconds between the waves."]
+  ],
+  "hidden": [
+    "round_n", "round_s", "round_plus", "round_rocket", "round_fallback", "s1_round", "release_round",
+    "release_explosion", "release_shell", "he_explosion", "he_round", "tracer_damage", "hellbomb_explosion", "hellbomb_hold",
+    "pull_on", "pull_every", "pull_radius", "pull_explosion",
+    "drive", "drive_test", "turn", "loco_manager", "loco_map", "loco_records", "loco_stride",
+    "stick_offset_fwd", "stick_offset_side", "stick_offset_turn", "max_rounds", "round_speed",
+    "warp_needs_walks", "nav_path", "stuck_seconds", "push_step", "push_steps",
+    "dead_after", "sinner_sight", "line_of_sight", "first_person", "cleanse", "sinner_steady",
+    "grip", "grip_gravity", "grip_cancel", "grip_margin", "grip_mass",
+    "car_steady", "car_spin", "car_lift", "car_window", "car_right", "car_right_after",
+    "drift_points", "full_tracer_every", "release_radius"
+  ]
+}

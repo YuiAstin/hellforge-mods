@@ -1,4 +1,4 @@
-/* alva: the options screen's rows. Written by tools/optgen.py from hud-src/alva_hud.lua (OPTIONS): edit that, then run it. */
+/* alva: the options screen's rows. Written by tools/optgen.py from hud-src/alva_hud.lua (OPTIONS) and options.json: edit those, then run it. */
 static const OpRow kOpRows[] = {
     {"shield_amount", "Brumal Barrier", "Shield", OP_FIELD, 50, 5000, 50,
      "Shield each grant adds to every ally in range (stacks, no cap)."},

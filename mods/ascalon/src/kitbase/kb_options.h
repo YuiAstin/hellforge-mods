@@ -34,9 +34,11 @@
 /* a row's control: a slider (few steps), a switch (0 or 1), a field to type in with - and + (a wide range: its limits
  * are the setting's own in the .ini, not the slider's), or one button a choice (choices: "A|B|C" for 0, 1, 2) */
 enum { OP_SLIDER, OP_TOGGLE, OP_FIELD, OP_CHOICE };
-typedef struct OpRow { const char* name; const char* group; const char* label; int kind; float lo, hi, step; const char* tip; const char* choices; } OpRow;
+/* adv: in the Advanced section (collapsed until opened); when: OP_LIVE, or when a change takes effect (shown beside it) */
+enum { OP_LIVE, OP_NEXT_MISSION, OP_RESTART };
+typedef struct OpRow { const char* name; const char* group; const char* label; int kind; float lo, hi, step; const char* tip; const char* choices; int adv, when; } OpRow;
 #define KB_OP_ICON 96                  /* a kit's icon: KB_OP_ICON x KB_OP_ICON RGBA8 */
-#define KB_OP_MAX 96                   /* most rows a kit shows */
+#define KB_OP_MAX 192                  /* most rows a kit shows */
 #define KB_OP_OFF_ID "~off"
 
 KB_VAR int g_opOn;                     /* this kit's rows are in the hub */
@@ -292,11 +294,15 @@ KB_FN void OpEditCommit(void)
     g_opEdit = -1;
 }
 KB_FN int OpIn(const HfInput* in, float x0, float y0, float x1, float y1) { return in->x >= x0 && in->x < x1 && in->y >= y0 && in->y < y1; }
-KB_FN int OpHead(int i) { return i == 0 || strcmp(kb_op_rows[i].group, kb_op_rows[i - 1].group); }
+KB_FN int OpHead(int i) { return i == 0 || kb_op_rows[i].adv != kb_op_rows[i - 1].adv || strcmp(kb_op_rows[i].group, kb_op_rows[i - 1].group); }
+KB_VAR int g_opAdvOpen;                /* the Advanced section is open */
+/* the first Advanced row (kb_op_n: none); the rows shown: all of them, or those before it while it is closed */
+KB_FN int OpFirstAdv(void) { for (int i = 0; i < kb_op_n; i++) if (kb_op_rows[i].adv) return i; return kb_op_n; }
 KB_FN void OpBody(const HfDraw* d, const HfInput* in, float dt, const KbOpBox* box)
 {
     const OpRow* rows = kb_op_rows;
-    const int N = kb_op_n;
+    const int firstAdv = OpFirstAdv(), hasAdv = firstAdv < kb_op_n;
+    const int N = g_opAdvOpen ? kb_op_n : firstAdv;   /* the rows shown */
     KbOpHub* hub = kb_ophub;
     if (hub && hub->opens != g_opOpens) { g_opOpens = hub->opens; g_opDrag = -1; g_opEdit = -1; g_opT = 0; }
     g_opT += dt;
@@ -314,10 +320,11 @@ KB_FN void OpBody(const HfDraw* d, const HfInput* in, float dt, const KbOpBox* b
     const char* tip = box->tip;
 
     /* the list: a group's heading, then its rows */
-    const float top = y0 + 74, bottom = y1 - 96, rowH = 46, headH = 44;
+    const float top = y0 + 74, bottom = y1 - 96, rowH = 46, headH = 44, advH = 56;
     const float lx = x0 + 44, vx = x1 - 44, tx1 = vx - 156, tx0 = tx1 - (W > 1000 ? 420 : 300);
     float content = 0;
     for (int i = 0; i < N; i++) content += rowH + (OpHead(i) ? headH : 0);
+    if (hasAdv) content += advH;
     float maxScroll = content - (bottom - top);
     if (maxScroll < 0) maxScroll = 0;
     if (in->x < x1) g_opScroll -= in->wheel * rowH * 2;
@@ -360,7 +367,7 @@ KB_FN void OpBody(const HfDraw* d, const HfInput* in, float dt, const KbOpBox* b
     if (keyMoved && g_opSel >= 0)
     {
         float y = 0;
-        for (int i = 0; i <= g_opSel; i++) { if (OpHead(i)) y += headH; if (i < g_opSel) y += rowH; }
+        for (int i = 0; i <= g_opSel; i++) { if (hasAdv && i == firstAdv) y += advH; if (OpHead(i)) y += headH; if (i < g_opSel) y += rowH; }
         if (y - headH < g_opScroll) g_opScroll = y - headH;
         if (y + rowH > g_opScroll + (bottom - top)) g_opScroll = y + rowH - (bottom - top);
     }
@@ -369,8 +376,25 @@ KB_FN void OpBody(const HfDraw* d, const HfInput* in, float dt, const KbOpBox* b
 
     d->clip_push(x0 + 2, top, x1 - 2, bottom);
     float y = top - g_opScroll;
-    for (int i = 0; i < N; i++)
+    int overAdv = 0;
+    for (int i = 0; i <= N; i++)
     {
+        /* the Advanced section's bar: before its first row, open or closed */
+        if (hasAdv && i == firstAdv)
+        {
+            if (y + advH > top && y < bottom)
+            {
+                overAdv = inList && g_opDrag < 0 && in->y >= y + 8 && in->y < y + advH - 4;
+                d->rect(x0 + 14, y + 8, x1 - 14, y + advH - 4, HF_RGBA(255, 255, 255, (uint32_t)((overAdv ? 30 : 14) * a)), overAdv ? yellow : grey, 2);
+                char bar[64];
+                snprintf(bar, sizeof bar, "%s  ADVANCED  (%d)", g_opAdvOpen ? "-" : "+", kb_op_n - firstAdv);
+                d->text(lx - 16, y + advH / 2 + 2, bar, 22, HF_FACE_TITLE, HF_ALIGN_LEFT, overAdv ? yellow : white);
+                d->text(x1 - 32, y + advH / 2 + 2, g_opAdvOpen ? "click to close" : "click to open", 17, HF_FACE_BODY, HF_ALIGN_RIGHT, grey);
+                if (overAdv && click) { OpEditCommit(); g_opAdvOpen = !g_opAdvOpen; g_opSel = -1; }
+            }
+            y += advH;
+        }
+        if (i == N) break;
         const OpRow* r = &rows[i];
         if (OpHead(i))
         {
@@ -393,6 +417,12 @@ KB_FN void OpBody(const HfDraw* d, const HfInput* in, float dt, const KbOpBox* b
             char text[32];
             OpValueText(i, v, text);
             d->text(lx, cy, r->label, 22, HF_FACE_BODY, HF_ALIGN_LEFT, white);
+            if (r->when)
+            {
+                /* when a change takes effect, beside the label */
+                float lw = d->text_width(r->label, 22, HF_FACE_BODY);
+                d->text(lx + lw + 12, cy + 1, r->when == OP_RESTART ? "after restart" : "next mission", 16, HF_FACE_BODY, HF_ALIGN_LEFT, grey);
+            }
             if (over && (in->pressed & HF_MOUSE_RIGHT)) { if (g_opEdit == i) g_opEdit = -1; OpAsk(i, g_opIni[i]); }
             if (r->kind == OP_TOGGLE)
             {
@@ -476,6 +506,9 @@ KB_FN void OpBody(const HfDraw* d, const HfInput* in, float dt, const KbOpBox* b
     int tipRow = hover >= 0 ? hover : g_opDrag >= 0 ? g_opDrag : g_opEdit >= 0 ? g_opEdit : g_opSel;
     if (tipRow >= N) tipRow = -1;
     if (!tip && tipRow >= 0) tip = rows[tipRow].tip;
+    if (!tip && overAdv)
+        tip = g_opAdvOpen ? "The rest of her settings from the .ini. Saved the same way; right click puts one back."
+                          : "The rest of her settings from the .ini: finer numbers for her skills and her Sinveiler. Leave them be unless you want to tune her.";
     d->rect(x0 + 2, bottom + 8, x1 - 2, bottom + 10, HF_RGBA(255, 232, 0, (uint32_t)(70 * a)), 0, 0);
     if (tip)
     {
