@@ -55,7 +55,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.3.4"
+#define VERSION "0.3.5"
 #define BUILD "25480438"
 
 /* S3 sets off a blast on every enemy it hit, 0.1 s apart: room for 12 of his own blasts within the guard's 1.2 s */
@@ -915,7 +915,9 @@ static void HealFrame(void)
     if (!HAS(heal) || !me || max <= 0) { static unsigned told; if (told++ < 3) Log("his heal: unavailable (HellForge's heal %s, max health %d)", HAS(heal) ? "present" : "missing", max); return; }
     int known = HealthOf(me, &hp, &life);
     float amount = (float)(owed * max);
-    if (!known || hp < max)
+    /* 0.3.5: never past his maximum (a heal well over it, on a health raised in the editor, crashed the game) */
+    if (known && hp > 0 && amount > (float)(max - hp)) amount = (float)(max - hp);
+    if ((!known || hp < max) && amount >= 1.0f)
     {
         int r = hf->heal(self, amount);
         if (Act("his heal", r))
