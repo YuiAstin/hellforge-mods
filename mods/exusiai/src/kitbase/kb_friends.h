@@ -146,6 +146,7 @@ KB_FN int FoeKind(uint64_t res)
 KB_FN void AddFoe(uint32_t entity, uint64_t res)
 {
     uint32_t holder = 0; if (!entity || entity == atomic_load(&g_avatar) || res == AVATAR || (WielderOf(entity, &holder) && holder != entity && holder)) return;   /* nothing a Helldiver holds or wears */
+    if (FriendRes(res)) return;   /* nor a friend (a SEAF trooper her shot hit: the kits' skills and the Sinveiler then fired at it) */
     int free_ = -1;
     for (int i = 0; i < FOES; i++)
     {
