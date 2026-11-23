@@ -89,12 +89,15 @@ KB_FN void LoadSettings(void)
     fclose(f);
 }
 
-/* Mod Options Menu: read one of the shown settings */
+/* Mod Options Menu: read one of the shown settings; the options screen: any setting of the kit's table (its Advanced
+ * section shows settings the Mod Options Menu does not: read as 0 and never set before this) */
 KB_FN int OptionGet(const char* name, double* out)
 {
     if (!name || !out) return 0;
     for (unsigned k = 0; k < kb_noptions; k++)
         if (!strcmp(kb_options[k].name, name)) { *out = kb_options[k].f ? (double)*kb_options[k].f : (double)*kb_options[k].i; return 1; }
+    for (unsigned k = 0; k < kb_nsettings; k++)
+        if (!strcmp(kb_settings[k].name, name) && (kb_settings[k].f || kb_settings[k].i)) { *out = kb_settings[k].f ? (double)*kb_settings[k].f : (double)*kb_settings[k].i; return 1; }
     return 0;
 }
 
@@ -108,7 +111,7 @@ KB_FN int OptionSet(const char* name, double value)
     OptionGet(name, &now);
     if (now != before)
     {
-        Log("option %s: %g -> %g (Mod Options Menu)", name, before, now);
+        Log("option %s: %g -> %g (options)", name, before, now);
         if (g_inMission && (!strcmp(name, "hp_mult") || !strcmp(name, "stamina_mult"))) { Body(0); Body(1); }
     }
     if (kb_option_after) kb_option_after(name, now != before);
