@@ -51,7 +51,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.4.20"
+#define VERSION "0.4.21"
 #define BUILD "25480438"
 
 #define KB_OWN_SLOTS 48   /* 0.3.0: Kinetic Release's rings and the Drift's rockets */
@@ -982,7 +982,7 @@ static void SelfDestructAdd(const HfApi* api, HfMod* mod)
         st.base = HF_STRATAGEM_EXO45_PATRIOT;
         st.name = "yui/koleda/sinner_self_destruct";
         st.title = "Sinveiler Self-Destruct";
-        st.description = "Koleda's, granted in a mission while her Sinveiler is out: it blows the Sinveiler up with a Hellbomb's blast and drops a fresh one. Picked in a loadout it does nothing.";
+        st.description = "Koleda's, granted in a mission while her Sinveiler is out: it blows the Sinveiler up with a Hellbomb's blast and drops a fresh one. Not in the loadout picker.";
         st.code = "RRLLR";
         st.cooldown = 1;
         st.uses = 1;
@@ -995,7 +995,7 @@ static void SelfDestructAdd(const HfApi* api, HfMod* mod)
     fr.base = FRV_STRATAGEM;
     fr.name = "yui/koleda/frv_sinner_self_destruct";
     fr.title = "FRV Sinveiler Self-Destruct";
-    fr.description = "Koleda's, granted in a mission while her FRV Sinveiler is out: it blows the FRV up with a Hellbomb's blast and drops a fresh one. Picked in a loadout it does nothing.";
+    fr.description = "Koleda's, granted in a mission while her FRV Sinveiler is out: it blows the FRV up with a Hellbomb's blast and drops a fresh one. Not in the loadout picker.";
     fr.code = "RRLLL";
     fr.cooldown = 1;
     fr.uses = 1;
@@ -1218,8 +1218,32 @@ static void SelfDestructOrder(void)
     Log("Sinveiler Self-Destruct: ordered: entity %u blows up, the fresh one is on its way (granted again %.0f s from now, once that one has landed)", g_doomed, (double)s_sdCd);
     SinnerLost("its self-destruct was ordered");
 }
+/* 0.4.21: kept out of the loadout picker like a mission stratagem: the row's selectable bit (+0x80 bit 1) cleared once its
+ * row exists (Voymastina's SinHide, 0.4.0). The rows are HellForge's own copies, so it holds for the session. */
+static void SelfDestructHide(void)
+{
+    static int done;
+    if (done || !hf->stratagem_row || hf->size < offsetof(HfApi, stratagem_row) + sizeof hf->stratagem_row) return;
+    const uint32_t types[2] = {g_sdType, g_sdFrvType};
+    int left = 0;
+    for (int k = 0; k < 2; k++)
+    {
+        if (!types[k]) continue;
+        uintptr_t row = hf->stratagem_row(types[k]);
+        uint8_t sel;
+        if (!row || !ReadAt(row + 0x80, &sel, 1)) { left = 1; continue; }
+        if (sel & 2)
+        {
+            sel &= (uint8_t)~2;
+            int bad = hf->write(row + 0x80, &sel, 1);
+            Log("the %sSinveiler Self-Destruct (stratagem %u): %s", k ? "FRV " : "", types[k], bad ? "could NOT be kept out of the loadout picker" : "kept out of the loadout picker");
+        }
+    }
+    if (!left) done = 1;
+}
 static void SelfDestructFrame(void)
 {
+    SelfDestructHide();
     /* the blast, and a second one if the first did not end it */
     if (g_doomed && g_doomRush && DoomRush()) {}
     else if (g_doomed && g_now >= g_doomAt)
@@ -1241,8 +1265,8 @@ static void SelfDestructFrame(void)
         }
         else g_doomed = 0;
     }
-    /* 0.4.20: HellForge lists every mod stratagem in the selection screen, so either self-destruct can be picked into a
-     * loadout: there it would be a Sinveiler call of its own. Any use it has that she was not granted is taken away. */
+    /* 0.4.20: one in a loadout (one saved before 0.4.21 hid them, or a row the hiding missed) would be a Sinveiler call of
+     * its own: any use it has that she was not granted is taken away. */
     if (g_inMission && kb_kit_on)
     {
         static double swept;
@@ -3842,6 +3866,7 @@ HF_MOD_EXPORT int koleda_key(unsigned version, int skill, int* vk, int* mods)
 static void Tick(HfMod* mod, float dt, void* user)
 {
     KbOptionsTick();   /* the options screen's changes, in a mission or not */
+    SelfDestructHide();   /* on the ship too, where the loadout picker is */
     double step = dt > 0 && dt < 1 ? dt : 0;
     g_now += step;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
