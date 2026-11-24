@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.1"
+#define VERSION "0.2.2"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -1247,19 +1247,14 @@ static void MissileInit(void)
         !hf->code_matches(game + 0x642B05, "8B 14 1E 48 8D 4C 24 44 E8 ?? ?? ?? ?? 80 7C 1E 34 00") ||
         !hf->code_matches(game + 0x642A0F, "41 8B 45 6C 41 89 47 60 41 8B 4D 00 85 C9 0F 84 ?? ?? ?? ??"))
     { Log("homing grenades off: the game's missile code is not the reviewed one"); return; }
-    uint32_t stride = 0, mode = 0;
-    uintptr_t record = hf->component_record("SeekingMissileComponentData", P33_MISSILE, &stride);
-    if (!record || !ReadAt(record, &mode, 4) || mode != 2) { Log("homing grenades off: the P-33 missile's record %s (targeting mode %u, wanted 2)", record ? "reads" : "was not found", mode); return; }
     g_netId = (uint32_t (*)(uint32_t))(game + 0xFD9AF0);
     g_missileCode = 1;
-    g_missilePkg = HF_PACKAGE_LOADING;
-    Log("homing grenades ready (the missile code checked, the P-33 missile follows an entity)");
 }
 static void MissileSwap(int on)
 {
     HfField f = HF_FIELD(ProjectileWeapon, projectile_entity);
     HfValue v = HF_U64(P33_MISSILE);
-    if (on && (g_missileOn || !g_missileCode || g_missilePkg != HF_PACKAGE_RESIDENT || !s_glHoming)) return;
+    if (on && (g_missileOn || g_missileCode != 2 || g_missilePkg != HF_PACKAGE_RESIDENT || !s_glHoming)) return;
     if (!on && !g_missileOn) return;
     int n = 0;
     for (unsigned i = 0; i < LAUNCHERS; i++)
@@ -1275,7 +1270,22 @@ static void MissileSwap(int on)
 /* (every frame, in a mission or not: the package has to be in before a launcher is made) */
 static void MissilePackage(void)
 {
-    if (!s_glHoming || !g_missileCode || g_missilePkg != HF_PACKAGE_LOADING) return;
+    /* the P-33 missile's record is there only once the game's entities are (0.2.1 asked at game load: not found) */
+    static double next;
+    static int tries;
+    if (s_glHoming && g_missileCode == 1 && g_now >= next)
+    {
+        uint32_t stride = 0, mode = 0;
+        uintptr_t record = hf->component_record("SeekingMissileComponentData", P33_MISSILE, &stride);
+        next = g_now + 1;
+        if (record && ReadAt(record, &mode, 4))
+        {
+            if (mode == 2) { g_missileCode = 2; g_missilePkg = HF_PACKAGE_LOADING; Log("homing grenades ready (the missile code checked, the P-33 missile follows an entity)"); }
+            else { g_missileCode = 0; Log("homing grenades off: the P-33 missile's targeting mode is %u, wanted 2", mode); }
+        }
+        else if (++tries == 120) { g_missileCode = 0; Log("homing grenades off: the P-33 missile's record was not found in two minutes"); }
+    }
+    if (!s_glHoming || g_missileCode != 2 || g_missilePkg != HF_PACKAGE_LOADING) return;
     g_missilePkg = hf->load_package(self, P33_PACKAGE);
     if (g_missilePkg == HF_PACKAGE_RESIDENT) Log("homing grenades: the P-33's package is in");
     else if (!g_missilePkg) Log("homing grenades off: the P-33's package did not load");
