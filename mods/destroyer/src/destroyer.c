@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.15"
+#define VERSION "0.2.16"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -1252,6 +1252,34 @@ static void OneHanded(int on)
     if (on)
     {
         static uint8_t seen[ONE_RECORDS];
+        /* (0.2.16) the table has to read as the one reviewed before anything is written: enough weapon rows, most of
+         * their records holding one of the two flag words known (two-handed 0x00010000, one-handed 0x00010001) and a
+         * small grip number, and the GL-21 among them. Else nothing is touched. */
+        {
+            int weapons = 0, known = 0, gl = 0;
+            memset(seen, 0, sizeof seen);
+            for (uint32_t i = 0; i < ONE_ROWS; i++)
+            {
+                struct { uint64_t res; uint32_t record, zero; } row;
+                uint32_t stride = 0, flags = 0, grip = 0;
+                if (!ReadAt(table + 16u * i, &row, sizeof row)) break;
+                if (!row.res || row.record >= ONE_RECORDS || seen[row.record]) continue;
+                if (!hf->component_record("ProjectileWeaponComponentData", row.res, &stride) && !hf->component_record("BeamWeaponComponentData", row.res, &stride) &&
+                    !hf->component_record("ArcWeaponComponentData", row.res, &stride) && !hf->component_record("SprayWeaponComponentData", row.res, &stride)) continue;
+                seen[row.record] = 1;
+                weapons++;
+                uintptr_t at = table + 11008u + (uintptr_t)row.record * 232u;
+                int ok = ReadAt(at + 0xC4, &flags, 4) && ReadAt(at + 0xC0, &grip, 4) && (flags == 0x00010000u || flags == 0x00010001u) && grip < 4096;
+                known += ok;
+                if (row.res == HF_ENTITY_GL21_GRENADE_LAUNCHER) gl = ok;
+            }
+            if (weapons < 50 || known * 10 < weapons * 7 || !gl)
+            {
+                Log("her hands: the Equipment table does not read as the one reviewed (%d weapon rows, %d with a known flag word and grip, the GL-21 %s): nothing held one-handed", weapons, known, gl ? "among them" : "not");
+                return;
+            }
+            Log("her hands: the Equipment table checked (%d weapon rows, %d with a known flag word and grip)", weapons, known);
+        }
         memset(seen, 0, sizeof seen);
         g_oneChangedN = 0;
         int rows = 0, others = 0;
@@ -1623,7 +1651,8 @@ static Shot g_shot[24];
 static int g_nshot;
 static uintptr_t g_shotPool;
 static uint32_t g_shotCounter;
-static unsigned g_shotSeen, g_shotSteered, g_shotSnapped;
+static unsigned g_shotSeen, g_shotSteered, g_shotSnapped, g_shotOdd;
+static int g_shotOff;   /* the pool did not read as reviewed: no steering this session */
 static void TurnTo(float v[3], const float to[3], float angle)
 {
     float speed = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), length = sqrtf(to[0] * to[0] + to[1] * to[1] + to[2] * to[2]);
@@ -1687,6 +1716,20 @@ static int FoeBody(int i, float p[3])
     else p[2] += 1.0f;
     return 1;
 }
+/* (0.2.16) A shot's flight has to read as a grenade's before it is steered: finite numbers, a speed a round can have,
+ * and a place within reach of her. Three in a row that do not, and the kit stops steering for the session (the pool's layout is
+ * the game's own: a change to it must turn this off, not write into something else). */
+static int ShotSane(const float f[14], const float me[3], float reach)
+{
+    for (int k = 0; k < 6; k++) if (!isfinite(f[k])) return 0;
+    float speed = sqrtf(f[3] * f[3] + f[4] * f[4] + f[5] * f[5]);
+    return isfinite(f[12]) && f[12] >= 0 && f[12] < 3000 && speed < 600 && Dist2(f, me) <= reach * reach;
+}
+static void ShotOdd(const char* what, int slot)
+{
+    if (++g_shotOdd <= 3) Log("homing grenades: a shot's flight does not read as a grenade's (%s, slot %d)%s", what, slot, g_shotOdd == 3 ? ": no steering for the rest of this session" : "");
+    if (g_shotOdd >= 3) { g_shotOff = 1; g_nshot = 0; }
+}
 /* the living enemy nearest `at` within flak_radius: where to hit it */
 static int ShotNear(const float at[3], float aim[3])
 {
@@ -1712,7 +1755,9 @@ static int ShotAim(uint32_t target, float aim[3])
 }
 static void ShotsFrame(float dt)
 {
-    if (!s_glHoming || s_homingMissile || !game) { g_nshot = 0; g_shotPool = 0; return; }
+    float me[3];
+    if (!s_glHoming || s_homingMissile || !game || g_shotOff) { g_nshot = 0; g_shotPool = 0; return; }
+    if (!PlayerPose(me, NULL)) return;
     uintptr_t pool = Pointer(game + 0x347CEA8);
     uint8_t active = 0;
     uint32_t counter = 0;
@@ -1731,7 +1776,12 @@ static void ShotsFrame(float dt)
         if (!hers || !ReadAt(pool + 0x3B040 + (uintptr_t)slot * 0x24 + 0x0C, &shooter, 4)) continue;
         if (shooter != g_weapon[1] && shooter != g_weapon[2] && shooter != g_weapon[3]) continue;
         if (g_nshot >= 24) break;
+        {
+            float f0[14];
+            if (!ReadAt(pool + 0x3040 + (uintptr_t)slot * 0x70, f0, sizeof f0) || !ShotSane(f0, me, 40)) { ShotOdd("as it left her", slot); if (g_shotOff) return; continue; }
+        }
         Shot* t = &g_shot[g_nshot++];
+        g_shotOdd = 0;
         memset(t, 0, sizeof *t);
         t->slot = slot;
         t->type = type;
@@ -1759,6 +1809,7 @@ static void ShotsFrame(float dt)
         if (g_now - t->since > 12 || !ReadAt(pool + 0xE5040 + (uintptr_t)t->slot * 4, &type, 4) || type != t->type || !ReadAt(pool + 0x203C + (uintptr_t)t->slot * 2, &flags, 2) ||
             !(flags & 2) || (flags & 1) || !ReadAt(flight, f, sizeof f) || f[12] < t->flown)
         { *t = g_shot[--g_nshot]; continue; }
+        if (!ShotSane(f, me, 800)) { int slot = t->slot; *t = g_shot[--g_nshot]; ShotOdd("in flight", slot); if (g_shotOff) return; continue; }
         t->flown = f[12];
         i++;
         float* v = f + 3;
