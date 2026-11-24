@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.9"
+#define VERSION "0.2.10"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -1277,7 +1277,8 @@ static uint64_t g_missile, g_missilePackage;
 static const char* g_missileName = "";
 static uintptr_t g_missileRecord;
 static float g_missileTurn[2];
-static int g_missileTurned, g_missileSpreadOff;
+static int g_missileTurned, g_missileSpreadOff, g_missileFlies;
+static float g_missileWas[2];   /* its movement delay and starting speed as the game has them */
 static uint8_t g_launcherSet[LAUNCHERS];
 static uint32_t (*g_netId)(uint32_t entity);
 typedef struct Missile { uint32_t entity, target; int handed, lost; float from[3], dir[3]; } Missile;
@@ -1314,6 +1315,30 @@ static void MissileSwap(int on)
         Log("homing grenades: the missile's turn rates %.2f / %.2f -> %.2f / %.2f (x%g)%s", (double)g_missileTurn[0], (double)g_missileTurn[1], (double)fast[0], (double)fast[1], (double)s_homingTurn, g_missileTurned ? "" : ": REFUSED");
     }
     else if (!on && g_missileTurned) { hf->write(g_missileRecord + 0x58, g_missileTurn, 8); g_missileTurned = 0; }
+    /* it flies as it leaves (0.2.9: the Spear's missile left a launcher like a lobbed grenade): no wait before it moves
+     * (+0x38), and its starting speed (+0x44) at least its preferred one (+0x4C). The record goes in the log whole. */
+    if (g_missileOn && !g_missileFlies && g_missileRecord)
+    {
+        float f[68];
+        memset(f, 0, sizeof f);
+        if (ReadAt(g_missileRecord, f, sizeof f))
+        {
+            char line[900];
+            int n = 0;
+            for (int i = 0; i < 68 && n < (int)sizeof line - 16; i++) n += snprintf(line + n, sizeof line - (size_t)n, "%s%.4g", i ? " " : "", (double)f[i]);
+            Log("homing grenades: the missile's record, 4 bytes a number from +0x00: %s", line);
+            g_missileWas[0] = f[14];
+            g_missileWas[1] = f[17];
+            float zero = 0, speed = f[19] > f[17] ? f[19] : f[17];
+            int ok = 1;
+            if (f[14] > 0) ok &= !hf->write(g_missileRecord + 0x38, &zero, 4);
+            if (speed > f[17]) ok &= !hf->write(g_missileRecord + 0x44, &speed, 4);
+            g_missileFlies = 1;
+            Log("homing grenades: the missile moves after %.2f s -> 0, starts at %.0f -> %.0f m/s (preferred %.0f, least %.0f, gaining %.0f a second)%s", (double)f[14], (double)f[17], (double)speed,
+                (double)f[19], (double)f[18], (double)f[20], ok ? "" : ": a write was REFUSED");
+        }
+    }
+    else if (!on && g_missileFlies) { hf->write(g_missileRecord + 0x38, &g_missileWas[0], 4); hf->write(g_missileRecord + 0x44, &g_missileWas[1], 4); g_missileFlies = 0; }
     /* its spread off (SeekingMissile +0xB4 deviation_enabled: the P-33's missile veers off its launch line, curves and
      * swings back onto its target; fired straight at an enemy that stood close it went around behind it, 0.2.6) */
     uint8_t spread = 0, none = 0, one = 1;
