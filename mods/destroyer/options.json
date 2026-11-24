@@ -293,6 +293,15 @@
    "Degrees a second a homing grenade turns."
   ],
   [
+   "homing_delay",
+   "Her Hands",
+   "Homing Delay",
+   "Seconds a grenade flies as fired before it starts to home, so it can be lobbed over something.",
+   {
+    "step": 0.1
+   }
+  ],
+  [
    "homing_arm",
    "Her Hands",
    "Homing From",

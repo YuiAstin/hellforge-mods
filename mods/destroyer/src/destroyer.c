@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.14"
+#define VERSION "0.2.15"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -81,7 +81,7 @@ static float s_lpClimb = 6, s_lpDrop = 12;
 /* her hands (0.1.8): a grenade launcher's rounds arm at once and home; every weapon is held in one hand */
 static int s_glArming = 1, s_glHoming = 1, s_glSafe = 1, s_oneHand = 1, s_oneHandGrip = 70;
 static float s_flakRadius = 4;
-static float s_homingCone = 25, s_homingRange = 80, s_homingTurn = 360, s_homingArm = 1;
+static float s_homingCone = 25, s_homingRange = 80, s_homingTurn = 360, s_homingArm = 1, s_homingDelay = 0.5f;
 static int s_homingMissile = 0;
 
 /* Every setting: its .ini / options name, variable and range (kitbase/kb_settings.h) */
@@ -109,7 +109,7 @@ static const KbSetting kSettings[] = {
     KB_F("hunting_taken", s_huntingTaken, 0, 5), KB_F("frenzy_refund", s_frenzyRefund, 0, 120),
     KB_I("explosion_small", s_rowSmall, 1, 100000), KB_I("explosion_big", s_rowBig, 1, 100000),
     KB_I("gl_arming", s_glArming, 0, 1), KB_I("gl_homing", s_glHoming, 0, 1), KB_I("gl_safe", s_glSafe, 0, 1),
-    KB_I("homing_missile", s_homingMissile, 0, 2), KB_F("homing_arm", s_homingArm, 0, 100), KB_F("flak_radius", s_flakRadius, 0, 20), KB_F("homing_cone", s_homingCone, 1, 180), KB_F("homing_turn", s_homingTurn, 1, 1440), KB_F("homing_range", s_homingRange, 1, 500), KB_I("one_handed", s_oneHand, 0, 1), KB_I("one_hand_grip", s_oneHandGrip, 0, 200),
+    KB_I("homing_missile", s_homingMissile, 0, 2), KB_F("homing_arm", s_homingArm, 0, 100), KB_F("homing_delay", s_homingDelay, 0, 5), KB_F("flak_radius", s_flakRadius, 0, 20), KB_F("homing_cone", s_homingCone, 1, 180), KB_F("homing_turn", s_homingTurn, 1, 1440), KB_F("homing_range", s_homingRange, 1, 500), KB_I("one_handed", s_oneHand, 0, 1), KB_I("one_hand_grip", s_oneHandGrip, 0, 200),
     KB_F("leap_climb", s_lpClimb, 0.5, 30), KB_F("leap_drop", s_lpDrop, 0.5, 50),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
@@ -171,7 +171,8 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "; Her hands. gl_arming 1: the rounds of a grenade launcher she holds arm as they leave (no arming distance:\n"
                "; any weapon whose round has one). gl_safe 1: the blasts of the weapons she holds do not hurt or throw her.\n"
                "; gl_homing 1: the grenades of a launcher she holds home. homing_missile 0: the grenade itself is steered by\n"
-               "; the kit (the game's projectile pool): from homing_arm m out it turns homing_turn degrees a second toward the\n"
+               "; the kit (the game's projectile pool): it flies as fired for homing_delay s (so she can lob it over\n"
+               "; something; how high she aims does not change which enemy it picks), then from homing_arm m out it turns homing_turn degrees a second toward the\n"
                "; living enemy nearest her and most in line within homing_cone degrees of where she looked and homing_range m,\n"
                "; and once it is flak_radius m from a living enemy it turns straight into it (0: never), so one that curved\n"
                "; too late still lands. homing_missile 1: the launchers fire the FAF-14 Spear's guided missile instead, 2: the\n"
@@ -179,7 +180,7 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "; flak_radius ends the missile in the air near an enemy.\n"
                "; one_handed 1: she holds every weapon in one hand (the game's one-handed mark on what she carries), in the\n"
                "; pose one_hand_grip (70: the one-handed SMG grip; 1: a pistol's; 0: the weapon's own).\n"
-               "gl_arming = %d\ngl_safe = %d\ngl_homing = %d\nhoming_missile = %d\nhoming_cone = %g\nhoming_range = %g\nhoming_turn = %g\nhoming_arm = %g\nflak_radius = %g\none_handed = %d\none_hand_grip = %d\n"
+               "gl_arming = %d\ngl_safe = %d\ngl_homing = %d\nhoming_missile = %d\nhoming_cone = %g\nhoming_range = %g\nhoming_turn = %g\nhoming_arm = %g\nhoming_delay = %g\nflak_radius = %g\none_handed = %d\none_hand_grip = %d\n"
                "; Her leaps land at most leap_climb m higher or leap_drop m lower.\n"
                "leap_climb = %g\nleap_drop = %g\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties. If her\n"
@@ -197,7 +198,7 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
         (double)s_s2Cd, (double)s_s2Length, (double)s_s2Width, (double)s_s2Damage, (double)s_s2Grenade, (double)s_s2Crit, (double)s_s2Step,
         (double)s_s3Cd, (double)s_s3Leap, (double)s_s3Width, (double)s_s3Damage, (double)s_s3Heal, (double)s_s3Step,
         (double)s_frenzyRadius, (double)s_frenzyDamage, (double)s_frenzyRange, (double)s_frenzyCone, s_frenzyRing, (double)s_huntingSeconds, (double)s_huntingTaken, (double)s_frenzyRefund,
-        s_rowSmall, s_rowBig, s_glArming, s_glSafe, s_glHoming, s_homingMissile, (double)s_homingCone, (double)s_homingRange, (double)s_homingTurn, (double)s_homingArm, (double)s_flakRadius, s_oneHand, s_oneHandGrip,
+        s_rowSmall, s_rowBig, s_glArming, s_glSafe, s_glHoming, s_homingMissile, (double)s_homingCone, (double)s_homingRange, (double)s_homingTurn, (double)s_homingArm, (double)s_homingDelay, (double)s_flakRadius, s_oneHand, s_oneHandGrip,
         (double)s_lpClimb, (double)s_lpDrop,
         (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
 }
@@ -1409,8 +1410,9 @@ static void MissilePackage(void)
  * not where she looks: far enemies were picked over ones in front of her. */
 static uint32_t MissileTarget(const float at[3], const float fwd[3])
 {
+    /* (0.2.15: the cone is measured on the ground plane, so aiming high to lob a grenade still picks what is ahead) */
     float cosCone = cosf(s_homingCone * 3.14159265f / 180), best = 1e30f;
-    float fl = sqrtf(fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]);
+    float fl = sqrtf(fwd[0] * fwd[0] + fwd[1] * fwd[1]);
     uint32_t pick = 0;
     if (fl < 0.1f) return 0;
     for (int i = 0; i < FOES; i++)
@@ -1421,7 +1423,8 @@ static uint32_t MissileTarget(const float at[3], const float fwd[3])
         float d[3] = {p[0] - at[0], p[1] - at[1], p[2] - at[2]};
         float d2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
         if (d2 >= s_homingRange * s_homingRange || d2 < 1) continue;
-        float dist = sqrtf(d2), c = (d[0] * fwd[0] + d[1] * fwd[1] + d[2] * fwd[2]) / (dist * fl);
+        float dist = sqrtf(d2), flat = sqrtf(d[0] * d[0] + d[1] * d[1]);
+        float c = flat > 0.5f ? (d[0] * fwd[0] + d[1] * fwd[1]) / (flat * fl) : 1;
         if (c < cosCone) continue;
         float score = dist * (1 + 3 * (1 - c) / (1 - cosCone + 1e-6f));
         if (score >= best || !Living(g_foe[i])) continue;
@@ -1761,6 +1764,7 @@ static void ShotsFrame(float dt)
         float* v = f + 3;
         float aim[3];
         if (sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) < 1.0f) continue;
+        if (g_now - t->since < s_homingDelay) continue;   /* hers to place first (0.2.15) */
         if (s_flakRadius > 0 && f[12] >= s_homingArm && ShotNear(f, aim))
         {
             float to[3] = {aim[0] - f[0], aim[1] - f[1], aim[2] - f[2]};
