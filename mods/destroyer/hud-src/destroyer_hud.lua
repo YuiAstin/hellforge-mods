@@ -393,7 +393,7 @@ local function ability(d, i, x, y, size, alpha)
     local tx = x + size + 10 * s
     local nsize = math.max(17 * s, size * 0.36)
     local name = NAMES[i]
-    if i == 1 and stage == 1 then name = 'ANNIHILATION I: THE LINE' elseif i == 1 and stage == 2 then name = 'ANNIHILATION II: THE CONE' end
+    if i == 1 and stage == 1 then name = 'ANNIHILATION DIRECTIVE I' elseif i == 1 and stage == 2 then name = 'ANNIHILATION DIRECTIVE II' end
     heavy(d, name, tx, y + size * 0.02, nsize, 'title', (i == 1 and stage > 0) and rgba(YELLOW, a) or ready and rgba(TEXT, a) or rgba(MUTED, a))
     local label = X.labels[i] or ffi.string(state.key_label[i - 1])
     if label == '' then label = key_name(state.keys[i - 1]) end
@@ -498,8 +498,8 @@ local OPTIONS = {
     {'s1_cooldown', 'slider', 'Annihilation Directive: Cooldown', 0, 60, 1, 'Seconds before it can be used again, from the end of the chain.', true},
     {'s1_leap', 'slider', 'Annihilation Directive: Leap', 5, 30, 1, 'Metres the leap reaches.'},
     {'s1_damage', 'slider', 'Annihilation Directive: Leap Damage', 0, 5000, 50, 'Damage to each enemy where she lands.'},
-    {'s1_damage_1', 'slider', 'Annihilation Directive: Line Damage', 0, 5000, 50, 'Damage to each enemy on the line.'},
-    {'s1_damage_2', 'slider', 'Annihilation Directive: Cone Damage', 0, 5000, 50, 'Damage to each enemy in the cone.'},
+    {'s1_damage_1', 'slider', 'Annihilation Directive I: Damage', 0, 5000, 50, 'Damage to each enemy on the line.'},
+    {'s1_damage_2', 'slider', 'Annihilation Directive II: Damage', 0, 5000, 50, 'Damage to each enemy in the cone.'},
     {'s2_cooldown', 'slider', 'Doom Barrage: Cooldown', 0, 120, 1, 'Seconds before it can be used again.', true},
     {'s2_damage', 'slider', 'Doom Barrage: Damage', 0, 5000, 50, 'Damage to each enemy in the box, before the Grenades spent.'},
     {'s3_cooldown', 'slider', 'Party Time: Cooldown', 0, 300, 5, 'Seconds before it can be used again.', true},
