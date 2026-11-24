@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.8"
+#define VERSION "0.2.9"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -80,7 +80,7 @@ static int s_rowSmall = 343, s_rowBig = 277;   /* 343: the Orbital Precision Str
 static float s_lpClimb = 6, s_lpDrop = 12;
 /* her hands (0.1.8): a grenade launcher's rounds arm at once and home; every weapon is held in one hand */
 static int s_glArming = 1, s_glHoming = 1, s_glSafe = 1, s_oneHand = 1, s_oneHandGrip = 70;
-static float s_homingCone = 25, s_homingRange = 80, s_homingTurn = 4;
+static float s_homingCone = 25, s_homingRange = 80, s_homingTurn = 1;
 static int s_homingMissile = 0;
 
 /* Every setting: its .ini / options name, variable and range (kitbase/kb_settings.h) */
@@ -174,8 +174,9 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "; grenade (the GL-21, GL-28, GL-52, GL-15, GP-31 and GP-20; one equipped or called in after the mission\n"
                "; starts), and each missile is given the living enemy nearest her and most in line within homing_cone degrees\n"
                "; of where she looks and homing_range m of her; the game's own missile guidance flies it there, turning\n"
-               "; homing_turn times as fast as that missile does (it flew around an enemy that stood close; the weapon the\n"
-               "; missile is from turns so too while she is in a mission).\n"
+               "; homing_turn times as fast as that missile does (1: as it does; the weapon the missile is from turns so\n"
+               "; too while she is in a mission), and without that missile's spread (the P-33's veers off its line and swings\n"
+               "; back: fired straight at a close enemy it went around behind it).\n"
                "; one_handed 1: she holds every weapon in one hand (the game's one-handed mark on what she carries), in the\n"
                "; pose one_hand_grip (70: the one-handed SMG grip; 1: a pistol's; 0: the weapon's own).\n"
                "gl_arming = %d\ngl_safe = %d\ngl_homing = %d\nhoming_missile = %d\nhoming_cone = %g\nhoming_range = %g\nhoming_turn = %g\none_handed = %d\none_hand_grip = %d\n"
@@ -1276,7 +1277,7 @@ static uint64_t g_missile, g_missilePackage;
 static const char* g_missileName = "";
 static uintptr_t g_missileRecord;
 static float g_missileTurn[2];
-static int g_missileTurned;
+static int g_missileTurned, g_missileSpreadOff;
 static uint8_t g_launcherSet[LAUNCHERS];
 static uint32_t (*g_netId)(uint32_t entity);
 typedef struct Missile { uint32_t entity, target; int handed, lost; float from[3], dir[3]; } Missile;
@@ -1313,6 +1314,15 @@ static void MissileSwap(int on)
         Log("homing grenades: the missile's turn rates %.2f / %.2f -> %.2f / %.2f (x%g)%s", (double)g_missileTurn[0], (double)g_missileTurn[1], (double)fast[0], (double)fast[1], (double)s_homingTurn, g_missileTurned ? "" : ": REFUSED");
     }
     else if (!on && g_missileTurned) { hf->write(g_missileRecord + 0x58, g_missileTurn, 8); g_missileTurned = 0; }
+    /* its spread off (SeekingMissile +0xB4 deviation_enabled: the P-33's missile veers off its launch line, curves and
+     * swings back onto its target; fired straight at an enemy that stood close it went around behind it, 0.2.6) */
+    uint8_t spread = 0, none = 0, one = 1;
+    if (g_missileOn && !g_missileSpreadOff && g_missileRecord && ReadAt(g_missileRecord + 0xB4, &spread, 1))
+    {
+        if (spread == 1) g_missileSpreadOff = !hf->write(g_missileRecord + 0xB4, &none, 1);
+        Log("homing grenades: the missile's spread (it veers off its line and swings back) was %s%s", spread ? "on" : "off already", spread == 1 ? (g_missileSpreadOff ? ": turned off for the mission" : ": could not be turned off") : "");
+    }
+    else if (!on && g_missileSpreadOff) { hf->write(g_missileRecord + 0xB4, &one, 1); g_missileSpreadOff = 0; }
     if (on) Log("homing grenades: %d of %u grenade launchers fire the %s's missile with their own grenade (one equipped or called in from now on)", n, (unsigned)LAUNCHERS, g_missileName);
     else Log("homing grenades: %d launcher(s) put back; %u missiles seen, %u target hand-offs, %u found no enemy", n, g_msSeen, g_msHanded, g_msLost);
     if (!on) { memset(g_ms, 0, sizeof g_ms); g_msSeen = g_msHanded = g_msLost = 0; }
