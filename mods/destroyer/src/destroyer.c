@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.4"
+#define VERSION "0.2.5"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -80,7 +80,7 @@ static int s_rowSmall = 343, s_rowBig = 277;   /* 343: the Orbital Precision Str
 static float s_lpClimb = 6, s_lpDrop = 12;
 /* her hands (0.1.8): a grenade launcher's rounds arm at once and home; every weapon is held in one hand */
 static int s_glArming = 1, s_glHoming = 1, s_glSafe = 1, s_oneHand = 1, s_oneHandGrip = 70;
-static float s_homingCone = 25, s_homingRange = 150;
+static float s_homingCone = 25, s_homingRange = 80;
 static int s_homingMissile = 0;
 
 /* Every setting: its .ini / options name, variable and range (kitbase/kb_settings.h) */
@@ -172,8 +172,8 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "; gl_homing 1: the grenade launchers fire a guided missile (homing_missile 0: the FAF-14 Spear's, or the P-33\n"
                "; Missile Pistol's if the Spear's cannot be used; 1: the P-33's, a premium weapon's) carrying their own\n"
                "; grenade (the GL-21, GL-28, GL-52, GL-15, GP-31 and GP-20; one equipped or called in after the mission\n"
-               "; starts), and each missile is given the nearest living enemy within homing_cone degrees of where it was\n"
-               "; fired and homing_range m; the game's own missile guidance flies it there.\n"
+               "; starts), and each missile is given the living enemy nearest her and most in line within homing_cone degrees\n"
+               "; of where she looks and homing_range m of her; the game's own missile guidance flies it there.\n"
                "; one_handed 1: she holds every weapon in one hand (the game's one-handed mark on what she carries), in the\n"
                "; pose one_hand_grip (70: the one-handed SMG grip; 1: a pistol's; 0: the weapon's own).\n"
                "gl_arming = %d\ngl_safe = %d\ngl_homing = %d\nhoming_missile = %d\nhoming_cone = %g\nhoming_range = %g\none_handed = %d\none_hand_grip = %d\n"
@@ -1258,7 +1258,7 @@ static uint64_t g_missile, g_missilePackage;
 static const char* g_missileName = "";
 static uint8_t g_launcherSet[LAUNCHERS];
 static uint32_t (*g_netId)(uint32_t entity);
-typedef struct Missile { uint32_t entity, target; int handed, lost; } Missile;
+typedef struct Missile { uint32_t entity, target; int handed, lost; float from[3], dir[3]; } Missile;
 static Missile g_ms[32];
 static unsigned g_msNext, g_msSeen, g_msHanded, g_msLost;
 static void MissileInit(void)
@@ -1344,11 +1344,16 @@ static void MissilePackage(void)
     }
     else if (!g_missilePkg) Log("homing grenades off: the P-33's package did not load");
 }
+/* The enemy a missile gets: within homing_cone degrees of where she was looking when it left (the camera's ray) and
+ * homing_range m of her, the one that is nearest and most in line (its distance, up to four times as far when at the
+ * cone's edge). 0.2.1 to 0.2.4 took the nearest to the missile within the cone of its own launch direction, which is
+ * not where she looks: far enemies were picked over ones in front of her. */
 static uint32_t MissileTarget(const float at[3], const float fwd[3])
 {
-    float best = s_homingRange * s_homingRange, cosCone = cosf(s_homingCone * 3.14159265f / 180);
+    float cosCone = cosf(s_homingCone * 3.14159265f / 180), best = 1e30f;
     float fl = sqrtf(fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]);
     uint32_t pick = 0;
+    if (fl < 0.1f) return 0;
     for (int i = 0; i < FOES; i++)
     {
         float p[3];
@@ -1356,10 +1361,12 @@ static uint32_t MissileTarget(const float at[3], const float fwd[3])
         p[2] += 1.0f;
         float d[3] = {p[0] - at[0], p[1] - at[1], p[2] - at[2]};
         float d2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-        if (d2 >= best || d2 < 1) continue;
-        if (fl > 0.1f && (d[0] * fwd[0] + d[1] * fwd[1] + d[2] * fwd[2]) / (sqrtf(d2) * fl) < cosCone) continue;
-        if (!Living(g_foe[i])) continue;
-        best = d2;
+        if (d2 >= s_homingRange * s_homingRange || d2 < 1) continue;
+        float dist = sqrtf(d2), c = (d[0] * fwd[0] + d[1] * fwd[1] + d[2] * fwd[2]) / (dist * fl);
+        if (c < cosCone) continue;
+        float score = dist * (1 + 3 * (1 - c) / (1 - cosCone + 1e-6f));
+        if (score >= best || !Living(g_foe[i])) continue;
+        best = score;
         pick = g_foe[i];
     }
     return pick;
@@ -1410,9 +1417,15 @@ static void MissilesFrame(void)
         }
         if (m->handed < 0) continue;
         if (m->target && MissileTargetLives(m->target)) continue;   /* (the game clears +0x00 for the final approach: leave it) */
-        float pos[3], fwd[3];
-        if (!ReadAt(state + 0x18, pos, 12) || !ReadAt(local + 0x74, fwd, 12)) continue;
-        uint32_t t = MissileTarget(pos, fwd), tn = t && t != m->target ? g_netId(t) : NO_NET;
+        if (!m->handed && !m->lost && m->dir[0] == 0 && m->dir[1] == 0 && m->dir[2] == 0)
+        {
+            /* where she looks as it leaves; else the missile's own start and direction */
+            float eye[3];
+            if (!CamView(eye, m->dir) || !PlayerPose(m->from, NULL))
+                if (!ReadAt(state + 0x18, m->from, 12) || !ReadAt(local + 0x74, m->dir, 12)) continue;
+            m->from[2] += 1.0f;
+        }
+        uint32_t t = MissileTarget(m->from, m->dir), tn = t && t != m->target ? g_netId(t) : NO_NET;
         if (tn != NO_NET)
         {
             uint32_t node = 0x10;

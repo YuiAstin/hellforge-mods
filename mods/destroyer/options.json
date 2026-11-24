@@ -278,13 +278,13 @@
    "homing_cone",
    "Her Hands",
    "Homing Cone",
-   "Degrees off the way it was fired a homing grenade may pick an enemy."
+   "Degrees off where she looks a homing grenade may pick an enemy."
   ],
   [
    "homing_range",
    "Her Hands",
    "Homing Range",
-   "Metres a homing grenade may pick an enemy within."
+   "Metres from her a homing grenade may pick an enemy within."
   ],
   [
    "one_hand_grip",
