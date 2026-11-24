@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.3"
+#define VERSION "0.1.4"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -67,8 +67,8 @@ static int s_bossArmour = 4;           /* heavy armour or above: boss-sized (Lem
 static float s_deniedCd = 180, s_deniedSeconds = 2, s_rage = 1;
 static float s_s1Cd = 10, s_s1Leap = 15, s_s1Radius = 5, s_s1Window = 3, s_s1Line = 25, s_s1Cone = 12, s_s1Triple = 2, s_s1Haste = 2, s_hasteMult = 1.3f;
 static float s_s1Damage = 600, s_s1Damage1 = 800, s_s1Damage2 = 1000, s_s1Stagger1 = 50, s_s1Stagger2 = 80, s_s1Shield = 1.5f;
-static int s_s1Rounds = 12, s_tracerRound = 77, s_tracerDamage = 125;   /* the stages' rounds: the Orbital Gatling Barrage's HE shell (Koleda's he_round), the minigun's damage row */
-static float s_s1Burst = 0.4f, s_s1ConeAngle = 30, s_tracerSpeed = 0;
+static int s_s1Rounds = 8, s_tracerRound = 77, s_tracerDamage = 125;   /* the stages' rounds: the Orbital Gatling Barrage's HE shell (Koleda's he_round), the minigun's damage row */
+static float s_s1Burst = 0.8f, s_s1ConeBurst = 0.5f, s_s1ConeAngle = 30, s_tracerSpeed = 0;
 static float s_s2Cd = 18, s_s2Length = 15, s_s2Width = 9, s_s2Damage = 400, s_s2Grenade = 0.20f, s_s2Crit = 1.5f, s_s2Step = 0.18f;
 static float s_s3Cd = 90, s_s3Leap = 18, s_s3Width = 9, s_s3Damage = 1500, s_s3Heal = 0.20f, s_s3Step = 0.12f;
 static float s_frenzyRadius = 24, s_frenzyDamage = 12000, s_frenzyRange = 120, s_frenzyCone = 6, s_huntingSeconds = 10, s_huntingTaken = 0.20f, s_frenzyRefund = 5;
@@ -89,7 +89,7 @@ static const KbSetting kSettings[] = {
     KB_F("s1_line", s_s1Line, 3, 100), KB_F("s1_cone", s_s1Cone, 3, 100), KB_F("s1_triple", s_s1Triple, 0, 20), KB_F("s1_haste", s_s1Haste, 0, 30),
     KB_F("haste_mult", s_hasteMult, 1, 3), KB_F("s1_damage", s_s1Damage, 0, 100000), KB_F("s1_damage_1", s_s1Damage1, 0, 100000),
     KB_F("s1_damage_2", s_s1Damage2, 0, 100000), KB_F("s1_stagger_1", s_s1Stagger1, 0, 500), KB_F("s1_stagger_2", s_s1Stagger2, 0, 500),
-    KB_I("s1_rounds", s_s1Rounds, 1, 40), KB_F("s1_burst", s_s1Burst, 0, 2), KB_F("s1_cone_angle", s_s1ConeAngle, 5, 80),
+    KB_I("s1_rounds", s_s1Rounds, 1, 40), KB_F("s1_burst", s_s1Burst, 0, 3), KB_F("s1_cone_burst", s_s1ConeBurst, 0, 3), KB_F("s1_cone_angle", s_s1ConeAngle, 5, 80),
     KB_F("s1_round_speed", s_tracerSpeed, 0, 2000), KB_I("s1_round", s_tracerRound, 1, 350), KB_I("s1_round_damage", s_tracerDamage, 1, 649),
     KB_F("s1_shield", s_s1Shield, 0, 10),
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("s2_length", s_s2Length, 5, 40), KB_F("s2_width", s_s2Width, 3, 30), KB_F("s2_damage", s_s2Damage, 0, 100000),
@@ -133,12 +133,13 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "; enemy itself; seconds without knockdown after each stage.\n"
                "s1_cooldown = %g\ns1_leap = %g\ns1_radius = %g\ns1_window = %g\ns1_line = %g\ns1_cone = %g\ns1_triple = %g\ns1_haste = %g\nhaste_mult = %g\n"
                "s1_damage = %g\ns1_damage_1 = %g\ns1_damage_2 = %g\ns1_stagger_1 = %g\ns1_stagger_2 = %g\ns1_shield = %g\n"
-               "; The line and the cone are high-explosive rounds she fires at the ground: s1_rounds of them within s1_burst\n"
-               "; s, the line's walking away from her (as an Eagle's strafing run), the cone's spread s1_cone_angle degrees\n"
-               "; to each side. s1_round: the projectile they copy (77: the Orbital Gatling Barrage's HE shell, as Koleda's\n"
+               "; The line and the cone are high-explosive rounds she fires at the ground, s1_rounds of them one after\n"
+               "; another: the line's within s1_burst s, walking away from her (as an Eagle's strafing run); the cone's\n"
+               "; within s1_cone_burst s, sweeping s1_cone_angle degrees to each side. (Fired closer together than about ten\n"
+               "; a second, the game leaves some of their blasts silent.) s1_round: the projectile they copy (77: the Orbital Gatling Barrage's HE shell, as Koleda's\n"
                "; Sinveiler fires); s1_round_damage: the damage row a direct hit's copies (the damage is the stage's);\n"
                "; s1_round_speed: their m/s (0: the round's own).\n"
-               "s1_rounds = %d\ns1_burst = %g\ns1_cone_angle = %g\ns1_round = %d\ns1_round_damage = %d\ns1_round_speed = %g\n"
+               "s1_rounds = %d\ns1_burst = %g\ns1_cone_burst = %g\ns1_cone_angle = %g\ns1_round = %d\ns1_round_damage = %d\ns1_round_speed = %g\n"
                "; Doom Barrage: cooldown; the box's length and width; damage; each Grenade spent adds s2_grenade; with 3 or\n"
                "; more spent the damage is times s2_crit; seconds between its blasts.\n"
                "s2_cooldown = %g\ns2_length = %g\ns2_width = %g\ns2_damage = %g\ns2_grenade = %g\ns2_crit = %g\ns2_step = %g\n"
@@ -164,7 +165,7 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
         (double)s_deniedCd, (double)s_deniedSeconds, (double)s_rage,
         (double)s_s1Cd, (double)s_s1Leap, (double)s_s1Radius, (double)s_s1Window, (double)s_s1Line, (double)s_s1Cone, (double)s_s1Triple, (double)s_s1Haste, (double)s_hasteMult,
         (double)s_s1Damage, (double)s_s1Damage1, (double)s_s1Damage2, (double)s_s1Stagger1, (double)s_s1Stagger2, (double)s_s1Shield,
-        s_s1Rounds, (double)s_s1Burst, (double)s_s1ConeAngle, s_tracerRound, s_tracerDamage, (double)s_tracerSpeed,
+        s_s1Rounds, (double)s_s1Burst, (double)s_s1ConeBurst, (double)s_s1ConeAngle, s_tracerRound, s_tracerDamage, (double)s_tracerSpeed,
         (double)s_s2Cd, (double)s_s2Length, (double)s_s2Width, (double)s_s2Damage, (double)s_s2Grenade, (double)s_s2Crit, (double)s_s2Step,
         (double)s_s3Cd, (double)s_s3Leap, (double)s_s3Width, (double)s_s3Damage, (double)s_s3Heal, (double)s_s3Step,
         (double)s_frenzyRadius, (double)s_frenzyDamage, (double)s_frenzyRange, (double)s_frenzyCone, s_frenzyRing, (double)s_huntingSeconds, (double)s_huntingTaken, (double)s_frenzyRefund,
@@ -340,20 +341,27 @@ static double Missing(void)
     if (!Hp(&hp, &max) || hp >= max) return 0;
     return 1.0 - (double)hp / max;
 }
-/* A skill's price: `share` of her maximum, never taking her below cost_floor of it (under the floor it costs nothing) */
+/* A skill's price: `share` of her maximum, never taking her below cost_floor of it (under the floor it costs nothing).
+ * 0.1.4: written into her health record alone, her health was lower but the game's HUD did not show it (as Koleda's
+ * Sinveiler's, before 0.4.4). So the write goes one point under, and the game's own heal gives that point back: the
+ * game's health change is what the HUD follows. (Not the game's change with a share off: it takes the same share off
+ * every limb, and her limbs would break.) */
 static void Pay(const char* what, float share)
 {
     int32_t hp, max;
     if (share <= 0) return;
     if (!Hp(&hp, &max)) { static unsigned told; if (told++ < 4) Log("%s: her health cannot be read: no price taken", what); return; }
     int32_t floor_ = (int32_t)ceil(max * (double)s_costFloor), want = hp - (int32_t)floor(max * (double)share + 0.5);
-    if (floor_ < 1) floor_ = 1;
+    if (floor_ < 2) floor_ = 2;
     if (want < floor_) want = floor_;
     if (want >= hp) return;
     uintptr_t r = HealthRec(atomic_load(&g_avatar));
-    if (!r || hf->write(r + 20, &want, 4)) { static unsigned told; if (told++ < 4) Log("%s: the health write failed: no price taken", what); return; }
+    int32_t under = want - 1;
+    if (!r || hf->write(r + 20, &under, 4)) { static unsigned told; if (told++ < 4) Log("%s: the health write failed: no price taken", what); return; }
+    int nudge = hf->heal(self, 1.0f), now = 0;
+    ReadAt(r + 20, &now, 4);
     static unsigned told;
-    if (told++ < 12) Log("%s: paid %d health (%d -> %d of %d)", what, hp - want, hp, want, max);
+    if (told++ < 16) Log("%s: paid %d health (%d -> %d of %d; the game's heal of the last point answered %d)", what, hp - now, hp, now, max, nudge);
 }
 
 /* ---- speed (Lenna's: her jog and sprint, live) --------------------------------------------------------------------- */
@@ -642,7 +650,8 @@ static void VolleyFrame(void)
     float h = sqrtf(v->aim[0] * v->aim[0] + v->aim[1] * v->aim[1]);
     if (h < 0.05f) { v->left = 0; return; }
     float fx = v->aim[0] / h, fy = v->aim[1] / h, feet = v->from[2] - 1.4f;
-    int per = s_s1Burst <= 0 ? v->left : v->cone ? 3 : 1;
+    float burst = v->cone ? s_s1ConeBurst : s_s1Burst;
+    int per = burst <= 0 ? v->left : 1;   /* one at a time: many at once and the game leaves some of their blasts silent */
     for (int k = 0; k < per && v->left > 0; k++)
     {
         int i = v->n - v->left;
@@ -672,7 +681,7 @@ static void VolleyFrame(void)
         atomic_store(&g_ownMs[slot], GetTickCount64());
         v->left--;
     }
-    v->next = g_now + (s_s1Burst > 0 && v->n > per ? s_s1Burst / ((double)v->n / per) : 0);
+    v->next = g_now + (burst > 0 && v->n > 1 ? burst / v->n : 0);
     if (v->left <= 0)
     {
         Group* g = &g_group[v->group];

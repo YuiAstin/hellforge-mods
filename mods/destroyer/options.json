@@ -140,8 +140,14 @@
   [
    "s1_burst",
    "Annihilation Directive",
-   "Burst Length",
-   "Seconds the rounds take to all be fired (0: all at once)."
+   "Line Burst Length",
+   "Seconds the line's rounds take to all be fired (0: all at once; some blasts then go silent)."
+  ],
+  [
+   "s1_cone_burst",
+   "Annihilation Directive",
+   "Cone Burst Length",
+   "Seconds the cone's rounds take to all be fired (0: all at once; some blasts then go silent)."
   ],
   [
    "s1_cone_angle",
