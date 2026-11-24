@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.13"
+#define VERSION "0.2.14"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -1634,6 +1634,56 @@ static void TurnTo(float v[3], const float to[3], float angle)
     float wa = sn > 1e-4f ? sinf((1 - t) * between) / sn : 1 - t, wb = sn > 1e-4f ? sinf(t * between) / sn : t;
     for (int k = 0; k < 3; k++) v[k] = (wa * a[k] + wb * b[k]) * speed;
 }
+/* Where to hit an enemy (Exusiai's guns' aim, 0.2.14): the middle of its body, the median of its unit's scene-graph
+ * nodes (a War Strider's root is on the ground, its hull metres up; 0.2.13 aimed 1 m above the root), kept a second
+ * per enemy; 1 m above its root when that cannot be read */
+#define BODIES 256
+static struct { uint32_t unit; double at; float off[3]; } g_body[BODIES];
+static int CmpF(const void* x, const void* y) { float a = *(const float*)x, b = *(const float*)y; return a < b ? -1 : a > b; }
+static int BodyOffset(uint32_t unit, const float root[3], float off[3])
+{
+    unsigned h = (unit * 2654435761u) % BODIES;
+    if (g_body[h].unit == unit && g_now - g_body[h].at < 1.0) { memcpy(off, g_body[h].off, 12); return 1; }
+    uintptr_t registry = Pointer(exe + 0x1A100F0), objects, object, nodes;
+    uint32_t count = 0, id, slot = unit & 0x3FFFFF;
+    static float m[256 * 16];
+    if (!registry || !(objects = Pointer(registry + 0x88)) || !(object = Pointer(objects + 8u * slot)) || !ReadAt(object + 8, &id, 4) || id != unit ||
+        !ReadAt(object + 0x70, &count, 4) || !count || count > 4096 || !(nodes = Pointer(object + 0x88)))
+        return 0;
+    if (count > 256) count = 256;
+    if (!ReadAt(nodes, m, (size_t)count * 64)) return 0;
+    /* the median of its nodes (the box's centre overshot small enemies: a few nodes far up, a weapon, an effect) */
+    static float v[3][256];
+    int used = 0;
+    for (uint32_t i = 0; i < count; i++)
+    {
+        const float* t = m + 16 * i + 12;
+        if (!isfinite(t[0]) || !isfinite(t[1]) || !isfinite(t[2]) || fabsf(t[0] - root[0]) > 20 || fabsf(t[1] - root[1]) > 20 || t[2] < root[2] - 2 || t[2] > root[2] + 20) continue;
+        for (int k = 0; k < 3; k++) v[k][used] = t[k] - root[k];
+        used++;
+    }
+    if (used < 2) return 0;
+    for (int k = 0; k < 3; k++) { qsort(v[k], used, sizeof(float), CmpF); off[k] = v[k][used / 2]; }
+    /* (Yui, 2026-11-11: the guns shot the floor under an Illuminate spawner) a tall thing whose nodes cluster at its
+     * foot (a structure: most of them on the ground, its body metres up): half its height instead (its 90th-percentile
+     * node, so a stray effect node far up does not count) */
+    {
+        float top = v[2][(used * 9) / 10];
+        if (top > 3.0f && off[2] < 0.35f * top) off[2] = 0.5f * top;
+    }
+    if (off[2] < 0.3f) off[2] = 0.3f;
+    g_body[h].unit = unit; g_body[h].at = g_now; memcpy(g_body[h].off, off, 12);
+    return 1;
+}
+static int FoeBody(int i, float p[3])
+{
+    uint8_t d[24];
+    float off[3];
+    if (!FoePos(i, p)) return 0;
+    if (Descriptor(g_foe[i], d) && BodyOffset(Word(d + 12), p, off)) { for (int k = 0; k < 3; k++) p[k] += off[k]; }
+    else p[2] += 1.0f;
+    return 1;
+}
 /* the living enemy nearest `at` within flak_radius: where to hit it */
 static int ShotNear(const float at[3], float aim[3])
 {
@@ -1643,7 +1693,7 @@ static int ShotNear(const float at[3], float aim[3])
     {
         float p[3];
         if (!g_foe[i] || !FoePos(i, p)) continue;
-        p[2] += 1.0f;
+        if (Dist2(p, at) > 30.0f * 30.0f || !FoeBody(i, p)) continue;   /* (the body is read only for the ones about) */
         float d2 = Dist2(p, at);
         if (d2 > best || !Living(g_foe[i])) continue;
         best = d2;
@@ -1654,7 +1704,7 @@ static int ShotNear(const float at[3], float aim[3])
 }
 static int ShotAim(uint32_t target, float aim[3])
 {
-    for (int i = 0; i < FOES; i++) if (g_foe[i] == target) { if (!FoePos(i, aim) || !Living(target)) return 0; aim[2] += 1.0f; return 1; }
+    for (int i = 0; i < FOES; i++) if (g_foe[i] == target) return FoeBody(i, aim) && Living(target);
     return 0;
 }
 static void ShotsFrame(float dt)
