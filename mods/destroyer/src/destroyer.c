@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.12"
+#define VERSION "0.2.13"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -1115,6 +1115,36 @@ static void PayHit(HfDamagePreEvent* e, HfDamageEvent* d, Group* g, uint64_t res
     if (told++ < 60) Log("her %s (skill %d) on entity %u: %d damage%s%s (%.1f m away)", by, g->skill, d->target, d->amount, boss ? ", boss-sized" : "", Hunted(d->target) ? ", Hunting Order" : "", (double)dist);
 }
 /* Any other hit: her blasts' and her tracers' on enemies and friends, her shots */
+/* Enemies the kit base's test leaves out (Koleda's and Lemuen's): an enemy's turret (an Automaton cannon tower, a War
+ * Strider: a turret that runs a behaviour and is no friend) and anything with the AI's enemy record and health. Her
+ * homing grenades went past a War Strider to other enemies (0.2.12). */
+static int FoeAlso(uint64_t res)
+{
+    static uint64_t keys[64];
+    static int8_t vals[64];
+    uint32_t stride;
+    if (!res || res == AVATAR) return 0;
+    unsigned h = (unsigned)(res ^ (res >> 31)) & 63;
+    for (unsigned i = 0; i < 64; i++)
+    {
+        unsigned k = (h + i) & 63;
+        if (keys[k] == res) return vals[k];
+        if (keys[k]) continue;
+        int foe = 0;
+        if (!hf->component_record("AvatarComponentData", res, &stride) && !FriendRes(res))
+        {
+            int turret = hf->component_record("TurretComponentData", res, &stride) != 0 && hf->component_record("BehaviorComponentData", res, &stride) != 0;
+            int ai = hf->component_record("AiEnemyComponentData", res, &stride) != 0 && hf->component_record("HealthComponentData", res, &stride) != 0;
+            foe = turret || ai;
+            if (foe && !FoeKind(res)) Log("an enemy kind the kit base leaves out: %016llx (%s): one of her foes", (unsigned long long)res, turret ? "an enemy turret" : "an AI enemy");
+        }
+        keys[k] = res;
+        vals[k] = (int8_t)foe;
+        return foe;
+    }
+    return 0;
+}
+static int Foe(uint64_t res) { return FoeKind(res) || FoeAlso(res); }
 /* A shield she may carry: it takes hits of its own, and a blast of hers on it threw her (0.2.5 and before) */
 static int ShieldKind(uint64_t res)
 {
@@ -1140,7 +1170,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
                 return;
             }
             if (friend_) { e->cancel = 1; g_friendSpared++; return; }
-            if (!res || !FoeKind(res)) return;   /* not an enemy the kit knows (a wall, a nest, a turret): the row's own hit */
+            if (!res || !Foe(res)) return;   /* not an enemy the kit knows (a wall, a nest, a turret): the row's own hit */
             int stage = g_group[b->group].skill == SK_LINE || g_group[b->group].skill == SK_CONE;   /* (a stage's shells burst small: all they reach) */
             if (!stage && dist > g_group[b->group].radius + 2.0f) { e->cancel = 1; g_cutHits++; return; }   /* the row reaches further than the skill */
             PayHit(e, d, &g_group[b->group], res, dist, stage ? "shell burst" : "blast");
@@ -1152,7 +1182,7 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     {
         uint64_t res;
         if (TargetFriend(d->target, &res)) { e->cancel = 1; g_friendSpared++; return; }
-        if (!res || !FoeKind(res)) return;
+        if (!res || !Foe(res)) return;
         float dist = sqrtf(Dist2(d->position, g_volley.from));
         if (dist > g_volley.range + 6.0f) { e->cancel = 1; g_cutHits++; return; }   /* further than the stage reaches */
         PayHit(e, d, &g_group[g_volley.group], res, dist, "round");
@@ -1745,7 +1775,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     {
         if (ShieldKind(s->resource)) { KbHers(s->entity); Log("a shield spawned (entity %u, %016llx): her blasts spare it", s->entity, (unsigned long long)s->resource); return; }
         MechSeen(s->resource);
-        if (FoeKind(s->resource)) AddFoe(s->entity, s->resource);
+        if (Foe(s->resource)) AddFoe(s->entity, s->resource);
         return;
     }
     if (!s->authority) return;
