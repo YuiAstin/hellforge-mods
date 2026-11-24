@@ -294,6 +294,15 @@
    "Times as fast as the missile's own a homing grenade turns (1: as it does)."
   ],
   [
+   "flak_radius",
+   "Her Hands",
+   "Flak Radius",
+   "A homing grenade goes off in the air this many metres from an enemy. 0: only where it hits.",
+   {
+    "step": 0.5
+   }
+  ],
+  [
    "one_hand_grip",
    "Her Hands",
    "One-Handed Grip",

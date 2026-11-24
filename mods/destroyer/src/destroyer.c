@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.10"
+#define VERSION "0.2.11"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -80,6 +80,7 @@ static int s_rowSmall = 343, s_rowBig = 277;   /* 343: the Orbital Precision Str
 static float s_lpClimb = 6, s_lpDrop = 12;
 /* her hands (0.1.8): a grenade launcher's rounds arm at once and home; every weapon is held in one hand */
 static int s_glArming = 1, s_glHoming = 1, s_glSafe = 1, s_oneHand = 1, s_oneHandGrip = 70;
+static float s_flakRadius = 4;
 static float s_homingCone = 25, s_homingRange = 80, s_homingTurn = 1;
 static int s_homingMissile = 0;
 
@@ -108,7 +109,7 @@ static const KbSetting kSettings[] = {
     KB_F("hunting_taken", s_huntingTaken, 0, 5), KB_F("frenzy_refund", s_frenzyRefund, 0, 120),
     KB_I("explosion_small", s_rowSmall, 1, 100000), KB_I("explosion_big", s_rowBig, 1, 100000),
     KB_I("gl_arming", s_glArming, 0, 1), KB_I("gl_homing", s_glHoming, 0, 1), KB_I("gl_safe", s_glSafe, 0, 1),
-    KB_I("homing_missile", s_homingMissile, 0, 1), KB_F("homing_cone", s_homingCone, 1, 180), KB_F("homing_turn", s_homingTurn, 1, 20), KB_F("homing_range", s_homingRange, 1, 500), KB_I("one_handed", s_oneHand, 0, 1), KB_I("one_hand_grip", s_oneHandGrip, 0, 200),
+    KB_I("homing_missile", s_homingMissile, 0, 1), KB_F("flak_radius", s_flakRadius, 0, 20), KB_F("homing_cone", s_homingCone, 1, 180), KB_F("homing_turn", s_homingTurn, 1, 20), KB_F("homing_range", s_homingRange, 1, 500), KB_I("one_handed", s_oneHand, 0, 1), KB_I("one_hand_grip", s_oneHandGrip, 0, 200),
     KB_F("leap_climb", s_lpClimb, 0.5, 30), KB_F("leap_drop", s_lpDrop, 0.5, 50),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
@@ -177,9 +178,11 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "; homing_turn times as fast as that missile does (1: as it does; the weapon the missile is from turns so\n"
                "; too while she is in a mission), and without that missile's spread (the P-33's veers off its line and swings\n"
                "; back: fired straight at a close enemy it went around behind it).\n"
+               "; flak_radius: a homing grenade goes off in the air once it is this many m from a living enemy, as a flak\n"
+               "; round does (0: only where it hits).\n"
                "; one_handed 1: she holds every weapon in one hand (the game's one-handed mark on what she carries), in the\n"
                "; pose one_hand_grip (70: the one-handed SMG grip; 1: a pistol's; 0: the weapon's own).\n"
-               "gl_arming = %d\ngl_safe = %d\ngl_homing = %d\nhoming_missile = %d\nhoming_cone = %g\nhoming_range = %g\nhoming_turn = %g\none_handed = %d\none_hand_grip = %d\n"
+               "gl_arming = %d\ngl_safe = %d\ngl_homing = %d\nhoming_missile = %d\nhoming_cone = %g\nhoming_range = %g\nhoming_turn = %g\nflak_radius = %g\none_handed = %d\none_hand_grip = %d\n"
                "; Her leaps land at most leap_climb m higher or leap_drop m lower.\n"
                "leap_climb = %g\nleap_drop = %g\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties. If her\n"
@@ -197,7 +200,7 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
         (double)s_s2Cd, (double)s_s2Length, (double)s_s2Width, (double)s_s2Damage, (double)s_s2Grenade, (double)s_s2Crit, (double)s_s2Step,
         (double)s_s3Cd, (double)s_s3Leap, (double)s_s3Width, (double)s_s3Damage, (double)s_s3Heal, (double)s_s3Step,
         (double)s_frenzyRadius, (double)s_frenzyDamage, (double)s_frenzyRange, (double)s_frenzyCone, s_frenzyRing, (double)s_huntingSeconds, (double)s_huntingTaken, (double)s_frenzyRefund,
-        s_rowSmall, s_rowBig, s_glArming, s_glSafe, s_glHoming, s_homingMissile, (double)s_homingCone, (double)s_homingRange, (double)s_homingTurn, s_oneHand, s_oneHandGrip,
+        s_rowSmall, s_rowBig, s_glArming, s_glSafe, s_glHoming, s_homingMissile, (double)s_homingCone, (double)s_homingRange, (double)s_homingTurn, (double)s_flakRadius, s_oneHand, s_oneHandGrip,
         (double)s_lpClimb, (double)s_lpDrop,
         (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
 }
@@ -1273,12 +1276,12 @@ static const uint64_t kLaunchers[] = {HF_ENTITY_GL21_GRENADE_LAUNCHER, HF_ENTITY
                                       HF_ENTITY_GL15_EVICTOR, HF_ENTITY_GP31_GRENADE_PISTOL, HF_ENTITY_GP20_ULTIMATUM};
 #define LAUNCHERS (sizeof kLaunchers / sizeof kLaunchers[0])
 static int g_missileCode, g_missilePkg, g_missileOn;
+static unsigned g_flakN, g_flakOwn;
 static uint64_t g_missile, g_missilePackage;
 static const char* g_missileName = "";
 static uintptr_t g_missileRecord;
 static float g_missileTurn[2];
 static int g_missileTurned, g_missileSpreadOff, g_missileFlies;
-static float g_missileWas[2];   /* its movement delay and starting speed as the game has them */
 static uint8_t g_launcherSet[LAUNCHERS];
 static uint32_t (*g_netId)(uint32_t entity);
 typedef struct Missile { uint32_t entity, target; int handed, lost; float from[3], dir[3]; } Missile;
@@ -1315,30 +1318,18 @@ static void MissileSwap(int on)
         Log("homing grenades: the missile's turn rates %.2f / %.2f -> %.2f / %.2f (x%g)%s", (double)g_missileTurn[0], (double)g_missileTurn[1], (double)fast[0], (double)fast[1], (double)s_homingTurn, g_missileTurned ? "" : ": REFUSED");
     }
     else if (!on && g_missileTurned) { hf->write(g_missileRecord + 0x58, g_missileTurn, 8); g_missileTurned = 0; }
-    /* it flies as it leaves (0.2.9: the Spear's missile left a launcher like a lobbed grenade): no wait before it moves
-     * (+0x38), and its starting speed (+0x44) at least its preferred one (+0x4C). The record goes in the log whole. */
+    /* (its record in the log, whole: 0.2.10 also made it move at once and start faster, on a misreading; taken out) */
     if (g_missileOn && !g_missileFlies && g_missileRecord)
     {
         float f[68];
+        char line[900];
+        int n = 0;
         memset(f, 0, sizeof f);
-        if (ReadAt(g_missileRecord, f, sizeof f))
-        {
-            char line[900];
-            int n = 0;
-            for (int i = 0; i < 68 && n < (int)sizeof line - 16; i++) n += snprintf(line + n, sizeof line - (size_t)n, "%s%.4g", i ? " " : "", (double)f[i]);
-            Log("homing grenades: the missile's record, 4 bytes a number from +0x00: %s", line);
-            g_missileWas[0] = f[14];
-            g_missileWas[1] = f[17];
-            float zero = 0, speed = f[19] > f[17] ? f[19] : f[17];
-            int ok = 1;
-            if (f[14] > 0) ok &= !hf->write(g_missileRecord + 0x38, &zero, 4);
-            if (speed > f[17]) ok &= !hf->write(g_missileRecord + 0x44, &speed, 4);
-            g_missileFlies = 1;
-            Log("homing grenades: the missile moves after %.2f s -> 0, starts at %.0f -> %.0f m/s (preferred %.0f, least %.0f, gaining %.0f a second)%s", (double)f[14], (double)f[17], (double)speed,
-                (double)f[19], (double)f[18], (double)f[20], ok ? "" : ": a write was REFUSED");
-        }
+        ReadAt(g_missileRecord, f, sizeof f);
+        for (int i = 0; i < 68 && n < (int)sizeof line - 16; i++) n += snprintf(line + n, sizeof line - (size_t)n, "%s%.4g", i ? " " : "", (double)f[i]);
+        Log("homing grenades: the missile's record, 4 bytes a number from +0x00: %s", line);
+        g_missileFlies = 1;
     }
-    else if (!on && g_missileFlies) { hf->write(g_missileRecord + 0x38, &g_missileWas[0], 4); hf->write(g_missileRecord + 0x44, &g_missileWas[1], 4); g_missileFlies = 0; }
     /* its spread off (SeekingMissile +0xB4 deviation_enabled: the P-33's missile veers off its launch line, curves and
      * swings back onto its target; fired straight at an enemy that stood close it went around behind it, 0.2.6) */
     uint8_t spread = 0, none = 0, one = 1;
@@ -1349,7 +1340,7 @@ static void MissileSwap(int on)
     }
     else if (!on && g_missileSpreadOff) { hf->write(g_missileRecord + 0xB4, &one, 1); g_missileSpreadOff = 0; }
     if (on) Log("homing grenades: %d of %u grenade launchers fire the %s's missile with their own grenade (one equipped or called in from now on)", n, (unsigned)LAUNCHERS, g_missileName);
-    else Log("homing grenades: %d launcher(s) put back; %u missiles seen, %u target hand-offs, %u found no enemy", n, g_msSeen, g_msHanded, g_msLost);
+    else Log("homing grenades: %d launcher(s) put back; %u missiles seen, %u target hand-offs, %u found no enemy, %u went off as flak (%u by the kit's own blast)", n, g_msSeen, g_msHanded, g_msLost, g_flakN, g_flakOwn);
     if (!on) { memset(g_ms, 0, sizeof g_ms); g_msSeen = g_msHanded = g_msLost = 0; }
 }
 /* Which guided missile the launchers fire: the FAF-14 Spear's (homing_missile 0, a weapon everyone has), or the P-33
@@ -1426,6 +1417,24 @@ static int MissileTargetLives(uint32_t e)
     for (int i = 0; i < FOES; i++) if (g_foe[i] == e) return Living(e);
     return 0;
 }
+/* Flak (0.2.11): a homing grenade within flak_radius m of a living enemy goes off there. The missile is ended (its age,
+ * [manager + 0x40] + index * 12 + 8, set past its lifetime); if no blast of her weapons follows near that spot within a
+ * fifth of a second, the kit sets off the grenade's own (the carried round's ProjectileSettings +0x90, else the stages'). */
+typedef struct Flak { float p[3]; double at; uint32_t row; int blasted; } Flak;
+static Flak g_flak[8];
+static unsigned g_flakNext;
+static const HfField kRoundBlast = {"ProjectileSettings", 25480438u, 0x90, 4, HF_TYPE_U32, __LINE__};
+static int FlakNear(const float at[3])
+{
+    for (int i = 0; i < FOES; i++)
+    {
+        float p[3];
+        if (!g_foe[i] || !FoePos(i, p)) continue;
+        p[2] += 1.0f;
+        if (Dist2(p, at) <= s_flakRadius * s_flakRadius && Living(g_foe[i])) return 1;
+    }
+    return 0;
+}
 static void MissilesFrame(void)
 {
     if (!g_missileOn) return;
@@ -1466,6 +1475,30 @@ static void MissilesFrame(void)
             if (hers) g_msSeen++;
         }
         if (m->handed < 0) continue;
+        if (s_flakRadius > 0 && m->lost < 2)
+        {
+            float at[3];
+            uintptr_t clocks = Pointer(mgr + 0x40);
+            if (clocks && ReadAt(state + 0x18, at, 12) && FlakNear(at))
+            {
+                float old = 1000;
+                uint32_t type = 0;
+                HfLiveValue v;
+                Flak* k = &g_flak[g_flakNext++ % 8];
+                memset(k, 0, sizeof *k);
+                memset(&v, 0, sizeof v);
+                memcpy(k->p, at, sizeof k->p);
+                k->at = g_now;
+                if (ReadAt(local + 0x34, &type, 4) && type && type < 100000 && hf->get_live(self, (HfRef)type, &kRoundBlast, &v) && v.now.number > 0 && v.now.number < 100000) k->row = (uint32_t)v.now.number;
+                hf->write(clocks + 12u * i + 8, &old, 4);
+                m->lost = 2;   /* (done with it) */
+                g_flakN++;
+                static unsigned noted;
+                if (noted++ < 8) Log("flak: missile %u is within %.1f m of an enemy: ended there (its round %u, that round's blast row %u)", entity, (double)s_flakRadius, type, k->row);
+                continue;
+            }
+        }
+        if (m->lost == 2) continue;
         if (m->target && MissileTargetLives(m->target)) continue;   /* (the game clears +0x00 for the final approach: leave it) */
         if (!m->handed && !m->lost && m->dir[0] == 0 && m->dir[1] == 0 && m->dir[2] == 0)
         {
@@ -1517,6 +1550,7 @@ static void OnExplosion(HfMod* mod, const HfEventInfo* info, void* user)
         if (odd < 6 && g_nhand && PlayerPose(me, NULL) && Dist2(me, x->position) < 36) { odd++; Log("her hands: a blast 6 m or less from her that is not a held weapon's (explosion row %u, from entity %u, owner %u; her weapons %u / %u / %u)", x->type, x->source, x->owner, g_weapon[1], g_weapon[2], g_weapon[3]); }
         return;
     }
+    for (int k = 0; k < 8; k++) if (g_flak[k].at > 0 && Dist2(g_flak[k].p, x->position) < 64) g_flak[k].blasted = 1;
     SelfBlast* b = &g_selfBlast[g_selfBlastNext++ % 16];
     memcpy(b->p, x->position, sizeof b->p);
     b->at = g_now;
@@ -1532,9 +1566,35 @@ static int SelfBlastAt(const float at[3])
         if (g_selfBlast[i].at > 0 && g_now - g_selfBlast[i].at <= 1.0 && Dist2(at, g_selfBlast[i].p) <= 20.0f * 20.0f) return 1;
     return 0;
 }
+static void FlakFrame(void)
+{
+    for (int k = 0; k < 8; k++)
+    {
+        Flak* f = &g_flak[k];
+        if (f->at <= 0 || g_now - f->at < 0.2) continue;
+        static unsigned noted;
+        if (!f->blasted)
+        {
+            uint32_t row = f->row ? f->row : (uint32_t)(s_rowHe > 0 ? s_rowHe : 175);
+            SelfBlast* b = &g_selfBlast[g_selfBlastNext++ % 16];
+            memcpy(b->p, f->p, sizeof b->p);
+            b->at = g_now;
+            unsigned slot = g_ownNext++ % KB_OWN_SLOTS;
+            memcpy(g_ownPos[slot], f->p, sizeof g_ownPos[slot]);
+            atomic_store(&g_ownMs[slot], GetTickCount64());
+            int r = hf->spawn_explosion(self, row, f->p);
+            if (r == HF_ACT_WAITING && g_now - f->at < 2.0) continue;   /* (its packages are coming) */
+            g_flakOwn++;
+            if (noted++ < 8) Log("flak: the ended missile set off nothing: the kit's blast there (row %u, answer %d)", row, r);
+        }
+        else if (noted++ < 8) Log("flak: the ended missile went off by itself");
+        f->at = 0;
+    }
+}
 static void HandsFrame(void)
 {
     MissilesFrame();
+    FlakFrame();
     for (int sel = 1; sel <= 3; sel++)
     {
         uint64_t res = g_weaponRes[sel];
