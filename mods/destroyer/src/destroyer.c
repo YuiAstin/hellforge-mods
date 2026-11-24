@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.3"
+#define VERSION "0.2.4"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -827,8 +827,10 @@ static void LeapFrame(void)
 }
 
 /* ---- Annihilation Directive ----------------------------------------------------------------------------------------- */
+static double g_castAt = -100;
 static void Shield(float seconds)
 {
+    g_castAt = g_now;
     g_drUntil = g_now + seconds;
     atomic_store(&g_shieldUntilMs, GetTickCount64() + (ULONGLONG)(seconds * 1000));
 }
@@ -1027,6 +1029,16 @@ static int SelfBlastAt(const float at[3]);
 /* A hit on her (HellForge's damage event; kitbase/kb_damage.h routes it here) */
 static void DamageTaken(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
+    /* (for the log: what reaches her in the two seconds after a cast; she was still thrown by her skills in 0.2.3) */
+    {
+        static unsigned told;
+        if (g_now - g_castAt < 2.0 && told < 60)
+        {
+            told++;
+            Log("after a cast (%.2f s): a hit on her of %d, kind %u, element %u, dealer %u, owner %u%s", g_now - g_castAt, d->amount, d->kind, d->element, d->dealer, d->owner,
+                d->kind == 4 && (BlastAt(d->position, NULL) || SelfBlastAt(d->position)) ? ": her own, spared" : "");
+        }
+    }
     /* her own blasts spare her */
     if (d->kind == 4 && (BlastAt(d->position, NULL) || SelfBlastAt(d->position))) { e->cancel = 1; g_selfSpared++; return; }
     if (d->amount <= 0) return;
@@ -1193,12 +1205,16 @@ static void OneHanded(int on)
         static uint8_t seen[ONE_RECORDS];
         memset(seen, 0, sizeof seen);
         g_oneChangedN = 0;
-        int rows = 0;
+        int rows = 0, others = 0;
         for (uint32_t i = 0; i < ONE_ROWS; i++)
         {
             struct { uint64_t res; uint32_t record, zero; } row;
             if (!ReadAt(table + 16u * i, &row, sizeof row)) break;
             if (!row.res || row.record >= ONE_RECORDS || seen[row.record]) continue;
+            /* weapons only (0.2.4; 0.1.9 marked every two-handed record, 232 of them, the things that are not weapons too) */
+            uint32_t stride = 0;
+            if (!hf->component_record("ProjectileWeaponComponentData", row.res, &stride) && !hf->component_record("BeamWeaponComponentData", row.res, &stride) &&
+                !hf->component_record("ArcWeaponComponentData", row.res, &stride) && !hf->component_record("SprayWeaponComponentData", row.res, &stride)) { others++; continue; }
             seen[row.record] = 1;
             rows++;
             uintptr_t at = table + 11008u + (uintptr_t)row.record * 232u;
@@ -1209,7 +1225,7 @@ static void OneHanded(int on)
             g_oneChanged[g_oneChangedN].record = row.record;
             g_oneChanged[g_oneChangedN++].grip = grip;
         }
-        Log("her hands: %d two-handed weapon record(s) of %d made one-handed (grip %d; 0: their own): what she equips from now on", g_oneChangedN, rows, s_oneHandGrip);
+        Log("her hands: %d two-handed weapon record(s) of %d made one-handed (grip %d; 0: their own; %d rows that are not weapons left alone): what she equips from now on", g_oneChangedN, rows, s_oneHandGrip, others);
     }
     else if (g_oneChangedN)
     {
@@ -1307,7 +1323,9 @@ static void MissilePackage(void)
             HfLiveValue v;
             HfField f = HF_FIELD(ProjectileWeapon, projectile_entity);
             memset(&v, 0, sizeof v);
-            uint64_t spear = hf->get_live(self, HF_ENTITY_FAF14_SPEAR, &f, &v) ? v.base.u64 : 0;
+            int got = hf->get_live(self, HF_ENTITY_FAF14_SPEAR, &f, &v);
+            uint64_t spear = got ? (v.base.u64 ? v.base.u64 : v.now.u64) : 0;
+            if (tries == 0 || tries == 10) Log("homing grenades: the Spear's ProjectileWeapon entity reads %016llx (now %016llx; answer %d)", (unsigned long long)v.base.u64, (unsigned long long)v.now.u64, got);
             r = MissileDonor(spear, SPEAR_PACKAGE, "FAF-14 Spear");
             if (r == 0 || (r < 0 && tries >= 10)) { spearOut = 1; if (r < 0) Log("homing grenades: the Spear's missile was not found (its weapon fires entity %016llx): the P-33's instead", (unsigned long long)spear); r = -1; }
         }
@@ -1375,7 +1393,19 @@ static void MissilesFrame(void)
             m = &g_ms[g_msNext++ % 32];
             memset(m, 0, sizeof *m);
             m->entity = entity;
-            m->handed = !hers || net != NO_NET ? -1 : 0;   /* another weapon's missile, or one the game gave a lock: left alone */
+            m->handed = !hers || net != NO_NET ? -1 : 0;
+            if (!hers)
+            {
+                /* (for the log: which missile another weapon fires, the Spear's above all) */
+                static unsigned told;
+                uint8_t mid[24];
+                uint32_t stride = 0, mode = 99;
+                uint64_t mres = Descriptor(entity, mid) ? Quad(mid) : 0;
+                uintptr_t rec = mres ? hf->component_record("SeekingMissileComponentData", mres, &stride) : 0;
+                if (rec) ReadAt(rec, &mode, 4);
+                if (told++ < 8) Log("homing grenades: a missile of another weapon: missile %016llx (targeting mode %u), fired by %016llx, target net %u at launch", (unsigned long long)mres, mode,
+                    Descriptor(shooter, sid) ? (unsigned long long)Quad(sid) : 0ull, net);
+            }   /* another weapon's missile, or one the game gave a lock: left alone */
             if (hers) g_msSeen++;
         }
         if (m->handed < 0) continue;
