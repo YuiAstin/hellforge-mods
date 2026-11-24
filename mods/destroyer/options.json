@@ -10,7 +10,8 @@
   "homing_cone": "mission",
   "homing_range": "mission",
   "homing_arm": "mission",
-  "one_hand_grip": "mission"
+  "one_hand_grip": "mission",
+  "homing_aim": "mission"
  },
  "advanced": [
   [
@@ -266,6 +267,12 @@
    "Seconds it takes off her other cooldowns."
   ],
   [
+   "gl_safe",
+   "Her Hands",
+   "Own Blasts Spare Her",
+   "The blasts of the weapons she holds do not hurt or throw her."
+  ],
+  [
    "homing_turn",
    "Her Hands",
    "Homing Turn Rate",
@@ -288,6 +295,18 @@
    "Her Hands",
    "Homing From",
    "Metres a grenade flies before it starts to steer."
+  ],
+  [
+   "homing_aim",
+   "Her Hands",
+   "Homing Aim Height",
+   "Metres above the enemy's feet a homing grenade aims."
+  ],
+  [
+   "homing_warm",
+   "Her Hands",
+   "Homing Warm-Up",
+   "Keeps an unseen round in the air above her so homing already knows the enemies when she fires."
   ],
   [
    "one_hand_grip",

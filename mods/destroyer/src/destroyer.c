@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.9"
+#define VERSION "0.2.0"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -79,8 +79,8 @@ static int s_frenzyRing = 3;
 static int s_rowSmall = 343, s_rowBig = 277;   /* 343: the Orbital Precision Strike's shell; 277: the Eagle 500kg Bomb going off (193 is it landing) */
 static float s_lpClimb = 6, s_lpDrop = 12;
 /* her hands (0.1.8): a grenade launcher's rounds arm at once and home; every weapon is held in one hand */
-static int s_glArming = 1, s_glHoming = 1, s_oneHand = 1, s_oneHandGrip = 70;
-static float s_homingTurn = 120, s_homingCone = 25, s_homingRange = 80, s_homingArm = 4;
+static int s_glArming = 1, s_glHoming = 1, s_glSafe = 1, s_homingWarm = 1, s_oneHand = 1, s_oneHandGrip = 70;
+static float s_homingTurn = 540, s_homingCone = 30, s_homingRange = 80, s_homingArm = 1, s_homingAim = 0.6f;
 
 /* Every setting: its .ini / options name, variable and range (kitbase/kb_settings.h) */
 static const KbSetting kSettings[] = {
@@ -106,7 +106,8 @@ static const KbSetting kSettings[] = {
     KB_F("frenzy_cone", s_frenzyCone, 1, 45), KB_I("frenzy_ring", s_frenzyRing, 0, 6), KB_F("hunting_seconds", s_huntingSeconds, 0, 120),
     KB_F("hunting_taken", s_huntingTaken, 0, 5), KB_F("frenzy_refund", s_frenzyRefund, 0, 120),
     KB_I("explosion_small", s_rowSmall, 1, 100000), KB_I("explosion_big", s_rowBig, 1, 100000),
-    KB_I("gl_arming", s_glArming, 0, 1), KB_I("gl_homing", s_glHoming, 0, 1), KB_F("homing_turn", s_homingTurn, 1, 1440), KB_F("homing_cone", s_homingCone, 1, 180),
+    KB_I("gl_arming", s_glArming, 0, 1), KB_I("gl_homing", s_glHoming, 0, 1), KB_I("gl_safe", s_glSafe, 0, 1), KB_I("homing_warm", s_homingWarm, 0, 1),
+    KB_F("homing_aim", s_homingAim, -5, 10), KB_F("homing_turn", s_homingTurn, 1, 1440), KB_F("homing_cone", s_homingCone, 1, 180),
     KB_F("homing_range", s_homingRange, 1, 500), KB_F("homing_arm", s_homingArm, 0, 100), KB_I("one_handed", s_oneHand, 0, 1), KB_I("one_hand_grip", s_oneHandGrip, 0, 200),
     KB_F("leap_climb", s_lpClimb, 0.5, 30), KB_F("leap_drop", s_lpDrop, 0.5, 50),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
@@ -167,11 +168,15 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "; Her blasts (ExplosionSettings rows): 343 the Orbital Precision Strike's, 277 the Eagle 500kg Bomb going off.\n"
                "explosion_small = %d\nexplosion_big = %d\n"
                "; Her hands. gl_arming 1: the rounds of a grenade launcher she holds arm as they leave (no arming distance:\n"
-               "; any weapon whose round has one). gl_homing 1: those rounds home on enemies, turning homing_turn degrees a\n"
-               "; second toward one within homing_cone degrees of their way and homing_range m, from homing_arm m out.\n"
+               "; any weapon whose round has one). gl_safe 1: the blasts of the weapons she holds do not hurt or throw her.\n"
+               "; gl_homing 1: those rounds home on enemies, turning homing_turn degrees a second toward the first one within\n"
+               "; homing_cone degrees of their way and homing_range m, from homing_arm m out, aiming homing_aim m above its\n"
+               "; feet. homing_warm 1: an unseen round kept in the air high above her while she carries such a weapon, so\n"
+               "; HellForge's homing already knows the enemies when she fires (it looks for them only while a homing round\n"
+               "; flies, and a first round found its target too late).\n"
                "; one_handed 1: she holds every weapon in one hand (the game's one-handed mark on what she carries), in the\n"
                "; pose one_hand_grip (70: the one-handed SMG grip; 1: a pistol's; 0: the weapon's own).\n"
-               "gl_arming = %d\ngl_homing = %d\nhoming_turn = %g\nhoming_cone = %g\nhoming_range = %g\nhoming_arm = %g\none_handed = %d\none_hand_grip = %d\n"
+               "gl_arming = %d\ngl_safe = %d\ngl_homing = %d\nhoming_turn = %g\nhoming_cone = %g\nhoming_range = %g\nhoming_arm = %g\nhoming_aim = %g\nhoming_warm = %d\none_handed = %d\none_hand_grip = %d\n"
                "; Her leaps land at most leap_climb m higher or leap_drop m lower.\n"
                "leap_climb = %g\nleap_drop = %g\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties. If her\n"
@@ -189,7 +194,7 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
         (double)s_s2Cd, (double)s_s2Length, (double)s_s2Width, (double)s_s2Damage, (double)s_s2Grenade, (double)s_s2Crit, (double)s_s2Step,
         (double)s_s3Cd, (double)s_s3Leap, (double)s_s3Width, (double)s_s3Damage, (double)s_s3Heal, (double)s_s3Step,
         (double)s_frenzyRadius, (double)s_frenzyDamage, (double)s_frenzyRange, (double)s_frenzyCone, s_frenzyRing, (double)s_huntingSeconds, (double)s_huntingTaken, (double)s_frenzyRefund,
-        s_rowSmall, s_rowBig, s_glArming, s_glHoming, (double)s_homingTurn, (double)s_homingCone, (double)s_homingRange, (double)s_homingArm, s_oneHand, s_oneHandGrip,
+        s_rowSmall, s_rowBig, s_glArming, s_glSafe, s_glHoming, (double)s_homingTurn, (double)s_homingCone, (double)s_homingRange, (double)s_homingArm, (double)s_homingAim, s_homingWarm, s_oneHand, s_oneHandGrip,
         (double)s_lpClimb, (double)s_lpDrop,
         (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
 }
@@ -1018,11 +1023,12 @@ static void AmmoFrenzy(void)
 }
 
 /* ---- the damage event ------------------------------------------------------------------------------------------------ */
+static int SelfBlastAt(const float at[3]);
 /* A hit on her (HellForge's damage event; kitbase/kb_damage.h routes it here) */
 static void DamageTaken(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     /* her own blasts spare her */
-    if (d->kind == 4 && BlastAt(d->position, NULL)) { e->cancel = 1; g_selfSpared++; return; }
+    if (d->kind == 4 && (BlastAt(d->position, NULL) || SelfBlastAt(d->position))) { e->cancel = 1; g_selfSpared++; return; }
     if (d->amount <= 0) return;
     if (g_now < g_deniedUntil) { e->cancel = 1; return; }
     /* a leap's window: no fall or landing damage (impact or flat, from nothing) */
@@ -1164,7 +1170,8 @@ static void HandSet(uint64_t res)
             rule.cone = s_homingCone;
             rule.range = s_homingRange;
             rule.arm_distance = s_homingArm;
-            rule.aim_height = 1.0f;
+            rule.aim_height = s_homingAim;
+            rule.flags = HF_HOMING_NO_RETARGET;   /* (the Rocket Sentry Test's best: a fast turn, the first target kept) */
             h->homing = hf->homing(self, &rule);
         }
         Log("her hands: weapon %016llx fires a grenade round (projectile %u, arming distance %.1f m): arming %s (answer %d), homing %s (rule %u)", (unsigned long long)res, h->projectile, was,
@@ -1227,8 +1234,62 @@ static void OneHanded(int on)
         g_oneChangedN = 0;
     }
 }
+/* The warm-up round (docs/research/homing.md): HellForge's homing gathers enemies only while a homing round of the
+ * player's is in the air, so the first grenade after a quiet spell found its target late and flew past. While she
+ * carries a homing weapon, an unseen, slow round of her own type (no effects, no blast, a homing rule that never
+ * steers) is kept in the air high above her. */
+static uint32_t g_warm, g_warmRule;
+static double g_warmNext;
+static void WarmFrame(void)
+{
+    int homing = 0;
+    for (int i = 0; i < g_nhand; i++) homing |= g_hand[i].homing != 0;
+    if (!homing || !s_homingWarm || !g_warm || g_now < g_warmNext) return;
+    if (!g_warmRule)
+    {
+        HfHoming rule = {sizeof rule};
+        rule.projectile = g_warm;
+        rule.turn_rate = 1; rule.cone = 1; rule.range = 1; rule.arm_distance = 100;
+        g_warmRule = hf->homing(self, &rule);
+        Log("homing warm-up: its rule %u (0: refused)", g_warmRule);
+        if (!g_warmRule) { g_warm = 0; return; }
+    }
+    float pos[3], up[3] = {0, 0, 1};
+    if (!PlayerPose(pos, NULL)) return;
+    pos[2] += 60;
+    int r = hf->spawn_projectile(self, g_warm, pos, up);
+    static unsigned noted;
+    if (noted++ < 4) Log("homing warm-up: an unseen round 60 m above her (projectile %u): answer %d", g_warm, r);
+    g_warmNext = g_now + (r == HF_ACT_WAITING ? 0.5 : 7.0);
+}
+/* The blasts of the weapons she holds (her grenades go off at once now, often at her feet): kept as her own, so the
+ * hit code and the damage event spare her from them */
+typedef struct SelfBlast { float p[3]; double at; } SelfBlast;
+static SelfBlast g_selfBlast[16];
+static unsigned g_selfBlastNext;
+static void OnExplosion(HfMod* mod, const HfEventInfo* info, void* user)
+{
+    const HfExplosionEvent* x = (const HfExplosionEvent*)info;
+    if (!s_glSafe || !g_inMission || !kb_kit_on || !x->source) return;
+    if (x->source != g_weapon[1] && x->source != g_weapon[2] && x->source != g_weapon[3]) return;
+    SelfBlast* b = &g_selfBlast[g_selfBlastNext++ % 16];
+    memcpy(b->p, x->position, sizeof b->p);
+    b->at = g_now;
+    unsigned slot = g_ownNext++ % KB_OWN_SLOTS;
+    memcpy(g_ownPos[slot], x->position, sizeof g_ownPos[slot]);
+    atomic_store(&g_ownMs[slot], GetTickCount64());
+    static unsigned told;
+    if (told++ < 4) Log("her hands: a blast of a weapon she holds (explosion row %u): it spares her", x->type);
+}
+static int SelfBlastAt(const float at[3])
+{
+    for (int i = 0; i < 16; i++)
+        if (g_selfBlast[i].at > 0 && g_now - g_selfBlast[i].at <= 1.0 && Dist2(at, g_selfBlast[i].p) <= 20.0f * 20.0f) return 1;
+    return 0;
+}
 static void HandsFrame(void)
 {
+    WarmFrame();
     for (int sel = 1; sel <= 3; sel++)
     {
         uint64_t res = g_weaponRes[sel];
@@ -1245,6 +1306,9 @@ static void HandsOff(void)
         if (h->armed) hf->set_live(self, (HfRef)h->projectile, &kArming, NULL, 0);
         if (h->homing) hf->stop_shots(self, h->homing);
     }
+    if (g_warmRule) { hf->stop_shots(self, g_warmRule); g_warmRule = 0; }
+    g_warmNext = 0;
+    memset(g_selfBlast, 0, sizeof g_selfBlast);
     if (g_nhand) Log("her hands: %d weapon(s) put back as the game has them", g_nhand);
     g_nhand = 0;
     OneHanded(0);
@@ -1364,6 +1428,21 @@ static void ProjectilesReady(HfMod* mod, HfEvent event, void* user)
         dmg->push_force = (__typeof__(dmg->push_force))want;
     }
     g_tracerReady = 1;
+    /* the homing warm-up round: slow, weightless, nine seconds, nothing to see and nothing where it ends
+     * (ProjectileSettings: +0x20 velocity, +0x28 drag, +0x2C gravity, +0x34 lifetime, +0x38 its variance, +0x48 and
+     * +0x70 its effects, +0x90 and +0x9C its blasts) */
+    uintptr_t row = g_warm ? hf->projectile_row(g_warm) : 0;
+    if (row)
+    {
+        float v = 3, zero = 0, life = 9;
+        uint64_t none = 0;
+        uint32_t no = 0;
+        int bad = hf->write(row + 0x20, &v, 4) | hf->write(row + 0x28, &zero, 4) | hf->write(row + 0x2C, &zero, 4) | hf->write(row + 0x34, &life, 4) |
+                  hf->write(row + 0x38, &zero, 4) | hf->write(row + 0x48, &none, 8) | hf->write(row + 0x70, &none, 8) | hf->write(row + 0x90, &no, 4) | hf->write(row + 0x9C, &no, 4);
+        Log("homing warm-up: projectile %u's row set (3 m/s, no gravity, 9 s, no effects)%s", g_warm, bad ? ": a write FAILED, no warm-up" : "");
+        if (bad) g_warm = 0;
+    }
+    else g_warm = 0;
 }
 
 /* ---- the HUD state (read by the Destroyer HUD addon through LuaJIT's ffi) ------------------------------------------- */
@@ -1559,13 +1638,18 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
             pr.damage = g_tracerDamage[k];
             g_tracer[k] = g_tracerDamage[k] ? api->add_projectile(mod, &pr) : 0;
         }
+        HfProjectile warm = {sizeof warm};
+        warm.base = 226;
+        warm.name = "yui/destroyer/homing_warm";
+        warm.damage = g_tracerDamage[0];
+        g_warm = g_tracerDamage[0] ? api->add_projectile(mod, &warm) : 0;
         if (!g_tracer[0] || !g_tracer[1] || api->on(mod, HF_EVENT_PROJECTILES_READY, ProjectilesReady, NULL))
         { g_tracer[0] = g_tracer[1] = 0; api->log(mod, "the stages' rounds could not be added: Annihilation Directive is the leap alone"); }
     }
     else api->log(mod, "this HellForge has no projectile rows: Annihilation Directive is the leap alone");
     /* registered: from here the DLL stays loaded; a failure below leaves it inert */
     int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
-             api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
+             api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_EXPLOSION, OnExplosion, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_PLAYER_DOWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) &&
              api->on_game_thread(mod, Tick, NULL);
     if (!ok) api->log(mod, "events or the game thread are unavailable: Destroyer stays off");
