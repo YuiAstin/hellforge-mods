@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.destroyer",
   "name": "Destroyer",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "description": "Destroyer's kit from Girls' Frontline 2 for your Helldiver: Annihilation Directive (a leap, then a line and a cone of high-explosive rounds), Doom Barrage (a grid of blasts ahead), Party Time (a leap that blasts the whole path and heals her) and Ammo Frenzy (at 3 Fang, one strike shared among every enemy in reach). Her skills cost health, and the less she has the harder she hits; Sangvis Ferri makes her stronger against Automatons; Denied Exit saves her from one killing hit. Her body: more health and stamina, and a Hellbomb if she ever runs her stamina dry (can be turned off). Solo or host. Keys in destroyer.ini; her numbers on the character kits' options screen (or the escape menu's MODS tab). HUD (needs Bingus Shared Loader and HD2Runtime). Research from Helldiver Survival Rework by enochlophobianumerophobia (MIT) and HD2Runtime by SkyeShade. No character model included.",
   "icon": "icon.png",
   "gameplay": true,

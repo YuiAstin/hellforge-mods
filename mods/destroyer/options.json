@@ -7,8 +7,7 @@
   "gl_homing": "mission",
   "one_handed": "mission",
   "one_hand_grip": "mission",
-  "homing_missile": "restart",
-  "homing_turn": "mission"
+  "homing_missile": "restart"
  },
  "advanced": [
   [
@@ -272,8 +271,8 @@
   [
    "homing_missile",
    "Her Hands",
-   "Homing Missile: P-33",
-   "Off: homing grenades fly as the FAF-14 Spear's missile. On: as the P-33 Missile Pistol's (a premium weapon's)."
+   "Homing Shot",
+   "0: her grenades steer themselves. 1: fired as the FAF-14 Spear's missile. 2: as the P-33 Missile Pistol's."
   ],
   [
    "homing_cone",
@@ -291,13 +290,22 @@
    "homing_turn",
    "Her Hands",
    "Homing Turn Speed",
-   "Times as fast as the missile's own a homing grenade turns (1: as it does)."
+   "Degrees a second a homing grenade turns."
+  ],
+  [
+   "homing_arm",
+   "Her Hands",
+   "Homing From",
+   "Metres a grenade flies before it starts to steer.",
+   {
+    "step": 0.5
+   }
   ],
   [
    "flak_radius",
    "Her Hands",
-   "Flak Radius",
-   "A homing grenade goes off in the air this many metres from an enemy. 0: only where it hits.",
+   "Close-In Radius",
+   "A homing grenade this many metres from an enemy turns straight into it (a missile goes off there). 0: never.",
    {
     "step": 0.5
    }

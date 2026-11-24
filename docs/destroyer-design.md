@@ -145,6 +145,10 @@ Its own key (proposed, as Ascalon's dash got Z) so a full Fang bar never blocks 
   the P-33's since 0.2.7 (the Spear's missile is entity 1a4323835b84cea7, seen in flight). 0.2.6: her blasts spare a
   shield she carries (a blast on it threw her). HellForge's homing rule on the grenade itself (0.1.8 to 0.2.0) found its target too late. The blasts
   of the weapons she holds (the explosion event, by its source weapon or missile) no longer hurt or throw her.
+- **Her hands (0.2.12):** the grenade itself homes again, steered by the kit through the game's projectile pool
+  (`homing_missile` 0; the layout from HellForge's actions.c): its target is picked from the kit's own enemy list as it
+  leaves, and within `flak_radius` m of a living enemy it turns straight into it, so one that curved too late still
+  lands. The guided-missile route stays as `homing_missile` 1 (the Spear's) and 2 (the P-33's).
 - **Not built:** Hunting Order's extra armour piercing, Claw Mark.
 - The mod icon and the four skill icons are placeholders.
 
