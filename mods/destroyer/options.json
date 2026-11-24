@@ -246,6 +246,7 @@
   "hellbomb_explosion",
   "hellbomb_hold",
   "tracer_round",
-  "tracer_damage"
+  "tracer_damage",
+  "tracer_speed"
  ]
 }

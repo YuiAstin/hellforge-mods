@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.1"
+#define VERSION "0.1.2"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -68,7 +68,7 @@ static float s_deniedCd = 180, s_deniedSeconds = 2, s_rage = 1;
 static float s_s1Cd = 10, s_s1Leap = 15, s_s1Radius = 5, s_s1Window = 3, s_s1Line = 20, s_s1Cone = 10, s_s1Triple = 2, s_s1Haste = 2, s_hasteMult = 1.3f;
 static float s_s1Damage = 600, s_s1Damage1 = 800, s_s1Damage2 = 1000, s_s1Stagger1 = 50, s_s1Stagger2 = 80, s_s1Shield = 1.5f;
 static int s_s1Rounds = 10, s_tracerRound = 226, s_tracerDamage = 125;   /* the stages' tracers: Koleda's (the bright round, the minigun's damage row) */
-static float s_s1Burst = 0.2f, s_s1ConeAngle = 30;
+static float s_s1Burst = 0.2f, s_s1ConeAngle = 30, s_tracerSpeed = 250;
 static float s_s2Cd = 18, s_s2Length = 15, s_s2Width = 9, s_s2Damage = 400, s_s2Grenade = 0.20f, s_s2Crit = 1.5f, s_s2Step = 0.18f;
 static float s_s3Cd = 90, s_s3Leap = 18, s_s3Width = 9, s_s3Damage = 1500, s_s3Heal = 0.20f, s_s3Step = 0.12f;
 static float s_frenzyRadius = 24, s_frenzyDamage = 12000, s_frenzyRange = 120, s_frenzyCone = 6, s_huntingSeconds = 10, s_huntingTaken = 0.20f, s_frenzyRefund = 5;
@@ -90,7 +90,7 @@ static const KbSetting kSettings[] = {
     KB_F("haste_mult", s_hasteMult, 1, 3), KB_F("s1_damage", s_s1Damage, 0, 100000), KB_F("s1_damage_1", s_s1Damage1, 0, 100000),
     KB_F("s1_damage_2", s_s1Damage2, 0, 100000), KB_F("s1_stagger_1", s_s1Stagger1, 0, 500), KB_F("s1_stagger_2", s_s1Stagger2, 0, 500),
     KB_I("s1_rounds", s_s1Rounds, 1, 40), KB_F("s1_burst", s_s1Burst, 0, 2), KB_F("s1_cone_angle", s_s1ConeAngle, 5, 80),
-    KB_I("tracer_round", s_tracerRound, 1, 350), KB_I("tracer_damage", s_tracerDamage, 1, 649),
+    KB_F("tracer_speed", s_tracerSpeed, 0, 2000), KB_I("tracer_round", s_tracerRound, 1, 350), KB_I("tracer_damage", s_tracerDamage, 1, 649),
     KB_F("s1_shield", s_s1Shield, 0, 10),
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("s2_length", s_s2Length, 5, 40), KB_F("s2_width", s_s2Width, 3, 30), KB_F("s2_damage", s_s2Damage, 0, 100000),
     KB_F("s2_grenade", s_s2Grenade, 0, 5), KB_F("s2_crit", s_s2Crit, 1, 10), KB_F("s2_step", s_s2Step, 0, 2),
@@ -135,8 +135,9 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "s1_damage = %g\ns1_damage_1 = %g\ns1_damage_2 = %g\ns1_stagger_1 = %g\ns1_stagger_2 = %g\ns1_shield = %g\n"
                "; The line and the cone are bursts of tracer rounds: s1_rounds of them within s1_burst s, the cone's spread\n"
                "; s1_cone_angle degrees to each side. tracer_round: the projectile they copy (226: the bright round of\n"
-               "; Koleda's Sinveiler); tracer_damage: the damage row theirs copies (their damage is the stage's).\n"
-               "s1_rounds = %d\ns1_burst = %g\ns1_cone_angle = %g\ntracer_round = %d\ntracer_damage = %d\n"
+               "; Koleda's Sinveiler); tracer_damage: the damage row theirs copies (their damage is the stage's);\n"
+               "; tracer_speed: their m/s (0: the round's own; slower, their trails start at her and not far ahead).\n"
+               "s1_rounds = %d\ns1_burst = %g\ns1_cone_angle = %g\ntracer_round = %d\ntracer_damage = %d\ntracer_speed = %g\n"
                "; Doom Barrage: cooldown; the box's length and width; damage; each Grenade spent adds s2_grenade; with 3 or\n"
                "; more spent the damage is times s2_crit; seconds between its blasts.\n"
                "s2_cooldown = %g\ns2_length = %g\ns2_width = %g\ns2_damage = %g\ns2_grenade = %g\ns2_crit = %g\ns2_step = %g\n"
@@ -162,7 +163,7 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
         (double)s_deniedCd, (double)s_deniedSeconds, (double)s_rage,
         (double)s_s1Cd, (double)s_s1Leap, (double)s_s1Radius, (double)s_s1Window, (double)s_s1Line, (double)s_s1Cone, (double)s_s1Triple, (double)s_s1Haste, (double)s_hasteMult,
         (double)s_s1Damage, (double)s_s1Damage1, (double)s_s1Damage2, (double)s_s1Stagger1, (double)s_s1Stagger2, (double)s_s1Shield,
-        s_s1Rounds, (double)s_s1Burst, (double)s_s1ConeAngle, s_tracerRound, s_tracerDamage,
+        s_s1Rounds, (double)s_s1Burst, (double)s_s1ConeAngle, s_tracerRound, s_tracerDamage, (double)s_tracerSpeed,
         (double)s_s2Cd, (double)s_s2Length, (double)s_s2Width, (double)s_s2Damage, (double)s_s2Grenade, (double)s_s2Crit, (double)s_s2Step,
         (double)s_s3Cd, (double)s_s3Leap, (double)s_s3Width, (double)s_s3Damage, (double)s_s3Heal, (double)s_s3Step,
         (double)s_frenzyRadius, (double)s_frenzyDamage, (double)s_frenzyRange, (double)s_frenzyCone, s_frenzyRing, (double)s_huntingSeconds, (double)s_huntingTaken, (double)s_frenzyRefund,
@@ -570,7 +571,62 @@ static Burst* BlastAt(const float at[3], float* dist)
  * bright round whose damage rows carry the stage's stagger and push. What a round deals is the stage's, paid once an
  * enemy: her projectile hits while a burst is in the air belong to it. */
 static uint32_t g_tracer[2], g_tracerDamage[2];
+static uint32_t MyUnit(void);
 static int g_tracerReady;
+/* 0.1.2: the camera (Alva's View, Exusiai's: her unit's world, its camera matrix at +0x230920; Apache - Rise Above's
+ * read). Her head's facing lags behind the reticle, and the tracers went where the head looked */
+static int CamView(float pos[3], float fwd[3])
+{
+    uint8_t d[24];
+    if (!exe || !Descriptor(atomic_load(&g_avatar), d)) return 0;
+    uint32_t unit = Word(d + 12), slot = unit & 0x3FFFFF, id = 0;
+    uintptr_t registry = Pointer(exe + 0x1A100F0), objects, object, w;
+    float m[16];
+    if (!registry || !(objects = Pointer(registry + 0x88)) || !(object = Pointer(objects + 8u * slot)) || !ReadAt(object + 8, &id, 4) || id != unit ||
+        !(w = Pointer(object + 0x18)) || !ReadAt(w + 0x230920, m, 64)) return 0;
+    for (int k = 0; k < 16; k++) if (!isfinite(m[k])) return 0;
+    if (fabsf(m[15] - 1) > 1e-3f) return 0;
+    memcpy(fwd, m + 4, 12);
+    memcpy(pos, m + 12, 12);
+    float n = sqrtf(fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]);
+    if (!(n > 0.5f)) return 0;
+    for (int k = 0; k < 3; k++) fwd[k] /= n;
+    return 1;
+}
+/* where a stage's tracers start (her chest) and go: at what her reticle is on (the camera's ray to the first wall);
+ * her head's facing when the camera cannot be read */
+static int StageAim(float from[3], float aim[3])
+{
+    float pos[3], cam[3], fwd[3];
+    if (!PlayerPose(pos, aim)) return 0;
+    from[0] = pos[0]; from[1] = pos[1]; from[2] = pos[2] + 1.4f;
+    static int told = -1;
+    int camera = CamView(cam, fwd);
+    if (camera != told) { told = camera; Log("the stages' aim: %s", camera ? "the camera's ray (her reticle)" : "her head's facing (the camera cannot be read)"); }
+    if (!camera) return 1;
+    uint32_t unit = MyUnit();
+    float reach = 200, toHer = sqrtf(Dist2(cam, from)) + 3;
+    if (unit && QueryIdle()) { float d = Ray(unit, cam, fwd, 200); if (d > 0 && d < reach) reach = d; }
+    if (reach < toHer) reach = toHer;      /* never a point between the camera and her */
+    float v[3] = {cam[0] + fwd[0] * reach - from[0], cam[1] + fwd[1] * reach - from[1], cam[2] + fwd[2] * reach - from[2]};
+    float n = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    if (n > 1) for (int k = 0; k < 3; k++) aim[k] = v[k] / n;
+    return 1;
+}
+/* the tracers' speed: slower than the round's own, so their trails start at her (Koleda's round_speed) */
+static void TracerSpeed(int k)
+{
+    static uint8_t set[2];
+    if (set[k] || s_tracerSpeed <= 0 || !g_tracer[k]) return;
+    set[k] = 1;
+    HfField f = HF_FIELD(ProjectileSettings, velocity);
+    HfValue v = HF_F32(s_tracerSpeed);
+    HfLiveValue was;
+    memset(&was, 0, sizeof was);
+    hf->get_live(self, (HfRef)g_tracer[k], &f, &was);
+    int ok = hf->set_live(self, (HfRef)g_tracer[k], &f, &v, 0);
+    Log("the %s's tracers (projectile %u): %.0f m/s -> %.0f (%s)", k ? "cone" : "line", g_tracer[k], was.base.number, (double)s_tracerSpeed, ok ? "set" : "refused");
+}
 typedef struct Volley { int group, left, cone, n; double next, until; float from[3], aim[3], range; } Volley;
 static Volley g_volley = {-1};
 static void VolleyFrame(void)
@@ -738,8 +794,8 @@ static void Annihilation(void)
         return;
     }
     if (g_chainWait >= 0) return;      /* the stage before has not landed its hit yet */
-    float pos[3], aim[3];
-    if (!PlayerPose(pos, aim)) return;
+    float from[3], aim[3];
+    if (!StageAim(from, aim)) return;
     int stage = g_chain;               /* 1: the line, 2: the cone */
     if (!g_tracerReady || !g_tracer[stage - 1]) { Log("Annihilation Directive: its tracer rounds are unavailable (see the start of the log)"); EndChain("no tracers"); return; }
     Pay(stage == 1 ? "Annihilation Directive I" : "Annihilation Directive II", s_s1Cost);
@@ -751,14 +807,16 @@ static void Annihilation(void)
     v->cone = stage == 2;
     v->n = v->left = s_s1Rounds;
     v->range = stage == 1 ? s_s1Line : s_s1Cone;
-    v->from[0] = pos[0]; v->from[1] = pos[1]; v->from[2] = pos[2] + 1.3f;
+    memcpy(v->from, from, sizeof v->from);
+    TracerSpeed(stage - 1);
     memcpy(v->aim, aim, sizeof v->aim);
     v->until = g_now + 3;
     g_chainGroup[stage] = g;
     g_chainWait = g;
     g_chain = stage + 1;               /* 3 after the cone: the chain ends when its hit is known */
     Shield(s_s1Shield);
-    if (told++ < 20) Log("Annihilation Directive %s: %d tracer rounds, %.0f damage an enemy within %.0f m, %d Grenade(s) left", stage == 1 ? "I (the line)" : "II (the cone)", s_s1Rounds, (double)damage, (double)v->range, g_grenades);
+    if (told++ < 20) Log("Annihilation Directive %s: %d tracer rounds from %.1f %.1f %.1f along %.2f %.2f %.2f, %.0f damage an enemy within %.0f m, %d Grenade(s) left", stage == 1 ? "I (the line)" : "II (the cone)", s_s1Rounds,
+        (double)from[0], (double)from[1], (double)from[2], (double)aim[0], (double)aim[1], (double)aim[2], (double)damage, (double)v->range, g_grenades);
 }
 /* the chain's waiting stage: a hit opens what is next; none in time ends the chain */
 static void ChainFrame(void)
