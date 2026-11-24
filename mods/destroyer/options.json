@@ -7,7 +7,8 @@
   "gl_homing": "mission",
   "one_handed": "mission",
   "one_hand_grip": "mission",
-  "homing_missile": "restart"
+  "homing_missile": "restart",
+  "homing_turn": "mission"
  },
  "advanced": [
   [
@@ -285,6 +286,12 @@
    "Her Hands",
    "Homing Range",
    "Metres from her a homing grenade may pick an enemy within."
+  ],
+  [
+   "homing_turn",
+   "Her Hands",
+   "Homing Turn Speed",
+   "Times as fast as the missile's own a homing grenade turns. Higher hits enemies that stand close."
   ],
   [
    "one_hand_grip",

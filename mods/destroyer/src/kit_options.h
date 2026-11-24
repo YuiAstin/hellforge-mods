@@ -146,6 +146,8 @@ static const OpRow kOpRows[] = {
      "Degrees off where she looks a homing grenade may pick an enemy.", NULL, 1, OP_LIVE},
     {"homing_range", "Her Hands", "Homing Range", OP_FIELD, 1, 500, 1,
      "Metres from her a homing grenade may pick an enemy within.", NULL, 1, OP_LIVE},
+    {"homing_turn", "Her Hands", "Homing Turn Speed", OP_SLIDER, 1, 20, 0.1f,
+     "Times as fast as the missile's own a homing grenade turns. Higher hits enemies that stand close.", NULL, 1, OP_NEXT_MISSION},
     {"one_hand_grip", "Her Hands", "One-Handed Grip", OP_FIELD, 0, 200, 1,
      "The pose she holds a weapon in: 70 the one-handed SMG grip, 1 a pistol's, 0 the weapon's own.", NULL, 1, OP_NEXT_MISSION},
     {"leap_climb", "Leaps", "Climb At Most", OP_SLIDER, 0.5f, 30, 0.5f,

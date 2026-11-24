@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.7"
+#define VERSION "0.2.8"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -80,7 +80,7 @@ static int s_rowSmall = 343, s_rowBig = 277;   /* 343: the Orbital Precision Str
 static float s_lpClimb = 6, s_lpDrop = 12;
 /* her hands (0.1.8): a grenade launcher's rounds arm at once and home; every weapon is held in one hand */
 static int s_glArming = 1, s_glHoming = 1, s_glSafe = 1, s_oneHand = 1, s_oneHandGrip = 70;
-static float s_homingCone = 25, s_homingRange = 80;
+static float s_homingCone = 25, s_homingRange = 80, s_homingTurn = 4;
 static int s_homingMissile = 0;
 
 /* Every setting: its .ini / options name, variable and range (kitbase/kb_settings.h) */
@@ -108,7 +108,7 @@ static const KbSetting kSettings[] = {
     KB_F("hunting_taken", s_huntingTaken, 0, 5), KB_F("frenzy_refund", s_frenzyRefund, 0, 120),
     KB_I("explosion_small", s_rowSmall, 1, 100000), KB_I("explosion_big", s_rowBig, 1, 100000),
     KB_I("gl_arming", s_glArming, 0, 1), KB_I("gl_homing", s_glHoming, 0, 1), KB_I("gl_safe", s_glSafe, 0, 1),
-    KB_I("homing_missile", s_homingMissile, 0, 1), KB_F("homing_cone", s_homingCone, 1, 180), KB_F("homing_range", s_homingRange, 1, 500), KB_I("one_handed", s_oneHand, 0, 1), KB_I("one_hand_grip", s_oneHandGrip, 0, 200),
+    KB_I("homing_missile", s_homingMissile, 0, 1), KB_F("homing_cone", s_homingCone, 1, 180), KB_F("homing_turn", s_homingTurn, 1, 20), KB_F("homing_range", s_homingRange, 1, 500), KB_I("one_handed", s_oneHand, 0, 1), KB_I("one_hand_grip", s_oneHandGrip, 0, 200),
     KB_F("leap_climb", s_lpClimb, 0.5, 30), KB_F("leap_drop", s_lpDrop, 0.5, 50),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
@@ -173,10 +173,12 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "; Missile Pistol's, a premium weapon's) carrying their own\n"
                "; grenade (the GL-21, GL-28, GL-52, GL-15, GP-31 and GP-20; one equipped or called in after the mission\n"
                "; starts), and each missile is given the living enemy nearest her and most in line within homing_cone degrees\n"
-               "; of where she looks and homing_range m of her; the game's own missile guidance flies it there.\n"
+               "; of where she looks and homing_range m of her; the game's own missile guidance flies it there, turning\n"
+               "; homing_turn times as fast as that missile does (it flew around an enemy that stood close; the weapon the\n"
+               "; missile is from turns so too while she is in a mission).\n"
                "; one_handed 1: she holds every weapon in one hand (the game's one-handed mark on what she carries), in the\n"
                "; pose one_hand_grip (70: the one-handed SMG grip; 1: a pistol's; 0: the weapon's own).\n"
-               "gl_arming = %d\ngl_safe = %d\ngl_homing = %d\nhoming_missile = %d\nhoming_cone = %g\nhoming_range = %g\none_handed = %d\none_hand_grip = %d\n"
+               "gl_arming = %d\ngl_safe = %d\ngl_homing = %d\nhoming_missile = %d\nhoming_cone = %g\nhoming_range = %g\nhoming_turn = %g\none_handed = %d\none_hand_grip = %d\n"
                "; Her leaps land at most leap_climb m higher or leap_drop m lower.\n"
                "leap_climb = %g\nleap_drop = %g\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties. If her\n"
@@ -194,7 +196,7 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
         (double)s_s2Cd, (double)s_s2Length, (double)s_s2Width, (double)s_s2Damage, (double)s_s2Grenade, (double)s_s2Crit, (double)s_s2Step,
         (double)s_s3Cd, (double)s_s3Leap, (double)s_s3Width, (double)s_s3Damage, (double)s_s3Heal, (double)s_s3Step,
         (double)s_frenzyRadius, (double)s_frenzyDamage, (double)s_frenzyRange, (double)s_frenzyCone, s_frenzyRing, (double)s_huntingSeconds, (double)s_huntingTaken, (double)s_frenzyRefund,
-        s_rowSmall, s_rowBig, s_glArming, s_glSafe, s_glHoming, s_homingMissile, (double)s_homingCone, (double)s_homingRange, s_oneHand, s_oneHandGrip,
+        s_rowSmall, s_rowBig, s_glArming, s_glSafe, s_glHoming, s_homingMissile, (double)s_homingCone, (double)s_homingRange, (double)s_homingTurn, s_oneHand, s_oneHandGrip,
         (double)s_lpClimb, (double)s_lpDrop,
         (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
 }
@@ -1272,6 +1274,9 @@ static const uint64_t kLaunchers[] = {HF_ENTITY_GL21_GRENADE_LAUNCHER, HF_ENTITY
 static int g_missileCode, g_missilePkg, g_missileOn;
 static uint64_t g_missile, g_missilePackage;
 static const char* g_missileName = "";
+static uintptr_t g_missileRecord;
+static float g_missileTurn[2];
+static int g_missileTurned;
 static uint8_t g_launcherSet[LAUNCHERS];
 static uint32_t (*g_netId)(uint32_t entity);
 typedef struct Missile { uint32_t entity, target; int handed, lost; float from[3], dir[3]; } Missile;
@@ -1300,6 +1305,14 @@ static void MissileSwap(int on)
         else if (g_launcherSet[i]) { hf->set_live(self, kLaunchers[i], &f, NULL, 0); g_launcherSet[i] = 0; n++; }
     }
     g_missileOn = on && n;
+    /* its turn rates (SeekingMissile +0x58 at the blend angle, +0x5C on target; the game reads the record every update) */
+    if (g_missileOn && !g_missileTurned && g_missileRecord && s_homingTurn > 1.01f && ReadAt(g_missileRecord + 0x58, g_missileTurn, 8))
+    {
+        float fast[2] = {g_missileTurn[0] * s_homingTurn, g_missileTurn[1] * s_homingTurn};
+        g_missileTurned = !hf->write(g_missileRecord + 0x58, fast, 8);
+        Log("homing grenades: the missile's turn rates %.2f / %.2f -> %.2f / %.2f (x%g)%s", (double)g_missileTurn[0], (double)g_missileTurn[1], (double)fast[0], (double)fast[1], (double)s_homingTurn, g_missileTurned ? "" : ": REFUSED");
+    }
+    else if (!on && g_missileTurned) { hf->write(g_missileRecord + 0x58, g_missileTurn, 8); g_missileTurned = 0; }
     if (on) Log("homing grenades: %d of %u grenade launchers fire the %s's missile with their own grenade (one equipped or called in from now on)", n, (unsigned)LAUNCHERS, g_missileName);
     else Log("homing grenades: %d launcher(s) put back; %u missiles seen, %u target hand-offs, %u found no enemy", n, g_msSeen, g_msHanded, g_msLost);
     if (!on) { memset(g_ms, 0, sizeof g_ms); g_msSeen = g_msHanded = g_msLost = 0; }
@@ -1317,6 +1330,7 @@ static int MissileDonor(uint64_t entity, uint64_t package, const char* name)
     memset(f, 0, sizeof f);
     ReadAt(record, f, sizeof f);
     g_missile = entity;
+    g_missileRecord = record;
     g_missilePackage = package;
     g_missileName = name;
     g_missileCode = 2;
