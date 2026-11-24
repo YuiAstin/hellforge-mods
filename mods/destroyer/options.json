@@ -6,12 +6,7 @@
   "gl_arming": "mission",
   "gl_homing": "mission",
   "one_handed": "mission",
-  "homing_turn": "mission",
-  "homing_cone": "mission",
-  "homing_range": "mission",
-  "homing_arm": "mission",
-  "one_hand_grip": "mission",
-  "homing_aim": "mission"
+  "one_hand_grip": "mission"
  },
  "advanced": [
   [
@@ -273,40 +268,16 @@
    "The blasts of the weapons she holds do not hurt or throw her."
   ],
   [
-   "homing_turn",
-   "Her Hands",
-   "Homing Turn Rate",
-   "Degrees a second a homing grenade turns."
-  ],
-  [
    "homing_cone",
    "Her Hands",
    "Homing Cone",
-   "Degrees off its way a homing grenade looks for a target."
+   "Degrees off the way it was fired a homing grenade may pick an enemy."
   ],
   [
    "homing_range",
    "Her Hands",
    "Homing Range",
-   "Metres a homing grenade looks for a target."
-  ],
-  [
-   "homing_arm",
-   "Her Hands",
-   "Homing From",
-   "Metres a grenade flies before it starts to steer."
-  ],
-  [
-   "homing_aim",
-   "Her Hands",
-   "Homing Aim Height",
-   "Metres above the enemy's feet a homing grenade aims."
-  ],
-  [
-   "homing_warm",
-   "Her Hands",
-   "Homing Warm-Up",
-   "Keeps an unseen round in the air above her so homing already knows the enemies when she fires."
+   "Metres a homing grenade may pick an enemy within."
   ],
   [
    "one_hand_grip",

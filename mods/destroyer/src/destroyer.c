@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -79,8 +79,8 @@ static int s_frenzyRing = 3;
 static int s_rowSmall = 343, s_rowBig = 277;   /* 343: the Orbital Precision Strike's shell; 277: the Eagle 500kg Bomb going off (193 is it landing) */
 static float s_lpClimb = 6, s_lpDrop = 12;
 /* her hands (0.1.8): a grenade launcher's rounds arm at once and home; every weapon is held in one hand */
-static int s_glArming = 1, s_glHoming = 1, s_glSafe = 1, s_homingWarm = 1, s_oneHand = 1, s_oneHandGrip = 70;
-static float s_homingTurn = 540, s_homingCone = 30, s_homingRange = 80, s_homingArm = 1, s_homingAim = 0.6f;
+static int s_glArming = 1, s_glHoming = 1, s_glSafe = 1, s_oneHand = 1, s_oneHandGrip = 70;
+static float s_homingCone = 25, s_homingRange = 150;
 
 /* Every setting: its .ini / options name, variable and range (kitbase/kb_settings.h) */
 static const KbSetting kSettings[] = {
@@ -106,9 +106,8 @@ static const KbSetting kSettings[] = {
     KB_F("frenzy_cone", s_frenzyCone, 1, 45), KB_I("frenzy_ring", s_frenzyRing, 0, 6), KB_F("hunting_seconds", s_huntingSeconds, 0, 120),
     KB_F("hunting_taken", s_huntingTaken, 0, 5), KB_F("frenzy_refund", s_frenzyRefund, 0, 120),
     KB_I("explosion_small", s_rowSmall, 1, 100000), KB_I("explosion_big", s_rowBig, 1, 100000),
-    KB_I("gl_arming", s_glArming, 0, 1), KB_I("gl_homing", s_glHoming, 0, 1), KB_I("gl_safe", s_glSafe, 0, 1), KB_I("homing_warm", s_homingWarm, 0, 1),
-    KB_F("homing_aim", s_homingAim, -5, 10), KB_F("homing_turn", s_homingTurn, 1, 1440), KB_F("homing_cone", s_homingCone, 1, 180),
-    KB_F("homing_range", s_homingRange, 1, 500), KB_F("homing_arm", s_homingArm, 0, 100), KB_I("one_handed", s_oneHand, 0, 1), KB_I("one_hand_grip", s_oneHandGrip, 0, 200),
+    KB_I("gl_arming", s_glArming, 0, 1), KB_I("gl_homing", s_glHoming, 0, 1), KB_I("gl_safe", s_glSafe, 0, 1),
+    KB_F("homing_cone", s_homingCone, 1, 180), KB_F("homing_range", s_homingRange, 1, 500), KB_I("one_handed", s_oneHand, 0, 1), KB_I("one_hand_grip", s_oneHandGrip, 0, 200),
     KB_F("leap_climb", s_lpClimb, 0.5, 30), KB_F("leap_drop", s_lpDrop, 0.5, 50),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
@@ -169,14 +168,13 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "explosion_small = %d\nexplosion_big = %d\n"
                "; Her hands. gl_arming 1: the rounds of a grenade launcher she holds arm as they leave (no arming distance:\n"
                "; any weapon whose round has one). gl_safe 1: the blasts of the weapons she holds do not hurt or throw her.\n"
-               "; gl_homing 1: those rounds home on enemies, turning homing_turn degrees a second toward the first one within\n"
-               "; homing_cone degrees of their way and homing_range m, from homing_arm m out, aiming homing_aim m above its\n"
-               "; feet. homing_warm 1: an unseen round kept in the air high above her while she carries such a weapon, so\n"
-               "; HellForge's homing already knows the enemies when she fires (it looks for them only while a homing round\n"
-               "; flies, and a first round found its target too late).\n"
+               "; gl_homing 1: the grenade launchers fire the P-33 Missile Pistol's guided missile carrying their own\n"
+               "; grenade (the GL-21, GL-28, GL-52, GL-15, GP-31 and GP-20; one equipped or called in after the mission\n"
+               "; starts), and each missile is given the nearest living enemy within homing_cone degrees of where it was\n"
+               "; fired and homing_range m; the game's own missile guidance flies it there.\n"
                "; one_handed 1: she holds every weapon in one hand (the game's one-handed mark on what she carries), in the\n"
                "; pose one_hand_grip (70: the one-handed SMG grip; 1: a pistol's; 0: the weapon's own).\n"
-               "gl_arming = %d\ngl_safe = %d\ngl_homing = %d\nhoming_turn = %g\nhoming_cone = %g\nhoming_range = %g\nhoming_arm = %g\nhoming_aim = %g\nhoming_warm = %d\none_handed = %d\none_hand_grip = %d\n"
+               "gl_arming = %d\ngl_safe = %d\ngl_homing = %d\nhoming_cone = %g\nhoming_range = %g\none_handed = %d\none_hand_grip = %d\n"
                "; Her leaps land at most leap_climb m higher or leap_drop m lower.\n"
                "leap_climb = %g\nleap_drop = %g\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties. If her\n"
@@ -194,7 +192,7 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
         (double)s_s2Cd, (double)s_s2Length, (double)s_s2Width, (double)s_s2Damage, (double)s_s2Grenade, (double)s_s2Crit, (double)s_s2Step,
         (double)s_s3Cd, (double)s_s3Leap, (double)s_s3Width, (double)s_s3Damage, (double)s_s3Heal, (double)s_s3Step,
         (double)s_frenzyRadius, (double)s_frenzyDamage, (double)s_frenzyRange, (double)s_frenzyCone, s_frenzyRing, (double)s_huntingSeconds, (double)s_huntingTaken, (double)s_frenzyRefund,
-        s_rowSmall, s_rowBig, s_glArming, s_glSafe, s_glHoming, (double)s_homingTurn, (double)s_homingCone, (double)s_homingRange, (double)s_homingArm, (double)s_homingAim, s_homingWarm, s_oneHand, s_oneHandGrip,
+        s_rowSmall, s_rowBig, s_glArming, s_glSafe, s_glHoming, (double)s_homingCone, (double)s_homingRange, s_oneHand, s_oneHandGrip,
         (double)s_lpClimb, (double)s_lpDrop,
         (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
 }
@@ -1137,9 +1135,9 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 }
 
 /* ---- her hands ----------------------------------------------------------------------------------------------------------
- * For each weapon she carries, once: its round's arming distance to 0 and a homing rule on it (a round with an arming
+ * For each weapon she carries, once: its round's arming distance to 0 (a round with an arming
  * distance is a grenade launcher's: ProjectileSettings +0xA0, the GL-21's 7 m, the GL-52's 4). All of it is put back when the mission ends or the kit stands by. */
-typedef struct Hand { uint64_t res; uint32_t projectile, homing; uint8_t armed; } Hand;
+typedef struct Hand { uint64_t res; uint32_t projectile; uint8_t armed; } Hand;
 static Hand g_hand[12];
 static int g_nhand;
 static const HfField kArming = {"ProjectileSettings", 25480438u, 0xA0, 4, HF_TYPE_F32, __LINE__};
@@ -1155,27 +1153,17 @@ static void HandSet(uint64_t res)
     if (hf->get_live(self, res, &proj, &v) && v.base.number > 0 && v.base.number < 100000) h->projectile = (uint32_t)v.base.number;
     memset(&v, 0, sizeof v);
     if (!h->projectile && hf->get_live(self, res, &rounds, &v) && v.base.number > 0 && v.base.number < 100000) h->projectile = (uint32_t)v.base.number;
-    /* a grenade launcher's round: armed as it leaves, and homing */
+    /* a grenade launcher's round: armed as it leaves */
     memset(&v, 0, sizeof v);
-    if (h->projectile && (s_glArming || s_glHoming) && hf->get_live(self, (HfRef)h->projectile, &kArming, &v) && v.base.number > 0.01 && v.base.number < 1000)
+    if (h->projectile && s_glArming && hf->get_live(self, (HfRef)h->projectile, &kArming, &v) && v.base.number > 0.01 && v.base.number < 1000)
     {
         double was = v.base.number;
         int set = -1;
-        if (s_glArming) { HfValue zero = HF_F32(0); set = hf->set_live(self, (HfRef)h->projectile, &kArming, &zero, 0); h->armed = set != 0; }
-        if (s_glHoming && hf->size >= offsetof(HfApi, stop_shots) + sizeof hf->stop_shots && hf->homing)
-        {
-            HfHoming rule = {sizeof rule};
-            rule.projectile = h->projectile;
-            rule.turn_rate = s_homingTurn;
-            rule.cone = s_homingCone;
-            rule.range = s_homingRange;
-            rule.arm_distance = s_homingArm;
-            rule.aim_height = s_homingAim;
-            rule.flags = HF_HOMING_NO_RETARGET;   /* (the Rocket Sentry Test's best: a fast turn, the first target kept) */
-            h->homing = hf->homing(self, &rule);
-        }
-        Log("her hands: weapon %016llx fires a grenade round (projectile %u, arming distance %.1f m): arming %s (answer %d), homing %s (rule %u)", (unsigned long long)res, h->projectile, was,
-            s_glArming ? (h->armed ? "set to 0" : "REFUSED") : "left", set, s_glHoming ? (h->homing ? "on" : "REFUSED") : "off", h->homing);
+        HfValue zero = HF_F32(0);
+        set = hf->set_live(self, (HfRef)h->projectile, &kArming, &zero, 0);
+        h->armed = set != 0;
+        Log("her hands: weapon %016llx fires a grenade round (projectile %u, arming distance %.1f m): arming %s (answer %d)", (unsigned long long)res, h->projectile, was,
+            h->armed ? "set to 0" : "REFUSED", set);
     }
 }
 /* Held in one hand (docs/research/one-handed.md, the kit base's One-Handed Grip on the kits-upgrade-test branch): the
@@ -1234,33 +1222,142 @@ static void OneHanded(int on)
         g_oneChangedN = 0;
     }
 }
-/* The warm-up round (docs/research/homing.md): HellForge's homing gathers enemies only while a homing round of the
- * player's is in the air, so the first grenade after a quiet spell found its target late and flew past. While she
- * carries a homing weapon, an unseen, slow round of her own type (no effects, no blast, a homing rule that never
- * steers) is kept in the air high above her. */
-static uint32_t g_warm, g_warmRule;
-static double g_warmNext;
-static void WarmFrame(void)
+/* Homing grenades (docs/research/homing.md and lock-on.md, Lock-on & Stim Test 0.2.0): the grenade launchers fire the
+ * P-33 Missile Pistol's guided missile (ProjectileWeapon +0x28; it carries the launcher's own grenade), and each missile
+ * that flies with no target (state +0x00 = 0x7FFF in the seeking-missile manager [game + 0x3326DF0]) is handed the
+ * nearest living enemy along the way it was fired: state +0x00 = its network id (game + 0xFD9AF0), +0x04 = 0x10 (its
+ * default aim point), +0x34 = 1 (guidance on). The game's own guidance flies it; a missile whose target dies gets the
+ * next. (HellForge's homing rule on the grenade itself found its target too late and flew past: 0.1.8 to 0.2.0.) */
+#define P33_MISSILE UINT64_C(0xA1470A4DAB237264)
+#define P33_PACKAGE UINT64_C(0x64C37A90C0D906DE)   /* packages/generated/loadout/pistol_smart_missile */
+#define NO_NET 0x7FFFu
+static const uint64_t kLaunchers[] = {HF_ENTITY_GL21_GRENADE_LAUNCHER, HF_ENTITY_GL28_BELTFED_GRENADE_LAUNCHER, HF_ENTITY_GL52_DEESCALATOR,
+                                      HF_ENTITY_GL15_EVICTOR, HF_ENTITY_GP31_GRENADE_PISTOL, HF_ENTITY_GP20_ULTIMATUM};
+#define LAUNCHERS (sizeof kLaunchers / sizeof kLaunchers[0])
+static int g_missileCode, g_missilePkg, g_missileOn;
+static uint8_t g_launcherSet[LAUNCHERS];
+static uint32_t (*g_netId)(uint32_t entity);
+typedef struct Missile { uint32_t entity, target; int handed, lost; } Missile;
+static Missile g_ms[32];
+static unsigned g_msNext, g_msSeen, g_msHanded, g_msLost;
+static void MissileInit(void)
 {
-    int homing = 0;
-    for (int i = 0; i < g_nhand; i++) homing |= g_hand[i].homing != 0;
-    if (!homing || !s_homingWarm || !g_warm || g_now < g_warmNext) return;
-    if (!g_warmRule)
+    if (!hf->code_matches(game + 0xFD9AF0, "48 83 EC 08 3B 0D ?? ?? ?? ?? 75 0B 8B 05 ?? ?? ?? ?? 48 83 C4 08 C3") ||
+        !hf->code_matches(game + 0x641148, "8B F7 4C 6B C6 38 F3 0F 10 40 44 4C 8D 2C 76 48 89 44 24 58") ||
+        !hf->code_matches(game + 0x642B05, "8B 14 1E 48 8D 4C 24 44 E8 ?? ?? ?? ?? 80 7C 1E 34 00") ||
+        !hf->code_matches(game + 0x642A0F, "41 8B 45 6C 41 89 47 60 41 8B 4D 00 85 C9 0F 84 ?? ?? ?? ??"))
+    { Log("homing grenades off: the game's missile code is not the reviewed one"); return; }
+    uint32_t stride = 0, mode = 0;
+    uintptr_t record = hf->component_record("SeekingMissileComponentData", P33_MISSILE, &stride);
+    if (!record || !ReadAt(record, &mode, 4) || mode != 2) { Log("homing grenades off: the P-33 missile's record %s (targeting mode %u, wanted 2)", record ? "reads" : "was not found", mode); return; }
+    g_netId = (uint32_t (*)(uint32_t))(game + 0xFD9AF0);
+    g_missileCode = 1;
+    g_missilePkg = HF_PACKAGE_LOADING;
+    Log("homing grenades ready (the missile code checked, the P-33 missile follows an entity)");
+}
+static void MissileSwap(int on)
+{
+    HfField f = HF_FIELD(ProjectileWeapon, projectile_entity);
+    HfValue v = HF_U64(P33_MISSILE);
+    if (on && (g_missileOn || !g_missileCode || g_missilePkg != HF_PACKAGE_RESIDENT || !s_glHoming)) return;
+    if (!on && !g_missileOn) return;
+    int n = 0;
+    for (unsigned i = 0; i < LAUNCHERS; i++)
     {
-        HfHoming rule = {sizeof rule};
-        rule.projectile = g_warm;
-        rule.turn_rate = 1; rule.cone = 1; rule.range = 1; rule.arm_distance = 100;
-        g_warmRule = hf->homing(self, &rule);
-        Log("homing warm-up: its rule %u (0: refused)", g_warmRule);
-        if (!g_warmRule) { g_warm = 0; return; }
+        if (on) { g_launcherSet[i] = hf->set_live(self, kLaunchers[i], &f, &v, 0) != 0; n += g_launcherSet[i]; }
+        else if (g_launcherSet[i]) { hf->set_live(self, kLaunchers[i], &f, NULL, 0); g_launcherSet[i] = 0; n++; }
     }
-    float pos[3], up[3] = {0, 0, 1};
-    if (!PlayerPose(pos, NULL)) return;
-    pos[2] += 60;
-    int r = hf->spawn_projectile(self, g_warm, pos, up);
-    static unsigned noted;
-    if (noted++ < 4) Log("homing warm-up: an unseen round 60 m above her (projectile %u): answer %d", g_warm, r);
-    g_warmNext = g_now + (r == HF_ACT_WAITING ? 0.5 : 7.0);
+    g_missileOn = on && n;
+    if (on) Log("homing grenades: %d of %u grenade launchers fire the P-33 missile with their own grenade (one equipped or called in from now on)", n, (unsigned)LAUNCHERS);
+    else Log("homing grenades: %d launcher(s) put back; %u missiles seen, %u target hand-offs, %u found no enemy", n, g_msSeen, g_msHanded, g_msLost);
+    if (!on) { memset(g_ms, 0, sizeof g_ms); g_msSeen = g_msHanded = g_msLost = 0; }
+}
+/* (every frame, in a mission or not: the package has to be in before a launcher is made) */
+static void MissilePackage(void)
+{
+    if (!s_glHoming || !g_missileCode || g_missilePkg != HF_PACKAGE_LOADING) return;
+    g_missilePkg = hf->load_package(self, P33_PACKAGE);
+    if (g_missilePkg == HF_PACKAGE_RESIDENT) Log("homing grenades: the P-33's package is in");
+    else if (!g_missilePkg) Log("homing grenades off: the P-33's package did not load");
+}
+static uint32_t MissileTarget(const float at[3], const float fwd[3])
+{
+    float best = s_homingRange * s_homingRange, cosCone = cosf(s_homingCone * 3.14159265f / 180);
+    float fl = sqrtf(fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]);
+    uint32_t pick = 0;
+    for (int i = 0; i < FOES; i++)
+    {
+        float p[3];
+        if (!g_foe[i] || !FoePos(i, p)) continue;
+        p[2] += 1.0f;
+        float d[3] = {p[0] - at[0], p[1] - at[1], p[2] - at[2]};
+        float d2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+        if (d2 >= best || d2 < 1) continue;
+        if (fl > 0.1f && (d[0] * fwd[0] + d[1] * fwd[1] + d[2] * fwd[2]) / (sqrtf(d2) * fl) < cosCone) continue;
+        if (!Living(g_foe[i])) continue;
+        best = d2;
+        pick = g_foe[i];
+    }
+    return pick;
+}
+static int MissileTargetLives(uint32_t e)
+{
+    for (int i = 0; i < FOES; i++) if (g_foe[i] == e) return Living(e);
+    return 0;
+}
+static void MissilesFrame(void)
+{
+    if (!g_missileOn) return;
+    uintptr_t mgr = Pointer(game + 0x3326DF0), heads, states, locals;
+    uint32_t count = 0;
+    if (!mgr || !ReadAt(mgr + 0x10, &count, 4) || count == 0 || count > 4096) return;
+    if (!(heads = Pointer(mgr + 0x38)) || !(states = Pointer(mgr + 0x50)) || !(locals = Pointer(mgr + 0x48))) return;
+    for (uint32_t i = 0; i < count && i < 256; i++)
+    {
+        uintptr_t h = Pointer(heads + 8u * i);
+        uint32_t entity = 0, net = 0, shooter = 0;
+        if (!h || !ReadAt(h + 8, &entity, 4) || !entity) continue;
+        uintptr_t state = states + 0x38u * i, local = locals + 0xC0u * i;
+        if (!ReadAt(state, &net, 4) || !ReadAt(local + 0x84, &shooter, 4)) continue;
+        Missile* m = NULL;
+        for (int k = 0; k < 32 && !m; k++) if (g_ms[k].entity == entity) m = &g_ms[k];
+        if (!m)
+        {
+            uint8_t sid[24];
+            int hers = 0;
+            if (Descriptor(shooter, sid)) for (unsigned k = 0; k < LAUNCHERS; k++) hers |= Quad(sid) == kLaunchers[k];
+            m = &g_ms[g_msNext++ % 32];
+            memset(m, 0, sizeof *m);
+            m->entity = entity;
+            m->handed = !hers || net != NO_NET ? -1 : 0;   /* another weapon's missile, or one the game gave a lock: left alone */
+            if (hers) g_msSeen++;
+        }
+        if (m->handed < 0) continue;
+        if (m->target && MissileTargetLives(m->target)) continue;   /* (the game clears +0x00 for the final approach: leave it) */
+        float pos[3], fwd[3];
+        if (!ReadAt(state + 0x18, pos, 12) || !ReadAt(local + 0x74, fwd, 12)) continue;
+        uint32_t t = MissileTarget(pos, fwd), tn = t && t != m->target ? g_netId(t) : NO_NET;
+        if (tn != NO_NET)
+        {
+            uint32_t node = 0x10;
+            uint8_t on = 1;
+            hf->write(state + 0x00, &tn, 4);
+            hf->write(state + 0x04, &node, 4);
+            hf->write(state + 0x34, &on, 1);
+            m->target = t;
+            m->handed++;
+            g_msHanded++;
+            static unsigned noted;
+            if (noted++ < 12) Log("homing grenades: missile %u given enemy %u (net %u)%s", entity, t, tn, m->handed > 1 ? ", a new one" : "");
+        }
+        else if (!m->lost)
+        {
+            m->lost = 1;
+            g_msLost++;
+            static unsigned noted;
+            if (noted++ < 6) Log("homing grenades: missile %u found no living enemy within %.0f degrees and %.0f m: it flies straight", entity, (double)s_homingCone, (double)s_homingRange);
+        }
+    }
 }
 /* The blasts of the weapons she holds (her grenades go off at once now, often at her feet): kept as her own, so the
  * hit code and the damage event spare her from them */
@@ -1271,7 +1368,16 @@ static void OnExplosion(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfExplosionEvent* x = (const HfExplosionEvent*)info;
     if (!s_glSafe || !g_inMission || !kb_kit_on || !x->source) return;
-    if (x->source != g_weapon[1] && x->source != g_weapon[2] && x->source != g_weapon[3]) return;
+    int hers = x->source == g_weapon[1] || x->source == g_weapon[2] || x->source == g_weapon[3];
+    for (int k = 0; k < 32 && !hers; k++) hers = g_ms[k].entity == x->source && g_ms[k].handed >= 0;
+    if (!hers)
+    {
+        /* (for the log: a blast close to her that is not known as hers) */
+        static unsigned odd;
+        float me[3];
+        if (odd < 6 && g_nhand && PlayerPose(me, NULL) && Dist2(me, x->position) < 36) { odd++; Log("her hands: a blast 6 m or less from her that is not a held weapon's (explosion row %u, from entity %u, owner %u; her weapons %u / %u / %u)", x->type, x->source, x->owner, g_weapon[1], g_weapon[2], g_weapon[3]); }
+        return;
+    }
     SelfBlast* b = &g_selfBlast[g_selfBlastNext++ % 16];
     memcpy(b->p, x->position, sizeof b->p);
     b->at = g_now;
@@ -1289,7 +1395,7 @@ static int SelfBlastAt(const float at[3])
 }
 static void HandsFrame(void)
 {
-    WarmFrame();
+    MissilesFrame();
     for (int sel = 1; sel <= 3; sel++)
     {
         uint64_t res = g_weaponRes[sel];
@@ -1304,10 +1410,8 @@ static void HandsOff(void)
     {
         Hand* h = &g_hand[i];
         if (h->armed) hf->set_live(self, (HfRef)h->projectile, &kArming, NULL, 0);
-        if (h->homing) hf->stop_shots(self, h->homing);
     }
-    if (g_warmRule) { hf->stop_shots(self, g_warmRule); g_warmRule = 0; }
-    g_warmNext = 0;
+    MissileSwap(0);
     memset(g_selfBlast, 0, sizeof g_selfBlast);
     if (g_nhand) Log("her hands: %d weapon(s) put back as the game has them", g_nhand);
     g_nhand = 0;
@@ -1358,6 +1462,7 @@ static void Reset(const char* why)
     Speed(0);
     HandsOff();
     if (start && kb_kit_on && s_oneHand) OneHanded(1);
+    if (start && kb_kit_on) MissileSwap(1);
     Body(start);
     if (start && s_hellbomb && s_hellbombRow == 125)
         if (!hf->load_package(self, UINT64_C(0x346D785D6CA13FF4))) Log("the Hellbomb's package could not be loaded ahead");  /* loadout/hellbomb_backpack */
@@ -1411,6 +1516,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     }
     else Log("leaps off: their functions are not the reviewed code");
     g_staminaOk = hf->code_matches(game + 0xA50E2D, "f3 42 0f 11 8c 11 54 78 54 00");
+    MissileInit();
     Log(g_staminaOk ? "stamina readable (the game's stamina write is the reviewed code)" : "stamina off: its code is not the reviewed one");
 }
 
@@ -1428,21 +1534,6 @@ static void ProjectilesReady(HfMod* mod, HfEvent event, void* user)
         dmg->push_force = (__typeof__(dmg->push_force))want;
     }
     g_tracerReady = 1;
-    /* the homing warm-up round: slow, weightless, nine seconds, nothing to see and nothing where it ends
-     * (ProjectileSettings: +0x20 velocity, +0x28 drag, +0x2C gravity, +0x34 lifetime, +0x38 its variance, +0x48 and
-     * +0x70 its effects, +0x90 and +0x9C its blasts) */
-    uintptr_t row = g_warm ? hf->projectile_row(g_warm) : 0;
-    if (row)
-    {
-        float v = 3, zero = 0, life = 9;
-        uint64_t none = 0;
-        uint32_t no = 0;
-        int bad = hf->write(row + 0x20, &v, 4) | hf->write(row + 0x28, &zero, 4) | hf->write(row + 0x2C, &zero, 4) | hf->write(row + 0x34, &life, 4) |
-                  hf->write(row + 0x38, &zero, 4) | hf->write(row + 0x48, &none, 8) | hf->write(row + 0x70, &none, 8) | hf->write(row + 0x90, &no, 4) | hf->write(row + 0x9C, &no, 4);
-        Log("homing warm-up: projectile %u's row set (3 m/s, no gravity, 9 s, no effects)%s", g_warm, bad ? ": a write FAILED, no warm-up" : "");
-        if (bad) g_warm = 0;
-    }
-    else g_warm = 0;
 }
 
 /* ---- the HUD state (read by the Destroyer HUD addon through LuaJIT's ffi) ------------------------------------------- */
@@ -1521,9 +1612,11 @@ static void Tick(HfMod* mod, float dt, void* user)
     KbOptionsTick();   /* the options screen's changes, in a mission or not */
     g_now += dt > 0 && dt < 1 ? dt : 0;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
+    MissilePackage();
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
     if (!g_inMission || !kb_kit_on) return;   /* (standing by: another kit is picked) */
     MyItems();
+    MissileSwap(1);   /* (the package came in after the mission began) */
     HandsFrame();
     static int prev[4];
     int focused = Focused();
@@ -1638,11 +1731,6 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
             pr.damage = g_tracerDamage[k];
             g_tracer[k] = g_tracerDamage[k] ? api->add_projectile(mod, &pr) : 0;
         }
-        HfProjectile warm = {sizeof warm};
-        warm.base = 226;
-        warm.name = "yui/destroyer/homing_warm";
-        warm.damage = g_tracerDamage[0];
-        g_warm = g_tracerDamage[0] ? api->add_projectile(mod, &warm) : 0;
         if (!g_tracer[0] || !g_tracer[1] || api->on(mod, HF_EVENT_PROJECTILES_READY, ProjectilesReady, NULL))
         { g_tracer[0] = g_tracer[1] = 0; api->log(mod, "the stages' rounds could not be added: Annihilation Directive is the leap alone"); }
     }

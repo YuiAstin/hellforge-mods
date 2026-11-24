@@ -138,11 +138,11 @@ Its own key (proposed, as Ascalon's dash got Z) so a full Fang bar never blocks 
   +0xA0) and home on enemies (the SDK's homing rule); she holds every weapon in one hand (0.1.9: the game's Equipment table, every
   two-handed record marked at the mission's start, with the SMG grip; docs/research/one-handed.md). Put back at
   mission end.
-- **Her hands (0.2.0):** the homing rule takes the Rocket Sentry test's values (540 degrees a second, the first target
-  kept, a 30 degree cone, 0.6 m above the feet, steering from 1 m), and an unseen slow round of her own is kept in
-  the air 60 m above her while she carries such a weapon, so HellForge's homing already has the enemies when she
-  fires (docs/research/homing.md: the first round found its target late and flew past). The blasts of the weapons she
-  holds (the explosion event, by its source weapon) no longer hurt or throw her.
+- **Her hands (0.2.1):** homing is the game's own: the grenade launchers (GL-21, GL-28, GL-52, GL-15, GP-31, GP-20)
+  fire the P-33 Missile Pistol's guided missile carrying their own grenade, and the kit hands each missile the nearest
+  living enemy within 25 degrees of where it was fired (docs/research/homing.md, lock-on.md; Lock-on & Stim Test
+  0.2.0's route). HellForge's homing rule on the grenade itself (0.1.8 to 0.2.0) found its target too late. The blasts
+  of the weapons she holds (the explosion event, by its source weapon or missile) no longer hurt or throw her.
 - **Not built:** Hunting Order's extra armour piercing, Claw Mark.
 - The mod icon and the four skill icons are placeholders.
 
