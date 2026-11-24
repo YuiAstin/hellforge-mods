@@ -3,8 +3,9 @@
  *
  * She pays for her skills with her own health (never below cost_floor of it), and the less she has the harder she hits.
  *   Annihilation Directive (key_s1, default Z): one key, three stages. A leap to where she aims with a blast where she
- *     lands; if that hits, the key again is a line of blasts that pushes enemies back; if that hits, the key again is a
- *     cone of blasts with a bigger push. An enemy hit by all three takes a bonus hit. Each stage spends a Grenade point.
+ *     lands; if that hits, the key again is a burst of tracer rounds in a line that staggers enemies back; if that hits,
+ *     the key again is a burst in a cone with a bigger push. An enemy hit by all three takes a bonus hit. Each stage
+ *     spends a Grenade point.
  *   Doom Barrage (key_s2, default X): a grid of blasts in a box in front of her, spending every Grenade point. +1 Fang.
  *   Party Time (key_s3, default C): a longer leap that blasts the whole path. Grenades back to full; each enemy hit
  *     heals her and gives Frenzy (a heavily armoured one: a full heal). +1 Fang.
@@ -16,8 +17,9 @@
  *
  * Her blasts are the game's own explosions (the Orbital Precision Strike's, the 500 kg bomb's for Ammo Frenzy), set off
  * with spawn_explosion; what each deals is the kit's (the damage event: a blast's hits on an enemy within the skill's
- * radius are paid once, at the skill's damage; the rest of the row's hits are cancelled). The two pushing stages raise
- * the row's stagger and push for the moment they go off. Her leaps are Lenna's teleport (the game's position setter,
+ * radius are paid once, at the skill's damage; the rest of the row's hits are cancelled). The line's and the cone's
+ * tracers are copies of a bright round (Koleda's Full Speed tracers) with the stage's stagger and push on their damage
+ * rows, paid the same way. Her leaps are Lenna's teleport (the game's position setter,
  * the game's fit test).
  *
  * Research credit: the hit-result layout, the hooked functions, the entity and scene-graph reads come from Helldiver
@@ -37,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -63,10 +65,12 @@ static int s_mech = 1;                 /* 0: never; 1: a mission where a known A
 static float s_mechRange = 40, s_mechEach = 0.05f, s_mechMax = 0.50f, s_mechHp = 0.10f, s_mechTaken = 0.30f;
 static int s_bossArmour = 4;           /* heavy armour or above: boss-sized (Lemuen's test) */
 static float s_deniedCd = 180, s_deniedSeconds = 2, s_rage = 1;
-static float s_s1Cd = 10, s_s1Leap = 15, s_s1Radius = 5, s_s1Window = 3, s_s1Line = 9, s_s1Cone = 6, s_s1Triple = 2, s_s1Haste = 2, s_hasteMult = 1.3f;
-static float s_s1Damage = 600, s_s1Damage1 = 800, s_s1Damage2 = 1000, s_s1Stagger1 = 2, s_s1Stagger2 = 3, s_s1Shield = 1.5f;
-static float s_s2Cd = 18, s_s2Length = 15, s_s2Width = 9, s_s2Damage = 400, s_s2Grenade = 0.20f, s_s2Crit = 1.5f, s_s2Step = 0.15f;
-static float s_s3Cd = 90, s_s3Leap = 18, s_s3Width = 9, s_s3Damage = 1500, s_s3Heal = 0.20f;
+static float s_s1Cd = 10, s_s1Leap = 15, s_s1Radius = 5, s_s1Window = 3, s_s1Line = 20, s_s1Cone = 10, s_s1Triple = 2, s_s1Haste = 2, s_hasteMult = 1.3f;
+static float s_s1Damage = 600, s_s1Damage1 = 800, s_s1Damage2 = 1000, s_s1Stagger1 = 50, s_s1Stagger2 = 80, s_s1Shield = 1.5f;
+static int s_s1Rounds = 10, s_tracerRound = 226, s_tracerDamage = 125;   /* the stages' tracers: Koleda's (the bright round, the minigun's damage row) */
+static float s_s1Burst = 0.2f, s_s1ConeAngle = 30;
+static float s_s2Cd = 18, s_s2Length = 15, s_s2Width = 9, s_s2Damage = 400, s_s2Grenade = 0.20f, s_s2Crit = 1.5f, s_s2Step = 0.18f;
+static float s_s3Cd = 90, s_s3Leap = 18, s_s3Width = 9, s_s3Damage = 1500, s_s3Heal = 0.20f, s_s3Step = 0.12f;
 static float s_frenzyRadius = 24, s_frenzyDamage = 12000, s_frenzyRange = 120, s_frenzyCone = 6, s_huntingSeconds = 10, s_huntingTaken = 0.20f, s_frenzyRefund = 5;
 static int s_frenzyRing = 3;
 static int s_rowSmall = 343, s_rowBig = 193;   /* 343: the Orbital Precision Strike's shell; 193: the Eagle 500kg Bomb's payload */
@@ -82,14 +86,16 @@ static const KbSetting kSettings[] = {
     KB_F("mech_hp", s_mechHp, 0, 1), KB_F("mech_taken", s_mechTaken, 0, 0.95), KB_I("boss_armour", s_bossArmour, 1, 10),
     KB_F("denied_cooldown", s_deniedCd, 0, 3600), KB_F("denied_seconds", s_deniedSeconds, 0, 10), KB_F("rage", s_rage, 0, 3),
     KB_F("s1_cooldown", s_s1Cd, 0, 600), KB_F("s1_leap", s_s1Leap, 3, 40), KB_F("s1_radius", s_s1Radius, 1, 20), KB_F("s1_window", s_s1Window, 0.5, 20),
-    KB_F("s1_line", s_s1Line, 3, 30), KB_F("s1_cone", s_s1Cone, 3, 30), KB_F("s1_triple", s_s1Triple, 0, 20), KB_F("s1_haste", s_s1Haste, 0, 30),
+    KB_F("s1_line", s_s1Line, 3, 100), KB_F("s1_cone", s_s1Cone, 3, 100), KB_F("s1_triple", s_s1Triple, 0, 20), KB_F("s1_haste", s_s1Haste, 0, 30),
     KB_F("haste_mult", s_hasteMult, 1, 3), KB_F("s1_damage", s_s1Damage, 0, 100000), KB_F("s1_damage_1", s_s1Damage1, 0, 100000),
-    KB_F("s1_damage_2", s_s1Damage2, 0, 100000), KB_F("s1_stagger_1", s_s1Stagger1, 1, 20), KB_F("s1_stagger_2", s_s1Stagger2, 1, 20),
+    KB_F("s1_damage_2", s_s1Damage2, 0, 100000), KB_F("s1_stagger_1", s_s1Stagger1, 0, 500), KB_F("s1_stagger_2", s_s1Stagger2, 0, 500),
+    KB_I("s1_rounds", s_s1Rounds, 1, 40), KB_F("s1_burst", s_s1Burst, 0, 2), KB_F("s1_cone_angle", s_s1ConeAngle, 5, 80),
+    KB_I("tracer_round", s_tracerRound, 1, 350), KB_I("tracer_damage", s_tracerDamage, 1, 649),
     KB_F("s1_shield", s_s1Shield, 0, 10),
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("s2_length", s_s2Length, 5, 40), KB_F("s2_width", s_s2Width, 3, 30), KB_F("s2_damage", s_s2Damage, 0, 100000),
     KB_F("s2_grenade", s_s2Grenade, 0, 5), KB_F("s2_crit", s_s2Crit, 1, 10), KB_F("s2_step", s_s2Step, 0, 2),
     KB_F("s3_cooldown", s_s3Cd, 0, 600), KB_F("s3_leap", s_s3Leap, 3, 40), KB_F("s3_width", s_s3Width, 2, 30), KB_F("s3_damage", s_s3Damage, 0, 100000),
-    KB_F("s3_heal", s_s3Heal, 0, 1),
+    KB_F("s3_heal", s_s3Heal, 0, 1), KB_F("s3_step", s_s3Step, 0, 2),
     KB_F("frenzy_radius", s_frenzyRadius, 5, 60), KB_F("frenzy_damage", s_frenzyDamage, 0, 1000000), KB_F("frenzy_range", s_frenzyRange, 10, 300),
     KB_F("frenzy_cone", s_frenzyCone, 1, 45), KB_I("frenzy_ring", s_frenzyRing, 0, 6), KB_F("hunting_seconds", s_huntingSeconds, 0, 120),
     KB_F("hunting_taken", s_huntingTaken, 0, 5), KB_F("frenzy_refund", s_frenzyRefund, 0, 120),
@@ -120,18 +126,23 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "; denied_cooldown s before it can again. rage: each 1%% of health she is missing adds rage %% to her skill\n"
                "; damage and takes half of that off the damage she takes (0: off).\n"
                "denied_cooldown = %g\ndenied_seconds = %g\nrage = %g\n"
-               "; Annihilation Directive: cooldown (from the end of the chain); the leap's reach; each blast's radius; seconds\n"
-               "; the next stage stays open after a hit; the line's and the cone's length; the bonus on an enemy all three\n"
-               "; stages hit (times the cone's damage); the sprint boost after a stage that hits (seconds, times her speed);\n"
-               "; each stage's damage; the two pushing stages' stagger and push (times the explosion's own); seconds without\n"
+               "; Annihilation Directive: cooldown (from the end of the chain); the leap's reach; its blast's radius; seconds\n"
+               "; the next stage stays open after a hit; how far the line's and the cone's tracers pay; the bonus on an enemy\n"
+               "; all three stages hit (times the cone's damage); the sprint boost after a stage that hits (seconds, times her\n"
+               "; speed); each stage's damage; the line's and the cone's stagger and push on what they hit; seconds without\n"
                "; knockdown after each stage.\n"
                "s1_cooldown = %g\ns1_leap = %g\ns1_radius = %g\ns1_window = %g\ns1_line = %g\ns1_cone = %g\ns1_triple = %g\ns1_haste = %g\nhaste_mult = %g\n"
                "s1_damage = %g\ns1_damage_1 = %g\ns1_damage_2 = %g\ns1_stagger_1 = %g\ns1_stagger_2 = %g\ns1_shield = %g\n"
+               "; The line and the cone are bursts of tracer rounds: s1_rounds of them within s1_burst s, the cone's spread\n"
+               "; s1_cone_angle degrees to each side. tracer_round: the projectile they copy (226: the bright round of\n"
+               "; Koleda's Sinveiler); tracer_damage: the damage row theirs copies (their damage is the stage's).\n"
+               "s1_rounds = %d\ns1_burst = %g\ns1_cone_angle = %g\ntracer_round = %d\ntracer_damage = %d\n"
                "; Doom Barrage: cooldown; the box's length and width; damage; each Grenade spent adds s2_grenade; with 3 or\n"
-               "; more spent the damage is times s2_crit; seconds between its rows.\n"
+               "; more spent the damage is times s2_crit; seconds between its blasts.\n"
                "s2_cooldown = %g\ns2_length = %g\ns2_width = %g\ns2_damage = %g\ns2_grenade = %g\ns2_crit = %g\ns2_step = %g\n"
-               "; Party Time: cooldown; the leap's reach; the path's width; damage; each enemy hit heals s3_heal of her maximum.\n"
-               "s3_cooldown = %g\ns3_leap = %g\ns3_width = %g\ns3_damage = %g\ns3_heal = %g\n"
+               "; Party Time: cooldown; the leap's reach; the path's width; damage; each enemy hit heals s3_heal of her maximum;\n"
+               "; seconds between its blasts, from where she stood to where she landed.\n"
+               "s3_cooldown = %g\ns3_leap = %g\ns3_width = %g\ns3_damage = %g\ns3_heal = %g\ns3_step = %g\n"
                "; Ammo Frenzy: its reach around the target; its total damage, shared among the enemies in reach; how far the\n"
                "; target may be and how many degrees off her crosshair; extra blasts on a ring around the first; Hunting\n"
                "; Order's length and how much more of her damage its enemies take; seconds off her cooldowns.\n"
@@ -151,8 +162,9 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
         (double)s_deniedCd, (double)s_deniedSeconds, (double)s_rage,
         (double)s_s1Cd, (double)s_s1Leap, (double)s_s1Radius, (double)s_s1Window, (double)s_s1Line, (double)s_s1Cone, (double)s_s1Triple, (double)s_s1Haste, (double)s_hasteMult,
         (double)s_s1Damage, (double)s_s1Damage1, (double)s_s1Damage2, (double)s_s1Stagger1, (double)s_s1Stagger2, (double)s_s1Shield,
+        s_s1Rounds, (double)s_s1Burst, (double)s_s1ConeAngle, s_tracerRound, s_tracerDamage,
         (double)s_s2Cd, (double)s_s2Length, (double)s_s2Width, (double)s_s2Damage, (double)s_s2Grenade, (double)s_s2Crit, (double)s_s2Step,
-        (double)s_s3Cd, (double)s_s3Leap, (double)s_s3Width, (double)s_s3Damage, (double)s_s3Heal,
+        (double)s_s3Cd, (double)s_s3Leap, (double)s_s3Width, (double)s_s3Damage, (double)s_s3Heal, (double)s_s3Step,
         (double)s_frenzyRadius, (double)s_frenzyDamage, (double)s_frenzyRange, (double)s_frenzyCone, s_frenzyRing, (double)s_huntingSeconds, (double)s_huntingTaken, (double)s_frenzyRefund,
         s_rowSmall, s_rowBig, (double)s_lpClimb, (double)s_lpDrop,
         (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
@@ -482,13 +494,10 @@ static unsigned g_groupNext;
 typedef struct Burst { float p[3]; double at; int group; float reach; } Burst;
 static Burst g_blast[64];
 static unsigned g_blastNext;
-typedef struct Queued { float p[3]; double at, until; int row, push, group; } Queued;
+typedef struct Queued { float p[3]; double at, until; int row, group; } Queued;
 static Queued g_q[64];
 static int g_nq;
-static int g_pushNow;                  /* what the small row's stagger and push are now: 0 its own, 1 the line's, 2 the cone's */
-static double g_pushSetAt, g_lastSpawn;
-static uint32_t g_pushDamage;          /* the small row's damage id */
-static double g_pushStagger = -1, g_pushForce = -1;
+static double g_lastSpawn;
 
 static int NewGroup(int skill, float damage, float radius)
 {
@@ -501,7 +510,7 @@ static int NewGroup(int skill, float damage, float radius)
     return id;
 }
 static int PaidBy(const Group* g, uint32_t e) { for (int i = 0; i < g->npaid; i++) if (g->paid[i] == e) return 1; return 0; }
-static void Queue(int group, int row, const float p[3], double delay, int push)
+static void Queue(int group, int row, const float p[3], double delay)
 {
     if (g_nq >= 64 || !row) return;
     Queued* q = &g_q[g_nq++];
@@ -509,45 +518,7 @@ static void Queue(int group, int row, const float p[3], double delay, int push)
     q->at = g_now + delay;
     q->until = q->at + 4;
     q->row = row;
-    q->push = push;
     q->group = group;
-}
-/* The pushing stages: the small row's damage row with its stagger and push raised (live, as Field Promotions' pop does
- * with a borrowed row), put back when no pushing blast is waiting */
-static int SetPush(int level)
-{
-    HfField dmgId = HF_FIELD(ExplosionSettings, damage), st = HF_FIELD(DamageInfo, stagger), pf = HF_FIELD(DamageInfo, push_force);
-    HfLiveValue v;
-    if (!g_pushDamage)
-    {
-        memset(&v, 0, sizeof v);
-        if (!hf->get_live(self, (uint32_t)s_rowSmall, &dmgId, &v) || v.base.number < 1) { static unsigned told; if (told++ < 3) Log("push: explosion row %d's damage id cannot be read: its own push stays", s_rowSmall); return 0; }
-        g_pushDamage = (uint32_t)v.base.number;
-        memset(&v, 0, sizeof v);
-        if (hf->get_live(self, g_pushDamage, &st, &v)) g_pushStagger = v.base.number;
-        memset(&v, 0, sizeof v);
-        if (hf->get_live(self, g_pushDamage, &pf, &v)) g_pushForce = v.base.number;
-        Log("push: explosion row %d deals damage %u (stagger %.0f, push %.0f)", s_rowSmall, g_pushDamage, g_pushStagger, g_pushForce);
-    }
-    if (g_pushStagger < 0 || g_pushForce < 0) return 0;
-    int r1, r2;
-    if (!level)
-    {
-        r1 = hf->set_live(self, g_pushDamage, &st, NULL, HF_LIVE_SHARED);
-        r2 = hf->set_live(self, g_pushDamage, &pf, NULL, HF_LIVE_SHARED);
-    }
-    else
-    {
-        double m = level == 1 ? s_s1Stagger1 : s_s1Stagger2;
-        HfValue a = HF_U32(floor(g_pushStagger * m + 0.5)), b = HF_U32(floor(g_pushForce * m + 0.5));
-        r1 = hf->set_live(self, g_pushDamage, &st, &a, HF_LIVE_SHARED);
-        r2 = hf->set_live(self, g_pushDamage, &pf, &b, HF_LIVE_SHARED);
-        static unsigned told;
-        if (told++ < 6) Log("push: stagger %.0f -> %.0f, push %.0f -> %.0f for a pushing stage (applies: %d / %d; 1 = now)", g_pushStagger, a.number, g_pushForce, b.number, r1, r2);
-    }
-    g_pushNow = level;
-    g_pushSetAt = g_now;
-    return 1;
 }
 static void BlastFrame(void)
 {
@@ -555,10 +526,6 @@ static void BlastFrame(void)
     {
         Queued* q = &g_q[i];
         if (g_now < q->at) continue;
-        /* the small row's push as this blast needs it; a change waits a moment before the blast */
-        int want = q->row == s_rowSmall ? q->push : g_pushNow;
-        if (want != g_pushNow) { if (g_now - g_lastSpawn < 0.08) return; if (!SetPush(want)) q->push = g_pushNow; return; }
-        if (g_now - g_pushSetAt < 0.05 && g_pushSetAt > 0) return;
         int r = hf->spawn_explosion(self, (uint32_t)q->row, q->p);
         if (r == HF_ACT_WAITING && g_now < q->until) continue;   /* its packages are loading: again next frame */
         static unsigned noted;
@@ -580,7 +547,6 @@ static void BlastFrame(void)
         g_q[i] = g_q[--g_nq];
         i--;
     }
-    if (g_pushNow && !g_nq && g_now - g_lastSpawn > 0.4) SetPush(0);
 }
 /* the blast a kind-4 hit at `at` belongs to: the nearest of her blasts of the last 1.2 s within its row's reach */
 static Burst* BlastAt(const float at[3], float* dist)
@@ -597,6 +563,47 @@ static Burst* BlastAt(const float at[3], float* dist)
     }
     if (best && dist) *dist = sqrtf(bd);
     return best;
+}
+
+/* ---- the stages' tracers --------------------------------------------------------------------------------------------
+ * The line and the cone are bursts of tracer rounds (as Full Speed's on Koleda's Sinveiler, all at once): copies of a
+ * bright round whose damage rows carry the stage's stagger and push. What a round deals is the stage's, paid once an
+ * enemy: her projectile hits while a burst is in the air belong to it. */
+static uint32_t g_tracer[2], g_tracerDamage[2];
+static int g_tracerReady;
+typedef struct Volley { int group, left, cone, n; double next, until; float from[3], aim[3], range; } Volley;
+static Volley g_volley = {-1};
+static void VolleyFrame(void)
+{
+    Volley* v = &g_volley;
+    if (v->group < 0 || v->left <= 0 || g_now < v->next) return;
+    uint32_t type = g_tracer[v->cone];
+    int per = s_s1Burst <= 0 ? v->left : 2;
+    for (int k = 0; k < per && v->left > 0; k++)
+    {
+        int i = v->n - v->left;
+        float h = sqrtf(v->aim[0] * v->aim[0] + v->aim[1] * v->aim[1]);
+        if (h < 0.05f) h = 0.05f;
+        /* the line: a hair of spread; the cone: evenly across its angle, a little up and down */
+        float t = v->n > 1 ? (float)i / (v->n - 1) * 2 - 1 : 0, r = (float)rand() / RAND_MAX * 2 - 1;
+        float a = (v->cone ? t * s_s1ConeAngle : r * 1.2f) * 0.0174533f, c = cosf(a), sn = sinf(a);
+        float dir[3] = {v->aim[0] * c - v->aim[1] * sn, v->aim[0] * sn + v->aim[1] * c, v->aim[2] + (v->cone ? r * 0.04f : 0)};
+        float n = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+        for (int j = 0; j < 3; j++) dir[j] /= n;
+        float from[3] = {v->from[0] + dir[0] * 0.9f, v->from[1] + dir[1] * 0.9f, v->from[2]};
+        int r2 = hf->spawn_projectile(self, type, from, dir);
+        static unsigned noted;
+        if (noted++ < 6) Log("tracer (projectile %u): answer %d", type, r2);
+        v->left--;
+    }
+    v->next = g_now + (s_s1Burst > 0 && v->n > 2 ? s_s1Burst / (v->n / 2.0) : 0);
+    if (v->left <= 0)
+    {
+        Group* g = &g_group[v->group];
+        g->spawned = 1;
+        g->spawnedAt = g_now;
+        v->until = g_now + 0.9;
+    }
 }
 
 /* ---- the chain, the stacks ----------------------------------------------------------------------------------------- */
@@ -731,34 +738,27 @@ static void Annihilation(void)
         return;
     }
     if (g_chainWait >= 0) return;      /* the stage before has not landed its hit yet */
-    float pos[3], dir[2], far_;
-    uint32_t unit = MyUnit();
-    if (!PlayerPose(pos, NULL) || !AimFlat(10, dir, &far_)) return;
+    float pos[3], aim[3];
+    if (!PlayerPose(pos, aim)) return;
     int stage = g_chain;               /* 1: the line, 2: the cone */
+    if (!g_tracerReady || !g_tracer[stage - 1]) { Log("Annihilation Directive: its tracer rounds are unavailable (see the start of the log)"); EndChain("no tracers"); return; }
     Pay(stage == 1 ? "Annihilation Directive I" : "Annihilation Directive II", s_s1Cost);
     float damage = StageDamage("Annihilation Directive", stage == 1 ? s_s1Damage1 : s_s1Damage2);
-    int g = NewGroup(stage == 1 ? SK_LINE : SK_CONE, damage, s_s1Radius);
-    float p[3];
-    if (stage == 1)
-        for (int k = 1; k <= 3; k++)   /* three blasts along the line */
-        {
-            float d = s_s1Line * k / 3.0f;
-            OnGround(unit, pos[0] + dir[0] * d, pos[1] + dir[1] * d, pos[2], p);
-            Queue(g, s_rowSmall, p, 0.05 * (k - 1), 1);
-        }
-    else
-        for (int k = -1; k <= 1; k++)  /* three blasts across the cone */
-        {
-            float a = k * 0.6f, c = cosf(a), s = sinf(a), d = s_s1Cone * 0.75f;
-            float x = dir[0] * c - dir[1] * s, y = dir[0] * s + dir[1] * c;
-            OnGround(unit, pos[0] + x * d, pos[1] + y * d, pos[2], p);
-            Queue(g, s_rowSmall, p, 0, 2);
-        }
+    int g = NewGroup(stage == 1 ? SK_LINE : SK_CONE, damage, stage == 1 ? s_s1Line : s_s1Cone);
+    Volley* v = &g_volley;
+    memset(v, 0, sizeof *v);
+    v->group = g;
+    v->cone = stage == 2;
+    v->n = v->left = s_s1Rounds;
+    v->range = stage == 1 ? s_s1Line : s_s1Cone;
+    v->from[0] = pos[0]; v->from[1] = pos[1]; v->from[2] = pos[2] + 1.3f;
+    memcpy(v->aim, aim, sizeof v->aim);
+    v->until = g_now + 3;
     g_chainGroup[stage] = g;
     g_chainWait = g;
     g_chain = stage + 1;               /* 3 after the cone: the chain ends when its hit is known */
     Shield(s_s1Shield);
-    if (told++ < 20) Log("Annihilation Directive %s: %.0f damage a blast's enemy, %d Grenade(s) left", stage == 1 ? "I (the line)" : "II (the cone)", (double)damage, g_grenades);
+    if (told++ < 20) Log("Annihilation Directive %s: %d tracer rounds, %.0f damage an enemy within %.0f m, %d Grenade(s) left", stage == 1 ? "I (the line)" : "II (the cone)", s_s1Rounds, (double)damage, (double)v->range, g_grenades);
 }
 /* the chain's waiting stage: a hit opens what is next; none in time ends the chain */
 static void ChainFrame(void)
@@ -773,7 +773,7 @@ static void ChainFrame(void)
             if (g_chain >= 3) EndChain("the cone landed");
             else g_chainUntil = g_now + s_s1Window;
         }
-        else if ((g->spawned && g_now - g->spawnedAt > 0.7) || g_now - g->at > 5) EndChain("the stage hit nothing");
+        else if ((g->spawned && g_now - g->spawnedAt > (g->skill == SK_LEAP ? 0.7 : 0.9)) || g_now - g->at > 5) EndChain("the stage hit nothing");
     }
     else if (g_chain && g_now > g_chainUntil) EndChain("the next stage was not used in time");
 }
@@ -798,7 +798,7 @@ static void DoomBarrage(void)
         {
             float d = step * (row + 0.5f) + 2.0f, x = pos[0] + dir[0] * d - dir[1] * half * col, y = pos[1] + dir[1] * d + dir[0] * half * col;
             OnGround(unit, x, y, pos[2], p);
-            Queue(g, s_rowSmall, p, (double)s_s2Step * row, 0);
+            Queue(g, s_rowSmall, p, (double)s_s2Step * (row * 2 + ((col > 0) ^ (row & 1))));   /* one after another, the sides in turn */
         }
     Gain(&g_fang, 1, 3);
     g_cd[1] = g_now + s_s2Cd;
@@ -826,7 +826,7 @@ static void Landed(int kind, const float from[3], const float to[3], float dist)
         float damage = StageDamage("Annihilation Directive", s_s1Damage);
         int g = NewGroup(SK_LEAP, damage, s_s1Radius);
         p[0] = to[0]; p[1] = to[1]; p[2] = to[2] + 0.5f;
-        Queue(g, s_rowSmall, p, 0, 0);
+        Queue(g, s_rowSmall, p, 0);
         g_chainGroup[0] = g; g_chainGroup[1] = g_chainGroup[2] = -1;
         g_chainWait = g;
         g_chain = 1;
@@ -845,7 +845,7 @@ static void Landed(int kind, const float from[3], const float to[3], float dist)
         float t = (float)k / n;
         if (k == n) { p[0] = to[0]; p[1] = to[1]; p[2] = to[2] + 0.5f; }
         else OnGround(unit, from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t, from[2] + (to[2] - from[2]) * t, p);
-        Queue(g, s_rowSmall, p, 0.04 * k, 0);
+        Queue(g, s_rowSmall, p, (double)s_s3Step * k);   /* a chain, from where she stood to where she is */
     }
     g_grenades = s_grenadesMax;
     Gain(&g_fang, 1, 3);
@@ -885,12 +885,12 @@ static void AmmoFrenzy(void)
     float share = (float)(s_frenzyDamage * m / (n > 0 ? n : 1));
     int g = NewGroup(SK_FRENZY, share, s_frenzyRadius);
     float c[3] = {at[0], at[1], at[2] + 0.5f};
-    Queue(g, s_rowBig, c, 0, 0);
+    Queue(g, s_rowBig, c, 0);
     for (int k = 0; k < s_frenzyRing; k++)
     {
         float a = 6.2831853f * k / s_frenzyRing, r = s_frenzyRadius * 0.55f;
         OnGround(unit, at[0] + cosf(a) * r, at[1] + sinf(a) * r, at[2], p);
-        Queue(g, s_rowBig, p, 0.25 + 0.1 * k, 0);
+        Queue(g, s_rowBig, p, 0.25 + 0.1 * k);
     }
     g_fang = 0;
     g_cd[3] = g_now + 2;
@@ -934,7 +934,39 @@ static void DamageTaken(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
         Log("Denied Exit: a killing hit on her %d health leaves her at 1; nothing hurts her for %.1f s; again in %.0f s", hp, (double)s_deniedSeconds, (double)s_deniedCd);
     }
 }
-/* Any other hit: her blasts' on enemies and friends, her shots */
+/* A skill's hit on an enemy: paid once by its group, at the skill's damage */
+static void PayHit(HfDamagePreEvent* e, HfDamageEvent* d, Group* g, uint64_t res, float dist, const char* by)
+{
+    if (PaidBy(g, d->target) || g->npaid >= PAID) { e->cancel = 1; g_cutHits++; return; }
+    g->paid[g->npaid++] = d->target;
+    g->hits++;
+    g_paidHits++;
+    double amount = g->damage;
+    int armour = 0;
+    int32_t full = 0;
+    KindBody(res, &armour, &full);
+    int boss = armour >= s_bossArmour;
+    if (Mech() && !boss && full > 0) amount += (double)s_mechHp * full;
+    if (Hunted(d->target)) amount *= 1 + (double)s_huntingTaken;
+    if (g->skill == SK_CONE && g_chainGroup[0] >= 0 && g_chainGroup[1] >= 0 && PaidBy(&g_group[g_chainGroup[0]], d->target) && PaidBy(&g_group[g_chainGroup[1]], d->target))
+    {
+        amount += (double)s_s1Triple * g->damage;
+        static unsigned told;
+        if (told++ < 10) Log("Annihilation Directive: all three stages hit entity %u: +%.0f", d->target, (double)s_s1Triple * g->damage);
+    }
+    if (g->skill == SK_PARTY)
+    {
+        Gain(&g_frenzy, boss ? 3 : 1, s_frenzyMax);
+        if (boss) g_healFull = 1;
+        else g_healOwed += s_s3Heal;
+    }
+    if (g->skill == SK_FRENZY) HuntMark(d->target);
+    d->amount = amount > 2147483647.0 ? 2147483647 : amount < 1 ? 1 : (int32_t)amount;
+    AddFoe(d->target, res);
+    static unsigned told;
+    if (told++ < 60) Log("her %s (skill %d) on entity %u: %d damage%s%s (%.1f m away)", by, g->skill, d->target, d->amount, boss ? ", boss-sized" : "", Hunted(d->target) ? ", Hunting Order" : "", (double)dist);
+}
+/* Any other hit: her blasts' and her tracers' on enemies and friends, her shots */
 static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     if (d->kind == 4)
@@ -946,38 +978,21 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
             uint64_t res;
             if (TargetFriend(d->target, &res)) { e->cancel = 1; g_friendSpared++; return; }
             if (!res || !FoeKind(res)) return;   /* not an enemy the kit knows (a wall, a nest, a turret): the row's own hit */
-            Group* g = &g_group[b->group];
-            /* outside the skill's radius (the row reaches further), or paid already by this skill: nothing */
-            if (dist > g->radius + 2.0f || PaidBy(g, d->target) || g->npaid >= PAID) { e->cancel = 1; g_cutHits++; return; }
-            g->paid[g->npaid++] = d->target;
-            g->hits++;
-            g_paidHits++;
-            double amount = g->damage;
-            int armour = 0;
-            int32_t full = 0;
-            KindBody(res, &armour, &full);
-            int boss = armour >= s_bossArmour;
-            if (Mech() && !boss && full > 0) amount += (double)s_mechHp * full;
-            if (Hunted(d->target)) amount *= 1 + (double)s_huntingTaken;
-            if (g->skill == SK_CONE && g_chainGroup[0] >= 0 && g_chainGroup[1] >= 0 && PaidBy(&g_group[g_chainGroup[0]], d->target) && PaidBy(&g_group[g_chainGroup[1]], d->target))
-            {
-                amount += (double)s_s1Triple * g->damage;
-                static unsigned told;
-                if (told++ < 10) Log("Annihilation Directive: all three stages hit entity %u: +%.0f", d->target, (double)s_s1Triple * g->damage);
-            }
-            if (g->skill == SK_PARTY)
-            {
-                Gain(&g_frenzy, boss ? 3 : 1, s_frenzyMax);
-                if (boss) g_healFull = 1;
-                else g_healOwed += s_s3Heal;
-            }
-            if (g->skill == SK_FRENZY) HuntMark(d->target);
-            d->amount = amount > 2147483647.0 ? 2147483647 : amount < 1 ? 1 : (int32_t)amount;
-            AddFoe(d->target, res);
-            static unsigned told;
-            if (told++ < 40) Log("her blast (skill %d) on entity %u: %d damage%s%s (%.1f m from it)", g->skill, d->target, d->amount, boss ? ", boss-sized" : "", Hunted(d->target) ? ", Hunting Order" : "", (double)dist);
+            if (dist > g_group[b->group].radius + 2.0f) { e->cancel = 1; g_cutHits++; return; }   /* the row reaches further than the skill */
+            PayHit(e, d, &g_group[b->group], res, dist, "blast");
             return;
         }
+    }
+    /* a stage's tracers: her projectile hits while its burst is in the air */
+    if ((d->kind == 0 || d->kind == 1) && g_volley.group >= 0 && g_now < g_volley.until && MineHit(d))
+    {
+        uint64_t res;
+        if (TargetFriend(d->target, &res)) { e->cancel = 1; g_friendSpared++; return; }
+        if (!res || !FoeKind(res)) return;
+        float dist = sqrtf(Dist2(d->position, g_volley.from));
+        if (dist > g_volley.range + 2.0f) { e->cancel = 1; g_cutHits++; return; }   /* a tracer flies further than the stage pays */
+        PayHit(e, d, &g_group[g_volley.group], res, dist, "tracers");
+        return;
     }
     if (d->amount <= 0) return;
     if (IsShot(d))
@@ -1029,7 +1044,6 @@ static void Reset(const char* why)
         Log("%s: casts %u / %u / %u / %u, %u enemies paid by her blasts, %u hits of theirs cut (out of radius or paid already), %u on friends and %u on her spared, %u Denied Exit, %u knockdowns stopped",
             why, g_casts[0], g_casts[1], g_casts[2], g_casts[3], g_paidHits, g_cutHits, g_friendSpared, g_selfSpared, g_denied, g_knockdowns);
     Speed(0);
-    if (g_pushNow) SetPush(0);
     Body(start);
     if (start && s_hellbomb && s_hellbombRow == 125)
         if (!hf->load_package(self, UINT64_C(0x346D785D6CA13FF4))) Log("the Hellbomb's package could not be loaded ahead");  /* loadout/hellbomb_backpack */
@@ -1040,6 +1054,7 @@ static void Reset(const char* why)
     memset(g_group, 0, sizeof g_group);
     memset(g_casts, 0, sizeof g_casts);
     g_nq = 0;
+    g_volley.group = -1;
     g_selfSpared = g_knockdowns = g_paidHits = g_cutHits = g_friendSpared = g_denied = 0;
     g_grenades = s_grenadesMax;
     g_fang = 0;
@@ -1080,6 +1095,22 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     else Log("leaps off: their functions are not the reviewed code");
     g_staminaOk = hf->code_matches(game + 0xA50E2D, "f3 42 0f 11 8c 11 54 78 54 00");
     Log(g_staminaOk ? "stamina readable (the game's stamina write is the reviewed code)" : "stamina off: its code is not the reviewed one");
+}
+
+/* the tracers' damage rows: the stage's stagger and push, nothing of their own to deal but a token */
+static void ProjectilesReady(HfMod* mod, HfEvent event, void* user)
+{
+    for (int k = 0; k < 2; k++)
+    {
+        HfDamageInfo* dmg = g_tracerDamage[k] ? (HfDamageInfo*)hf->damage_row(g_tracerDamage[k]) : NULL;
+        if (!dmg || !g_tracer[k]) { g_tracer[k] = 0; continue; }
+        float want = k ? s_s1Stagger2 : s_s1Stagger1;
+        Log("the %s's tracer: projectile %u, damage row %u: stagger %u -> %.0f, push %u -> %.0f", k ? "cone" : "line", g_tracer[k], g_tracerDamage[k],
+            (unsigned)dmg->stagger, (double)want, (unsigned)dmg->push_force, (double)want);
+        dmg->stagger = (__typeof__(dmg->stagger))want;
+        dmg->push_force = (__typeof__(dmg->push_force))want;
+    }
+    g_tracerReady = 1;
 }
 
 /* ---- the HUD state (read by the Destroyer HUD addon through LuaJIT's ffi) ------------------------------------------- */
@@ -1214,6 +1245,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     }
     LeapFrame();
     BlastFrame();
+    VolleyFrame();
     ChainFrame();
     Exhaustion();
     /* Party Time's heals: what its hits owe, never past her maximum */
@@ -1280,6 +1312,27 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_keyFrenzy.label, (double)s_s1Cost * 100, (double)s_s2Cost * 100, (double)s_costFloor * 100);
     if (s_badKey) api->log(mod, "destroyer.ini: a key could not be read (bits %d: s1, s2, s3); its default stays", s_badKey);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
+    if (api->size >= offsetof(HfApi, projectile_row) + sizeof api->projectile_row)
+    {
+        static const char* const dn[2] = {"yui/destroyer/line_damage", "yui/destroyer/cone_damage"};
+        static const char* const pn[2] = {"yui/destroyer/line_tracer", "yui/destroyer/cone_tracer"};
+        for (int k = 0; k < 2; k++)
+        {
+            HfDamage dm = {sizeof dm};
+            dm.base = (uint32_t)s_tracerDamage;
+            dm.name = dn[k];
+            dm.scale = 1;
+            g_tracerDamage[k] = api->add_damage(mod, &dm);
+            HfProjectile pr = {sizeof pr};
+            pr.base = (uint32_t)s_tracerRound;
+            pr.name = pn[k];
+            pr.damage = g_tracerDamage[k];
+            g_tracer[k] = g_tracerDamage[k] ? api->add_projectile(mod, &pr) : 0;
+        }
+        if (!g_tracer[0] || !g_tracer[1] || api->on(mod, HF_EVENT_PROJECTILES_READY, ProjectilesReady, NULL))
+        { g_tracer[0] = g_tracer[1] = 0; api->log(mod, "the stages' tracers could not be added: Annihilation Directive is the leap alone"); }
+    }
+    else api->log(mod, "this HellForge has no projectile rows: Annihilation Directive is the leap alone");
     /* registered: from here the DLL stays loaded; a failure below leaves it inert */
     int ok = api->subscribe(mod, HF_ON_DAMAGE_PRE, OnDamagePre, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
              api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&

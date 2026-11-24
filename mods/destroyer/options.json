@@ -1,6 +1,9 @@
 {
  "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
- "when": {},
+ "when": {
+  "s1_stagger_1": "restart",
+  "s1_stagger_2": "restart"
+ },
  "advanced": [
   [
    "grenades_max",
@@ -77,8 +80,8 @@
   [
    "s1_radius",
    "Annihilation Directive",
-   "Blast Radius",
-   "Metres around each blast its enemies are hit."
+   "Leap Blast Radius",
+   "Metres around where she lands its enemies are hit."
   ],
   [
    "s1_window",
@@ -89,14 +92,14 @@
   [
    "s1_line",
    "Annihilation Directive",
-   "Line Length",
-   "Metres the line of blasts reaches."
+   "Line Range",
+   "Metres: how far the line's tracers pay."
   ],
   [
    "s1_cone",
    "Annihilation Directive",
-   "Cone Length",
-   "Metres the cone of blasts reaches."
+   "Cone Range",
+   "Metres: how far the cone's tracers pay."
   ],
   [
    "s1_triple",
@@ -120,13 +123,31 @@
    "s1_stagger_1",
    "Annihilation Directive",
    "Line Push",
-   "The line's stagger and push, times the explosion's own."
+   "The stagger and push of the line's tracers on what they hit."
   ],
   [
    "s1_stagger_2",
    "Annihilation Directive",
    "Cone Push",
-   "The cone's stagger and push, times the explosion's own."
+   "The stagger and push of the cone's tracers on what they hit."
+  ],
+  [
+   "s1_rounds",
+   "Annihilation Directive",
+   "Tracer Rounds",
+   "Tracer rounds in the line's and the cone's burst."
+  ],
+  [
+   "s1_burst",
+   "Annihilation Directive",
+   "Burst Length",
+   "Seconds the burst takes (0: all at once)."
+  ],
+  [
+   "s1_cone_angle",
+   "Annihilation Directive",
+   "Cone Angle",
+   "Degrees to each side the cone's tracers spread."
   ],
   [
    "s1_shield",
@@ -161,14 +182,20 @@
   [
    "s2_step",
    "Doom Barrage",
-   "Row Interval",
-   "Seconds between its rows."
+   "Blast Interval",
+   "Seconds between its blasts."
   ],
   [
    "s3_width",
    "Party Time",
    "Path Width",
    "Metres across the path its blasts cover."
+  ],
+  [
+   "s3_step",
+   "Party Time",
+   "Blast Interval",
+   "Seconds between its blasts, from where she stood to where she landed."
   ],
   [
    "frenzy_range",
@@ -217,6 +244,8 @@
   "explosion_small",
   "explosion_big",
   "hellbomb_explosion",
-  "hellbomb_hold"
+  "hellbomb_hold",
+  "tracer_round",
+  "tracer_damage"
  ]
 }

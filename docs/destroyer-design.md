@@ -122,8 +122,11 @@ Its own key (proposed, as Ascalon's dash got Z) so a full Fang bar never blocks 
 - **Her blasts' damage** is set in the damage event: an enemy within the skill's radius of a blast is paid once at the
   skill's damage, the row's other hits on enemies are cancelled, and its hits on anything that is not a known enemy
   kind (walls, nests) are left as the row's own.
-- **The push** raises the Orbital Precision Strike's own stagger and push for the moment a pushing blast goes off
-  (`s1_stagger_1`, `s1_stagger_2`), then puts them back.
+- **The line and the cone (0.1.1)** are bursts of tracer rounds, as Full Speed's on Koleda's Sinveiler but all at
+  once: copies of its bright round whose damage rows carry the stage's stagger and push (`s1_stagger_1`,
+  `s1_stagger_2`). They pay out to `s1_line` and `s1_cone` metres (20 and 10).
+- **Doom Barrage (0.1.1)** drops its blasts one after another (`s2_step`), and **Party Time's** chain from where she
+  stood to where she landed (`s3_step`).
 - **Ammo Frenzy's key** (`key_frenzy`, default B) is read from destroyer.ini only: the options screen and Mod Bindings
   Menu know three keys.
 - **Not built:** Hunting Order's extra armour piercing, Claw Mark.
