@@ -9,6 +9,8 @@
 | [research/ai-modding.md](research/ai-modding.md) | AI modding in HellForge: friendly AI (sentries, guard dogs), enemy AI and the tools each relies on, tagged proven / static / speculative. |
 | [research/teleport-blink.md](research/teleport-blink.md) | How to move a Helldiver from a C mod (blink / teleport), from the LIFT-182 Warp Pack's own code. |
 | [research/ias-stutter.md](research/ias-stutter.md) | Why HD2Runtime + IAS stutter together, and the garbage-collector tuning that became Smooth GC. |
+| [research/one-handed.md](research/one-handed.md) | What makes a weapon one-handed (Equipment +0xC4 bit 0, +0xC0 grip), where the records are, and the code that uses it. |
+| [research/homing.md](research/homing.md) | Homing shots: HellForge's `homing` rule and how it steers, HD2Runtime's version, the Rocket Sentry Test results, notes for the Destroyer. |
 
 The research notes were written while working, so their file paths point at a scratch folder (`<scratch>`, or `S` / `HF` / `RT` abbreviations defined at the top of each); the findings and addresses are what matter.
 
