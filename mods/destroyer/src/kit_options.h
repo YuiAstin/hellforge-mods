@@ -89,7 +89,7 @@ static const OpRow kOpRows[] = {
     {"s1_stagger_2", "Annihilation Directive", "Cone Push", OP_FIELD, 0, 500, 1,
      "The stagger and push of a cone round that hits an enemy itself.", NULL, 1, OP_RESTART},
     {"s1_rounds", "Annihilation Directive", "Rounds", OP_SLIDER, 1, 40, 1,
-     "High-explosive rounds in the line and in the cone.", NULL, 1, OP_LIVE},
+     "Rounds in the line and in the cone, each with a blast where it lands.", NULL, 1, OP_LIVE},
     {"s1_burst", "Annihilation Directive", "Line Burst Length", OP_SLIDER, 0, 3, 0.05f,
      "Seconds the line's rounds take to all be fired (0: all at once; some blasts then go silent).", NULL, 1, OP_LIVE},
     {"s1_cone_burst", "Annihilation Directive", "Cone Burst Length", OP_SLIDER, 0, 3, 0.05f,
@@ -127,4 +127,4 @@ static const OpRow kOpRows[] = {
     {"leap_drop", "Leaps", "Drop At Most", OP_SLIDER, 0.5f, 50, 0.5f,
      "Metres lower a leap may land.", NULL, 1, OP_LIVE},
 };
-static const char* const kOpKeyLabels[3] = {"Annihilation Directive", "Doom Barrage", "Party Time"};
+static const char* const kOpKeyLabels[4] = {"Annihilation Directive", "Doom Barrage", "Party Time", "Ammo Frenzy"};

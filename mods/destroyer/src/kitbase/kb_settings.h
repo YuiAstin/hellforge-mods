@@ -17,8 +17,12 @@
 
 #include "kb_body.h"
 
-/* Her three skill keys (Z, X, C unless the .ini says otherwise); s_badKey: bit k set when key k could not be read */
-KB_VAR Key s_keys[3] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
+/* Her skill keys (Z, X, C unless the .ini says otherwise); s_badKey: bit k set when key k could not be read. A kit with
+ * more than three defines KB_KEYS before including the kit base and gives the rest their defaults itself. */
+#ifndef KB_KEYS
+#define KB_KEYS 3
+#endif
+KB_VAR Key s_keys[KB_KEYS] = {{'Z', 0, "Z"}, {'X', 0, "X"}, {'C', 0, "C"}};
 KB_VAR int s_badKey;
 
 typedef struct KbSetting { const char* name; float* f; int* i; double lo, hi; } KbSetting;
@@ -29,7 +33,7 @@ typedef struct KbOption { const char* name; float* f; int* i; } KbOption;
 #define KB_OPTIONS(t) (kb_options = (const KbOption*)(t), kb_noptions = sizeof (t) / sizeof (t)[0])
 
 KB_VAR const char* kb_ini;
-KB_VAR const char* kb_key_names[3];
+KB_VAR const char* kb_key_names[KB_KEYS];
 KB_VAR const KbSetting* kb_settings;
 KB_VAR unsigned kb_nsettings;
 KB_VAR const KbOption* kb_options;
@@ -78,7 +82,7 @@ KB_FN void LoadSettings(void)
         char key[64];
         if (sscanf(line, " %63s", key) != 1) continue;
         int k = -1;
-        for (int i = 0; i < 3; i++) if (kb_key_names[i] && !strcmp(key, kb_key_names[i])) { k = i; break; }
+        for (int i = 0; i < KB_KEYS; i++) if (kb_key_names[i] && !strcmp(key, kb_key_names[i])) { k = i; break; }
         if (k >= 0)
         {
             Key parsed;

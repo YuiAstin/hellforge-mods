@@ -39,9 +39,10 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.4"
+#define VERSION "0.1.5"
 #define BUILD "25480438"
 
+#define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
@@ -65,17 +66,16 @@ static int s_mech = 1;                 /* 0: never; 1: a mission where a known A
 static float s_mechRange = 40, s_mechEach = 0.05f, s_mechMax = 0.50f, s_mechHp = 0.10f, s_mechTaken = 0.30f;
 static int s_bossArmour = 4;           /* heavy armour or above: boss-sized (Lemuen's test) */
 static float s_deniedCd = 180, s_deniedSeconds = 2, s_rage = 1;
-static float s_s1Cd = 10, s_s1Leap = 15, s_s1Radius = 5, s_s1Window = 3, s_s1Line = 25, s_s1Cone = 12, s_s1Triple = 2, s_s1Haste = 2, s_hasteMult = 1.3f;
+static float s_s1Cd = 10, s_s1Leap = 15, s_s1Radius = 5, s_s1Window = 3, s_s1Line = 37.5f, s_s1Cone = 12, s_s1Triple = 2, s_s1Haste = 2, s_hasteMult = 1.3f;
 static float s_s1Damage = 600, s_s1Damage1 = 800, s_s1Damage2 = 1000, s_s1Stagger1 = 50, s_s1Stagger2 = 80, s_s1Shield = 1.5f;
-static int s_s1Rounds = 8, s_tracerRound = 77, s_tracerDamage = 125;   /* the stages' rounds: the Orbital Gatling Barrage's HE shell (Koleda's he_round), the minigun's damage row */
-static float s_s1Burst = 0.8f, s_s1ConeBurst = 0.5f, s_s1ConeAngle = 30, s_tracerSpeed = 0;
+static int s_s1Rounds = 12, s_tracerRound = 226, s_tracerDamage = 125, s_rowHe = 266;   /* the stages' rounds: Koleda's bright round and the minigun's damage row; where each lands, the Orbital Gatling Barrage's HE blast */
+static float s_s1Burst = 1.0f, s_s1ConeBurst = 0.5f, s_s1ConeAngle = 30, s_tracerSpeed = 250;
 static float s_s2Cd = 18, s_s2Length = 15, s_s2Width = 9, s_s2Damage = 400, s_s2Grenade = 0.20f, s_s2Crit = 1.5f, s_s2Step = 0.18f;
 static float s_s3Cd = 90, s_s3Leap = 18, s_s3Width = 9, s_s3Damage = 1500, s_s3Heal = 0.20f, s_s3Step = 0.12f;
 static float s_frenzyRadius = 24, s_frenzyDamage = 12000, s_frenzyRange = 120, s_frenzyCone = 6, s_huntingSeconds = 10, s_huntingTaken = 0.20f, s_frenzyRefund = 5;
 static int s_frenzyRing = 3;
-static int s_rowSmall = 343, s_rowBig = 193;   /* 343: the Orbital Precision Strike's shell; 193: the Eagle 500kg Bomb's payload */
+static int s_rowSmall = 343, s_rowBig = 277;   /* 343: the Orbital Precision Strike's shell; 277: the Eagle 500kg Bomb going off (193 is it landing) */
 static float s_lpClimb = 6, s_lpDrop = 12;
-static Key s_keyFrenzy = {'B', 0, "B"};
 
 /* Every setting: its .ini / options name, variable and range (kitbase/kb_settings.h) */
 static const KbSetting kSettings[] = {
@@ -90,7 +90,7 @@ static const KbSetting kSettings[] = {
     KB_F("haste_mult", s_hasteMult, 1, 3), KB_F("s1_damage", s_s1Damage, 0, 100000), KB_F("s1_damage_1", s_s1Damage1, 0, 100000),
     KB_F("s1_damage_2", s_s1Damage2, 0, 100000), KB_F("s1_stagger_1", s_s1Stagger1, 0, 500), KB_F("s1_stagger_2", s_s1Stagger2, 0, 500),
     KB_I("s1_rounds", s_s1Rounds, 1, 40), KB_F("s1_burst", s_s1Burst, 0, 3), KB_F("s1_cone_burst", s_s1ConeBurst, 0, 3), KB_F("s1_cone_angle", s_s1ConeAngle, 5, 80),
-    KB_F("s1_round_speed", s_tracerSpeed, 0, 2000), KB_I("s1_round", s_tracerRound, 1, 350), KB_I("s1_round_damage", s_tracerDamage, 1, 649),
+    KB_F("s1_round_speed", s_tracerSpeed, 0, 2000), KB_I("s1_round", s_tracerRound, 1, 350), KB_I("s1_round_damage", s_tracerDamage, 1, 649), KB_I("s1_explosion", s_rowHe, 0, 100000),
     KB_F("s1_shield", s_s1Shield, 0, 10),
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("s2_length", s_s2Length, 5, 40), KB_F("s2_width", s_s2Width, 3, 30), KB_F("s2_damage", s_s2Damage, 0, 100000),
     KB_F("s2_grenade", s_s2Grenade, 0, 5), KB_F("s2_crit", s_s2Crit, 1, 10), KB_F("s2_step", s_s2Step, 0, 2),
@@ -133,13 +133,14 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "; enemy itself; seconds without knockdown after each stage.\n"
                "s1_cooldown = %g\ns1_leap = %g\ns1_radius = %g\ns1_window = %g\ns1_line = %g\ns1_cone = %g\ns1_triple = %g\ns1_haste = %g\nhaste_mult = %g\n"
                "s1_damage = %g\ns1_damage_1 = %g\ns1_damage_2 = %g\ns1_stagger_1 = %g\ns1_stagger_2 = %g\ns1_shield = %g\n"
-               "; The line and the cone are high-explosive rounds she fires at the ground, s1_rounds of them one after\n"
-               "; another: the line's within s1_burst s, walking away from her (as an Eagle's strafing run); the cone's\n"
-               "; within s1_cone_burst s, sweeping s1_cone_angle degrees to each side. (Fired closer together than about ten\n"
-               "; a second, the game leaves some of their blasts silent.) s1_round: the projectile they copy (77: the Orbital Gatling Barrage's HE shell, as Koleda's\n"
-               "; Sinveiler fires); s1_round_damage: the damage row a direct hit's copies (the damage is the stage's);\n"
-               "; s1_round_speed: their m/s (0: the round's own).\n"
-               "s1_rounds = %d\ns1_burst = %g\ns1_cone_burst = %g\ns1_cone_angle = %g\ns1_round = %d\ns1_round_damage = %d\ns1_round_speed = %g\n"
+               "; The line and the cone are rounds she fires at the ground, s1_rounds of them one after another, each with a\n"
+               "; high-explosive blast where it lands: the line's within s1_burst s, walking away from her (as an Eagle's\n"
+               "; strafing run); the cone's within s1_cone_burst s, sweeping s1_cone_angle degrees to each side.\n"
+               "; s1_round: the projectile they copy (226: the bright round of Koleda's Sinveiler); s1_round_damage: the\n"
+               "; damage row a direct hit's copies (the damage is the stage's); s1_round_speed: their m/s (0: the round's own;\n"
+               "; slower, their trails start at her); s1_explosion: the blast where each lands (266: the Orbital Gatling\n"
+               "; Barrage's shell's; set off by the kit, so its sound is loaded).\n"
+               "s1_rounds = %d\ns1_burst = %g\ns1_cone_burst = %g\ns1_cone_angle = %g\ns1_round = %d\ns1_round_damage = %d\ns1_round_speed = %g\ns1_explosion = %d\n"
                "; Doom Barrage: cooldown; the box's length and width; damage; each Grenade spent adds s2_grenade; with 3 or\n"
                "; more spent the damage is times s2_crit; seconds between its blasts.\n"
                "s2_cooldown = %g\ns2_length = %g\ns2_width = %g\ns2_damage = %g\ns2_grenade = %g\ns2_crit = %g\ns2_step = %g\n"
@@ -150,7 +151,7 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "; target may be and how many degrees off her crosshair; extra blasts on a ring around the first; Hunting\n"
                "; Order's length and how much more of her damage its enemies take; seconds off her cooldowns.\n"
                "frenzy_radius = %g\nfrenzy_damage = %g\nfrenzy_range = %g\nfrenzy_cone = %g\nfrenzy_ring = %d\nhunting_seconds = %g\nhunting_taken = %g\nfrenzy_refund = %g\n"
-               "; Her blasts (ExplosionSettings rows): 343 the Orbital Precision Strike's, 193 the Eagle 500kg Bomb's.\n"
+               "; Her blasts (ExplosionSettings rows): 343 the Orbital Precision Strike's, 277 the Eagle 500kg Bomb going off.\n"
                "explosion_small = %d\nexplosion_big = %d\n"
                "; Her leaps land at most leap_climb m higher or leap_drop m lower.\n"
                "leap_climb = %g\nleap_drop = %g\n"
@@ -159,13 +160,13 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "; Hellbomb's) on her.\n"
                "; hellbomb_hold: seconds the bar must stay empty first (it flickers to 0 for a moment at times).\n"
                "hp_mult = %g\nstamina_mult = %g\nhellbomb_on_exhaustion = %d\nhellbomb_explosion = %d\nhellbomb_hold = %g\n",
-        VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_keyFrenzy.label, (double)s_s1Cost, (double)s_s2Cost, (double)s_costFloor,
+        VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_keys[3].label[0] ? s_keys[3].label : "B", (double)s_s1Cost, (double)s_s2Cost, (double)s_costFloor,
         s_grenadesMax, (double)s_grenadeMult, s_frenzyStart, s_frenzyMax, (double)s_frenzyMult,
         s_mech, (double)s_mechRange, (double)s_mechEach, (double)s_mechMax, (double)s_mechHp, (double)s_mechTaken, s_bossArmour,
         (double)s_deniedCd, (double)s_deniedSeconds, (double)s_rage,
         (double)s_s1Cd, (double)s_s1Leap, (double)s_s1Radius, (double)s_s1Window, (double)s_s1Line, (double)s_s1Cone, (double)s_s1Triple, (double)s_s1Haste, (double)s_hasteMult,
         (double)s_s1Damage, (double)s_s1Damage1, (double)s_s1Damage2, (double)s_s1Stagger1, (double)s_s1Stagger2, (double)s_s1Shield,
-        s_s1Rounds, (double)s_s1Burst, (double)s_s1ConeBurst, (double)s_s1ConeAngle, s_tracerRound, s_tracerDamage, (double)s_tracerSpeed,
+        s_s1Rounds, (double)s_s1Burst, (double)s_s1ConeBurst, (double)s_s1ConeAngle, s_tracerRound, s_tracerDamage, (double)s_tracerSpeed, s_rowHe,
         (double)s_s2Cd, (double)s_s2Length, (double)s_s2Width, (double)s_s2Damage, (double)s_s2Grenade, (double)s_s2Crit, (double)s_s2Step,
         (double)s_s3Cd, (double)s_s3Leap, (double)s_s3Width, (double)s_s3Damage, (double)s_s3Heal, (double)s_s3Step,
         (double)s_frenzyRadius, (double)s_frenzyDamage, (double)s_frenzyRange, (double)s_frenzyCone, s_frenzyRing, (double)s_huntingSeconds, (double)s_huntingTaken, (double)s_frenzyRefund,
@@ -546,7 +547,7 @@ static void BlastFrame(void)
             memcpy(b->p, q->p, sizeof b->p);
             b->at = g_now;
             b->group = q->group;
-            b->reach = q->row == s_rowBig ? 60.0f : 30.0f;
+            b->reach = q->row == s_rowBig ? 60.0f : q->row == s_rowHe ? 10.0f : 30.0f;
             Group* g = &g_group[q->group];
             if (!g->spawned) { g->spawned = 1; g->spawnedAt = g_now; }
             unsigned slot = g_ownNext++ % KB_OWN_SLOTS;
@@ -638,10 +639,11 @@ static void TracerSpeed(int k)
 }
 typedef struct Volley { int group, left, cone, n; double next, until; float from[3], aim[3], range; } Volley;
 static Volley g_volley = {-1};
+static void Queue(int group, int row, const float p[3], double delay);
 static void OnGround(uint32_t unit, float x, float y, float ref, float out[3]);
 /* A stage's rounds, each at a point on the ground: the line's from near her to its end, one after another (an Eagle's
- * strafing run, from her); the cone's across its angle, near and far in turn. Each point is kept as a blast of the
- * stage's group, so what the shell's burst hits there is paid as the stage's and spares her and her friends. */
+ * strafing run, from her); the cone's across its angle, near and far in turn. Each point gets a blast of the
+ * stage's group when its round lands, so what it hits there is paid as the stage's and spares her and her friends. */
 static void VolleyFrame(void)
 {
     Volley* v = &g_volley;
@@ -671,14 +673,8 @@ static void VolleyFrame(void)
         static unsigned noted;
         if (noted++ < 6) Log("round (projectile %u): answer %d%s", type, r2, r2 == HF_ACT_WAITING ? " (its packages are loading)" : "");
         if (r2 == HF_ACT_WAITING && g_now < v->until) { v->next = g_now + 0.05; return; }   /* again in a moment */
-        Burst* b = &g_blast[g_blastNext++ % 64];
-        memcpy(b->p, p, sizeof b->p);
-        b->at = g_now;
-        b->group = v->group;
-        b->reach = 8.0f;
-        unsigned slot = g_ownNext++ % KB_OWN_SLOTS;
-        memcpy(g_ownPos[slot], p, sizeof g_ownPos[slot]);
-        atomic_store(&g_ownMs[slot], GetTickCount64());
+        /* its blast where it lands, when it lands (set off by the kit: a shell's own burst came without its sound) */
+        Queue(v->group, s_rowHe, p, n / (s_tracerSpeed > 50 ? s_tracerSpeed : 800));
         v->left--;
     }
     v->next = g_now + (burst > 0 && v->n > 1 ? burst / v->n : 0);
@@ -844,7 +840,7 @@ static void Annihilation(void)
     g_chainWait = g;
     g_chain = stage + 1;               /* 3 after the cone: the chain ends when its hit is known */
     Shield(s_s1Shield);
-    if (told++ < 20) Log("Annihilation Directive %s: %d HE rounds from %.1f %.1f %.1f along %.2f %.2f %.2f, %.0f damage an enemy within %.0f m, %d Grenade(s) left", stage == 1 ? "I (the line)" : "II (the cone)", s_s1Rounds,
+    if (told++ < 20) Log("Annihilation Directive %s: %d rounds from %.1f %.1f %.1f along %.2f %.2f %.2f, %.0f damage an enemy within %.0f m, %d Grenade(s) left", stage == 1 ? "I (the line)" : "II (the cone)", s_s1Rounds,
         (double)from[0], (double)from[1], (double)from[2], (double)aim[0], (double)aim[1], (double)aim[2], (double)damage, (double)v->range, g_grenades);
 }
 /* the chain's waiting stage: a hit opens what is next; none in time ends the chain */
@@ -1239,7 +1235,7 @@ HF_MOD_EXPORT DestroyerHud* destroyer_hud_state(void)
     g_hud.hunted = n;
     for (int i = 0; i < 4; i++)
     {
-        const Key* k = i < 3 ? &s_keys[i] : &s_keyFrenzy;
+        const Key* k = &s_keys[i];
         g_hud.keys[i] = (uint32_t)k->vk;
         memcpy(g_hud.key_label[i], k->label, sizeof g_hud.key_label[i]);
     }
@@ -1250,7 +1246,7 @@ HF_MOD_EXPORT DestroyerHud* destroyer_hud_state(void)
 }
 
 /* ---- in-game key bindings: the HUD registers her three skills with Mod Bindings Menu and passes each press here (and
- * a heartbeat twice a second); the .ini's keys keep working. Ammo Frenzy's key is the .ini's only. */
+ * a heartbeat twice a second); the .ini's keys keep working. Ammo Frenzy's key is the .ini's and the options screen's. */
 static _Atomic unsigned long long g_bindMs;
 static atomic_int g_bindPress;
 HF_MOD_EXPORT int destroyer_input(unsigned version, int skill)
@@ -1263,40 +1259,11 @@ HF_MOD_EXPORT int destroyer_input(unsigned version, int skill)
 HF_MOD_EXPORT int destroyer_key(unsigned version, int skill, int* vk, int* mods)
 {
     if (version != 1 || skill < 1 || skill > 4 || !vk || !mods) return 0;
-    const Key* k = skill <= 3 ? &s_keys[skill - 1] : &s_keyFrenzy;
+    const Key* k = &s_keys[skill - 1];
     *vk = k->vk;
     *mods = k->mods;
     return 1;
 }
-/* key_frenzy: read here (the kit base knows three keys), from the mod's .ini and then the options screen's file */
-static void FrenzyKeyLoad(void)
-{
-    char path[2][MAX_PATH * 2], line[256], local[MAX_PATH];
-    snprintf(path[0], sizeof path[0], "%s\\%s", hf->mod_folder(self), kb_ini);
-    path[1][0] = 0;
-    DWORD n = GetEnvironmentVariableA("LOCALAPPDATA", local, sizeof local);
-    if (n && n < sizeof local) snprintf(path[1], sizeof path[1], "%s\\HellForgeMods\\%s", local, kb_ini);
-    for (int k = 0; k < 2; k++)
-    {
-        FILE* f = path[k][0] ? OpenUtf8(path[k], L"r") : NULL;
-        if (!f) continue;
-        while (fgets(line, sizeof line, f))
-        {
-            char* c = strchr(line, ';');
-            if (c) *c = 0;
-            char* eq = strchr(line, '=');
-            char key[64];
-            if (!eq) continue;
-            *eq = 0;
-            if (sscanf(line, " %63s", key) != 1 || strcmp(key, "key_frenzy")) continue;
-            Key parsed;
-            if (ParseKey(eq + 1, &parsed)) s_keyFrenzy = parsed;
-            else hf->log(self, "destroyer.ini: key_frenzy could not be read; its default stays");
-        }
-        fclose(f);
-    }
-}
-
 /* ---- the frame ------------------------------------------------------------------------------------------------------ */
 static void Tick(HfMod* mod, float dt, void* user)
 {
@@ -1316,7 +1283,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (bound != wasBound) { wasBound = bound; Log("keys: %s", bound ? "the .ini's and Mod Bindings Menu's (the binding pages' MODS tab)" : "the .ini's"); }
     for (int i = 0; i < 4; i++)
     {
-        const Key* key = i < 3 ? &s_keys[i] : &s_keyFrenzy;
+        const Key* key = &s_keys[i];
         /* a modifier bound alone ignores its own bit */
         int own = key->vk == VK_SHIFT ? KM_SHIFT : key->vk == VK_CONTROL ? KM_CTRL : key->vk == VK_MENU ? KM_ALT : 0;
         int down = focused && (GetAsyncKeyState(key->vk) & 0x8000) != 0 && (mods & ~own) == key->mods;
@@ -1386,6 +1353,8 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     kb_key_names[0] = "key_s1";
     kb_key_names[1] = "key_s2";
     kb_key_names[2] = "key_s3";
+    kb_key_names[3] = "key_frenzy";
+    s_keys[3] = (Key){'B', 0, "B"};
     KB_SETTINGS(kSettings);
     KB_OPTIONS(kOptions);
     kb_option_after = OptionAfter;
@@ -1394,11 +1363,10 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 13 || api->size < offsetof(HfApi, code_matches) + sizeof api->code_matches) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadSettings();
-    FrenzyKeyLoad();
     KbOptionsStart(api, mod, "destroyer", "Destroyer", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, -1);
     api->log(mod, "Destroyer %s: keys %s / %s / %s / %s (Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy); skills cost %.0f%% and %.0f%% of her health, never below %.0f%%",
-        VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_keyFrenzy.label, (double)s_s1Cost * 100, (double)s_s2Cost * 100, (double)s_costFloor * 100);
-    if (s_badKey) api->log(mod, "destroyer.ini: a key could not be read (bits %d: s1, s2, s3); its default stays", s_badKey);
+        VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_keys[3].label, (double)s_s1Cost * 100, (double)s_s2Cost * 100, (double)s_costFloor * 100);
+    if (s_badKey) api->log(mod, "destroyer.ini: a key could not be read (bits %d: s1, s2, s3, frenzy); its default stays", s_badKey);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     if (api->size >= offsetof(HfApi, projectile_row) + sizeof api->projectile_row)
     {

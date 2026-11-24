@@ -135,7 +135,7 @@
    "s1_rounds",
    "Annihilation Directive",
    "Rounds",
-   "High-explosive rounds in the line and in the cone."
+   "Rounds in the line and in the cone, each with a blast where it lands."
   ],
   [
    "s1_burst",
@@ -253,6 +253,7 @@
   "hellbomb_hold",
   "s1_round",
   "s1_round_damage",
-  "s1_round_speed"
+  "s1_round_speed",
+  "s1_explosion"
  ]
 }

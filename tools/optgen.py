@@ -136,7 +136,7 @@ def settings_table(kit):
 
 
 # which of the HUD's skill names (NAMES, 1-based) each of the kit's three keys (s_keys[0..2]) fires
-KEY_SKILLS = {'ascalon': (3, 1, 2)}
+KEY_SKILLS = {'ascalon': (3, 1, 2), 'destroyer': (1, 2, 3, 4)}
 SMALL = {'of', 'the', 'ex', 'a', 'an', 'and', 'to', 'for', 'in', 'on'}
 
 
@@ -172,7 +172,8 @@ def rows_text(kit):
             tail += ', %d, %s' % (adv, when or 'OP_LIVE')
         lines.append('    {%s, %s, %s, %s, %s, %s, %s,\n     %s%s},' % (cstr(name), cstr(group), cstr(label), kind, num(lo), num(hi), num(step), cstr(tip), tail))
     lines.append('};')
-    lines.append('static const char* const kOpKeyLabels[3] = {%s};' % ', '.join(cstr(n) if n else 'NULL' for n in key_labels(kit)))
+    labels = key_labels(kit)
+    lines.append('static const char* const kOpKeyLabels[%d] = {%s};' % (len(labels), ', '.join(cstr(n) if n else 'NULL' for n in labels)))
     return '\n'.join(lines) + '\n'
 
 

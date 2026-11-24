@@ -122,13 +122,15 @@ Its own key (proposed, as Ascalon's dash got Z) so a full Fang bar never blocks 
 - **Her blasts' damage** is set in the damage event: an enemy within the skill's radius of a blast is paid once at the
   skill's damage, the row's other hits on enemies are cancelled, and its hits on anything that is not a known enemy
   kind (walls, nests) are left as the row's own.
-- **The line and the cone (0.1.3)** are high-explosive rounds (copies of the Orbital Gatling Barrage's shell, as
-  Koleda's Sinveiler fires) aimed at points on the ground: the line's walk away from her like an Eagle's strafing run,
-  the cone's spread across its angle. 0.1.1's tracer bursts rarely hit more than one enemy.
+- **The line and the cone (0.1.5)** are rounds fired at points on the ground (Koleda's bright round), each with the
+  Orbital Gatling Barrage's HE blast set off by the kit where it lands: the line's walk away from her like an Eagle's
+  strafing run (37.5 m), the cone's sweep across its angle. (0.1.1's tracer bursts rarely hit more than one enemy;
+  0.1.3's HE shells burst without their sound.)
 - **Doom Barrage (0.1.1)** drops its blasts one after another (`s2_step`), and **Party Time's** chain from where she
   stood to where she landed (`s3_step`).
-- **Ammo Frenzy's key** (`key_frenzy`, default B) is read from destroyer.ini only: the options screen and Mod Bindings
-  Menu know three keys.
+- **Ammo Frenzy's key** (`key_frenzy`, default B) is in destroyer.ini and on the options screen (the kit base takes a
+  kit's own number of keys, `KB_KEYS`, since 0.1.5); Mod Bindings Menu still knows three. Its blast is the Eagle 500kg
+  Bomb going off (row 277; 193 is the bomb landing).
 - **Not built:** Hunting Order's extra armour piercing, Claw Mark.
 - The mod icon and the four skill icons are placeholders.
 
