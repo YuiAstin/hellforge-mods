@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.6"
+#define VERSION "0.2.7"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -169,8 +169,8 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "explosion_small = %d\nexplosion_big = %d\n"
                "; Her hands. gl_arming 1: the rounds of a grenade launcher she holds arm as they leave (no arming distance:\n"
                "; any weapon whose round has one). gl_safe 1: the blasts of the weapons she holds do not hurt or throw her.\n"
-               "; gl_homing 1: the grenade launchers fire a guided missile (homing_missile 0: the FAF-14 Spear's, or the P-33\n"
-               "; Missile Pistol's if the Spear's cannot be used; 1: the P-33's, a premium weapon's) carrying their own\n"
+               "; gl_homing 1: the grenade launchers fire a guided missile (homing_missile 0: the FAF-14 Spear's; 1: the P-33\n"
+               "; Missile Pistol's, a premium weapon's) carrying their own\n"
                "; grenade (the GL-21, GL-28, GL-52, GL-15, GP-31 and GP-20; one equipped or called in after the mission\n"
                "; starts), and each missile is given the living enemy nearest her and most in line within homing_cone degrees\n"
                "; of where she looks and homing_range m of her; the game's own missile guidance flies it there.\n"
@@ -1264,6 +1264,7 @@ static void OneHanded(int on)
 #define P33_MISSILE UINT64_C(0xA1470A4DAB237264)
 #define P33_PACKAGE UINT64_C(0x64C37A90C0D906DE)   /* packages/generated/loadout/pistol_smart_missile */
 #define SPEAR_PACKAGE UINT64_C(0xF904B93FBB70584C) /* packages/generated/loadout/faf_missile_launcher (the name's hash; not seen in HellForge's list) */
+#define SPEAR_MISSILE UINT64_C(0x1A4323835B84CEA7) /* what the FAF-14 Spear fires (seen in flight, 0.2.6; targeting mode 2) */
 #define NO_NET 0x7FFFu
 static const uint64_t kLaunchers[] = {HF_ENTITY_GL21_GRENADE_LAUNCHER, HF_ENTITY_GL28_BELTFED_GRENADE_LAUNCHER, HF_ENTITY_GL52_DEESCALATOR,
                                       HF_ENTITY_GL15_EVICTOR, HF_ENTITY_GP31_GRENADE_PISTOL, HF_ENTITY_GP20_ULTIMATUM};
@@ -1303,11 +1304,9 @@ static void MissileSwap(int on)
     else Log("homing grenades: %d launcher(s) put back; %u missiles seen, %u target hand-offs, %u found no enemy", n, g_msSeen, g_msHanded, g_msLost);
     if (!on) { memset(g_ms, 0, sizeof g_ms); g_msSeen = g_msHanded = g_msLost = 0; }
 }
-/* Which guided missile the launchers fire: the FAF-14 Spear's (homing_missile 0, a weapon everyone has), else the P-33
- * Missile Pistol's (1, a premium weapon's; 0.2.1 and 0.2.2 used it, and it is the one the research proved). The Spear's
- * is what the Spear itself fires (its ProjectileWeapon +0x28), and is used only if its record follows an entity (targeting
- * mode 2) and its package loads; else the P-33's. Looked up once the game's entities are in (every frame, in a mission or
- * not: the package has to be in before a launcher is made). */
+/* Which guided missile the launchers fire: the FAF-14 Spear's (homing_missile 0, a weapon everyone has), or the P-33
+ * Missile Pistol's (1, a premium weapon's; the one the research proved). Looked up once the game's entities are in
+ * (every frame, in a mission or not: the package has to be in before a launcher is made). */
 static int MissileDonor(uint64_t entity, uint64_t package, const char* name)
 {
     uint32_t stride = 0, mode = 0;
@@ -1328,36 +1327,23 @@ static int MissileDonor(uint64_t entity, uint64_t package, const char* name)
 static void MissilePackage(void)
 {
     static double next;
-    static int tries, spearOut;
+    static int tries;
     if (s_glHoming && g_missileCode == 1 && g_now >= next)
     {
         next = g_now + 1;
-        int r = -1;
-        if (s_homingMissile == 0 && !spearOut)
-        {
-            HfLiveValue v;
-            HfField f = HF_FIELD(ProjectileWeapon, projectile_entity);
-            memset(&v, 0, sizeof v);
-            int got = hf->get_live(self, HF_ENTITY_FAF14_SPEAR, &f, &v);
-            uint64_t spear = got ? (v.base.u64 ? v.base.u64 : v.now.u64) : 0;
-            if (tries == 0 || tries == 10) Log("homing grenades: the Spear's ProjectileWeapon entity reads %016llx (now %016llx; answer %d)", (unsigned long long)v.base.u64, (unsigned long long)v.now.u64, got);
-            r = MissileDonor(spear, SPEAR_PACKAGE, "FAF-14 Spear");
-            if (r == 0 || (r < 0 && tries >= 10)) { spearOut = 1; if (r < 0) Log("homing grenades: the Spear's missile was not found (its weapon fires entity %016llx): the P-33's instead", (unsigned long long)spear); r = -1; }
-        }
-        if (r < 0 && (s_homingMissile != 0 || spearOut)) r = MissileDonor(P33_MISSILE, P33_PACKAGE, "P-33 Missile Pistol");
+        int r = s_homingMissile ? MissileDonor(P33_MISSILE, P33_PACKAGE, "P-33 Missile Pistol") : MissileDonor(SPEAR_MISSILE, SPEAR_PACKAGE, "FAF-14 Spear");
         if (r == 0) g_missileCode = 0;
-        else if (r < 0 && ++tries == 120) { g_missileCode = 0; Log("homing grenades off: no guided missile's record was found in two minutes"); }
+        else if (r < 0 && ++tries == 120) { g_missileCode = 0; Log("homing grenades off: the guided missile's record was not found in two minutes"); }
     }
     if (!s_glHoming || g_missileCode != 2 || g_missilePkg != HF_PACKAGE_LOADING) return;
     g_missilePkg = hf->load_package(self, g_missilePackage);
     if (g_missilePkg == HF_PACKAGE_RESIDENT) Log("homing grenades: the %s's package is in", g_missileName);
-    else if (!g_missilePkg && g_missile != P33_MISSILE)
+    else if (!g_missilePkg)
     {
-        Log("homing grenades: the %s's package (%016llx) did not load: the P-33's missile instead", g_missileName, (unsigned long long)g_missilePackage);
-        spearOut = 1;
-        g_missileCode = 1;
+        /* (the Spear's package name is a guess; without it the missile may show as the game's placeholder until a Spear is in the mission) */
+        Log("homing grenades: the %s's package (%016llx) was refused: going on without it", g_missileName, (unsigned long long)g_missilePackage);
+        g_missilePkg = HF_PACKAGE_RESIDENT;
     }
-    else if (!g_missilePkg) Log("homing grenades off: the P-33's package did not load");
 }
 /* The enemy a missile gets: within homing_cone degrees of where she was looking when it left (the camera's ray) and
  * homing_range m of her, the one that is nearest and most in line (its distance, up to four times as far when at the
