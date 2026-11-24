@@ -18,5 +18,11 @@ Cheat Engine for this mod; the per-Helldiver index comes from HellForge's own ac
 **Mod Options Menu** by CowboyBingus (0BSD) through its public API. The HUD's skill panel follows the stratagem list
 through **HD2Runtime**'s slot overlay (internal modules), and its icons are built with HD2Runtime's SDK.
 
+Her homing grenades are steered in the game's projectile pool ([game.dll+0x347CEA8]); its layout (a slot's flags, flight,
+shooter and type) is the one **HellForge by SkyeShade** (https://github.com/SkyeShade/HellForge) reads for its own
+homing shots (native/mod-loader/actions.c). The one-handed hold (the game's Equipment table) and the guided-missile
+route kept as an option (the seeking-missile manager) were researched for this mod (docs/research in the source
+repository).
+
 Her skills are read from Dandegate's database of Girls' Frontline 2: Exilium (https://dandegate.net/dolls/destroyer/skills).
 Girls' Frontline 2: Exilium and Destroyer belong to Sunborn Network Technology / MICA Team. No game art is included.
