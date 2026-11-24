@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.2"
+#define VERSION "0.2.3"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -81,6 +81,7 @@ static float s_lpClimb = 6, s_lpDrop = 12;
 /* her hands (0.1.8): a grenade launcher's rounds arm at once and home; every weapon is held in one hand */
 static int s_glArming = 1, s_glHoming = 1, s_glSafe = 1, s_oneHand = 1, s_oneHandGrip = 70;
 static float s_homingCone = 25, s_homingRange = 150;
+static int s_homingMissile = 0;
 
 /* Every setting: its .ini / options name, variable and range (kitbase/kb_settings.h) */
 static const KbSetting kSettings[] = {
@@ -107,7 +108,7 @@ static const KbSetting kSettings[] = {
     KB_F("hunting_taken", s_huntingTaken, 0, 5), KB_F("frenzy_refund", s_frenzyRefund, 0, 120),
     KB_I("explosion_small", s_rowSmall, 1, 100000), KB_I("explosion_big", s_rowBig, 1, 100000),
     KB_I("gl_arming", s_glArming, 0, 1), KB_I("gl_homing", s_glHoming, 0, 1), KB_I("gl_safe", s_glSafe, 0, 1),
-    KB_F("homing_cone", s_homingCone, 1, 180), KB_F("homing_range", s_homingRange, 1, 500), KB_I("one_handed", s_oneHand, 0, 1), KB_I("one_hand_grip", s_oneHandGrip, 0, 200),
+    KB_I("homing_missile", s_homingMissile, 0, 1), KB_F("homing_cone", s_homingCone, 1, 180), KB_F("homing_range", s_homingRange, 1, 500), KB_I("one_handed", s_oneHand, 0, 1), KB_I("one_hand_grip", s_oneHandGrip, 0, 200),
     KB_F("leap_climb", s_lpClimb, 0.5, 30), KB_F("leap_drop", s_lpDrop, 0.5, 50),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
@@ -168,13 +169,14 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "explosion_small = %d\nexplosion_big = %d\n"
                "; Her hands. gl_arming 1: the rounds of a grenade launcher she holds arm as they leave (no arming distance:\n"
                "; any weapon whose round has one). gl_safe 1: the blasts of the weapons she holds do not hurt or throw her.\n"
-               "; gl_homing 1: the grenade launchers fire the P-33 Missile Pistol's guided missile carrying their own\n"
+               "; gl_homing 1: the grenade launchers fire a guided missile (homing_missile 0: the FAF-14 Spear's, or the P-33\n"
+               "; Missile Pistol's if the Spear's cannot be used; 1: the P-33's, a premium weapon's) carrying their own\n"
                "; grenade (the GL-21, GL-28, GL-52, GL-15, GP-31 and GP-20; one equipped or called in after the mission\n"
                "; starts), and each missile is given the nearest living enemy within homing_cone degrees of where it was\n"
                "; fired and homing_range m; the game's own missile guidance flies it there.\n"
                "; one_handed 1: she holds every weapon in one hand (the game's one-handed mark on what she carries), in the\n"
                "; pose one_hand_grip (70: the one-handed SMG grip; 1: a pistol's; 0: the weapon's own).\n"
-               "gl_arming = %d\ngl_safe = %d\ngl_homing = %d\nhoming_cone = %g\nhoming_range = %g\none_handed = %d\none_hand_grip = %d\n"
+               "gl_arming = %d\ngl_safe = %d\ngl_homing = %d\nhoming_missile = %d\nhoming_cone = %g\nhoming_range = %g\none_handed = %d\none_hand_grip = %d\n"
                "; Her leaps land at most leap_climb m higher or leap_drop m lower.\n"
                "leap_climb = %g\nleap_drop = %g\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties. If her\n"
@@ -192,7 +194,7 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
         (double)s_s2Cd, (double)s_s2Length, (double)s_s2Width, (double)s_s2Damage, (double)s_s2Grenade, (double)s_s2Crit, (double)s_s2Step,
         (double)s_s3Cd, (double)s_s3Leap, (double)s_s3Width, (double)s_s3Damage, (double)s_s3Heal, (double)s_s3Step,
         (double)s_frenzyRadius, (double)s_frenzyDamage, (double)s_frenzyRange, (double)s_frenzyCone, s_frenzyRing, (double)s_huntingSeconds, (double)s_huntingTaken, (double)s_frenzyRefund,
-        s_rowSmall, s_rowBig, s_glArming, s_glSafe, s_glHoming, (double)s_homingCone, (double)s_homingRange, s_oneHand, s_oneHandGrip,
+        s_rowSmall, s_rowBig, s_glArming, s_glSafe, s_glHoming, s_homingMissile, (double)s_homingCone, (double)s_homingRange, s_oneHand, s_oneHandGrip,
         (double)s_lpClimb, (double)s_lpDrop,
         (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
 }
@@ -1230,11 +1232,14 @@ static void OneHanded(int on)
  * next. (HellForge's homing rule on the grenade itself found its target too late and flew past: 0.1.8 to 0.2.0.) */
 #define P33_MISSILE UINT64_C(0xA1470A4DAB237264)
 #define P33_PACKAGE UINT64_C(0x64C37A90C0D906DE)   /* packages/generated/loadout/pistol_smart_missile */
+#define SPEAR_PACKAGE UINT64_C(0xF904B93FBB70584C) /* packages/generated/loadout/faf_missile_launcher (the name's hash; not seen in HellForge's list) */
 #define NO_NET 0x7FFFu
 static const uint64_t kLaunchers[] = {HF_ENTITY_GL21_GRENADE_LAUNCHER, HF_ENTITY_GL28_BELTFED_GRENADE_LAUNCHER, HF_ENTITY_GL52_DEESCALATOR,
                                       HF_ENTITY_GL15_EVICTOR, HF_ENTITY_GP31_GRENADE_PISTOL, HF_ENTITY_GP20_ULTIMATUM};
 #define LAUNCHERS (sizeof kLaunchers / sizeof kLaunchers[0])
 static int g_missileCode, g_missilePkg, g_missileOn;
+static uint64_t g_missile, g_missilePackage;
+static const char* g_missileName = "";
 static uint8_t g_launcherSet[LAUNCHERS];
 static uint32_t (*g_netId)(uint32_t entity);
 typedef struct Missile { uint32_t entity, target; int handed, lost; } Missile;
@@ -1253,7 +1258,7 @@ static void MissileInit(void)
 static void MissileSwap(int on)
 {
     HfField f = HF_FIELD(ProjectileWeapon, projectile_entity);
-    HfValue v = HF_U64(P33_MISSILE);
+    HfValue v = HF_U64(g_missile);
     if (on && (g_missileOn || g_missileCode != 2 || g_missilePkg != HF_PACKAGE_RESIDENT || !s_glHoming)) return;
     if (!on && !g_missileOn) return;
     int n = 0;
@@ -1263,31 +1268,62 @@ static void MissileSwap(int on)
         else if (g_launcherSet[i]) { hf->set_live(self, kLaunchers[i], &f, NULL, 0); g_launcherSet[i] = 0; n++; }
     }
     g_missileOn = on && n;
-    if (on) Log("homing grenades: %d of %u grenade launchers fire the P-33 missile with their own grenade (one equipped or called in from now on)", n, (unsigned)LAUNCHERS);
+    if (on) Log("homing grenades: %d of %u grenade launchers fire the %s's missile with their own grenade (one equipped or called in from now on)", n, (unsigned)LAUNCHERS, g_missileName);
     else Log("homing grenades: %d launcher(s) put back; %u missiles seen, %u target hand-offs, %u found no enemy", n, g_msSeen, g_msHanded, g_msLost);
     if (!on) { memset(g_ms, 0, sizeof g_ms); g_msSeen = g_msHanded = g_msLost = 0; }
 }
-/* (every frame, in a mission or not: the package has to be in before a launcher is made) */
+/* Which guided missile the launchers fire: the FAF-14 Spear's (homing_missile 0, a weapon everyone has), else the P-33
+ * Missile Pistol's (1, a premium weapon's; 0.2.1 and 0.2.2 used it, and it is the one the research proved). The Spear's
+ * is what the Spear itself fires (its ProjectileWeapon +0x28), and is used only if its record follows an entity (targeting
+ * mode 2) and its package loads; else the P-33's. Looked up once the game's entities are in (every frame, in a mission or
+ * not: the package has to be in before a launcher is made). */
+static int MissileDonor(uint64_t entity, uint64_t package, const char* name)
+{
+    uint32_t stride = 0, mode = 0;
+    uintptr_t record = entity ? hf->component_record("SeekingMissileComponentData", entity, &stride) : 0;
+    if (!record || !ReadAt(record, &mode, 4)) return -1;
+    if (mode != 2) { Log("homing grenades: the %s's missile (%016llx) has targeting mode %u, not 2 (follow an entity): not used", name, (unsigned long long)entity, mode); return 0; }
+    float f[17];
+    memset(f, 0, sizeof f);
+    ReadAt(record, f, sizeof f);
+    g_missile = entity;
+    g_missilePackage = package;
+    g_missileName = name;
+    g_missileCode = 2;
+    g_missilePkg = HF_PACKAGE_LOADING;
+    Log("homing grenades ready: the %s's missile (%016llx; guidance on after %.2f s, lifetime %.0f s)", name, (unsigned long long)entity, (double)f[3], (double)f[16]);
+    return 1;
+}
 static void MissilePackage(void)
 {
-    /* the P-33 missile's record is there only once the game's entities are (0.2.1 asked at game load: not found) */
     static double next;
-    static int tries;
+    static int tries, spearOut;
     if (s_glHoming && g_missileCode == 1 && g_now >= next)
     {
-        uint32_t stride = 0, mode = 0;
-        uintptr_t record = hf->component_record("SeekingMissileComponentData", P33_MISSILE, &stride);
         next = g_now + 1;
-        if (record && ReadAt(record, &mode, 4))
+        int r = -1;
+        if (s_homingMissile == 0 && !spearOut)
         {
-            if (mode == 2) { g_missileCode = 2; g_missilePkg = HF_PACKAGE_LOADING; Log("homing grenades ready (the missile code checked, the P-33 missile follows an entity)"); }
-            else { g_missileCode = 0; Log("homing grenades off: the P-33 missile's targeting mode is %u, wanted 2", mode); }
+            HfLiveValue v;
+            HfField f = HF_FIELD(ProjectileWeapon, projectile_entity);
+            memset(&v, 0, sizeof v);
+            uint64_t spear = hf->get_live(self, HF_ENTITY_FAF14_SPEAR, &f, &v) ? v.base.u64 : 0;
+            r = MissileDonor(spear, SPEAR_PACKAGE, "FAF-14 Spear");
+            if (r == 0 || (r < 0 && tries >= 10)) { spearOut = 1; if (r < 0) Log("homing grenades: the Spear's missile was not found (its weapon fires entity %016llx): the P-33's instead", (unsigned long long)spear); r = -1; }
         }
-        else if (++tries == 120) { g_missileCode = 0; Log("homing grenades off: the P-33 missile's record was not found in two minutes"); }
+        if (r < 0 && (s_homingMissile != 0 || spearOut)) r = MissileDonor(P33_MISSILE, P33_PACKAGE, "P-33 Missile Pistol");
+        if (r == 0) g_missileCode = 0;
+        else if (r < 0 && ++tries == 120) { g_missileCode = 0; Log("homing grenades off: no guided missile's record was found in two minutes"); }
     }
     if (!s_glHoming || g_missileCode != 2 || g_missilePkg != HF_PACKAGE_LOADING) return;
-    g_missilePkg = hf->load_package(self, P33_PACKAGE);
-    if (g_missilePkg == HF_PACKAGE_RESIDENT) Log("homing grenades: the P-33's package is in");
+    g_missilePkg = hf->load_package(self, g_missilePackage);
+    if (g_missilePkg == HF_PACKAGE_RESIDENT) Log("homing grenades: the %s's package is in", g_missileName);
+    else if (!g_missilePkg && g_missile != P33_MISSILE)
+    {
+        Log("homing grenades: the %s's package (%016llx) did not load: the P-33's missile instead", g_missileName, (unsigned long long)g_missilePackage);
+        spearOut = 1;
+        g_missileCode = 1;
+    }
     else if (!g_missilePkg) Log("homing grenades off: the P-33's package did not load");
 }
 static uint32_t MissileTarget(const float at[3], const float fwd[3])

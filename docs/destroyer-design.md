@@ -141,7 +141,8 @@ Its own key (proposed, as Ascalon's dash got Z) so a full Fang bar never blocks 
 - **Her hands (0.2.1):** homing is the game's own: the grenade launchers (GL-21, GL-28, GL-52, GL-15, GP-31, GP-20)
   fire the P-33 Missile Pistol's guided missile carrying their own grenade, and the kit hands each missile the nearest
   living enemy within 25 degrees of where it was fired (docs/research/homing.md, lock-on.md; Lock-on & Stim Test
-  0.2.0's route). HellForge's homing rule on the grenade itself (0.1.8 to 0.2.0) found its target too late. The blasts
+  0.2.0's route). 0.2.3: the FAF-14 Spear's missile by default (`homing_missile` 0; the P-33 is a premium weapon), the P-33's if
+  the Spear's record or package cannot be used. HellForge's homing rule on the grenade itself (0.1.8 to 0.2.0) found its target too late. The blasts
   of the weapons she holds (the explosion event, by its source weapon or missile) no longer hurt or throw her.
 - **Not built:** Hunting Order's extra armour piercing, Claw Mark.
 - The mod icon and the four skill icons are placeholders.

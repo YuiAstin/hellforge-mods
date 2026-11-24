@@ -140,6 +140,8 @@ static const OpRow kOpRows[] = {
      "Seconds it takes off her other cooldowns.", NULL, 1, OP_LIVE},
     {"gl_safe", "Her Hands", "Own Blasts Spare Her", OP_TOGGLE, 0, 1, 1,
      "The blasts of the weapons she holds do not hurt or throw her.", NULL, 1, OP_LIVE},
+    {"homing_missile", "Her Hands", "Homing Missile: P-33", OP_TOGGLE, 0, 1, 1,
+     "Off: homing grenades fly as the FAF-14 Spear's missile. On: as the P-33 Missile Pistol's (a premium weapon's).", NULL, 1, OP_RESTART},
     {"homing_cone", "Her Hands", "Homing Cone", OP_FIELD, 1, 180, 1,
      "Degrees off the way it was fired a homing grenade may pick an enemy.", NULL, 1, OP_LIVE},
     {"homing_range", "Her Hands", "Homing Range", OP_FIELD, 1, 500, 1,

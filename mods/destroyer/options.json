@@ -6,7 +6,8 @@
   "gl_arming": "mission",
   "gl_homing": "mission",
   "one_handed": "mission",
-  "one_hand_grip": "mission"
+  "one_hand_grip": "mission",
+  "homing_missile": "restart"
  },
  "advanced": [
   [
@@ -266,6 +267,12 @@
    "Her Hands",
    "Own Blasts Spare Her",
    "The blasts of the weapons she holds do not hurt or throw her."
+  ],
+  [
+   "homing_missile",
+   "Her Hands",
+   "Homing Missile: P-33",
+   "Off: homing grenades fly as the FAF-14 Spear's missile. On: as the P-33 Missile Pistol's (a premium weapon's)."
   ],
   [
    "homing_cone",
