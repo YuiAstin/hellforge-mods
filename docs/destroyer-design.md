@@ -135,8 +135,9 @@ Its own key (proposed, as Ascalon's dash got Z) so a full Fang bar never blocks 
   a stack of Offense Only (at most 3; a hit on her spends one and does nothing, with the hits of the next half second),
   and after the cone her next skill deals 50% more. (There too: Hunting Order is +60% of her damage, Claw Mark +50%.)
 - **Her hands (0.1.8):** the rounds of a grenade launcher she holds have no arming distance (ProjectileSettings
-  +0xA0) and home on enemies (the SDK's homing rule); she holds every weapon in one hand (the One-Handed Test's mark,
-  Equipment +0xC4 bit 0, with the SMG grip). Put back at mission end.
+  +0xA0) and home on enemies (the SDK's homing rule); she holds every weapon in one hand (0.1.9: the game's Equipment table, every
+  two-handed record marked at the mission's start, with the SMG grip; docs/research/one-handed.md). Put back at
+  mission end.
 - **Not built:** Hunting Order's extra armour piercing, Claw Mark.
 - The mod icon and the four skill icons are placeholders.
 

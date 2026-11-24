@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.8"
+#define VERSION "0.1.9"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -1132,15 +1132,11 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 
 /* ---- her hands ----------------------------------------------------------------------------------------------------------
  * For each weapon she carries, once: its round's arming distance to 0 and a homing rule on it (a round with an arming
- * distance is a grenade launcher's: ProjectileSettings +0xA0, the GL-21's 7 m, the GL-52's 4), and the game's
- * one-handed mark on its Equipment record (+0xC4 bit 0, with the grip pose at +0xC0: the One-Handed Test's finding).
- * All of it is put back when the mission ends or the kit stands by. */
-typedef struct Hand { uint64_t res; uint32_t projectile, homing; uint8_t armed, flagged, gripped; } Hand;
+ * distance is a grenade launcher's: ProjectileSettings +0xA0, the GL-21's 7 m, the GL-52's 4). All of it is put back when the mission ends or the kit stands by. */
+typedef struct Hand { uint64_t res; uint32_t projectile, homing; uint8_t armed; } Hand;
 static Hand g_hand[12];
 static int g_nhand;
 static const HfField kArming = {"ProjectileSettings", 25480438u, 0xA0, 4, HF_TYPE_F32, __LINE__};
-static const HfField kOneHandFlags = {"EquipmentComponentData", 25480438u, 0xC4, 4, HF_TYPE_U32, __LINE__};
-static const HfField kOneHandGrip = {"EquipmentComponentData", 25480438u, 0xC0, 4, HF_TYPE_U32, __LINE__};
 static void HandSet(uint64_t res)
 {
     if (g_nhand >= 12) return;
@@ -1174,23 +1170,62 @@ static void HandSet(uint64_t res)
         Log("her hands: weapon %016llx fires a grenade round (projectile %u, arming distance %.1f m): arming %s (answer %d), homing %s (rule %u)", (unsigned long long)res, h->projectile, was,
             s_glArming ? (h->armed ? "set to 0" : "REFUSED") : "left", set, s_glHoming ? (h->homing ? "on" : "REFUSED") : "off", h->homing);
     }
-    /* held in one hand */
-    memset(&v, 0, sizeof v);
-    if (s_oneHand && hf->get_live(self, res, &kOneHandFlags, &v))
+}
+/* Held in one hand (docs/research/one-handed.md, the kit base's One-Handed Grip on the kits-upgrade-test branch): the
+ * game's Equipment table, [[game + 0x346BF98] + 0xF12478 + 8 * 233] -> index rows {u64 resource, u32 record, u32 0} x
+ * 688, 232-byte records from +11008; +0xC4 bit 0 is one-handed, +0xC0 the grip. Every record at exactly 0x00010000 (a
+ * two-handed weapon) changes at the mission's start, so what she equips after has it, and goes back at its end.
+ * (0.1.8 asked HellForge for each weapon's record: it has no such read for Equipment.) Game build 25480438. */
+#define ONE_ROWS 688u
+#define ONE_RECORDS 1024u
+static struct { uint32_t record, grip; } g_oneChanged[ONE_RECORDS];
+static int g_oneChangedN;
+static uintptr_t OneTable(void)
+{
+    const char* build = hf->build_id ? hf->build_id() : NULL;
+    if (!build || strcmp(build, BUILD) || !game) return 0;
+    uintptr_t root = Pointer(game + 0x346BF98);
+    return root ? Pointer(root + 0xF12478 + 8u * 233u) : 0;
+}
+static void OneHanded(int on)
+{
+    uintptr_t table = OneTable();
+    if (!table) { if (on) Log("her hands: the Equipment table is not there: nothing held one-handed"); return; }
+    if (on)
     {
-        uint32_t flags = (uint32_t)v.base.number;
-        HfLiveValue g;
-        memset(&g, 0, sizeof g);
-        uint32_t grip = hf->get_live(self, res, &kOneHandGrip, &g) ? (uint32_t)g.base.number : 0;
-        if (flags & 1) { Log("her hands: weapon %016llx is one-handed already (grip %u)", (unsigned long long)res, grip); return; }
-        HfValue f = HF_U32(flags | 1u), gv = HF_U32(s_oneHandGrip);
-        int a = hf->set_live(self, res, &kOneHandFlags, &f, HF_LIVE_SHARED), b = -1;
-        h->flagged = a != 0;
-        if (s_oneHandGrip > 0 && h->flagged) { b = hf->set_live(self, res, &kOneHandGrip, &gv, HF_LIVE_SHARED); h->gripped = b != 0; }
-        Log("her hands: weapon %016llx one-handed: mark %08X -> %08X (answer %d), grip %u -> %u (answer %d; 1 = now, 2 = when it is next equipped)", (unsigned long long)res, flags, flags | 1u, a,
-            grip, h->gripped ? (uint32_t)s_oneHandGrip : grip, b);
+        static uint8_t seen[ONE_RECORDS];
+        memset(seen, 0, sizeof seen);
+        g_oneChangedN = 0;
+        int rows = 0;
+        for (uint32_t i = 0; i < ONE_ROWS; i++)
+        {
+            struct { uint64_t res; uint32_t record, zero; } row;
+            if (!ReadAt(table + 16u * i, &row, sizeof row)) break;
+            if (!row.res || row.record >= ONE_RECORDS || seen[row.record]) continue;
+            seen[row.record] = 1;
+            rows++;
+            uintptr_t at = table + 11008u + (uintptr_t)row.record * 232u;
+            uint32_t flags = 0, grip = 0, one = 0x00010001u, pose = (uint32_t)s_oneHandGrip;
+            if (!ReadAt(at + 0xC4, &flags, 4) || flags != 0x00010000u || !ReadAt(at + 0xC0, &grip, 4)) continue;
+            if (!pose) pose = grip;
+            if (hf->write(at + 0xC4, &one, 4) || hf->write(at + 0xC0, &pose, 4)) continue;
+            g_oneChanged[g_oneChangedN].record = row.record;
+            g_oneChanged[g_oneChangedN++].grip = grip;
+        }
+        Log("her hands: %d two-handed weapon record(s) of %d made one-handed (grip %d; 0: their own): what she equips from now on", g_oneChangedN, rows, s_oneHandGrip);
     }
-    else if (s_oneHand) Log("her hands: weapon %016llx has no Equipment record to read: left as it is", (unsigned long long)res);
+    else if (g_oneChangedN)
+    {
+        int back = 0;
+        for (int i = 0; i < g_oneChangedN; i++)
+        {
+            uintptr_t at = table + 11008u + (uintptr_t)g_oneChanged[i].record * 232u;
+            uint32_t flags = 0x00010000u, grip = g_oneChanged[i].grip;
+            back += !hf->write(at + 0xC4, &flags, 4) && !hf->write(at + 0xC0, &grip, 4);
+        }
+        Log("her hands: %d weapon record(s) back to two-handed", back);
+        g_oneChangedN = 0;
+    }
 }
 static void HandsFrame(void)
 {
@@ -1209,11 +1244,10 @@ static void HandsOff(void)
         Hand* h = &g_hand[i];
         if (h->armed) hf->set_live(self, (HfRef)h->projectile, &kArming, NULL, 0);
         if (h->homing) hf->stop_shots(self, h->homing);
-        if (h->gripped) hf->set_live(self, h->res, &kOneHandGrip, NULL, HF_LIVE_SHARED);
-        if (h->flagged) hf->set_live(self, h->res, &kOneHandFlags, NULL, HF_LIVE_SHARED);
     }
     if (g_nhand) Log("her hands: %d weapon(s) put back as the game has them", g_nhand);
     g_nhand = 0;
+    OneHanded(0);
 }
 
 static void OnKill(HfMod* mod, const HfEventInfo* info, void* user)
@@ -1259,6 +1293,7 @@ static void Reset(const char* why)
             why, g_casts[0], g_casts[1], g_casts[2], g_casts[3], g_paidHits, g_cutHits, g_friendSpared, g_selfSpared, g_denied, g_knockdowns);
     Speed(0);
     HandsOff();
+    if (start && kb_kit_on && s_oneHand) OneHanded(1);
     Body(start);
     if (start && s_hellbomb && s_hellbombRow == 125)
         if (!hf->load_package(self, UINT64_C(0x346D785D6CA13FF4))) Log("the Hellbomb's package could not be loaded ahead");  /* loadout/hellbomb_backpack */
