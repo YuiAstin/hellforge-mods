@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.5"
+#define VERSION "0.1.6"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -66,9 +66,9 @@ static int s_mech = 1;                 /* 0: never; 1: a mission where a known A
 static float s_mechRange = 40, s_mechEach = 0.05f, s_mechMax = 0.50f, s_mechHp = 0.10f, s_mechTaken = 0.30f;
 static int s_bossArmour = 4;           /* heavy armour or above: boss-sized (Lemuen's test) */
 static float s_deniedCd = 180, s_deniedSeconds = 2, s_rage = 1;
-static float s_s1Cd = 10, s_s1Leap = 15, s_s1Radius = 5, s_s1Window = 3, s_s1Line = 37.5f, s_s1Cone = 12, s_s1Triple = 2, s_s1Haste = 2, s_hasteMult = 1.3f;
+static float s_s1Cd = 10, s_s1Leap = 15, s_s1Radius = 5, s_s1Window = 3, s_s1Line = 25, s_s1LineWidth = 3, s_s1Cone = 12, s_s1Triple = 2, s_s1Haste = 2, s_hasteMult = 1.3f;
 static float s_s1Damage = 600, s_s1Damage1 = 800, s_s1Damage2 = 1000, s_s1Stagger1 = 50, s_s1Stagger2 = 80, s_s1Shield = 1.5f;
-static int s_s1Rounds = 12, s_tracerRound = 226, s_tracerDamage = 125, s_rowHe = 266;   /* the stages' rounds: Koleda's bright round and the minigun's damage row; where each lands, the Orbital Gatling Barrage's HE blast */
+static int s_s1Rounds = 12, s_tracerRound = 226, s_tracerDamage = 125, s_rowHe = 175;   /* the stages' rounds: Koleda's bright round and the minigun's damage row; where each lands, the G-12 High Explosive grenade's blast (0.1.6: the Orbital Gatling Barrage's, 266, came without its sound) */
 static float s_s1Burst = 1.0f, s_s1ConeBurst = 0.5f, s_s1ConeAngle = 30, s_tracerSpeed = 250;
 static float s_s2Cd = 18, s_s2Length = 15, s_s2Width = 9, s_s2Damage = 400, s_s2Grenade = 0.20f, s_s2Crit = 1.5f, s_s2Step = 0.18f;
 static float s_s3Cd = 90, s_s3Leap = 18, s_s3Width = 9, s_s3Damage = 1500, s_s3Heal = 0.20f, s_s3Step = 0.12f;
@@ -86,7 +86,7 @@ static const KbSetting kSettings[] = {
     KB_F("mech_hp", s_mechHp, 0, 1), KB_F("mech_taken", s_mechTaken, 0, 0.95), KB_I("boss_armour", s_bossArmour, 1, 10),
     KB_F("denied_cooldown", s_deniedCd, 0, 3600), KB_F("denied_seconds", s_deniedSeconds, 0, 10), KB_F("rage", s_rage, 0, 3),
     KB_F("s1_cooldown", s_s1Cd, 0, 600), KB_F("s1_leap", s_s1Leap, 3, 40), KB_F("s1_radius", s_s1Radius, 1, 20), KB_F("s1_window", s_s1Window, 0.5, 20),
-    KB_F("s1_line", s_s1Line, 3, 100), KB_F("s1_cone", s_s1Cone, 3, 100), KB_F("s1_triple", s_s1Triple, 0, 20), KB_F("s1_haste", s_s1Haste, 0, 30),
+    KB_F("s1_line", s_s1Line, 3, 100), KB_F("s1_line_width", s_s1LineWidth, 0, 20), KB_F("s1_cone", s_s1Cone, 3, 100), KB_F("s1_triple", s_s1Triple, 0, 20), KB_F("s1_haste", s_s1Haste, 0, 30),
     KB_F("haste_mult", s_hasteMult, 1, 3), KB_F("s1_damage", s_s1Damage, 0, 100000), KB_F("s1_damage_1", s_s1Damage1, 0, 100000),
     KB_F("s1_damage_2", s_s1Damage2, 0, 100000), KB_F("s1_stagger_1", s_s1Stagger1, 0, 500), KB_F("s1_stagger_2", s_s1Stagger2, 0, 500),
     KB_I("s1_rounds", s_s1Rounds, 1, 40), KB_F("s1_burst", s_s1Burst, 0, 3), KB_F("s1_cone_burst", s_s1ConeBurst, 0, 3), KB_F("s1_cone_angle", s_s1ConeAngle, 5, 80),
@@ -138,9 +138,10 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "; strafing run); the cone's within s1_cone_burst s, sweeping s1_cone_angle degrees to each side.\n"
                "; s1_round: the projectile they copy (226: the bright round of Koleda's Sinveiler); s1_round_damage: the\n"
                "; damage row a direct hit's copies (the damage is the stage's); s1_round_speed: their m/s (0: the round's own;\n"
-               "; slower, their trails start at her); s1_explosion: the blast where each lands (266: the Orbital Gatling\n"
-               "; Barrage's shell's; set off by the kit, so its sound is loaded).\n"
-               "s1_rounds = %d\ns1_burst = %g\ns1_cone_burst = %g\ns1_cone_angle = %g\ns1_round = %d\ns1_round_damage = %d\ns1_round_speed = %g\ns1_explosion = %d\n"
+               "; slower, their trails start at her); s1_explosion: the blast where each lands (175: the G-12 High Explosive\n"
+               "; grenade's; 266, the Orbital Gatling Barrage's shell's, came without its sound). s1_line_width: metres\n"
+               "; across the line's rounds land, left and right in turn.\n"
+               "s1_rounds = %d\ns1_burst = %g\ns1_cone_burst = %g\ns1_cone_angle = %g\ns1_round = %d\ns1_round_damage = %d\ns1_round_speed = %g\ns1_explosion = %d\ns1_line_width = %g\n"
                "; Doom Barrage: cooldown; the box's length and width; damage; each Grenade spent adds s2_grenade; with 3 or\n"
                "; more spent the damage is times s2_crit; seconds between its blasts.\n"
                "s2_cooldown = %g\ns2_length = %g\ns2_width = %g\ns2_damage = %g\ns2_grenade = %g\ns2_crit = %g\ns2_step = %g\n"
@@ -166,7 +167,7 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
         (double)s_deniedCd, (double)s_deniedSeconds, (double)s_rage,
         (double)s_s1Cd, (double)s_s1Leap, (double)s_s1Radius, (double)s_s1Window, (double)s_s1Line, (double)s_s1Cone, (double)s_s1Triple, (double)s_s1Haste, (double)s_hasteMult,
         (double)s_s1Damage, (double)s_s1Damage1, (double)s_s1Damage2, (double)s_s1Stagger1, (double)s_s1Stagger2, (double)s_s1Shield,
-        s_s1Rounds, (double)s_s1Burst, (double)s_s1ConeBurst, (double)s_s1ConeAngle, s_tracerRound, s_tracerDamage, (double)s_tracerSpeed, s_rowHe,
+        s_s1Rounds, (double)s_s1Burst, (double)s_s1ConeBurst, (double)s_s1ConeAngle, s_tracerRound, s_tracerDamage, (double)s_tracerSpeed, s_rowHe, (double)s_s1LineWidth,
         (double)s_s2Cd, (double)s_s2Length, (double)s_s2Width, (double)s_s2Damage, (double)s_s2Grenade, (double)s_s2Crit, (double)s_s2Step,
         (double)s_s3Cd, (double)s_s3Leap, (double)s_s3Width, (double)s_s3Damage, (double)s_s3Heal, (double)s_s3Step,
         (double)s_frenzyRadius, (double)s_frenzyDamage, (double)s_frenzyRange, (double)s_frenzyCone, s_frenzyRing, (double)s_huntingSeconds, (double)s_huntingTaken, (double)s_frenzyRefund,
@@ -661,7 +662,7 @@ static void VolleyFrame(void)
         float a = v->cone ? (t * 2 - 1) * s_s1ConeAngle * 0.0174533f : 0, c = cosf(a), sn = sinf(a);
         float dx = fx * c - fy * sn, dy = fx * sn + fy * c;
         float far_ = v->cone ? v->range * ((i & 1) ? 1.0f : 0.55f) : 3.0f + (v->range - 3.0f) * t;
-        float side = v->cone ? 0 : r * 0.5f, p[3];
+        float side = v->cone ? 0 : ((i & 1) ? 0.5f : -0.5f) * s_s1LineWidth + r * 0.3f, p[3];   /* the line: left and right in turn */
         OnGround(unit, v->from[0] + dx * far_ - dy * side, v->from[1] + dy * far_ + dx * side, feet, p);
         p[2] -= 0.4f;   /* (OnGround is half a metre up: just over the ground) */
         float dir[3] = {p[0] - v->from[0], p[1] - v->from[1], p[2] - v->from[2]};

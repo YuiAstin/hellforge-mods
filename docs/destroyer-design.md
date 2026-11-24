@@ -123,8 +123,8 @@ Its own key (proposed, as Ascalon's dash got Z) so a full Fang bar never blocks 
   skill's damage, the row's other hits on enemies are cancelled, and its hits on anything that is not a known enemy
   kind (walls, nests) are left as the row's own.
 - **The line and the cone (0.1.5)** are rounds fired at points on the ground (Koleda's bright round), each with the
-  Orbital Gatling Barrage's HE blast set off by the kit where it lands: the line's walk away from her like an Eagle's
-  strafing run (37.5 m), the cone's sweep across its angle. (0.1.1's tracer bursts rarely hit more than one enemy;
+  G-12 High Explosive grenade's blast set off by the kit where it lands (0.1.6: the Orbital Gatling Barrage's came without its sound): the line's walk away from her like an Eagle's
+  strafing run (25 m long, 3 m across, left and right in turn), the cone's sweep across its angle. (0.1.1's tracer bursts rarely hit more than one enemy;
   0.1.3's HE shells burst without their sound.)
 - **Doom Barrage (0.1.1)** drops its blasts one after another (`s2_step`), and **Party Time's** chain from where she
   stood to where she landed (`s3_step`).

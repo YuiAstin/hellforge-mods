@@ -96,6 +96,12 @@
    "Metres the line of rounds reaches."
   ],
   [
+   "s1_line_width",
+   "Annihilation Directive",
+   "Line Width",
+   "Metres across the line's rounds land, left and right in turn."
+  ],
+  [
    "s1_cone",
    "Annihilation Directive",
    "Cone Range",
@@ -154,6 +160,12 @@
    "Annihilation Directive",
    "Cone Angle",
    "Degrees to each side the cone's rounds spread."
+  ],
+  [
+   "s1_explosion",
+   "Annihilation Directive",
+   "Round Blast",
+   "The explosion where each round lands, by its row: 175 HE grenade, 361 grenade launcher, 234 autocannon sentry, 266 gatling barrage, 343 precision strike."
   ],
   [
    "s1_shield",
@@ -253,7 +265,6 @@
   "hellbomb_hold",
   "s1_round",
   "s1_round_damage",
-  "s1_round_speed",
-  "s1_explosion"
+  "s1_round_speed"
  ]
 }
