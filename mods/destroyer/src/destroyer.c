@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.6"
+#define VERSION "0.1.7"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -66,6 +66,8 @@ static int s_mech = 1;                 /* 0: never; 1: a mission where a known A
 static float s_mechRange = 40, s_mechEach = 0.05f, s_mechMax = 0.50f, s_mechHp = 0.10f, s_mechTaken = 0.30f;
 static int s_bossArmour = 4;           /* heavy armour or above: boss-sized (Lemuen's test) */
 static float s_deniedCd = 180, s_deniedSeconds = 2, s_rage = 1;
+static int s_offenseMax = 3;           /* Offense Only: a stack after each stage of Annihilation Directive; a hit on her spends one and does nothing */
+static float s_offenseWindow = 0.5f, s_ammoLoaded = 0.5f;
 static float s_s1Cd = 10, s_s1Leap = 15, s_s1Radius = 5, s_s1Window = 3, s_s1Line = 25, s_s1LineWidth = 3, s_s1Cone = 12, s_s1Triple = 2, s_s1Haste = 2, s_hasteMult = 1.3f;
 static float s_s1Damage = 600, s_s1Damage1 = 800, s_s1Damage2 = 1000, s_s1Stagger1 = 50, s_s1Stagger2 = 80, s_s1Shield = 1.5f;
 static int s_s1Rounds = 12, s_tracerRound = 226, s_tracerDamage = 125, s_rowHe = 175;   /* the stages' rounds: Koleda's bright round and the minigun's damage row; where each lands, the G-12 High Explosive grenade's blast (0.1.6: the Orbital Gatling Barrage's, 266, came without its sound) */
@@ -84,6 +86,7 @@ static const KbSetting kSettings[] = {
     KB_I("frenzy_start", s_frenzyStart, 0, 12), KB_I("frenzy_max", s_frenzyMax, 0, 12), KB_F("frenzy_mult", s_frenzyMult, 0, 5),
     KB_I("mech", s_mech, 0, 2), KB_F("mech_range", s_mechRange, 5, 200), KB_F("mech_each", s_mechEach, 0, 1), KB_F("mech_max", s_mechMax, 0, 5),
     KB_F("mech_hp", s_mechHp, 0, 1), KB_F("mech_taken", s_mechTaken, 0, 0.95), KB_I("boss_armour", s_bossArmour, 1, 10),
+    KB_I("offense_max", s_offenseMax, 0, 10), KB_F("offense_window", s_offenseWindow, 0, 5), KB_F("ammo_loaded", s_ammoLoaded, 0, 5),
     KB_F("denied_cooldown", s_deniedCd, 0, 3600), KB_F("denied_seconds", s_deniedSeconds, 0, 10), KB_F("rage", s_rage, 0, 3),
     KB_F("s1_cooldown", s_s1Cd, 0, 600), KB_F("s1_leap", s_s1Leap, 3, 40), KB_F("s1_radius", s_s1Radius, 1, 20), KB_F("s1_window", s_s1Window, 0.5, 20),
     KB_F("s1_line", s_s1Line, 3, 100), KB_F("s1_line_width", s_s1LineWidth, 0, 20), KB_F("s1_cone", s_s1Cone, 3, 100), KB_F("s1_triple", s_s1Triple, 0, 20), KB_F("s1_haste", s_s1Haste, 0, 30),
@@ -126,6 +129,10 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "; denied_cooldown s before it can again. rage: each 1%% of health she is missing adds rage %% to her skill\n"
                "; damage and takes half of that off the damage she takes (0: off).\n"
                "denied_cooldown = %g\ndenied_seconds = %g\nrage = %g\n"
+               "; Offense Only: each stage of Annihilation Directive gives a stack (at most offense_max); a hit on her spends\n"
+               "; one and does nothing, and so do the hits of the next offense_window s (one attack is often many hits).\n"
+               "; Ammo Loaded: after the cone, her next skill deals ammo_loaded more (0.5: +50%%).\n"
+               "offense_max = %d\noffense_window = %g\nammo_loaded = %g\n"
                "; Annihilation Directive: cooldown (from the end of the chain); the leap's reach; its blast's radius; seconds\n"
                "; the next stage stays open after a hit; how far the line and the cone reach; the bonus on an enemy\n"
                "; all three stages hit (times the cone's damage); the sprint boost after a stage that hits (seconds, times her\n"
@@ -164,7 +171,7 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
         VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_keys[3].label[0] ? s_keys[3].label : "B", (double)s_s1Cost, (double)s_s2Cost, (double)s_costFloor,
         s_grenadesMax, (double)s_grenadeMult, s_frenzyStart, s_frenzyMax, (double)s_frenzyMult,
         s_mech, (double)s_mechRange, (double)s_mechEach, (double)s_mechMax, (double)s_mechHp, (double)s_mechTaken, s_bossArmour,
-        (double)s_deniedCd, (double)s_deniedSeconds, (double)s_rage,
+        (double)s_deniedCd, (double)s_deniedSeconds, (double)s_rage, s_offenseMax, (double)s_offenseWindow, (double)s_ammoLoaded,
         (double)s_s1Cd, (double)s_s1Leap, (double)s_s1Radius, (double)s_s1Window, (double)s_s1Line, (double)s_s1Cone, (double)s_s1Triple, (double)s_s1Haste, (double)s_hasteMult,
         (double)s_s1Damage, (double)s_s1Damage1, (double)s_s1Damage2, (double)s_s1Stagger1, (double)s_s1Stagger2, (double)s_s1Shield,
         s_s1Rounds, (double)s_s1Burst, (double)s_s1ConeBurst, (double)s_s1ConeAngle, s_tracerRound, s_tracerDamage, (double)s_tracerSpeed, s_rowHe, (double)s_s1LineWidth,
@@ -176,7 +183,9 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
 }
 
 /* ---- state ---------------------------------------------------------------------------------------------------- */
-static int g_grenades, g_fang, g_frenzy;
+static int g_grenades, g_fang, g_frenzy, g_offense, g_ammoLoaded;
+static double g_offenseUntil;
+static unsigned g_offenseSpent;
 static double g_cd[4];                 /* ready at: Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy (a short lockout) */
 static double g_drUntil, g_speedUntil, g_deniedUntil, g_deniedReady;
 static int g_mechMission;              /* this mission is against Automatons */
@@ -708,6 +717,13 @@ static void Gain(int* what, int n, int max) { *what += n; if (*what > max) *what
 static double CastMult(const char* what, int frenzy)
 {
     double m = (1 + (double)s_rage * Missing()) * MechBonus();
+    if (g_ammoLoaded)
+    {
+        g_ammoLoaded = 0;
+        m *= 1 + (double)s_ammoLoaded;
+        static unsigned told;
+        if (told++ < 6) Log("%s: Ammo Loaded spent (+%.0f%%)", what, (double)s_ammoLoaded * 100);
+    }
     if (frenzy && g_frenzy > 0)
     {
         g_frenzy--;
@@ -840,6 +856,8 @@ static void Annihilation(void)
     g_chainGroup[stage] = g;
     g_chainWait = g;
     g_chain = stage + 1;               /* 3 after the cone: the chain ends when its hit is known */
+    Gain(&g_offense, 1, s_offenseMax);
+    if (stage == 2) g_ammoLoaded = 1;
     Shield(s_s1Shield);
     if (told++ < 20) Log("Annihilation Directive %s: %d rounds from %.1f %.1f %.1f along %.2f %.2f %.2f, %.0f damage an enemy within %.0f m, %d Grenade(s) left", stage == 1 ? "I (the line)" : "II (the cone)", s_s1Rounds,
         (double)from[0], (double)from[1], (double)from[2], (double)aim[0], (double)aim[1], (double)aim[2], (double)damage, (double)v->range, g_grenades);
@@ -915,6 +933,7 @@ static void Landed(int kind, const float from[3], const float to[3], float dist)
         g_chainWait = g;
         g_chain = 1;
         g_casts[0]++;
+        Gain(&g_offense, 1, s_offenseMax);
         Shield(s_s1Shield);
         Log("Annihilation Directive: leapt %.1f m (%+.1f m in height), %.0f damage where she landed, %d Grenade(s) left", (double)dist, (double)(to[2] - from[2]), (double)damage, g_grenades);
         return;
@@ -996,6 +1015,18 @@ static void DamageTaken(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     if (g_now < g_deniedUntil) { e->cancel = 1; return; }
     /* a leap's window: no fall or landing damage (impact or flat, from nothing) */
     if (g_now < g_drUntil && (d->kind == 5 || d->kind == 7) && !NetOk(d->dealer) && !NetOk(d->owner)) { e->cancel = 1; return; }
+    /* Offense Only: a stack spent, this hit and the next moment's do nothing */
+    if (g_now < g_offenseUntil) { e->cancel = 1; return; }
+    if (g_offense > 0)
+    {
+        g_offense--;
+        g_offenseUntil = g_now + s_offenseWindow;
+        g_offenseSpent++;
+        e->cancel = 1;
+        static unsigned told;
+        if (told++ < 12) Log("Offense Only: a hit of %d on her (kind %u) does nothing; %d stack(s) left", d->amount, d->kind, g_offense);
+        return;
+    }
     double m = 1;
     if (Mech() && (NetOk(d->dealer) || NetOk(d->owner))) m *= 1 - (double)s_mechTaken;
     m *= 1 - 0.5 * (double)s_rage * Missing();
@@ -1143,6 +1174,9 @@ static void Reset(const char* why)
     g_selfSpared = g_knockdowns = g_paidHits = g_cutHits = g_friendSpared = g_denied = 0;
     g_grenades = s_grenadesMax;
     g_fang = 0;
+    g_offense = g_ammoLoaded = 0;
+    g_offenseUntil = 0;
+    g_offenseSpent = 0;
     g_frenzy = s_frenzyStart > s_frenzyMax ? s_frenzyMax : s_frenzyStart;
     memset(g_cd, 0, sizeof g_cd);
     g_chain = 0;
@@ -1214,6 +1248,7 @@ typedef struct DestroyerHud
     float stamina;                       /* 0..1 (-1: unknown) */
     uint32_t hellbomb;
     float haste;
+    uint32_t offense, ammo_loaded;       /* the stacks of Offense Only; Ammo Loaded is waiting for her next skill */
 } DestroyerHud;
 static DestroyerHud g_hud = {1};
 HF_MOD_EXPORT DestroyerHud* destroyer_hud_state(void)
@@ -1243,6 +1278,8 @@ HF_MOD_EXPORT DestroyerHud* destroyer_hud_state(void)
     g_hud.stamina = g_inMission && g_alive ? StaminaNow() : -1;
     g_hud.hellbomb = (uint32_t)(s_hellbomb != 0);
     g_hud.haste = (float)fmax(0, g_speedUntil - g_now);
+    g_hud.offense = (uint32_t)g_offense;
+    g_hud.ammo_loaded = (uint32_t)g_ammoLoaded;
     return &g_hud;
 }
 
@@ -1331,7 +1368,7 @@ static const KbOption kOptions[] = {
     {"s1_cooldown", &s_s1Cd, NULL}, {"s1_leap", &s_s1Leap, NULL}, {"s1_damage", &s_s1Damage, NULL}, {"s1_damage_1", &s_s1Damage1, NULL}, {"s1_damage_2", &s_s1Damage2, NULL},
     {"s2_cooldown", &s_s2Cd, NULL}, {"s2_damage", &s_s2Damage, NULL}, {"s3_cooldown", &s_s3Cd, NULL}, {"s3_leap", &s_s3Leap, NULL}, {"s3_damage", &s_s3Damage, NULL},
     {"s3_heal", &s_s3Heal, NULL}, {"frenzy_damage", &s_frenzyDamage, NULL}, {"frenzy_radius", &s_frenzyRadius, NULL}, {"hunting_seconds", &s_huntingSeconds, NULL},
-    {"denied_cooldown", &s_deniedCd, NULL}, {"mech", NULL, &s_mech},
+    {"denied_cooldown", &s_deniedCd, NULL}, {"offense_max", NULL, &s_offenseMax}, {"mech", NULL, &s_mech},
     {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL}, {"hellbomb_on_exhaustion", NULL, &s_hellbomb},
 };
 static void OptionAfter(const char* name, int changed)

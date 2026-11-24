@@ -27,7 +27,7 @@ end
 
 local ffi = require('ffi')
 pcall(ffi.cdef, [[
-typedef struct destroyerhud1_state { uint32_t version, in_mission; float cd[4], cd_max[4]; uint32_t grenades, grenades_max, fang, frenzy, stage; float stage_left, denied_cd, denied, rage; uint32_t mech, hunted, keys[4]; char key_label[4][24]; float stamina; uint32_t hellbomb; float haste; } destroyerhud1_state;
+typedef struct destroyerhud1_state { uint32_t version, in_mission; float cd[4], cd_max[4]; uint32_t grenades, grenades_max, fang, frenzy, stage; float stage_left, denied_cd, denied, rage; uint32_t mech, hunted, keys[4]; char key_label[4][24]; float stamina; uint32_t hellbomb; float haste; uint32_t offense, ammo_loaded; } destroyerhud1_state;
 void *destroyerhud1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
 void *destroyerhud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
 ]])
@@ -459,6 +459,8 @@ local function ci_bar(d)
     if rage > 1.005 then bits[#bits + 1] = string.format('RAGE +%.0f%%', (rage - 1) * 100) end
     if state.denied > 0 then bits[#bits + 1] = string.format('DENIED EXIT %.1fs', tonumber(state.denied))
     elseif state.denied_cd > 0 then bits[#bits + 1] = string.format('DENIED EXIT IN %.0fs', math.ceil(state.denied_cd)) end
+    if tonumber(state.offense) > 0 then bits[#bits + 1] = 'OFFENSE ONLY ' .. tonumber(state.offense) end
+    if state.ammo_loaded ~= 0 then bits[#bits + 1] = 'AMMO LOADED' end
     if state.mech ~= 0 then bits[#bits + 1] = 'SANGVIS FERRI' end
     if tonumber(state.hunted) > 0 then bits[#bits + 1] = 'HUNTING ' .. tonumber(state.hunted) end
     if state.haste > 0 then bits[#bits + 1] = 'HASTE' end
@@ -507,6 +509,7 @@ local OPTIONS = {
     {'frenzy_damage', 'slider', 'Ammo Frenzy: Damage', 0, 50000, 500, 'Its whole damage, shared evenly among the enemies in reach.', true},
     {'frenzy_radius', 'slider', 'Ammo Frenzy: Radius', 5, 50, 1, 'Metres around the target it reaches.'},
     {'hunting_seconds', 'slider', 'Ammo Frenzy: Hunting Order', 0, 60, 1, 'Seconds its enemies take more of her damage.'},
+    {'offense_max', 'slider', 'Offense Only: Stacks', 0, 6, 1, 'Each stage of Annihilation Directive gives a stack; a hit on her spends one and does nothing. Most she holds (0: off).', true},
     {'denied_cooldown', 'slider', 'Denied Exit: Cooldown', 0, 600, 10, 'Seconds before a killing hit can be denied again.', true},
     {'mech', 'slider', 'Sangvis Ferri: Missions', 0, 2, 1, '1: against Automatons. 2: every mission. 0: never.'},
     {'hp_mult', 'slider', 'Body: Health', 0.5, 4, 0.1, 'Her health, times a Helldiver\'s.', true},

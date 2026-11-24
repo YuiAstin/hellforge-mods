@@ -131,6 +131,9 @@ Its own key (proposed, as Ascalon's dash got Z) so a full Fang bar never blocks 
 - **Ammo Frenzy's key** (`key_frenzy`, default B) is in destroyer.ini and on the options screen (the kit base takes a
   kit's own number of keys, `KB_KEYS`, since 0.1.5); Mod Bindings Menu still knows three. Its blast is the Eagle 500kg
   Bomb going off (row 277; 193 is the bomb landing).
+- **Offense Only and Ammo Loaded (0.1.7)**, from Dandegate's effect pages: each stage of Annihilation Directive gives
+  a stack of Offense Only (at most 3; a hit on her spends one and does nothing, with the hits of the next half second),
+  and after the cone her next skill deals 50% more. (There too: Hunting Order is +60% of her damage, Claw Mark +50%.)
 - **Not built:** Hunting Order's extra armour piercing, Claw Mark.
 - The mod icon and the four skill icons are placeholders.
 

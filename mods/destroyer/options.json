@@ -72,6 +72,18 @@
    "Armour this high or above is boss-sized (4: heavy)."
   ],
   [
+   "offense_window",
+   "Offense Only",
+   "Window",
+   "Seconds after a spent stack that further hits also do nothing (one attack is often many hits)."
+  ],
+  [
+   "ammo_loaded",
+   "Annihilation Directive",
+   "Ammo Loaded",
+   "After the cone, her next skill deals this much more (0.5: +50%)."
+  ],
+  [
    "denied_seconds",
    "Denied Exit",
    "Protection",
