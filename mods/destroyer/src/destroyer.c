@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.2.5"
+#define VERSION "0.2.6"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -1112,6 +1112,11 @@ static void PayHit(HfDamagePreEvent* e, HfDamageEvent* d, Group* g, uint64_t res
     if (told++ < 60) Log("her %s (skill %d) on entity %u: %d damage%s%s (%.1f m away)", by, g->skill, d->target, d->amount, boss ? ", boss-sized" : "", Hunted(d->target) ? ", Hunting Order" : "", (double)dist);
 }
 /* Any other hit: her blasts' and her tracers' on enemies and friends, her shots */
+/* A shield she may carry: it takes hits of its own, and a blast of hers on it threw her (0.2.5 and before) */
+static int ShieldKind(uint64_t res)
+{
+    return res == HF_ENTITY_SH20_BALLISTIC_SHIELD_BACKPACK || res == HF_ENTITY_SH51_DIRECTIONAL_SHIELD || res == HF_ENTITY_GSH39_SHIELD;
+}
 static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
 {
     if (d->kind == 4)
@@ -1121,7 +1126,17 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
         if (b)
         {
             uint64_t res;
-            if (TargetFriend(d->target, &res)) { e->cancel = 1; g_friendSpared++; return; }
+            int friend_ = TargetFriend(d->target, &res);
+            if (ShieldKind(res))
+            {
+                static unsigned told;
+                KbHers(d->target);
+                e->cancel = 1;
+                g_selfSpared++;
+                if (told++ < 4) Log("her blast on a shield (entity %u, %016llx): spared, and her blasts spare it in the hit code from now on", d->target, (unsigned long long)res);
+                return;
+            }
+            if (friend_) { e->cancel = 1; g_friendSpared++; return; }
             if (!res || !FoeKind(res)) return;   /* not an enemy the kit knows (a wall, a nest, a turret): the row's own hit */
             int stage = g_group[b->group].skill == SK_LINE || g_group[b->group].skill == SK_CONE;   /* (a stage's shells burst small: all they reach) */
             if (!stage && dist > g_group[b->group].radius + 2.0f) { e->cancel = 1; g_cutHits++; return; }   /* the row reaches further than the skill */
@@ -1518,6 +1533,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
     if (s->resource != AVATAR)
     {
+        if (ShieldKind(s->resource)) { KbHers(s->entity); Log("a shield spawned (entity %u, %016llx): her blasts spare it", s->entity, (unsigned long long)s->resource); return; }
         MechSeen(s->resource);
         if (FoeKind(s->resource)) AddFoe(s->entity, s->resource);
         return;
