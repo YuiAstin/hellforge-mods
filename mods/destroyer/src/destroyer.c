@@ -3,8 +3,8 @@
  *
  * She pays for her skills with her own health (never below cost_floor of it), and the less she has the harder she hits.
  *   Annihilation Directive (key_s1, default Z): one key, three stages. A leap to where she aims with a blast where she
- *     lands; if that hits, the key again is a burst of tracer rounds in a line that staggers enemies back; if that hits,
- *     the key again is a burst in a cone with a bigger push. An enemy hit by all three takes a bonus hit. Each stage
+ *     lands; if that hits, the key again is a line of high-explosive rounds walking away from her; if that hits, the
+ *     key again is a cone of them. An enemy hit by all three takes a bonus hit. Each stage
  *     spends a Grenade point.
  *   Doom Barrage (key_s2, default X): a grid of blasts in a box in front of her, spending every Grenade point. +1 Fang.
  *   Party Time (key_s3, default C): a longer leap that blasts the whole path. Grenades back to full; each enemy hit
@@ -18,8 +18,8 @@
  * Her blasts are the game's own explosions (the Orbital Precision Strike's, the 500 kg bomb's for Ammo Frenzy), set off
  * with spawn_explosion; what each deals is the kit's (the damage event: a blast's hits on an enemy within the skill's
  * radius are paid once, at the skill's damage; the rest of the row's hits are cancelled). The line's and the cone's
- * tracers are copies of a bright round (Koleda's Full Speed tracers) with the stage's stagger and push on their damage
- * rows, paid the same way. Her leaps are Lenna's teleport (the game's position setter,
+ * rounds are copies of the Orbital Gatling Barrage's HE shell (as Koleda's Sinveiler fires), aimed at points on the
+ * ground and paid the same way. Her leaps are Lenna's teleport (the game's position setter,
  * the game's fit test).
  *
  * Research credit: the hit-result layout, the hooked functions, the entity and scene-graph reads come from Helldiver
@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.2"
+#define VERSION "0.1.3"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -65,10 +65,10 @@ static int s_mech = 1;                 /* 0: never; 1: a mission where a known A
 static float s_mechRange = 40, s_mechEach = 0.05f, s_mechMax = 0.50f, s_mechHp = 0.10f, s_mechTaken = 0.30f;
 static int s_bossArmour = 4;           /* heavy armour or above: boss-sized (Lemuen's test) */
 static float s_deniedCd = 180, s_deniedSeconds = 2, s_rage = 1;
-static float s_s1Cd = 10, s_s1Leap = 15, s_s1Radius = 5, s_s1Window = 3, s_s1Line = 20, s_s1Cone = 10, s_s1Triple = 2, s_s1Haste = 2, s_hasteMult = 1.3f;
+static float s_s1Cd = 10, s_s1Leap = 15, s_s1Radius = 5, s_s1Window = 3, s_s1Line = 25, s_s1Cone = 12, s_s1Triple = 2, s_s1Haste = 2, s_hasteMult = 1.3f;
 static float s_s1Damage = 600, s_s1Damage1 = 800, s_s1Damage2 = 1000, s_s1Stagger1 = 50, s_s1Stagger2 = 80, s_s1Shield = 1.5f;
-static int s_s1Rounds = 10, s_tracerRound = 226, s_tracerDamage = 125;   /* the stages' tracers: Koleda's (the bright round, the minigun's damage row) */
-static float s_s1Burst = 0.2f, s_s1ConeAngle = 30, s_tracerSpeed = 250;
+static int s_s1Rounds = 12, s_tracerRound = 77, s_tracerDamage = 125;   /* the stages' rounds: the Orbital Gatling Barrage's HE shell (Koleda's he_round), the minigun's damage row */
+static float s_s1Burst = 0.4f, s_s1ConeAngle = 30, s_tracerSpeed = 0;
 static float s_s2Cd = 18, s_s2Length = 15, s_s2Width = 9, s_s2Damage = 400, s_s2Grenade = 0.20f, s_s2Crit = 1.5f, s_s2Step = 0.18f;
 static float s_s3Cd = 90, s_s3Leap = 18, s_s3Width = 9, s_s3Damage = 1500, s_s3Heal = 0.20f, s_s3Step = 0.12f;
 static float s_frenzyRadius = 24, s_frenzyDamage = 12000, s_frenzyRange = 120, s_frenzyCone = 6, s_huntingSeconds = 10, s_huntingTaken = 0.20f, s_frenzyRefund = 5;
@@ -90,7 +90,7 @@ static const KbSetting kSettings[] = {
     KB_F("haste_mult", s_hasteMult, 1, 3), KB_F("s1_damage", s_s1Damage, 0, 100000), KB_F("s1_damage_1", s_s1Damage1, 0, 100000),
     KB_F("s1_damage_2", s_s1Damage2, 0, 100000), KB_F("s1_stagger_1", s_s1Stagger1, 0, 500), KB_F("s1_stagger_2", s_s1Stagger2, 0, 500),
     KB_I("s1_rounds", s_s1Rounds, 1, 40), KB_F("s1_burst", s_s1Burst, 0, 2), KB_F("s1_cone_angle", s_s1ConeAngle, 5, 80),
-    KB_F("tracer_speed", s_tracerSpeed, 0, 2000), KB_I("tracer_round", s_tracerRound, 1, 350), KB_I("tracer_damage", s_tracerDamage, 1, 649),
+    KB_F("s1_round_speed", s_tracerSpeed, 0, 2000), KB_I("s1_round", s_tracerRound, 1, 350), KB_I("s1_round_damage", s_tracerDamage, 1, 649),
     KB_F("s1_shield", s_s1Shield, 0, 10),
     KB_F("s2_cooldown", s_s2Cd, 0, 600), KB_F("s2_length", s_s2Length, 5, 40), KB_F("s2_width", s_s2Width, 3, 30), KB_F("s2_damage", s_s2Damage, 0, 100000),
     KB_F("s2_grenade", s_s2Grenade, 0, 5), KB_F("s2_crit", s_s2Crit, 1, 10), KB_F("s2_step", s_s2Step, 0, 2),
@@ -127,17 +127,18 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "; damage and takes half of that off the damage she takes (0: off).\n"
                "denied_cooldown = %g\ndenied_seconds = %g\nrage = %g\n"
                "; Annihilation Directive: cooldown (from the end of the chain); the leap's reach; its blast's radius; seconds\n"
-               "; the next stage stays open after a hit; how far the line's and the cone's tracers pay; the bonus on an enemy\n"
+               "; the next stage stays open after a hit; how far the line and the cone reach; the bonus on an enemy\n"
                "; all three stages hit (times the cone's damage); the sprint boost after a stage that hits (seconds, times her\n"
-               "; speed); each stage's damage; the line's and the cone's stagger and push on what they hit; seconds without\n"
-               "; knockdown after each stage.\n"
+               "; speed); each stage's damage; the stagger and push of a round of the line and of the cone that hits an\n"
+               "; enemy itself; seconds without knockdown after each stage.\n"
                "s1_cooldown = %g\ns1_leap = %g\ns1_radius = %g\ns1_window = %g\ns1_line = %g\ns1_cone = %g\ns1_triple = %g\ns1_haste = %g\nhaste_mult = %g\n"
                "s1_damage = %g\ns1_damage_1 = %g\ns1_damage_2 = %g\ns1_stagger_1 = %g\ns1_stagger_2 = %g\ns1_shield = %g\n"
-               "; The line and the cone are bursts of tracer rounds: s1_rounds of them within s1_burst s, the cone's spread\n"
-               "; s1_cone_angle degrees to each side. tracer_round: the projectile they copy (226: the bright round of\n"
-               "; Koleda's Sinveiler); tracer_damage: the damage row theirs copies (their damage is the stage's);\n"
-               "; tracer_speed: their m/s (0: the round's own; slower, their trails start at her and not far ahead).\n"
-               "s1_rounds = %d\ns1_burst = %g\ns1_cone_angle = %g\ntracer_round = %d\ntracer_damage = %d\ntracer_speed = %g\n"
+               "; The line and the cone are high-explosive rounds she fires at the ground: s1_rounds of them within s1_burst\n"
+               "; s, the line's walking away from her (as an Eagle's strafing run), the cone's spread s1_cone_angle degrees\n"
+               "; to each side. s1_round: the projectile they copy (77: the Orbital Gatling Barrage's HE shell, as Koleda's\n"
+               "; Sinveiler fires); s1_round_damage: the damage row a direct hit's copies (the damage is the stage's);\n"
+               "; s1_round_speed: their m/s (0: the round's own).\n"
+               "s1_rounds = %d\ns1_burst = %g\ns1_cone_angle = %g\ns1_round = %d\ns1_round_damage = %d\ns1_round_speed = %g\n"
                "; Doom Barrage: cooldown; the box's length and width; damage; each Grenade spent adds s2_grenade; with 3 or\n"
                "; more spent the damage is times s2_crit; seconds between its blasts.\n"
                "s2_cooldown = %g\ns2_length = %g\ns2_width = %g\ns2_damage = %g\ns2_grenade = %g\ns2_crit = %g\ns2_step = %g\n"
@@ -566,10 +567,10 @@ static Burst* BlastAt(const float at[3], float* dist)
     return best;
 }
 
-/* ---- the stages' tracers --------------------------------------------------------------------------------------------
- * The line and the cone are bursts of tracer rounds (as Full Speed's on Koleda's Sinveiler, all at once): copies of a
- * bright round whose damage rows carry the stage's stagger and push. What a round deals is the stage's, paid once an
- * enemy: her projectile hits while a burst is in the air belong to it. */
+/* ---- the stages' rounds ----------------------------------------------------------------------------------------------
+ * The line and the cone are high-explosive rounds: copies of the Orbital Gatling Barrage's shell, whose damage rows
+ * carry the stage's stagger and push for a round that hits an enemy itself. What a round or its burst deals is the
+ * stage's, paid once an enemy. */
 static uint32_t g_tracer[2], g_tracerDamage[2];
 static uint32_t MyUnit(void);
 static int g_tracerReady;
@@ -625,40 +626,59 @@ static void TracerSpeed(int k)
     memset(&was, 0, sizeof was);
     hf->get_live(self, (HfRef)g_tracer[k], &f, &was);
     int ok = hf->set_live(self, (HfRef)g_tracer[k], &f, &v, 0);
-    Log("the %s's tracers (projectile %u): %.0f m/s -> %.0f (%s)", k ? "cone" : "line", g_tracer[k], was.base.number, (double)s_tracerSpeed, ok ? "set" : "refused");
+    Log("the %s's rounds (projectile %u): %.0f m/s -> %.0f (%s)", k ? "cone" : "line", g_tracer[k], was.base.number, (double)s_tracerSpeed, ok ? "set" : "refused");
 }
 typedef struct Volley { int group, left, cone, n; double next, until; float from[3], aim[3], range; } Volley;
 static Volley g_volley = {-1};
+static void OnGround(uint32_t unit, float x, float y, float ref, float out[3]);
+/* A stage's rounds, each at a point on the ground: the line's from near her to its end, one after another (an Eagle's
+ * strafing run, from her); the cone's across its angle, near and far in turn. Each point is kept as a blast of the
+ * stage's group, so what the shell's burst hits there is paid as the stage's and spares her and her friends. */
 static void VolleyFrame(void)
 {
     Volley* v = &g_volley;
     if (v->group < 0 || v->left <= 0 || g_now < v->next) return;
-    uint32_t type = g_tracer[v->cone];
-    int per = s_s1Burst <= 0 ? v->left : 2;
+    uint32_t type = g_tracer[v->cone], unit = MyUnit();
+    float h = sqrtf(v->aim[0] * v->aim[0] + v->aim[1] * v->aim[1]);
+    if (h < 0.05f) { v->left = 0; return; }
+    float fx = v->aim[0] / h, fy = v->aim[1] / h, feet = v->from[2] - 1.4f;
+    int per = s_s1Burst <= 0 ? v->left : v->cone ? 3 : 1;
     for (int k = 0; k < per && v->left > 0; k++)
     {
         int i = v->n - v->left;
-        float h = sqrtf(v->aim[0] * v->aim[0] + v->aim[1] * v->aim[1]);
-        if (h < 0.05f) h = 0.05f;
-        /* the line: a hair of spread; the cone: evenly across its angle, a little up and down */
-        float t = v->n > 1 ? (float)i / (v->n - 1) * 2 - 1 : 0, r = (float)rand() / RAND_MAX * 2 - 1;
-        float a = (v->cone ? t * s_s1ConeAngle : r * 1.2f) * 0.0174533f, c = cosf(a), sn = sinf(a);
-        float dir[3] = {v->aim[0] * c - v->aim[1] * sn, v->aim[0] * sn + v->aim[1] * c, v->aim[2] + (v->cone ? r * 0.04f : 0)};
+        float t = v->n > 1 ? (float)i / (v->n - 1) : 0, r = (float)rand() / RAND_MAX * 2 - 1;
+        float a = v->cone ? (t * 2 - 1) * s_s1ConeAngle * 0.0174533f : 0, c = cosf(a), sn = sinf(a);
+        float dx = fx * c - fy * sn, dy = fx * sn + fy * c;
+        float far_ = v->cone ? v->range * ((i & 1) ? 1.0f : 0.55f) : 3.0f + (v->range - 3.0f) * t;
+        float side = v->cone ? 0 : r * 0.5f, p[3];
+        OnGround(unit, v->from[0] + dx * far_ - dy * side, v->from[1] + dy * far_ + dx * side, feet, p);
+        p[2] -= 0.4f;   /* (OnGround is half a metre up: just over the ground) */
+        float dir[3] = {p[0] - v->from[0], p[1] - v->from[1], p[2] - v->from[2]};
         float n = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+        if (n < 0.5f) { v->left--; continue; }
         for (int j = 0; j < 3; j++) dir[j] /= n;
-        float from[3] = {v->from[0] + dir[0] * 0.9f, v->from[1] + dir[1] * 0.9f, v->from[2]};
+        float from[3] = {v->from[0] + dir[0] * 0.9f, v->from[1] + dir[1] * 0.9f, v->from[2] + dir[2] * 0.9f};
         int r2 = hf->spawn_projectile(self, type, from, dir);
         static unsigned noted;
-        if (noted++ < 6) Log("tracer (projectile %u): answer %d", type, r2);
+        if (noted++ < 6) Log("round (projectile %u): answer %d%s", type, r2, r2 == HF_ACT_WAITING ? " (its packages are loading)" : "");
+        if (r2 == HF_ACT_WAITING && g_now < v->until) { v->next = g_now + 0.05; return; }   /* again in a moment */
+        Burst* b = &g_blast[g_blastNext++ % 64];
+        memcpy(b->p, p, sizeof b->p);
+        b->at = g_now;
+        b->group = v->group;
+        b->reach = 8.0f;
+        unsigned slot = g_ownNext++ % KB_OWN_SLOTS;
+        memcpy(g_ownPos[slot], p, sizeof g_ownPos[slot]);
+        atomic_store(&g_ownMs[slot], GetTickCount64());
         v->left--;
     }
-    v->next = g_now + (s_s1Burst > 0 && v->n > 2 ? s_s1Burst / (v->n / 2.0) : 0);
+    v->next = g_now + (s_s1Burst > 0 && v->n > per ? s_s1Burst / ((double)v->n / per) : 0);
     if (v->left <= 0)
     {
         Group* g = &g_group[v->group];
         g->spawned = 1;
         g->spawnedAt = g_now;
-        v->until = g_now + 0.9;
+        v->until = g_now + 1.2;
     }
 }
 
@@ -797,7 +817,7 @@ static void Annihilation(void)
     float from[3], aim[3];
     if (!StageAim(from, aim)) return;
     int stage = g_chain;               /* 1: the line, 2: the cone */
-    if (!g_tracerReady || !g_tracer[stage - 1]) { Log("Annihilation Directive: its tracer rounds are unavailable (see the start of the log)"); EndChain("no tracers"); return; }
+    if (!g_tracerReady || !g_tracer[stage - 1]) { Log("Annihilation Directive: its rounds are unavailable (see the start of the log)"); EndChain("no tracers"); return; }
     Pay(stage == 1 ? "Annihilation Directive I" : "Annihilation Directive II", s_s1Cost);
     float damage = StageDamage("Annihilation Directive", stage == 1 ? s_s1Damage1 : s_s1Damage2);
     int g = NewGroup(stage == 1 ? SK_LINE : SK_CONE, damage, stage == 1 ? s_s1Line : s_s1Cone);
@@ -807,15 +827,15 @@ static void Annihilation(void)
     v->cone = stage == 2;
     v->n = v->left = s_s1Rounds;
     v->range = stage == 1 ? s_s1Line : s_s1Cone;
+    v->until = g_now + 4;
     memcpy(v->from, from, sizeof v->from);
     TracerSpeed(stage - 1);
     memcpy(v->aim, aim, sizeof v->aim);
-    v->until = g_now + 3;
     g_chainGroup[stage] = g;
     g_chainWait = g;
     g_chain = stage + 1;               /* 3 after the cone: the chain ends when its hit is known */
     Shield(s_s1Shield);
-    if (told++ < 20) Log("Annihilation Directive %s: %d tracer rounds from %.1f %.1f %.1f along %.2f %.2f %.2f, %.0f damage an enemy within %.0f m, %d Grenade(s) left", stage == 1 ? "I (the line)" : "II (the cone)", s_s1Rounds,
+    if (told++ < 20) Log("Annihilation Directive %s: %d HE rounds from %.1f %.1f %.1f along %.2f %.2f %.2f, %.0f damage an enemy within %.0f m, %d Grenade(s) left", stage == 1 ? "I (the line)" : "II (the cone)", s_s1Rounds,
         (double)from[0], (double)from[1], (double)from[2], (double)aim[0], (double)aim[1], (double)aim[2], (double)damage, (double)v->range, g_grenades);
 }
 /* the chain's waiting stage: a hit opens what is next; none in time ends the chain */
@@ -831,7 +851,7 @@ static void ChainFrame(void)
             if (g_chain >= 3) EndChain("the cone landed");
             else g_chainUntil = g_now + s_s1Window;
         }
-        else if ((g->spawned && g_now - g->spawnedAt > (g->skill == SK_LEAP ? 0.7 : 0.9)) || g_now - g->at > 5) EndChain("the stage hit nothing");
+        else if ((g->spawned && g_now - g->spawnedAt > (g->skill == SK_LEAP ? 0.7 : 1.2)) || g_now - g->at > 5) EndChain("the stage hit nothing");
     }
     else if (g_chain && g_now > g_chainUntil) EndChain("the next stage was not used in time");
 }
@@ -1036,20 +1056,21 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
             uint64_t res;
             if (TargetFriend(d->target, &res)) { e->cancel = 1; g_friendSpared++; return; }
             if (!res || !FoeKind(res)) return;   /* not an enemy the kit knows (a wall, a nest, a turret): the row's own hit */
-            if (dist > g_group[b->group].radius + 2.0f) { e->cancel = 1; g_cutHits++; return; }   /* the row reaches further than the skill */
-            PayHit(e, d, &g_group[b->group], res, dist, "blast");
+            int stage = g_group[b->group].skill == SK_LINE || g_group[b->group].skill == SK_CONE;   /* (a stage's shells burst small: all they reach) */
+            if (!stage && dist > g_group[b->group].radius + 2.0f) { e->cancel = 1; g_cutHits++; return; }   /* the row reaches further than the skill */
+            PayHit(e, d, &g_group[b->group], res, dist, stage ? "shell burst" : "blast");
             return;
         }
     }
-    /* a stage's tracers: her projectile hits while its burst is in the air */
+    /* a stage's rounds that hit an enemy themselves: her projectile hits while its burst is in the air */
     if ((d->kind == 0 || d->kind == 1) && g_volley.group >= 0 && g_now < g_volley.until && MineHit(d))
     {
         uint64_t res;
         if (TargetFriend(d->target, &res)) { e->cancel = 1; g_friendSpared++; return; }
         if (!res || !FoeKind(res)) return;
         float dist = sqrtf(Dist2(d->position, g_volley.from));
-        if (dist > g_volley.range + 2.0f) { e->cancel = 1; g_cutHits++; return; }   /* a tracer flies further than the stage pays */
-        PayHit(e, d, &g_group[g_volley.group], res, dist, "tracers");
+        if (dist > g_volley.range + 6.0f) { e->cancel = 1; g_cutHits++; return; }   /* further than the stage reaches */
+        PayHit(e, d, &g_group[g_volley.group], res, dist, "round");
         return;
     }
     if (d->amount <= 0) return;
@@ -1163,7 +1184,7 @@ static void ProjectilesReady(HfMod* mod, HfEvent event, void* user)
         HfDamageInfo* dmg = g_tracerDamage[k] ? (HfDamageInfo*)hf->damage_row(g_tracerDamage[k]) : NULL;
         if (!dmg || !g_tracer[k]) { g_tracer[k] = 0; continue; }
         float want = k ? s_s1Stagger2 : s_s1Stagger1;
-        Log("the %s's tracer: projectile %u, damage row %u: stagger %u -> %.0f, push %u -> %.0f", k ? "cone" : "line", g_tracer[k], g_tracerDamage[k],
+        Log("the %s's round: projectile %u, damage row %u: stagger %u -> %.0f, push %u -> %.0f", k ? "cone" : "line", g_tracer[k], g_tracerDamage[k],
             (unsigned)dmg->stagger, (double)want, (unsigned)dmg->push_force, (double)want);
         dmg->stagger = (__typeof__(dmg->stagger))want;
         dmg->push_force = (__typeof__(dmg->push_force))want;
@@ -1373,7 +1394,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (api->size >= offsetof(HfApi, projectile_row) + sizeof api->projectile_row)
     {
         static const char* const dn[2] = {"yui/destroyer/line_damage", "yui/destroyer/cone_damage"};
-        static const char* const pn[2] = {"yui/destroyer/line_tracer", "yui/destroyer/cone_tracer"};
+        static const char* const pn[2] = {"yui/destroyer/line_round", "yui/destroyer/cone_round"};
         for (int k = 0; k < 2; k++)
         {
             HfDamage dm = {sizeof dm};
@@ -1388,7 +1409,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
             g_tracer[k] = g_tracerDamage[k] ? api->add_projectile(mod, &pr) : 0;
         }
         if (!g_tracer[0] || !g_tracer[1] || api->on(mod, HF_EVENT_PROJECTILES_READY, ProjectilesReady, NULL))
-        { g_tracer[0] = g_tracer[1] = 0; api->log(mod, "the stages' tracers could not be added: Annihilation Directive is the leap alone"); }
+        { g_tracer[0] = g_tracer[1] = 0; api->log(mod, "the stages' rounds could not be added: Annihilation Directive is the leap alone"); }
     }
     else api->log(mod, "this HellForge has no projectile rows: Annihilation Directive is the leap alone");
     /* registered: from here the DLL stays loaded; a failure below leaves it inert */

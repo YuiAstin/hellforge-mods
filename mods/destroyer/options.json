@@ -93,13 +93,13 @@
    "s1_line",
    "Annihilation Directive",
    "Line Range",
-   "Metres: how far the line's tracers pay."
+   "Metres the line of rounds reaches."
   ],
   [
    "s1_cone",
    "Annihilation Directive",
    "Cone Range",
-   "Metres: how far the cone's tracers pay."
+   "Metres the cone of rounds reaches."
   ],
   [
    "s1_triple",
@@ -123,31 +123,31 @@
    "s1_stagger_1",
    "Annihilation Directive",
    "Line Push",
-   "The stagger and push of the line's tracers on what they hit."
+   "The stagger and push of a line round that hits an enemy itself."
   ],
   [
    "s1_stagger_2",
    "Annihilation Directive",
    "Cone Push",
-   "The stagger and push of the cone's tracers on what they hit."
+   "The stagger and push of a cone round that hits an enemy itself."
   ],
   [
    "s1_rounds",
    "Annihilation Directive",
-   "Tracer Rounds",
-   "Tracer rounds in the line's and the cone's burst."
+   "Rounds",
+   "High-explosive rounds in the line and in the cone."
   ],
   [
    "s1_burst",
    "Annihilation Directive",
    "Burst Length",
-   "Seconds the burst takes (0: all at once)."
+   "Seconds the rounds take to all be fired (0: all at once)."
   ],
   [
    "s1_cone_angle",
    "Annihilation Directive",
    "Cone Angle",
-   "Degrees to each side the cone's tracers spread."
+   "Degrees to each side the cone's rounds spread."
   ],
   [
    "s1_shield",
@@ -245,8 +245,8 @@
   "explosion_big",
   "hellbomb_explosion",
   "hellbomb_hold",
-  "tracer_round",
-  "tracer_damage",
-  "tracer_speed"
+  "s1_round",
+  "s1_round_damage",
+  "s1_round_speed"
  ]
 }

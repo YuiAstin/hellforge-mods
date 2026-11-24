@@ -122,9 +122,9 @@ Its own key (proposed, as Ascalon's dash got Z) so a full Fang bar never blocks 
 - **Her blasts' damage** is set in the damage event: an enemy within the skill's radius of a blast is paid once at the
   skill's damage, the row's other hits on enemies are cancelled, and its hits on anything that is not a known enemy
   kind (walls, nests) are left as the row's own.
-- **The line and the cone (0.1.1)** are bursts of tracer rounds, as Full Speed's on Koleda's Sinveiler but all at
-  once: copies of its bright round whose damage rows carry the stage's stagger and push (`s1_stagger_1`,
-  `s1_stagger_2`). They pay out to `s1_line` and `s1_cone` metres (20 and 10).
+- **The line and the cone (0.1.3)** are high-explosive rounds (copies of the Orbital Gatling Barrage's shell, as
+  Koleda's Sinveiler fires) aimed at points on the ground: the line's walk away from her like an Eagle's strafing run,
+  the cone's spread across its angle. 0.1.1's tracer bursts rarely hit more than one enemy.
 - **Doom Barrage (0.1.1)** drops its blasts one after another (`s2_step`), and **Party Time's** chain from where she
   stood to where she landed (`s3_step`).
 - **Ammo Frenzy's key** (`key_frenzy`, default B) is read from destroyer.ini only: the options screen and Mod Bindings
