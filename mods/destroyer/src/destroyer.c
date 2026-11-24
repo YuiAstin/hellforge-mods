@@ -39,7 +39,7 @@
 #include "hellforge_components.h"
 #include "hellforge_content.h"
 
-#define VERSION "0.1.7"
+#define VERSION "0.1.8"
 #define BUILD "25480438"
 
 #define KB_KEYS 4   /* Annihilation Directive, Doom Barrage, Party Time, Ammo Frenzy */
@@ -78,6 +78,9 @@ static float s_frenzyRadius = 24, s_frenzyDamage = 12000, s_frenzyRange = 120, s
 static int s_frenzyRing = 3;
 static int s_rowSmall = 343, s_rowBig = 277;   /* 343: the Orbital Precision Strike's shell; 277: the Eagle 500kg Bomb going off (193 is it landing) */
 static float s_lpClimb = 6, s_lpDrop = 12;
+/* her hands (0.1.8): a grenade launcher's rounds arm at once and home; every weapon is held in one hand */
+static int s_glArming = 1, s_glHoming = 1, s_oneHand = 1, s_oneHandGrip = 70;
+static float s_homingTurn = 120, s_homingCone = 25, s_homingRange = 80, s_homingArm = 4;
 
 /* Every setting: its .ini / options name, variable and range (kitbase/kb_settings.h) */
 static const KbSetting kSettings[] = {
@@ -103,6 +106,8 @@ static const KbSetting kSettings[] = {
     KB_F("frenzy_cone", s_frenzyCone, 1, 45), KB_I("frenzy_ring", s_frenzyRing, 0, 6), KB_F("hunting_seconds", s_huntingSeconds, 0, 120),
     KB_F("hunting_taken", s_huntingTaken, 0, 5), KB_F("frenzy_refund", s_frenzyRefund, 0, 120),
     KB_I("explosion_small", s_rowSmall, 1, 100000), KB_I("explosion_big", s_rowBig, 1, 100000),
+    KB_I("gl_arming", s_glArming, 0, 1), KB_I("gl_homing", s_glHoming, 0, 1), KB_F("homing_turn", s_homingTurn, 1, 1440), KB_F("homing_cone", s_homingCone, 1, 180),
+    KB_F("homing_range", s_homingRange, 1, 500), KB_F("homing_arm", s_homingArm, 0, 100), KB_I("one_handed", s_oneHand, 0, 1), KB_I("one_hand_grip", s_oneHandGrip, 0, 200),
     KB_F("leap_climb", s_lpClimb, 0.5, 30), KB_F("leap_drop", s_lpDrop, 0.5, 50),
     KB_F("hp_mult", s_hpMult, 0.1, 10), KB_F("stamina_mult", s_staminaMult, 0.1, 20), KB_I("hellbomb_on_exhaustion", s_hellbomb, 0, 1),
     KB_I("hellbomb_explosion", s_hellbombRow, 0, 100000), KB_F("hellbomb_hold", s_hellbombHold, 0, 10),
@@ -161,6 +166,12 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
                "frenzy_radius = %g\nfrenzy_damage = %g\nfrenzy_range = %g\nfrenzy_cone = %g\nfrenzy_ring = %d\nhunting_seconds = %g\nhunting_taken = %g\nfrenzy_refund = %g\n"
                "; Her blasts (ExplosionSettings rows): 343 the Orbital Precision Strike's, 277 the Eagle 500kg Bomb going off.\n"
                "explosion_small = %d\nexplosion_big = %d\n"
+               "; Her hands. gl_arming 1: the rounds of a grenade launcher she holds arm as they leave (no arming distance:\n"
+               "; any weapon whose round has one). gl_homing 1: those rounds home on enemies, turning homing_turn degrees a\n"
+               "; second toward one within homing_cone degrees of their way and homing_range m, from homing_arm m out.\n"
+               "; one_handed 1: she holds every weapon in one hand (the game's one-handed mark on what she carries), in the\n"
+               "; pose one_hand_grip (70: the one-handed SMG grip; 1: a pistol's; 0: the weapon's own).\n"
+               "gl_arming = %d\ngl_homing = %d\nhoming_turn = %g\nhoming_cone = %g\nhoming_range = %g\nhoming_arm = %g\none_handed = %d\none_hand_grip = %d\n"
                "; Her leaps land at most leap_climb m higher or leap_drop m lower.\n"
                "leap_climb = %g\nleap_drop = %g\n"
                "; Her body: hp_mult times a Helldiver's health, stamina_mult times her sprint before the bar empties. If her\n"
@@ -178,7 +189,8 @@ fprintf(f, "; Destroyer %s. Keys: a letter, digit, F1-F24, Space, Mouse3, Mouse4
         (double)s_s2Cd, (double)s_s2Length, (double)s_s2Width, (double)s_s2Damage, (double)s_s2Grenade, (double)s_s2Crit, (double)s_s2Step,
         (double)s_s3Cd, (double)s_s3Leap, (double)s_s3Width, (double)s_s3Damage, (double)s_s3Heal, (double)s_s3Step,
         (double)s_frenzyRadius, (double)s_frenzyDamage, (double)s_frenzyRange, (double)s_frenzyCone, s_frenzyRing, (double)s_huntingSeconds, (double)s_huntingTaken, (double)s_frenzyRefund,
-        s_rowSmall, s_rowBig, (double)s_lpClimb, (double)s_lpDrop,
+        s_rowSmall, s_rowBig, s_glArming, s_glHoming, (double)s_homingTurn, (double)s_homingCone, (double)s_homingRange, (double)s_homingArm, s_oneHand, s_oneHandGrip,
+        (double)s_lpClimb, (double)s_lpDrop,
         (double)s_hpMult, (double)s_staminaMult, s_hellbomb, s_hellbombRow, (double)s_hellbombHold);
 }
 
@@ -1118,6 +1130,92 @@ static void DamageDealt(HfDamagePreEvent* e, HfDamageEvent* d, uint32_t me)
     }
 }
 
+/* ---- her hands ----------------------------------------------------------------------------------------------------------
+ * For each weapon she carries, once: its round's arming distance to 0 and a homing rule on it (a round with an arming
+ * distance is a grenade launcher's: ProjectileSettings +0xA0, the GL-21's 7 m, the GL-52's 4), and the game's
+ * one-handed mark on its Equipment record (+0xC4 bit 0, with the grip pose at +0xC0: the One-Handed Test's finding).
+ * All of it is put back when the mission ends or the kit stands by. */
+typedef struct Hand { uint64_t res; uint32_t projectile, homing; uint8_t armed, flagged, gripped; } Hand;
+static Hand g_hand[12];
+static int g_nhand;
+static const HfField kArming = {"ProjectileSettings", 25480438u, 0xA0, 4, HF_TYPE_F32, __LINE__};
+static const HfField kOneHandFlags = {"EquipmentComponentData", 25480438u, 0xC4, 4, HF_TYPE_U32, __LINE__};
+static const HfField kOneHandGrip = {"EquipmentComponentData", 25480438u, 0xC0, 4, HF_TYPE_U32, __LINE__};
+static void HandSet(uint64_t res)
+{
+    if (g_nhand >= 12) return;
+    Hand* h = &g_hand[g_nhand++];
+    memset(h, 0, sizeof *h);
+    h->res = res;
+    HfLiveValue v;
+    HfField proj = HF_FIELD(ProjectileWeapon, projectile), rounds = HF_FIELD(WeaponRounds, primary_projectile);
+    memset(&v, 0, sizeof v);
+    if (hf->get_live(self, res, &proj, &v) && v.base.number > 0 && v.base.number < 100000) h->projectile = (uint32_t)v.base.number;
+    memset(&v, 0, sizeof v);
+    if (!h->projectile && hf->get_live(self, res, &rounds, &v) && v.base.number > 0 && v.base.number < 100000) h->projectile = (uint32_t)v.base.number;
+    /* a grenade launcher's round: armed as it leaves, and homing */
+    memset(&v, 0, sizeof v);
+    if (h->projectile && (s_glArming || s_glHoming) && hf->get_live(self, (HfRef)h->projectile, &kArming, &v) && v.base.number > 0.01 && v.base.number < 1000)
+    {
+        double was = v.base.number;
+        int set = -1;
+        if (s_glArming) { HfValue zero = HF_F32(0); set = hf->set_live(self, (HfRef)h->projectile, &kArming, &zero, 0); h->armed = set != 0; }
+        if (s_glHoming && hf->size >= offsetof(HfApi, stop_shots) + sizeof hf->stop_shots && hf->homing)
+        {
+            HfHoming rule = {sizeof rule};
+            rule.projectile = h->projectile;
+            rule.turn_rate = s_homingTurn;
+            rule.cone = s_homingCone;
+            rule.range = s_homingRange;
+            rule.arm_distance = s_homingArm;
+            rule.aim_height = 1.0f;
+            h->homing = hf->homing(self, &rule);
+        }
+        Log("her hands: weapon %016llx fires a grenade round (projectile %u, arming distance %.1f m): arming %s (answer %d), homing %s (rule %u)", (unsigned long long)res, h->projectile, was,
+            s_glArming ? (h->armed ? "set to 0" : "REFUSED") : "left", set, s_glHoming ? (h->homing ? "on" : "REFUSED") : "off", h->homing);
+    }
+    /* held in one hand */
+    memset(&v, 0, sizeof v);
+    if (s_oneHand && hf->get_live(self, res, &kOneHandFlags, &v))
+    {
+        uint32_t flags = (uint32_t)v.base.number;
+        HfLiveValue g;
+        memset(&g, 0, sizeof g);
+        uint32_t grip = hf->get_live(self, res, &kOneHandGrip, &g) ? (uint32_t)g.base.number : 0;
+        if (flags & 1) { Log("her hands: weapon %016llx is one-handed already (grip %u)", (unsigned long long)res, grip); return; }
+        HfValue f = HF_U32(flags | 1u), gv = HF_U32(s_oneHandGrip);
+        int a = hf->set_live(self, res, &kOneHandFlags, &f, HF_LIVE_SHARED), b = -1;
+        h->flagged = a != 0;
+        if (s_oneHandGrip > 0 && h->flagged) { b = hf->set_live(self, res, &kOneHandGrip, &gv, HF_LIVE_SHARED); h->gripped = b != 0; }
+        Log("her hands: weapon %016llx one-handed: mark %08X -> %08X (answer %d), grip %u -> %u (answer %d; 1 = now, 2 = when it is next equipped)", (unsigned long long)res, flags, flags | 1u, a,
+            grip, h->gripped ? (uint32_t)s_oneHandGrip : grip, b);
+    }
+    else if (s_oneHand) Log("her hands: weapon %016llx has no Equipment record to read: left as it is", (unsigned long long)res);
+}
+static void HandsFrame(void)
+{
+    for (int sel = 1; sel <= 3; sel++)
+    {
+        uint64_t res = g_weaponRes[sel];
+        int known = !res || res == AVATAR;
+        for (int i = 0; i < g_nhand && !known; i++) known = g_hand[i].res == res;
+        if (!known) HandSet(res);
+    }
+}
+static void HandsOff(void)
+{
+    for (int i = 0; i < g_nhand; i++)
+    {
+        Hand* h = &g_hand[i];
+        if (h->armed) hf->set_live(self, (HfRef)h->projectile, &kArming, NULL, 0);
+        if (h->homing) hf->stop_shots(self, h->homing);
+        if (h->gripped) hf->set_live(self, h->res, &kOneHandGrip, NULL, HF_LIVE_SHARED);
+        if (h->flagged) hf->set_live(self, h->res, &kOneHandFlags, NULL, HF_LIVE_SHARED);
+    }
+    if (g_nhand) Log("her hands: %d weapon(s) put back as the game has them", g_nhand);
+    g_nhand = 0;
+}
+
 static void OnKill(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfKillEvent* k = (const HfKillEvent*)info;
@@ -1160,6 +1258,7 @@ static void Reset(const char* why)
         Log("%s: casts %u / %u / %u / %u, %u enemies paid by her blasts, %u hits of theirs cut (out of radius or paid already), %u on friends and %u on her spared, %u Denied Exit, %u knockdowns stopped",
             why, g_casts[0], g_casts[1], g_casts[2], g_casts[3], g_paidHits, g_cutHits, g_friendSpared, g_selfSpared, g_denied, g_knockdowns);
     Speed(0);
+    HandsOff();
     Body(start);
     if (start && s_hellbomb && s_hellbombRow == 125)
         if (!hf->load_package(self, UINT64_C(0x346D785D6CA13FF4))) Log("the Hellbomb's package could not be loaded ahead");  /* loadout/hellbomb_backpack */
@@ -1311,6 +1410,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (inMission != g_inMission) { Reset(inMission ? "mission start" : "mission end"); g_inMission = inMission; }
     if (!g_inMission || !kb_kit_on) return;   /* (standing by: another kit is picked) */
     MyItems();
+    HandsFrame();
     static int prev[4];
     int focused = Focused();
     int mods = focused ? ((GetAsyncKeyState(VK_SHIFT) & 0x8000) ? KM_SHIFT : 0) | ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? KM_CTRL : 0) |
@@ -1369,6 +1469,7 @@ static const KbOption kOptions[] = {
     {"s2_cooldown", &s_s2Cd, NULL}, {"s2_damage", &s_s2Damage, NULL}, {"s3_cooldown", &s_s3Cd, NULL}, {"s3_leap", &s_s3Leap, NULL}, {"s3_damage", &s_s3Damage, NULL},
     {"s3_heal", &s_s3Heal, NULL}, {"frenzy_damage", &s_frenzyDamage, NULL}, {"frenzy_radius", &s_frenzyRadius, NULL}, {"hunting_seconds", &s_huntingSeconds, NULL},
     {"denied_cooldown", &s_deniedCd, NULL}, {"offense_max", NULL, &s_offenseMax}, {"mech", NULL, &s_mech},
+    {"gl_arming", NULL, &s_glArming}, {"gl_homing", NULL, &s_glHoming}, {"one_handed", NULL, &s_oneHand},
     {"hp_mult", &s_hpMult, NULL}, {"stamina_mult", &s_staminaMult, NULL}, {"hellbomb_on_exhaustion", NULL, &s_hellbomb},
 };
 static void OptionAfter(const char* name, int changed)

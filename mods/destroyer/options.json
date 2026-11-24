@@ -2,7 +2,15 @@
  "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
  "when": {
   "s1_stagger_1": "restart",
-  "s1_stagger_2": "restart"
+  "s1_stagger_2": "restart",
+  "gl_arming": "mission",
+  "gl_homing": "mission",
+  "one_handed": "mission",
+  "homing_turn": "mission",
+  "homing_cone": "mission",
+  "homing_range": "mission",
+  "homing_arm": "mission",
+  "one_hand_grip": "mission"
  },
  "advanced": [
   [
@@ -256,6 +264,36 @@
    "Ammo Frenzy",
    "Cooldown Refund",
    "Seconds it takes off her other cooldowns."
+  ],
+  [
+   "homing_turn",
+   "Her Hands",
+   "Homing Turn Rate",
+   "Degrees a second a homing grenade turns."
+  ],
+  [
+   "homing_cone",
+   "Her Hands",
+   "Homing Cone",
+   "Degrees off its way a homing grenade looks for a target."
+  ],
+  [
+   "homing_range",
+   "Her Hands",
+   "Homing Range",
+   "Metres a homing grenade looks for a target."
+  ],
+  [
+   "homing_arm",
+   "Her Hands",
+   "Homing From",
+   "Metres a grenade flies before it starts to steer."
+  ],
+  [
+   "one_hand_grip",
+   "Her Hands",
+   "One-Handed Grip",
+   "The pose she holds a weapon in: 70 the one-handed SMG grip, 1 a pistol's, 0 the weapon's own."
   ],
   [
    "leap_climb",
