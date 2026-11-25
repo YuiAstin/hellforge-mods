@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.equip-probe",
+  "name": "Equip Probe (research)",
+  "version": "0.1.0",
+  "description": "Research only, for W's King of Hearts: can a mod put a GL-21 in your Helldiver's hands, fill it to 40 rounds and give your own weapon back? Logs the game's weapon switches; Insert / Home / End / Delete run the steps (the log lists them). Solo or host. Turn off when done.",
+  "gameplay": false,
+  "code": {
+    "dll": "equip_probe.dll",
+    "sdk": 16
+  }
+}
