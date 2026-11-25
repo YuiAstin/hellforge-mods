@@ -781,7 +781,7 @@ local function mines_draw(d)
                         local r = math.max(9, math.min(22, 200 / math.max(dist, 1))) * sc
                         if lit then r = r * (1.15 + 0.15 * math.sin(mk_t * 20)) end
                         d:image(MINE_ICON, sx - r, sy - r, 2 * r, 2 * r, {z = 6, colours = {r = lit and {255, 200, 40, 255} or {224, 58, 58, 255}, g = {255, 255, 255, 255}},
-                            colour = {255, 255, 255, 240}})
+                            colour = lit and {255, 215, 50, 255} or {255, 255, 255, 240}})
                         if dist < 60 then d:text(('%dm'):format(math.floor(dist + 0.5)), sx, sy + r + 2 * sc, {size = 12 * sc, colour = lit and {255, 230, 80, 255} or {255, 255, 255, 235}, z = 6, align = 'center'}) end
                     else
                     local tk = math.max(1, 2 * sc)
