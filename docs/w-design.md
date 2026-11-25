@@ -50,6 +50,17 @@ Source kit: W, Sniper (Artilleryman), at rank 10 of each skill. Her module is le
 - King of Hearts' damage: 3.5 times the launcher's reads right in play (Yui).
 - Her own blasts spare her and what she carries: Destroyer's handling.
 
+## Built, not yet played (0.3.0)
+
+- Artilleryman: a shot of hers that lands on an enemy sets off a small blast there (the PLAS-1 Scorcher's explosion by
+  default), not while the launcher is out nor within 5 m of her. A blast, not Ascalon's area strikes: it is an
+  Artilleryman's.
+- Insult to Injury: 1.18 times her damage on an enemy her skills hold.
+- Ambush, both triggers: 60% of the hits on her are cancelled, and enemies within 80 m that do not sense her at the
+  moment forget her (their target and their perception entries of her: Ascalon's forgetting).
+- The mine census: what an MD-6 Anti-Personnel Minefield's deployer spawns, and its mines' explosion types, logged, to
+  find the game's own mine for Jack in the Box.
+
 ## Open
 
 - How long the freeze lasts (3 s to start). An enemy already held and then killed by a later round.

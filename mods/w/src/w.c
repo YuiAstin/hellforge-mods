@@ -16,6 +16,12 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.3.0: her three passives. Artilleryman: a shot of hers that lands on an enemy also sets off a small blast there
+ * (splash_explosion; not while the launcher is out, nor within 5 m of her). Insult to Injury: an enemy her skills hold
+ * takes insult_mult times her damage. Ambush, in two versions to play (ambush 1: on ambush_after s after she lands;
+ * 2: on after that long without firing): ambush_miss of the hits on her miss, and enemies that do not sense her at the
+ * moment forget her (Ascalon's forgetting, Lost Contact's records). And, for Jack in the Box: what an MD-6 Anti-Personnel
+ * Minefield spawns and what its mines' blasts are is logged (call one in once): the game's own mine is to be found.
  * 0.2.1: an enemy a round kills dies as the game has it; the hold takes only those the blast left alive (Yui).
  * Solo or host. 0.1.2: in the character picker (the roster). 0.2.0: her page on the options screen (F9): the skill's
  * numbers and its key, through the kit base's settings and options. Research: HellForge's mappings and HD2Runtime by SkyeShade; entity, unit
@@ -36,7 +42,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.2.1"
+#define VERSION "0.3.0"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -54,15 +60,21 @@ KB_OPTIONS_EXPORTS(w)
 /* ---- settings ---------------------------------------------------------------------------------------------------- */
 static int s_rounds = 40, s_rareMax = 4;
 static float s_damage = 3.5f, s_cooldown = 16, s_freezeSeconds = 3, s_freezeRadius = 5;
+static float s_insult = 1.18f, s_splashEvery = 0.15f, s_ambushAfter = 10, s_ambushMiss = 0.6f, s_ambushRange = 80;
+static int s_splash = 1, s_splashExplosion = HF_EXPLOSION_PLAS1_SCORCHER_IMPACT, s_ambush = 1;
 static int s_optionsKey = 0x78;        /* options_key: the virtual key that opens the options screen (120: F9; 0: none) */
 static const KbSetting kSettings[] = {
     KB_I("koh_rounds", s_rounds, 1, 200), KB_F("koh_damage", s_damage, 0.1, 50), KB_F("koh_cooldown", s_cooldown, 0, 600),
     KB_F("koh_freeze_seconds", s_freezeSeconds, 0, 30), KB_F("koh_freeze_radius", s_freezeRadius, 0.5, 30), KB_I("rare_max", s_rareMax, 1, 64),
+    KB_F("insult_mult", s_insult, 1, 5), KB_I("splash", s_splash, 0, 1), KB_I("splash_explosion", s_splashExplosion, 0, 2000), KB_F("splash_every", s_splashEvery, 0.02, 5),
+    KB_I("ambush", s_ambush, 0, 2), KB_F("ambush_after", s_ambushAfter, 0, 120), KB_F("ambush_miss", s_ambushMiss, 0, 1), KB_F("ambush_range", s_ambushRange, 5, 300),
     KB_I("options_key", s_optionsKey, 0, 255),
 };
 static const KbOption kOptions[] = {
     {"koh_rounds", NULL, &s_rounds}, {"koh_damage", &s_damage, NULL}, {"koh_cooldown", &s_cooldown, NULL}, {"koh_freeze_seconds", &s_freezeSeconds, NULL},
     {"koh_freeze_radius", &s_freezeRadius, NULL}, {"rare_max", NULL, &s_rareMax},
+    {"insult_mult", &s_insult, NULL}, {"splash", NULL, &s_splash}, {"splash_explosion", NULL, &s_splashExplosion}, {"splash_every", &s_splashEvery, NULL},
+    {"ambush", NULL, &s_ambush}, {"ambush_after", &s_ambushAfter, NULL}, {"ambush_miss", &s_ambushMiss, NULL}, {"ambush_range", &s_ambushRange, NULL},
 };
 #define s_key s_keys[0]
 #include "kit_options.h"   /* kOpRows: the options screen's rows (kitbase/kb_options.h) */
@@ -72,7 +84,7 @@ static const KbOption kOptions[] = {
 typedef struct WTarget { uint32_t entity, unit; uint64_t object; float pos[3]; uint32_t pad; } WTarget;
 typedef struct WState
 {
-    uint32_t version, seq, active, skill, count, rare_max;   /* skill: 0 ready, 1 on, 2 cooling down, 3 busy */
+    uint32_t version, seq, active, skill, count, rare_max;   /* skill: its low byte 0 ready, 1 on, 2 cooling down, 3 busy; bit 8: Ambush is on */
     uint32_t player_unit, in_mission;
     uint64_t player_object;
     float player_pos[3], value;                               /* value: the rounds left, or the seconds of cooldown */
@@ -221,6 +233,9 @@ static void FreezeFrame(void)
     if (changed) Publish();
 }
 
+typedef struct Boom { volatile uint32_t type, source; volatile float pos[3]; } Boom;
+static Boom g_boom[32];
+static atomic_uint g_boomHead;
 /* ---- her rounds' blasts: seen as they are asked for, on whatever thread ------------------------------------------------ */
 static atomic_uint g_gl;                    /* the launcher the skill made (0: none) */
 typedef struct Blast { volatile float pos[3]; volatile uint64_t ms; } Blast;
@@ -228,11 +243,26 @@ typedef struct Blast { volatile float pos[3]; volatile uint64_t ms; } Blast;
 static Blast g_blast[BLASTS];
 static atomic_uint g_blastHead;
 static unsigned g_blastTail, g_blastSeen, g_scaled;
+static int g_ambushOn;
+static uint32_t g_rand = 0x2545F491u;
+static unsigned g_missed, g_insulted, g_splashes, g_forgot;
+static uint64_t g_dealtMs, g_splashMs;
+static float g_splashAt[8][3];
+static int g_nsplash;
+enum { K_IDLE, K_PACKAGE, K_WAITGL, K_PUTAWAY, K_TAKE, K_ASK, K_HELD, K_LETGO, K_REMOVE, K_WAITS };
+static int g_k;
 static atomic_ullong g_skillMs;             /* the last moment the skill was on (her rounds still fly a little after) */
 static void OnExplosion(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfExplosionEvent* x = (const HfExplosionEvent*)info;
     uint32_t gl = atomic_load(&g_gl);
+    if (x->source && x->source != gl)
+    {
+        unsigned bh = atomic_load(&g_boomHead);
+        Boom* bm = &g_boom[bh % 32];
+        bm->type = x->type; bm->source = x->source; bm->pos[0] = x->position[0]; bm->pos[1] = x->position[1]; bm->pos[2] = x->position[2];
+        atomic_store(&g_boomHead, bh + 1);
+    }
     if (!gl || x->source != gl) return;
     unsigned h = atomic_load(&g_blastHead);
     Blast* b = &g_blast[h % BLASTS];
@@ -245,18 +275,40 @@ static void OnExplosion(HfMod* mod, const HfEventInfo* info, void* user)
 static void OnDamagePre(HfMod* mod, HfDamagePreEvent* ev, void* user)
 {
     HfDamageEvent* d = &ev->damage;
-    if (ev->cancel || d->amount <= 0 || (d->kind != 4 && d->kind != 5 && d->kind != 0) || !d->target || d->target == atomic_load(&g_avatar)) return;
-    uint64_t now = GetTickCount64();
-    if (now - atomic_load(&g_skillMs) > 4000) return;
-    for (int i = 0; i < BLASTS; i++)
+    uint32_t me = atomic_load(&g_avatar);
+    if (ev->cancel || d->amount <= 0 || !d->target || !g_inMission || !kb_kit_on) return;
+    if (d->target == me)
     {
-        const Blast* b = &g_blast[i];
-        float p[3] = {b->pos[0], b->pos[1], b->pos[2]};
-        if (!b->ms || now - b->ms > 250 || Dist2(p, d->position) > 12.0f * 12.0f) continue;
-        double a = (double)d->amount * (double)s_damage;
-        d->amount = a > 2147483647.0 ? 2147483647 : (int32_t)a;
-        g_scaled++;
+        /* Ambush: a hit on her misses (not what burns, bleeds or drowns her) */
+        if (g_ambushOn && s_ambushMiss > 0 && (d->kind == 0 || d->kind == 1 || d->kind == 3 || d->kind == 4 || d->kind == 5 || d->kind == 6))
+        {
+            g_rand = g_rand * 1664525u + 1013904223u;
+            if ((float)(g_rand >> 8) / 16777216.0f < s_ambushMiss) { ev->cancel = 1; g_missed++; }
+        }
         return;
+    }
+    uint64_t now = GetTickCount64();
+    int hers = 0, blast = 0;
+    if ((d->kind == 4 || d->kind == 5 || d->kind == 0) && now - atomic_load(&g_skillMs) <= 4000)
+        for (int i = 0; i < BLASTS && !blast; i++)
+        {
+            const Blast* b = &g_blast[i];
+            float p[3] = {b->pos[0], b->pos[1], b->pos[2]};
+            blast = b->ms && now - b->ms <= 250 && Dist2(p, d->position) <= 12.0f * 12.0f;
+        }
+    double mult = 1;
+    if (blast) { mult *= (double)s_damage; g_scaled++; hers = 1; }
+    else hers = MineHit(d);
+    if (!hers) return;
+    g_dealtMs = now;
+    /* Insult to Injury: what her skills hold takes more from her */
+    for (int k = 0; k < TARGETS && s_insult > 1; k++) if (g_frozen[k].entity == d->target) { mult *= (double)s_insult; g_insulted++; break; }
+    if (mult != 1) { double a = (double)d->amount * mult; d->amount = a > 2147483647.0 ? 2147483647 : (int32_t)a; }
+    /* Artilleryman: a shot that lands also bursts there (asked for from the frame) */
+    if (!blast && s_splash && (d->kind == 0 || d->kind == 1 || d->kind == 3) && g_k != K_HELD && g_nsplash < 8 && now - g_splashMs >= (uint64_t)(s_splashEvery * 1000.0f))
+    {
+        g_splashMs = now;
+        memcpy(g_splashAt[g_nsplash++], d->position, 12);
     }
 }
 static void BlastFrame(void)
@@ -364,8 +416,6 @@ static void FillUp(uint32_t weapon)
     }
     if (refill) for (int i = 0; i < 6; i++) refill(0, weapon, 1.0f);
 }
-enum { K_IDLE, K_PACKAGE, K_WAITGL, K_PUTAWAY, K_TAKE, K_ASK, K_HELD, K_LETGO, K_REMOVE, K_WAITS };
-static int g_k;
 static double g_kAt, g_madeAt, g_readyAt, g_awaySince;
 static uint32_t g_kSel, g_kOld, g_kNew;     /* her selection at the start; the support weapon she had; its replacement */
 static uint64_t g_kOldRes;
@@ -508,10 +558,187 @@ static void SkillFrame(void)
     }
 }
 
+/* ---- the passives' frame: Artilleryman's bursts, and Ambush ------------------------------------------------------- */
+static uintptr_t Behaviour(uint32_t e)
+{
+    uintptr_t m = Pointer(game + 0x3326740), recs;
+    uint32_t i, count;
+    if (!m || !Lookup(m + 0x40, e, 1048576, &i) || !ReadAt(m + 0x20, &count, 4) || i >= count || i >= 16384 || !(recs = Pointer(m + 0x60))) return 0;
+    return recs + 0x1F8ull * i;
+}
+static uintptr_t Perception(uint32_t e)
+{
+    uintptr_t m = Pointer(game + 0x3326548), recs;
+    uint32_t i;
+    if (!m || !Lookup(m + 0x30, e, 1048576, &i) || i >= 16384 || !(recs = Pointer(m + 0x50))) return 0;
+    return recs + 0x13F8ull * i;
+}
+static const struct { uint32_t count, entries; } kLists[3] = {{0x310, 0x318}, {0x818, 0x820}, {0xD20, 0xD28}};
+static const uint32_t kSingles[3] = {0x1228, 0x1278, 0x12C8};
+static uint32_t SensedIn(uintptr_t pr, uint32_t me)
+{
+    uint32_t bits = 0;
+    for (int l = 0; l < 3; l++)
+    {
+        uint32_t c = 0;
+        uint8_t ent[0x50];
+        if (!ReadAt(pr + kLists[l].count, &c, 4) || c > 16) continue;
+        for (uint32_t k = 0; k < c; k++)
+            if (ReadAt(pr + kLists[l].entries + 0x50u * k, ent, sizeof ent) && Word(ent) == me) bits |= Word(ent + 0x4C);
+    }
+    return bits;
+}
+static int ForgetIn(uintptr_t pr, uint32_t me)
+{
+    int n = 0;
+    for (int l = 0; l < 3; l++)
+    {
+        uint32_t c = 0;
+        if (!ReadAt(pr + kLists[l].count, &c, 4) || c > 16 || !c) continue;
+        uint8_t list[16 * 0x50];
+        if (!ReadAt(pr + kLists[l].entries, list, 0x50u * c)) continue;
+        uint32_t keep = 0;
+        for (uint32_t k = 0; k < c; k++)
+            if (Word(list + 0x50u * k) != me) { if (keep != k) memmove(list + 0x50u * keep, list + 0x50u * k, 0x50); keep++; }
+        if (keep == c) continue;
+        if (keep && hf->write(pr + kLists[l].entries, list, 0x50u * keep)) continue;
+        if (hf->write(pr + kLists[l].count, &keep, 4)) continue;
+        n += (int)(c - keep);
+    }
+    for (int s = 0; s < 3; s++)
+    {
+        uintptr_t at = pr + kSingles[s];
+        uint32_t id = 0, used = 0;
+        static const uint32_t zero = 0;
+        if (ReadAt(at, &id, 4) && id == me && ReadAt(at + 0x48, &used, 4) && used && !hf->write(at + 0x48, &zero, 4)) n++;
+    }
+    return n;
+}
+/* Ambush's other half: an enemy within ambush_range m that does not sense her at this moment forgets her (its target
+ * and its entries of her); one that senses her keeps her */
+static void ForgetPass(void)
+{
+    uint32_t me = atomic_load(&g_avatar);
+    float mp[3], p[3];
+    if (!me || !PlayerPose(mp, NULL)) return;
+    for (int j = 0; j < FOES; j++)
+    {
+        uint32_t id = g_foe[j];
+        uint8_t d[24], b[0xA0];
+        if (!id || !Descriptor(id, d) || Quad(d) != g_foeRes[j] || !UnitNode(Word(d + 12), 0, p) || Dist2(p, mp) > s_ambushRange * s_ambushRange) continue;
+        uintptr_t br = Behaviour(id), pr = Perception(id), sq = 0;
+        uint32_t perceiver = 0, bits = 0;
+        int target = 0, had = 0;
+        if (br && ReadAt(br, b, sizeof b)) { perceiver = Word(b + 0x68); target = Word(b + 0x18) == me; }
+        if (perceiver && perceiver != id) sq = Perception(perceiver);
+        if (pr) bits |= SensedIn(pr, me);
+        if (sq) bits |= SensedIn(sq, me);
+        if (bits) continue;
+        if (target)
+        {
+            static const uint32_t z = 0;
+            static const uint64_t z8 = 0;
+            hf->write(br + 0x18, &z, 4); hf->write(br + 0x78, &z, 4); hf->write(br + 0x98, &z8, 8);
+            had = 1;
+        }
+        if (pr && ForgetIn(pr, me)) had = 1;
+        if (sq && ForgetIn(sq, me)) had = 1;
+        g_forgot += (unsigned)had;
+    }
+}
+static double g_landAt, g_firedAt, g_forgetAt;
+static atomic_int g_landed;
+static void PassiveFrame(void)
+{
+    uint32_t me = atomic_load(&g_avatar);
+    float mp[3];
+    /* Artilleryman's bursts */
+    int n = g_nsplash;
+    g_nsplash = 0;
+    for (int i = 0; i < n && hf->spawn_explosion && PlayerPose(mp, NULL); i++)
+    {
+        if (Dist2(g_splashAt[i], mp) < 5.0f * 5.0f) continue;
+        hf->spawn_explosion(self, (uint32_t)s_splashExplosion, g_splashAt[i]);
+        g_splashes++;
+    }
+    /* Ambush */
+    if (atomic_exchange(&g_landed, 0)) g_landAt = g_firedAt = g_now;
+    static uint32_t lastWeapon;
+    static int lastRounds = -1;
+    uintptr_t rec = InventoryRecord(me);
+    uint32_t slots[8] = {0};
+    if (rec && ReadAt(rec, slots, sizeof slots) && slots[7] >= 1 && slots[7] <= 3)
+    {
+        uint32_t w = slots[slots[7] - 1];
+        int r = Rounds(w);
+        if (w == lastWeapon && r >= 0 && lastRounds >= 0 && r < lastRounds) g_firedAt = g_now;
+        lastWeapon = w; lastRounds = r;
+    }
+    if (g_dealtMs && GetTickCount64() - g_dealtMs < 200) g_firedAt = g_now;
+    int was = g_ambushOn;
+    g_ambushOn = g_alive && (s_ambush == 1 ? g_now - g_landAt >= s_ambushAfter : s_ambush == 2 ? g_now - g_firedAt >= s_ambushAfter : 0);
+    static unsigned told;
+    if (g_ambushOn != was && told++ < 30)
+        Log(g_ambushOn ? "Ambush on (%s)" : "Ambush off (%s): %u hits on her missed, %u enemies made to forget her so far", s_ambush == 1 ? "after landing" : "not firing", g_missed, g_forgot);
+    if (g_ambushOn && g_now >= g_forgetAt) { g_forgetAt = g_now + 0.5; ForgetPass(); }
+}
+
+/* ---- for Jack in the Box: what a minefield spawns (logged; call an MD-6 Anti-Personnel Minefield in once) -------------- */
+#define CENSUS 64
+static uint32_t g_cEnt[CENSUS];
+static uint64_t g_cRes[CENSUS];
+static atomic_uint g_cHead;
+static unsigned g_cTail;
+static uint64_t g_mineKinds[24];
+static int g_nMineKinds;
+static double g_censusUntil;
+static unsigned g_boomTail;
+static void CensusFrame(void)
+{
+    static const char* names[] = {"Health", "Explosive", "Projectile", "Behavior", "AiEnemy", "Interactable", "Throwable", "Hazard", "Trigger", "Sensor", "Mount"};
+    for (unsigned head = atomic_load(&g_cHead); g_cTail != head; g_cTail++)
+    {
+        uint32_t e = g_cEnt[g_cTail % CENSUS];
+        uint64_t r = g_cRes[g_cTail % CENSUS];
+        if (r == HF_ENTITY_MD6_ANTIPERSONNEL_MINEFIELD)
+        {
+            g_censusUntil = g_now + 25;
+            Log("mine census: an MD-6 Anti-Personnel Minefield deployer spawned (entity %u): what spawns in the next 25 s is listed", e);
+            continue;
+        }
+        if (g_now > g_censusUntil || FoeKind(r) || r == AVATAR) continue;
+        int known = 0;
+        for (int i = 0; i < g_nMineKinds; i++) known |= g_mineKinds[i] == r;
+        if (known || g_nMineKinds >= 24) continue;
+        g_mineKinds[g_nMineKinds++] = r;
+        char kinds[200] = "", name[64];
+        uint32_t st;
+        for (unsigned i = 0; i < sizeof names / sizeof *names; i++)
+        {
+            snprintf(name, sizeof name, "%sComponentData", names[i]);
+            if (hf->component_record(name, r, &st)) { strcat(kinds, " "); strcat(kinds, names[i]); }
+        }
+        Log("mine census: spawned after the deployer: entity %u, resource %016llx:%s", e, (unsigned long long)r, kinds[0] ? kinds : " (none of the listed components)");
+    }
+    for (unsigned head = atomic_load(&g_boomHead); g_boomTail != head; g_boomTail++)
+    {
+        const Boom* b = &g_boom[g_boomTail % 32];
+        uint64_t r = ResOf(b->source);
+        static unsigned told;
+        for (int i = 0; i < g_nMineKinds && told < 20; i++)
+            if (g_mineKinds[i] == r) { told++; Log("mine census: explosion type %u from entity %u (resource %016llx) at %.1f %.1f %.1f", b->type, b->source, (unsigned long long)r, (double)b->pos[0], (double)b->pos[1], (double)b->pos[2]); break; }
+    }
+}
+
 /* ---- events and the frame ---------------------------------------------------------------------------------------- */
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
+    {
+        unsigned ch = atomic_load(&g_cHead);
+        g_cEnt[ch % CENSUS] = s->entity; g_cRes[ch % CENSUS] = s->resource;
+        atomic_store(&g_cHead, ch + 1);
+    }
     if (s->resource != AVATAR)
     {
         uint32_t stride;
@@ -537,6 +764,7 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
     {
         if (p->entity && p->entity != atomic_load(&g_avatar)) { atomic_store(&g_avatar, p->entity); g_avatarNet = 0; }
         g_alive = 1;
+        atomic_store(&g_landed, 1);
     }
     else g_alive = 0;
 }
@@ -573,11 +801,14 @@ static void Tick(HfMod* mod, float dt, void* user)
         else if (g_k == K_IDLE && g_now >= g_readyAt) Start();
     }
     prev = down;
+    if (!NetOk(g_avatarNet)) LearnNet();
     SkillFrame();
     BlastFrame();
     FreezeFrame();
+    PassiveFrame();
+    CensusFrame();
     if (!g_alive) FreezeClear("she is down");
-    g_state.skill = g_k == K_HELD ? 1u : g_k != K_IDLE ? 3u : g_now < g_readyAt ? 2u : 0u;
+    g_state.skill = (g_k == K_HELD ? 1u : g_k != K_IDLE ? 3u : g_now < g_readyAt ? 2u : 0u) | (g_ambushOn ? 0x100u : 0u);
     g_state.value = g_k == K_HELD ? (float)Rounds(atomic_load(&g_gl)) : g_now < g_readyAt ? (float)(g_readyAt - g_now) : 0;
 }
 static void Pin(void** slot, uintptr_t at, const char* pattern, const char* what)
