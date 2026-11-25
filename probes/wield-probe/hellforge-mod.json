@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.wield-probe",
   "name": "Wield Probe (research)",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Research only, for W's King of Hearts: can a mod put a GL-21 in your Helldiver's hands, fill it to 40 rounds and give your own weapon back? Logs the game's weapon switches; In a mission, Insert puts a GL-21 with 40 rounds in place of the weapon in your hands; Delete gives your weapon back. Solo or host. Turn off when done.",
   "gameplay": false,
   "code": {

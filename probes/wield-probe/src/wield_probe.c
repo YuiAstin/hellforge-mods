@@ -29,6 +29,9 @@
  *                 into the slot of the weapon in her hand (primary, secondary or support) with the same pickup, which
  *                 drops that weapon; Delete takes that weapon back into the slot the same way (which drops the
  *                 GL-21), removes the GL-21 and refills her weapon. 0.4.0's way D never ran: no Insert reached it
+ *   0.5.1: way E held: she took the pose and fired, slot and carry calls as a pickup by hand makes them, but the
+ *                 GL-21 stayed where it was spawned. It was taken in the very frame it was asked for, before its
+ *                 spawn had finished; now it is taken 0.75 s after it is made
  *   Ctrl+Home     your inventory record, your wield slots, the held weapon's magazine
  *   Shift+Insert  loads the GL-21's package and spawns a GL-21 at your feet (RequestEntitySpawn)
  *   Ctrl+Insert   way A: wields it straight into the slot your last observed Wield used (the inventory is untouched)
@@ -55,7 +58,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.5.0"
+#define VERSION "0.5.1"
 #include "kitbase/kb_core.h"
 
 #define GL21 HF_ENTITY_GL21_GRENADE_LAUNCHER
@@ -225,6 +228,7 @@ static int HaveGl(const char* key)
     if (!g_gl || ResOf(g_gl) != GL21) { Log("%s: there is no spawned GL-21 (Shift+Insert first)", key); g_gl = 0; return 0; }
     return 1;
 }
+static double g_madeAt;                     /* when the GL-21 was made: it is taken 0.75 s later */
 static void SpawnNow(void)
 {
     HfFn_RequestEntitySpawn spawn = hf_fn_RequestEntitySpawn(self);
@@ -245,6 +249,7 @@ static void SpawnNow(void)
     Log("Shift+Insert: asking for a GL-21 at %.1f %.1f %.1f ...", (double)info.pose[12], (double)info.pose[13], (double)info.pose[14]);
     spawn(&out, GL21, &info);
     g_gl = out && out != UINT32_MAX ? out : 0;
+    g_madeAt = g_now;
     if (g_gl) Log("Shift+Insert: made entity %u (%s). Is it on the ground by you? Can you pick it up by hand?", g_gl, ResOf(g_gl) == GL21 ? "reads as a GL-21" : "does not read as a GL-21 yet");
     else Log("Shift+Insert: no entity came back (out %u)", out);
 }
@@ -443,7 +448,7 @@ static void AutoFrame(void)
     if (g_give && g_now >= g_giveAt && !g_wantSpawn)
     {
         if (!g_gl || ResOf(g_gl) != GL21) { if (g_now > g_giveAt + 5) { g_give = 0; Log("Insert: no GL-21 came in 5 s: given up"); } }
-        else { g_give = 0; WieldD(); Fill(); g_lastRounds = -1; }
+        else if (g_now >= g_madeAt + 0.75) { g_give = 0; WieldD(); Fill(); g_lastRounds = -1; }
     }
     if (g_back && g_now >= g_backAt)
     {
