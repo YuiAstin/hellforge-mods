@@ -16,6 +16,16 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.4.0: Jack in the Box (X), with mines the kit keeps itself (the game's own mine is not found yet: a minefield's
+ * deployer spawns nothing mine-like through the spawn event). jib_charges charges, one back every jib_charge_every s; a
+ * press spends one and lays one mine under the living enemy nearest her aim line in a box jib_width m wide and
+ * jib_length m long from her, or at a random spot in the box (at her height: the ground there is not looked for yet).
+ * An enemy within jib_trigger m sets it off after jib_delay s: the game's explosion jib_explosion (the GL-21's), its
+ * damage jib_damage times, and the hold for jib_freeze s within jib_freeze_radius m. At most jib_max out, the oldest
+ * goes first; one lasts jib_seconds. Where a mine lies is shown by an entity spawned bare there (jib_marker, default 3: 1 a G/40-K
+ * Melta Mine, 2 a TM-1 Lure Mine, 3 the enemy's contact mine, 0 none): a bare-spawned weapon lay inert, and whether
+ * these do is part of the probing (a marker's own blast is logged). The mine census now lists every explosion for
+ * three minutes after a minefield's deployer spawns, with what it came from.
  * 0.3.1: Artilleryman never went off (her Helldiver's network id was never learned, so no hit read as hers): it is now
  * asked of the game for a hit's owner. Its burst is a G-6 Frag's by default (Yui), at most one every 0.4 s and not
  * within 8 m of her. Ambush is Ascalon's cut of her visibility (ambush_visual_cut percent of the range enemies see her
@@ -46,7 +56,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.3.1"
+#define VERSION "0.4.0"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -66,6 +76,9 @@ static int s_rounds = 40, s_rareMax = 4;
 static float s_damage = 3.5f, s_cooldown = 16, s_freezeSeconds = 3, s_freezeRadius = 5;
 static float s_insult = 1.18f, s_splashEvery = 0.4f, s_splashSafe = 8, s_ambushAfter = 10, s_ambushMiss = 0.6f, s_ambushRange = 80, s_visualCut = 60;
 static int s_splash = 1, s_splashExplosion = HF_EXPLOSION_G6_FRAG_DETONATION, s_ambush = 1, s_ambushForget = 0;
+static int s_jibCharges = 5, s_jibMax = 30, s_jibExplosion = HF_EXPLOSION_MD6_ANTIPERSONNEL_MINEFIELD_MINE, s_jibMarker = 3;
+static float s_jibEvery = 8, s_jibWidth = 15, s_jibLength = 40, s_jibTrigger = 3, s_jibDelay = 1.5f, s_jibLife = 120, s_jibDamage = 2.8f, s_jibFreeze = 2.2f,
+             s_jibFreezeRadius = 5;
 static int s_optionsKey = 0x78;        /* options_key: the virtual key that opens the options screen (120: F9; 0: none) */
 static const KbSetting kSettings[] = {
     KB_I("koh_rounds", s_rounds, 1, 200), KB_F("koh_damage", s_damage, 0.1, 50), KB_F("koh_cooldown", s_cooldown, 0, 600),
@@ -73,6 +86,10 @@ static const KbSetting kSettings[] = {
     KB_F("insult_mult", s_insult, 1, 5), KB_I("splash", s_splash, 0, 1), KB_I("splash_explosion", s_splashExplosion, 0, 2000), KB_F("splash_every", s_splashEvery, 0.02, 5),
     KB_F("splash_safe", s_splashSafe, 0, 30), KB_F("ambush_visual_cut", s_visualCut, 0, 95), KB_I("ambush_forget", s_ambushForget, 0, 1),
     KB_I("ambush", s_ambush, 0, 2), KB_F("ambush_after", s_ambushAfter, 0, 120), KB_F("ambush_miss", s_ambushMiss, 0, 1), KB_F("ambush_range", s_ambushRange, 5, 300),
+    KB_I("jib_charges", s_jibCharges, 1, 20), KB_F("jib_charge_every", s_jibEvery, 0.5, 120), KB_I("jib_max", s_jibMax, 1, 64), KB_F("jib_width", s_jibWidth, 1, 60),
+    KB_F("jib_length", s_jibLength, 2, 150), KB_F("jib_trigger", s_jibTrigger, 0.5, 15), KB_F("jib_delay", s_jibDelay, 0, 10), KB_F("jib_seconds", s_jibLife, 5, 600),
+    KB_F("jib_damage", s_jibDamage, 0.1, 50), KB_F("jib_freeze", s_jibFreeze, 0, 30), KB_F("jib_freeze_radius", s_jibFreezeRadius, 0.5, 30),
+    KB_I("jib_explosion", s_jibExplosion, 0, 2000), KB_I("jib_marker", s_jibMarker, 0, 3),
     KB_I("options_key", s_optionsKey, 0, 255),
 };
 static const KbOption kOptions[] = {
@@ -80,6 +97,10 @@ static const KbOption kOptions[] = {
     {"koh_freeze_radius", &s_freezeRadius, NULL}, {"rare_max", NULL, &s_rareMax},
     {"insult_mult", &s_insult, NULL}, {"splash", NULL, &s_splash}, {"splash_explosion", NULL, &s_splashExplosion}, {"splash_every", &s_splashEvery, NULL},
     {"splash_safe", &s_splashSafe, NULL}, {"ambush_visual_cut", &s_visualCut, NULL}, {"ambush_forget", NULL, &s_ambushForget},
+    {"jib_charges", NULL, &s_jibCharges}, {"jib_charge_every", &s_jibEvery, NULL}, {"jib_max", NULL, &s_jibMax}, {"jib_width", &s_jibWidth, NULL},
+    {"jib_length", &s_jibLength, NULL}, {"jib_trigger", &s_jibTrigger, NULL}, {"jib_delay", &s_jibDelay, NULL}, {"jib_seconds", &s_jibLife, NULL},
+    {"jib_damage", &s_jibDamage, NULL}, {"jib_freeze", &s_jibFreeze, NULL}, {"jib_freeze_radius", &s_jibFreezeRadius, NULL},
+    {"jib_explosion", NULL, &s_jibExplosion}, {"jib_marker", NULL, &s_jibMarker},
     {"ambush", NULL, &s_ambush}, {"ambush_after", &s_ambushAfter, NULL}, {"ambush_miss", &s_ambushMiss, NULL}, {"ambush_range", &s_ambushRange, NULL},
 };
 #define s_key s_keys[0]
@@ -90,7 +111,7 @@ static const KbOption kOptions[] = {
 typedef struct WTarget { uint32_t entity, unit; uint64_t object; float pos[3]; uint32_t pad; } WTarget;
 typedef struct WState
 {
-    uint32_t version, seq, active, skill, count, rare_max;   /* skill: its low byte 0 ready, 1 on, 2 cooling down, 3 busy; bit 8: Ambush is on */
+    uint32_t version, seq, active, skill, count, rare_max;   /* skill: its low byte 0 ready, 1 on, 2 cooling down, 3 busy; bit 8: Ambush is on; bits 16-23 the mine charges, 24-31 the mines out */
     uint32_t player_unit, in_mission;
     uint64_t player_object;
     float player_pos[3], value;                               /* value: the rounds left, or the seconds of cooldown */
@@ -244,7 +265,7 @@ static Boom g_boom[32];
 static atomic_uint g_boomHead;
 /* ---- her rounds' blasts: seen as they are asked for, on whatever thread ------------------------------------------------ */
 static atomic_uint g_gl;                    /* the launcher the skill made (0: none) */
-typedef struct Blast { volatile float pos[3]; volatile uint64_t ms; } Blast;
+typedef struct Blast { volatile float pos[3]; volatile uint64_t ms; volatile uint32_t kind; } Blast;   /* kind 0: a round's; 1: a mine's */
 #define BLASTS 16
 static Blast g_blast[BLASTS];
 static atomic_uint g_blastHead;
@@ -273,6 +294,7 @@ static void OnExplosion(HfMod* mod, const HfEventInfo* info, void* user)
     unsigned h = atomic_load(&g_blastHead);
     Blast* b = &g_blast[h % BLASTS];
     b->pos[0] = x->position[0]; b->pos[1] = x->position[1]; b->pos[2] = x->position[2];
+    b->kind = 0;
     b->ms = GetTickCount64();
     atomic_store(&g_blastHead, h + 1);
 }
@@ -294,16 +316,17 @@ static void OnDamagePre(HfMod* mod, HfDamagePreEvent* ev, void* user)
         return;
     }
     uint64_t now = GetTickCount64();
-    int hers = 0, blast = 0;
+    int hers = 0, blast = 0, mine = 0;
     if ((d->kind == 4 || d->kind == 5 || d->kind == 0) && now - atomic_load(&g_skillMs) <= 4000)
         for (int i = 0; i < BLASTS && !blast; i++)
         {
             const Blast* b = &g_blast[i];
             float p[3] = {b->pos[0], b->pos[1], b->pos[2]};
             blast = b->ms && now - b->ms <= 250 && Dist2(p, d->position) <= 12.0f * 12.0f;
+            mine = blast && b->kind == 1;
         }
     double mult = 1;
-    if (blast) { mult *= (double)s_damage; g_scaled++; hers = 1; }
+    if (blast) { mult *= (double)(mine ? s_jibDamage : s_damage); g_scaled++; hers = 1; }
     else
     {
         /* her Helldiver's network id, asked of the game for this hit's owner (the spawn list never gave it) */
@@ -339,7 +362,8 @@ static void BlastFrame(void)
          * (0.2.0 held the ones it killed for a frame, their state machine off as they died: their corpses went wrong) */
         if (GetTickCount64() - b->ms < 150) break;
         g_blastSeen++;
-        for (int i = 0; i < FOES && s_freezeSeconds > 0; i++)
+        float radius = b->kind == 1 ? s_jibFreezeRadius : s_freezeRadius, seconds = b->kind == 1 ? s_jibFreeze : s_freezeSeconds;
+        for (int i = 0; i < FOES && seconds > 0; i++)
         {
             uint32_t e = g_foe[i];
             uint8_t d[24];
@@ -347,14 +371,14 @@ static void BlastFrame(void)
             if (!e || !Descriptor(e, d) || !UnitNode(Word(d + 12), 0, p)) continue;
             /* a big enemy's root may be far from where the round struck: its height is not counted against it */
             float dx = p[0] - at[0], dy = p[1] - at[1], dz = p[2] - at[2], flat = dx * dx + dy * dy;
-            if (flat > s_freezeRadius * s_freezeRadius || fabsf(dz) > 25) continue;
+            if (flat > radius * radius || fabsf(dz) > 25) continue;
             if (!Alive(e)) continue;
             caught++;
-            fresh += FreezeAdd(e, s_freezeSeconds);
+            fresh += FreezeAdd(e, seconds);
         }
         if (fresh) Publish();
-        if (g_blastSeen <= 12) Log("a round's blast at %.1f %.1f %.1f: %d enemies within %.1f m held (%d newly)", (double)at[0], (double)at[1], (double)at[2], caught,
-            (double)s_freezeRadius, fresh);
+        if (g_blastSeen <= 12) Log("a %s blast at %.1f %.1f %.1f: %d enemies within %.1f m held (%d newly)", b->kind == 1 ? "mine's" : "round's", (double)at[0], (double)at[1],
+            (double)at[2], caught, (double)radius, fresh);
     }
 }
 
@@ -391,12 +415,20 @@ static int Ask(uint32_t selection, const char* why)
     g_request((void*)obj);
     return 1;
 }
+static uint32_t SpawnAt(uint64_t res, const float at[3], const char* what);
 static uint32_t SpawnRes(uint64_t res, const char* what)
 {
-    HfFn_RequestEntitySpawn spawn = hf_fn_RequestEntitySpawn(self);
     float p[3];
+    if (!PlayerPose(p, NULL)) { Log("King of Hearts: %s could not be asked for", what); return 0; }
+    p[2] += 1.0f;
+    return SpawnAt(res, p, what);
+}
+static uint32_t SpawnAt(uint64_t res, const float at[3], const char* what)
+{
+    HfFn_RequestEntitySpawn spawn = hf_fn_RequestEntitySpawn(self);
+    float p[3] = {at[0], at[1], at[2] - 1.0f};
     uint32_t out = 0;
-    if (!spawn || !PlayerPose(p, NULL)) { Log("King of Hearts: %s could not be asked for", what); return 0; }
+    if (!spawn) { Log("King of Hearts: %s could not be asked for", what); return 0; }
     struct { uint32_t one, network; float pose[16]; void* context; uint64_t pad; } info;
     _Static_assert(sizeof info == 0x58, "the spawn record is 0x58 bytes");
     memset(&info, 0, sizeof info);
@@ -573,6 +605,160 @@ static void SkillFrame(void)
     }
 }
 
+/* ---- Jack in the Box: mines the kit keeps itself ---------------------------------------------------------------- */
+#define MINES 64
+typedef struct MineT { int on; float pos[3]; double born, boomAt; uint32_t marker; } MineT;
+static MineT g_mine[MINES];
+static int g_charges;
+static double g_chargeAt;
+static uint64_t g_markerPackage;
+static int g_markerPkg, g_markerSeen, g_markerTold;
+static unsigned g_minesLaid, g_minesBlown;
+static uint64_t MarkerRes(void)
+{
+    return s_jibMarker == 1 ? HF_ENTITY_G40K_MELTA_MINE : s_jibMarker == 2 ? HF_ENTITY_TM1_LURE_MINE : s_jibMarker == 3 ? HF_ENTITY_CONTACT_MINE : 0;
+}
+static float Rand01(void) { g_rand = g_rand * 1664525u + 1013904223u; return (float)(g_rand >> 8) / 16777216.0f; }
+static int MinesOut(void) { int n = 0; for (int i = 0; i < MINES; i++) n += g_mine[i].on; return n; }
+static void MineOff(MineT* m, int touch)
+{
+    HfFn_RemoveEntity remove = hf_fn_RemoveEntity(self);
+    void* em = hf_global_EntityManager(self);
+    if (touch && m->marker && remove && em && ResOf(m->marker) == MarkerRes()) remove(em, m->marker);
+    memset(m, 0, sizeof *m);
+}
+static void MinesClear(int touch, const char* why)
+{
+    int n = MinesOut();
+    for (int i = 0; i < MINES; i++) if (g_mine[i].on) MineOff(&g_mine[i], touch);
+    if (n) Log("Jack in the Box: %d mines gone (%s)", n, why);
+    g_markerSeen = 0; g_markerPkg = 0; g_markerPackage = 0;
+}
+/* a mine's blast, the kit's own or its marker's: the damage multiplied near it for a moment, and the hold */
+static void MineBlast(const float at[3])
+{
+    unsigned h = atomic_load(&g_blastHead);
+    Blast* b = &g_blast[h % BLASTS];
+    b->pos[0] = at[0]; b->pos[1] = at[1]; b->pos[2] = at[2];
+    b->kind = 1;
+    b->ms = GetTickCount64();
+    atomic_store(&g_blastHead, h + 1);
+    atomic_store(&g_skillMs, GetTickCount64());
+    g_minesBlown++;
+}
+static void JibPlace(void)
+{
+    float me[3], aim[3], at[3], best = 1e9f;
+    int found = 0;
+    if (!PlayerPose(me, aim)) return;
+    float n = sqrtf(aim[0] * aim[0] + aim[1] * aim[1]);
+    if (n < 0.05f) { Log("Jack in the Box: she aims straight up or down: nothing laid"); return; }
+    float fx = aim[0] / n, fy = aim[1] / n;
+    for (int i = 0; i < FOES; i++)
+    {
+        uint32_t e = g_foe[i];
+        uint8_t d[24];
+        float p[3];
+        if (!e || !Descriptor(e, d) || Quad(d) != g_foeRes[i] || !UnitNode(Word(d + 12), 0, p) || !Alive(e)) continue;
+        float dx = p[0] - me[0], dy = p[1] - me[1], along = dx * fx + dy * fy, side = fabsf(dx * fy - dy * fx);
+        if (along < 0 || along > s_jibLength || side > s_jibWidth / 2 || fabsf(p[2] - me[2]) > 20) continue;
+        /* one mine is not laid on another */
+        int taken = 0;
+        for (int k = 0; k < MINES && !taken; k++) taken = g_mine[k].on && Dist2(g_mine[k].pos, p) < 1.0f;
+        if (taken) continue;
+        if (side < best) { best = side; at[0] = p[0]; at[1] = p[1]; at[2] = p[2]; found = 1; }
+    }
+    if (!found)
+    {
+        float along = 2 + Rand01() * (s_jibLength - 2), side = (Rand01() - 0.5f) * s_jibWidth;
+        at[0] = me[0] + fx * along + fy * side; at[1] = me[1] + fy * along - fx * side; at[2] = me[2];
+    }
+    MineT* m = NULL;
+    int out = 0, oldest = -1;
+    for (int i = 0; i < MINES; i++)
+    {
+        if (!g_mine[i].on) { if (!m) m = &g_mine[i]; continue; }
+        out++;
+        if (oldest < 0 || g_mine[i].born < g_mine[oldest].born) oldest = i;
+    }
+    if ((out >= s_jibMax || !m) && oldest >= 0) { MineOff(&g_mine[oldest], 1); m = &g_mine[oldest]; out--; }
+    if (!m) return;
+    m->on = 1; m->born = g_now; m->boomAt = 0; m->marker = 0;
+    m->pos[0] = at[0]; m->pos[1] = at[1]; m->pos[2] = at[2];
+    if (g_charges == s_jibCharges) g_chargeAt = g_now;
+    g_charges--;
+    g_minesLaid++;
+    /* its marker: only once the marker's resource is known to be loaded (its package resident, or one seen spawned) */
+    uint64_t res = MarkerRes();
+    if (res && (g_markerPkg == HF_PACKAGE_RESIDENT || g_markerSeen))
+    {
+        float up[3] = {at[0], at[1], at[2] + 0.15f};
+        m->marker = SpawnAt(res, up, "a mine's marker");
+    }
+    if (g_minesLaid <= 30)
+        Log("Jack in the Box: mine %u %s at %.1f %.1f %.1f, %.0f m from her (marker %u); %d charges left, %d out", g_minesLaid, found ? "under an enemy" : "at a random spot", (double)at[0],
+            (double)at[1], (double)at[2], (double)sqrtf(Dist2(at, me)), m->marker, g_charges, out + 1);
+}
+static void MineFrame(void)
+{
+    /* the charges */
+    if (g_charges >= s_jibCharges) { g_charges = s_jibCharges; g_chargeAt = g_now; }
+    else if (g_now - g_chargeAt >= s_jibEvery) { g_charges++; g_chargeAt = g_now; }
+    /* the marker's package */
+    uint64_t res = MarkerRes();
+    if (res && !g_markerPackage)
+    {
+        uint32_t stride = 0;
+        uintptr_t r = hf->component_record("LoadoutPackageComponentData", res, &stride);
+        if (!r || !ReadAt(r + 8, &g_markerPackage, 8) || !g_markerPackage) g_markerPackage = ~0ull;
+        if (!g_markerTold++) Log("Jack in the Box: the marker %016llx has %s", (unsigned long long)res, g_markerPackage == ~0ull ? "no package of its own: one is spawned only once the mission has spawned one itself" : "a package: asked for");
+    }
+    if (res && g_markerPackage && g_markerPackage != ~0ull && g_markerPkg != HF_PACKAGE_RESIDENT)
+    {
+        static double again;
+        if (g_now >= again) { g_markerPkg = hf->load_package(self, g_markerPackage); again = g_now + 0.5; if (!g_markerPkg) g_markerPackage = ~0ull; }
+    }
+    for (int i = 0; i < MINES; i++)
+    {
+        MineT* m = &g_mine[i];
+        if (!m->on) continue;
+        /* its marker went by itself (it is a live mine of the game's): its blast is the mine's */
+        if (m->marker && g_now - m->born > 1.0 && ResOf(m->marker) != res)
+        {
+            static unsigned told;
+            if (told++ < 10) Log("Jack in the Box: a mine's marker %u is gone by itself %.1f s after it was laid: counted as the mine's blast", m->marker, g_now - m->born);
+            MineBlast(m->pos);
+            m->marker = 0;
+            MineOff(m, 0);
+            continue;
+        }
+        if (g_now - m->born > s_jibLife) { MineOff(m, 1); continue; }
+        if (!m->boomAt)
+        {
+            if (g_now - m->born < 0.6) continue;
+            for (int j = 0; j < FOES; j++)
+            {
+                uint32_t e = g_foe[j];
+                uint8_t d[24];
+                float p[3];
+                if (!e || !Descriptor(e, d) || Quad(d) != g_foeRes[j] || !UnitNode(Word(d + 12), 0, p)) continue;
+                float dx = p[0] - m->pos[0], dy = p[1] - m->pos[1];
+                if (dx * dx + dy * dy > s_jibTrigger * s_jibTrigger || fabsf(p[2] - m->pos[2]) > 6 || !Alive(e)) continue;
+                m->boomAt = g_now + s_jibDelay;
+                break;
+            }
+            if (!m->boomAt) continue;
+        }
+        if (g_now < m->boomAt) continue;
+        float at[3] = {m->pos[0], m->pos[1], m->pos[2] + 0.3f};
+        MineBlast(at);
+        int r = hf->spawn_explosion ? hf->spawn_explosion(self, (uint32_t)s_jibExplosion, at) : -1;
+        if (g_minesBlown <= 30) Log("Jack in the Box: a mine went off at %.1f %.1f %.1f (explosion %d: %s)", (double)at[0], (double)at[1], (double)at[2], s_jibExplosion,
+            r == HF_ACT_DONE || r == HF_ACT_REQUESTED || r == HF_ACT_QUEUED ? "asked" : r == HF_ACT_WAITING ? "waiting for its package" : "refused");
+        MineOff(m, 1);
+    }
+}
+
 /* ---- the passives' frame: Artilleryman's bursts, and Ambush ------------------------------------------------------- */
 static uintptr_t Behaviour(uint32_t e)
 {
@@ -746,7 +932,7 @@ static atomic_uint g_cHead;
 static unsigned g_cTail;
 static uint64_t g_mineKinds[24];
 static int g_nMineKinds;
-static double g_censusUntil;
+static double g_censusUntil, g_boomsUntil;
 static unsigned g_boomTail;
 static void CensusFrame(void)
 {
@@ -758,7 +944,8 @@ static void CensusFrame(void)
         if (r == HF_ENTITY_MD6_ANTIPERSONNEL_MINEFIELD)
         {
             g_censusUntil = g_now + 25;
-            Log("mine census: an MD-6 Anti-Personnel Minefield deployer spawned (entity %u): what spawns in the next 25 s is listed", e);
+            g_boomsUntil = g_now + 180;
+            Log("mine census: an MD-6 Anti-Personnel Minefield deployer spawned (entity %u): what spawns in the next 25 s, and every explosion in the next 3 minutes, is listed", e);
             continue;
         }
         if (g_now > g_censusUntil || FoeKind(r) || r == AVATAR) continue;
@@ -779,9 +966,16 @@ static void CensusFrame(void)
     {
         const Boom* b = &g_boom[g_boomTail % 32];
         uint64_t r = ResOf(b->source);
-        static unsigned told;
-        for (int i = 0; i < g_nMineKinds && told < 20; i++)
-            if (g_mineKinds[i] == r) { told++; Log("mine census: explosion type %u from entity %u (resource %016llx) at %.1f %.1f %.1f", b->type, b->source, (unsigned long long)r, (double)b->pos[0], (double)b->pos[1], (double)b->pos[2]); break; }
+        static unsigned told, mine;
+        if (r && r == MarkerRes() && mine++ < 10)
+            Log("Jack in the Box: a MARKER blew by itself: explosion type %u from entity %u (%016llx) at %.1f %.1f %.1f", b->type, b->source, (unsigned long long)r, (double)b->pos[0],
+                (double)b->pos[1], (double)b->pos[2]);
+        if (g_now <= g_boomsUntil && told < 40 && r != GL21 && !FoeKind(r))
+        {
+            told++;
+            Log("mine census: explosion type %u from entity %u (resource %016llx) at %.1f %.1f %.1f", b->type, b->source, (unsigned long long)r, (double)b->pos[0], (double)b->pos[1],
+                (double)b->pos[2]);
+        }
     }
 }
 
@@ -793,6 +987,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
         unsigned ch = atomic_load(&g_cHead);
         g_cEnt[ch % CENSUS] = s->entity; g_cRes[ch % CENSUS] = s->resource;
         atomic_store(&g_cHead, ch + 1);
+        if (s->resource == MarkerRes()) g_markerSeen = 1;
     }
     if (s->resource != AVATAR)
     {
@@ -832,10 +1027,11 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (inMission != g_inMission)
     {
         g_inMission = inMission;
-        if (inMission) KitDecide();
+        if (inMission) { KitDecide(); g_charges = s_jibCharges; g_chargeAt = g_now; }
         if (!inMission)
         {
             Abort("the mission ended");
+            MinesClear(0, "the mission ended");
             g_cut = 0; g_ambushOn = 0;
             memset(g_frozen, 0, sizeof g_frozen);
             g_state.active = 0; g_state.count = 0; g_state.seq++;
@@ -857,14 +1053,24 @@ static void Tick(HfMod* mod, float dt, void* user)
         else if (g_k == K_IDLE && g_now >= g_readyAt) Start();
     }
     prev = down;
+    {
+        static int prev2;
+        const Key* k2 = &s_keys[1];
+        int own2 = k2->vk == VK_SHIFT ? KM_SHIFT : k2->vk == VK_CONTROL ? KM_CTRL : k2->vk == VK_MENU ? KM_ALT : 0;
+        int down2 = focused && (GetAsyncKeyState(k2->vk) & 0x8000) != 0 && (mods & ~own2) == k2->mods;
+        if (down2 && !prev2 && g_alive && atomic_load(&g_avatar) && g_charges > 0) JibPlace();
+        prev2 = down2;
+    }
     if (!NetOk(g_avatarNet)) LearnNet();
     SkillFrame();
+    MineFrame();
     BlastFrame();
     FreezeFrame();
     PassiveFrame();
     CensusFrame();
     if (!g_alive) FreezeClear("she is down");
-    g_state.skill = (g_k == K_HELD ? 1u : g_k != K_IDLE ? 3u : g_now < g_readyAt ? 2u : 0u) | (g_ambushOn ? 0x100u : 0u);
+    g_state.skill = (g_k == K_HELD ? 1u : g_k != K_IDLE ? 3u : g_now < g_readyAt ? 2u : 0u) | (g_ambushOn ? 0x100u : 0u) |
+                    ((uint32_t)(g_charges < 0 ? 0 : g_charges > 255 ? 255 : g_charges) << 16) | ((uint32_t)MinesOut() << 24);
     g_state.value = g_k == K_HELD ? (float)Rounds(atomic_load(&g_gl)) : g_now < g_readyAt ? (float)(g_readyAt - g_now) : 0;
 }
 static void Pin(void** slot, uintptr_t at, const char* pattern, const char* what)
@@ -901,6 +1107,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     kb_ini = "w.ini";
     kb_key_names[0] = "key_s1";
+    kb_key_names[1] = "key_s2";
     KB_SETTINGS(kSettings);
     KB_OPTIONS(kOptions);
     RosterJoin("w", "W");

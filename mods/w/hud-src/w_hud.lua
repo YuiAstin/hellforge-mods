@@ -222,6 +222,7 @@ overlay:draw(function(d, dt)
     elseif skill == 3 then text, colour = 'KING OF HEARTS  ...', {255, 200, 120, 255}
     elseif skill == 2 then text, colour = ('King of Hearts  %.0f s'):format(math.max(0, st.value)), {170, 170, 170, 230}
     else text, colour = 'King of Hearts  ready', {255, 255, 255, 230} end
+    text = text .. ('   |   Jack in the Box  %d  (%d out)'):format(math.floor(st.skill / 65536) % 256, math.floor(st.skill / 16777216) % 256)
     if ambush then text = text .. '   |   AMBUSH' end
     local x, y = d.width / 2, (d.height or 1080 * sc) - 150 * sc
     d:text(text, x + 2, y + 2, {size = 20 * sc, colour = {0, 0, 0, 200}, z = 4, align = 'center'})

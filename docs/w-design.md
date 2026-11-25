@@ -61,6 +61,18 @@ Source kit: W, Sniper (Artilleryman), at rank 10 of each skill. Her module is le
 - The mine census: what an MD-6 Anti-Personnel Minefield's deployer spawns, and its mines' explosion types, logged, to
   find the game's own mine for Jack in the Box.
 
+## Built in 0.4.0
+
+- Jack in the Box with mines the kit keeps itself (the minefield's deployer spawned nothing mine-like through the spawn
+  event, so the game's own mine is not found yet). 5 charges, one back every 8 s; a press lays one under the living
+  enemy nearest her aim line in the 15 m x 40 m box, or at a random spot in it at her height. An enemy within 3 m sets
+  it off after 1.5 s: the MD-6 mine's own explosion (type 366), its damage 2.8 times, enemies within 5 m held 2.2 s. At
+  most 30 out, the oldest goes; one lasts 120 s.
+- Still probing: where a mine lies is shown by an entity spawned bare there, by default the game's CONTACT MINE entity
+  (the MD-6's explosion is named ContactMine), and only once the mission has spawned one itself or its package is
+  resident. If that entity is a live mine it blows by itself: the kit counts that as the mine's blast, and logs it. The
+  census now lists every explosion for 3 minutes after a minefield's deployer spawns.
+
 ## Open
 
 - How long the freeze lasts (3 s to start). An enemy already held and then killed by a later round.
