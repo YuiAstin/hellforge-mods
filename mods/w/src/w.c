@@ -16,6 +16,11 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.7.2: her mines wear the MD-6's mine without a minefield called in (played: 0.7.1's do after one; the game's own
+ * call is WorldSpawnUnit(the main world, the unit, no name, 0, 0, 1, 0)). The kit asks the game for the minefield's
+ * package itself: the deployer entity's loadout package if it has one, else the stratagem's call-in package (row
+ * +0xA8, read from a hidden copy of the row, as the FRV Package Probe reads them); once it is resident the pattern is
+ * the MD-6's mine in the main world.
  * 0.7.1: the MD-6's mine is unit ee89cc10d80b6afb (played: 48 of it spawned with the deployer; the field readout's
  * UnitResourceName answered 0, so 0.7.0 never learned it and no mine of hers wore one). Known from the start now.
  * 0.7.0: a mine of hers can wear the game's own mine (jib_model 1), once the mission has seen a minefield called in.
@@ -97,7 +102,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.7.1"
+#define VERSION "0.7.2"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12
@@ -831,6 +836,52 @@ static uint32_t ModelSpawn(const float at[3])
     if (g_models <= 6) Log("Jack in the Box: a mine's unit %016llx spawned at %.1f %.1f %.1f: handle %08x", (unsigned long long)res, (double)at[0], (double)at[1], (double)at[2], handle);
     return handle;
 }
+/* the minefield's package, asked of the game so the mine's unit is there without a call-in */
+static uint32_t g_mineRow;                  /* the hidden copy of the MD-6's stratagem row (0: none) */
+static uint64_t g_minePackage;              /* 0 not looked for yet, ~0 none */
+static int g_minePkg;
+/* the copy is for reading only: taken off the stratagem selection as soon as its row is there */
+static void MineRowHide(void)
+{
+    static int done;
+    static double again;
+    uintptr_t row;
+    uint8_t sel = 0;
+    if (done || !g_mineRow || g_now < again) return;
+    again = g_now + 1;
+    if (!(row = hf->stratagem_row(g_mineRow)) || !ReadAt(row + 0x80, &sel, 1)) return;
+    if (sel & 2) { sel &= (uint8_t)~2; hf->write(row + 0x80, &sel, 1); }
+    done = 1;
+}
+static void ModelReady(void)
+{
+    static double again;
+    static int told;
+    if (!s_jibModel || g_pattern.valid || g_now < again) return;
+    again = g_now + 0.5;
+    if (!g_minePackage)
+    {
+        uint32_t stride = 0;
+        uintptr_t r = hf->component_record("LoadoutPackageComponentData", HF_ENTITY_MD6_ANTIPERSONNEL_MINEFIELD, &stride), row;
+        const char* from = "the deployer's loadout package";
+        if (!r || !ReadAt(r + 8, &g_minePackage, 8) || !g_minePackage || g_minePackage == ~0ull)
+        {
+            g_minePackage = 0;
+            from = "the stratagem's call-in package";
+            if (!g_mineRow || !(row = hf->stratagem_row(g_mineRow)) || !ReadAt(row + 0xA8, &g_minePackage, 8) || !g_minePackage) g_minePackage = ~0ull;
+        }
+        Log("Jack in the Box: the minefield's package: %s%s (%016llx)", g_minePackage == ~0ull ? "not found: her mines wear the game's mine only after a minefield is called in" : from, "",
+            (unsigned long long)g_minePackage);
+    }
+    if (g_minePackage == ~0ull) return;
+    g_minePkg = hf->load_package(self, g_minePackage);
+    if (g_minePkg != HF_PACKAGE_RESIDENT) { if (!g_minePkg && !told++) Log("Jack in the Box: the minefield's package was refused"); if (!g_minePkg) g_minePackage = ~0ull; return; }
+    HfFn_MainWorld world = hf_fn_MainWorld(self);
+    void* w = world ? world() : NULL;
+    if (!w) return;
+    g_pattern = (UnitPattern){1, w, 0xEE89CC10D80B6AFBull, 0, 0, 0, 0, 1, 0};
+    Log("Jack in the Box: the minefield's package is resident: her mines wear the MD-6's mine (world %p)", w);
+}
 static void ModelHide(uint32_t handle)
 {
     HfFn_UnitAlive alive = hf_fn_UnitAlive(self);
@@ -1011,6 +1062,7 @@ HF_MOD_EXPORT int w_option_get(const char* name, double* out) { return OptionGet
 HF_MOD_EXPORT int w_option_set(const char* name, double value) { return OptionSet(name, value); }
 static void MineFrame(void)
 {
+    ModelReady();
     /* the charges */
     if (g_charges >= s_jibCharges) { g_charges = s_jibCharges; g_chargeAt = g_now; }
     else if (g_now - g_chargeAt >= s_jibEvery) { g_charges++; g_chargeAt = g_now; }
@@ -1465,6 +1517,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     double step = dt > 0 && dt < 1 ? dt : 0;
     g_now += step;
     KbOptionsTick();   /* the options screen's changes, in a mission or not */
+    MineRowHide();
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission)
     {
@@ -1582,6 +1635,15 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
              api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_EXPLOSION, OnExplosion, NULL, 0) &&
              !hf_on_damage_pre(mod, OnDamagePre, NULL, 0) && api->on_game_thread(mod, Tick, NULL);   /* the typed helper answers 0 when it is in */
     if (!ok) api->log(mod, "events or the game thread are unavailable: the kit stays off");
+    if (s_jibModel && api->add_stratagem && api->stratagem_row)
+    {
+        /* a hidden copy of the MD-6's row: its call-in package is read from it (a vanilla row is not handed out) */
+        HfStratagem st = {sizeof st};
+        st.base = HF_STRATAGEM_MD6_ANTIPERSONNEL_MINEFIELD;
+        st.name = "yui/w/minefield_package";
+        g_mineRow = api->add_stratagem(mod, &st);
+        if (!g_mineRow) api->log(mod, "the copy of the minefield's stratagem row was refused: its call-in package cannot be read");
+    }
     if (s_mineProbe && hf_hook_WorldSpawnUnit(mod, SpawnUnitDetour, &original_wsu, 0)) api->log(mod, "the mine probe's unit hook was refused: no units listed");
     if (!ok) return 0;
     if (hf_on_bughole(mod, OnBughole, NULL, 0)) api->log(mod, "the bug hole event is unavailable: a closed hole can be marked again");

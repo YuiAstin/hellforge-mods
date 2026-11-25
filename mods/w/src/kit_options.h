@@ -57,7 +57,7 @@ static const OpRow kOpRows[] = {
     {"jib_explosion", "Jack in the Box", "Blast Type", OP_FIELD, 0, 2000, 1,
      "The game's explosion type a mine sets off (366: the MD-6 mine's; 178: the anti-tank mine's).", NULL, 1, OP_LIVE},
     {"jib_model", "Jack in the Box", "Game's Mine", OP_TOGGLE, 0, 1, 1,
-     "Her mines wear the game's own mine once a minefield has been called in in the mission (still being tried).", NULL, 1, OP_LIVE},
+     "Her mines wear the game's own mine (still being tried).", NULL, 1, OP_LIVE},
     {"jib_marker", "Jack in the Box", "Marker", OP_CHOICE, 0, 3, 1,
      "An entity put where a mine lies, besides the HUD's marker (still being tried).", "None|Melta Mine|Lure Mine|Contact Mine", 1, OP_LIVE},
     {"d12_range", "D12", "Range", OP_FIELD, 5, 300, 5,
