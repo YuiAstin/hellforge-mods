@@ -16,6 +16,9 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.5.3: Artilleryman never went off (played; the log: "dealer 571, owner 567 (hers: network 567): not hers"). Her
+ * shots name her weapon as their dealer, and the kit base's test takes such a hit only with its hit hook, which this kit
+ * does not install. A hit she owns whose dealer is a weapon in her inventory (primary, secondary, support) is hers.
  * 0.5.2: a bug hole still was not marked (played; the dynamite does close one). A hole or spawner is now listed whatever
  * else it is (one the kit also counts an enemy was asked to be alive, and has no health), and a press that marks
  * nothing logs the nearest hole or spawner and how far it is from her aim line.
@@ -74,7 +77,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.5.2"
+#define VERSION "0.5.3"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12
@@ -332,6 +335,20 @@ static void OnExplosion(HfMod* mod, const HfEventInfo* info, void* user)
     b->ms = GetTickCount64();
     atomic_store(&g_blastHead, h + 1);
 }
+/* a hit she owns, dealt by a weapon she carries (her inventory's first three slots) */
+static uintptr_t InventoryRecord(uint32_t e);
+static int HerWeaponHit(const HfDamageEvent* d, uint32_t me)
+{
+    uint32_t slots[3] = {0}, dealer;
+    uintptr_t rec;
+    static atomic_uint told;
+    if (!NetOk(g_avatarNet) || d->owner != g_avatarNet || !NetOk(d->dealer) || !hf->entity_of_network) return 0;
+    dealer = hf->entity_of_network(self, d->dealer);
+    if (!dealer || !(rec = InventoryRecord(me)) || !ReadAt(rec, slots, sizeof slots)) return 0;
+    int mine = dealer == slots[0] || dealer == slots[1] || dealer == slots[2];
+    if (atomic_fetch_add(&told, 1) < 6) Log("a hit she owns dealt by entity %u (her weapons %u %u %u): %s", dealer, slots[0], slots[1], slots[2], mine ? "hers" : "not hers");
+    return mine;
+}
 /* the damage of her rounds' blasts, multiplied: an explosion's or an impact's hit on something other than her, within
  * 12 m of one of her blasts and a quarter second of it */
 static void OnDamagePre(HfMod* mod, HfDamagePreEvent* ev, void* user)
@@ -369,7 +386,7 @@ static void OnDamagePre(HfMod* mod, HfDamagePreEvent* ev, void* user)
             g_avatarNet = d->owner;
             Log("her Helldiver: entity %u, network %u (from a hit's owner)", me, g_avatarNet);
         }
-        hers = MineHit(d);
+        hers = MineHit(d) || HerWeaponHit(d, me);
     }
     if (!hers) return;
     g_dealtMs = now;
