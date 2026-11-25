@@ -32,6 +32,11 @@
  *   0.5.1: way E held: she took the pose and fired, slot and carry calls as a pickup by hand makes them, but the
  *                 GL-21 stayed where it was spawned. It was taken in the very frame it was asked for, before its
  *                 spawn had finished; now it is taken 0.75 s after it is made
+ *   0.6.0: with the wait the GL-21 is carried, but on her back (stowed) while her hands hold the pose. Two tries in
+ *                 one build. Insert: she puts her weapon away first (selects another slot), the GL-21 is taken into
+ *                 the emptied hand's slot, and half a second later that slot is selected, so the game plays its own
+ *                 draw. Ctrl+Insert: taken as in 0.5.1, then dropped the game's way and taken again 0.7 s later (a
+ *                 GL-21 that had been dropped and picked up by hand was an ordinary weapon). Delete undoes either
  *   Ctrl+Home     your inventory record, your wield slots, the held weapon's magazine
  *   Shift+Insert  loads the GL-21's package and spawns a GL-21 at your feet (RequestEntitySpawn)
  *   Ctrl+Insert   way A: wields it straight into the slot your last observed Wield used (the inventory is untouched)
@@ -58,7 +63,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.5.1"
+#define VERSION "0.6.0"
 #include "kitbase/kb_core.h"
 
 #define GL21 HF_ENTITY_GL21_GRENADE_LAUNCHER
@@ -287,7 +292,7 @@ static void Remember(void)
     uint32_t sel = atomic_load(&g_selection);
     if (sel) g_selWas = sel;
 }
-static void WieldA(void)
+__attribute__((unused)) static void WieldA(void)
 {
     HfFn_Wield wield = hf_fn_Wield(self);
     HfFn_SetWielder setw = hf_fn_SetWielder(self);
@@ -389,6 +394,9 @@ typedef void (*DropFn)(void* inventory, uint32_t entity, uint32_t item, uint8_t 
 static TakeFn g_take;
 static DropFn g_drop;
 static uint32_t g_slot, g_oldItem;      /* way E: the slot the GL-21 took, and the weapon that was in it */
+static int g_seq, g_mode = 1, g_lastRounds = -1;
+static double g_seqAt;
+static void SeqLog(const char* what) { Log("Insert (try %d): %s", g_mode, what); }
 static void WieldD(void)
 {
     HfFn_SwitchWeapon sw = hf_fn_SwitchWeapon(self);
@@ -396,15 +404,42 @@ static void WieldD(void)
     uint32_t me = atomic_load(&g_avatar), sel = 0, old = 0;
     uintptr_t rec;
     if (!Mine("Insert") || !HaveGl("Insert")) return;
-    if (!g_take || !sw || !im || !(rec = InventoryRecord(me)) || !ReadAt(rec + 0x1C, &sel, 4)) { Log("Insert: the pickup (0x9AE030) is not the reviewed code, or your inventory is not there: nothing done"); return; }
+    if (!g_take || !g_drop || !sw || !im || !(rec = InventoryRecord(me)) || !ReadAt(rec + 0x1C, &sel, 4)) { Log("Insert: the pickup (0x9AE030) is not the reviewed code, or your inventory is not there: nothing done"); return; }
     if (sel < 1 || sel > 3) { Log("Insert: you hold no weapon (selection %u): take your primary, secondary or support weapon in hand first", sel); return; }
     ReadAt(rec + 4u * (sel - 1), &old, 4);
     g_slot = sel;
     g_oldItem = old;
-    Log("Insert (way E): Take(you, %u, slot %u) in place of your weapon %u, then SwitchWeapon(you, %u) ...", g_gl, sel, old, sel);
-    g_take(im, me, g_gl, sel, 0);
-    sw(im, me, sel);
-    Log("Insert: returned. Is the GL-21 in her hands, her own weapon gone from them? Does it aim and fire?");
+    if (g_mode == 1)
+    {
+        uint32_t other = sel == 2 ? 1 : 2;
+        Log("Insert (try 1): the GL-21 %u for your weapon %u in slot %u: SwitchWeapon(you, %u) first (her weapon put away) ...", g_gl, old, sel, other);
+        sw(im, me, other);
+        g_seq = 1; g_seqAt = g_now + 0.6;
+    }
+    else
+    {
+        Log("Insert (try 2): Take(you, %u, slot %u) in place of your weapon %u, SwitchWeapon(you, %u) ...", g_gl, sel, old, sel);
+        g_take(im, me, g_gl, sel, 0);
+        sw(im, me, sel);
+        g_seq = 10; g_seqAt = g_now + 0.6;
+    }
+}
+static void SeqFrame(void)
+{
+    HfFn_SwitchWeapon sw = hf_fn_SwitchWeapon(self);
+    void* im = hf_global_InventoryManager(self);
+    uint32_t me = atomic_load(&g_avatar);
+    if (!g_seq || g_now < g_seqAt) return;
+    if (!sw || !im || !ResOf(me) || !g_gl || ResOf(g_gl) != GL21) { g_seq = 0; Log("Insert: she or the GL-21 is gone: stopped"); return; }
+    switch (g_seq)
+    {
+    case 1: SeqLog("Take(you, GL-21, her slot) while it is put away ..."); g_take(im, me, g_gl, g_slot, 0); g_seq = 2; g_seqAt = g_now + 0.5; break;
+    case 2: SeqLog("SwitchWeapon(you, her slot): the game's own draw ..."); sw(im, me, g_slot); g_seq = 3; g_seqAt = g_now + 0.1; break;
+    case 10: SeqLog("Drop(you, GL-21) the game's way ..."); g_drop(im, me, g_gl, 0, 0, 1); g_seq = 11; g_seqAt = g_now + 0.7; break;
+    case 11: SeqLog("Take(you, GL-21, her slot) again, SwitchWeapon(you, her slot) ..."); g_take(im, me, g_gl, g_slot, 0); sw(im, me, g_slot); g_seq = 3; g_seqAt = g_now + 0.1; break;
+    case 3: Fill(); g_lastRounds = -1; g_seq = 0; SeqLog("done. Is the GL-21 in her HANDS now (not on her back)? Fire it; Delete gives your weapon back"); break;
+    default: g_seq = 0;
+    }
 }
 static void BackD(void)
 {
@@ -425,13 +460,15 @@ static void BackD(void)
 }
 
 /* ---- 0.2.0: Insert and Delete by themselves do the whole thing ------------------------------------------------------ */
-static int g_give, g_back, g_lastRounds = -1;
+static int g_give, g_back;
 static double g_giveAt, g_backAt;
-static void Give(void)
+static void Give(int mode)
 {
+    g_mode = mode;
     if (!Mine("Insert")) return;
     if (g_gl && ResOf(g_gl) == GL21 && atomic_load(&g_held) == g_gl) { Log("Insert: the GL-21 is in your hands already (Delete gives your weapon back)"); return; }
-    Log("Insert: a GL-21 in place of the weapon in your hands, with 40 rounds. Fire it; Delete gives your weapon back");
+    Log("Insert (try %d): a GL-21 in place of the weapon in your hands, with 40 rounds", mode);
+    if (g_seq) { Log("Insert: still busy with the last one"); return; }
     if (!g_gl || ResOf(g_gl) != GL21) Spawn();
     g_give = 1;
     g_giveAt = g_now + 0.3;
@@ -448,8 +485,9 @@ static void AutoFrame(void)
     if (g_give && g_now >= g_giveAt && !g_wantSpawn)
     {
         if (!g_gl || ResOf(g_gl) != GL21) { if (g_now > g_giveAt + 5) { g_give = 0; Log("Insert: no GL-21 came in 5 s: given up"); } }
-        else if (g_now >= g_madeAt + 0.75) { g_give = 0; WieldD(); Fill(); g_lastRounds = -1; }
+        else if (g_now >= g_madeAt + 0.75) { g_give = 0; WieldD(); }
     }
+    SeqFrame();
     if (g_back && g_now >= g_backAt)
     {
         g_back = 0;
@@ -505,7 +543,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         focused && (GetAsyncKeyState(VK_DELETE) & 0x8000), focused && (GetAsyncKeyState(VK_END) & 0x8000)};
     if (k[0] && !prev[0]) Log("key: Insert pressed%s%s%s", shift ? " +Shift" : "", ctrl ? " +Ctrl" : "", alt ? " +Alt" : "");
     if (k[2] && !prev[2]) Log("key: Delete pressed%s%s", shift ? " +Shift" : "", ctrl ? " +Ctrl" : "");
-    if (k[0] && !prev[0]) { if (shift) Spawn(); else if (ctrl) WieldA(); else if (alt) WieldB(); else Give(); }
+    if (k[0] && !prev[0]) { if (shift) Spawn(); else if (ctrl) Give(2); else if (alt) WieldB(); else Give(1); }
     if (k[1] && !prev[1]) { if (ctrl) State("Ctrl+Home"); else Fill(); }
     if (k[2] && !prev[2]) { if (shift) Remove(); else if (ctrl) GiveBack(); else Back(); }
     if (k[3] && !prev[3]) Refill();
@@ -527,7 +565,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     int w = hf->hook_function(self, "Wield", (void*)WieldDetour, (void**)&original_wield, 0),
         s = hf->hook_function(self, "SwitchWeapon", (void*)SwitchDetour, (void**)&original_switch, 0),
         t = hf->hook_function(self, "SetWielder", (void*)SetWielderDetour, (void**)&original_setw, 0);
-    Log("ready: Wield %s, SwitchWeapon %s, SetWielder %s. In a mission, with a weapon in hand: Insert puts a GL-21 with 40 rounds in its place (the game's own pickup); fire it; "
+    Log("ready: Wield %s, SwitchWeapon %s, SetWielder %s. In a mission, with a weapon in hand: Insert (try 1: put away, take, draw) or Ctrl+Insert (try 2: take, drop, take again) puts a GL-21 with 40 rounds in its place; "
         "Delete gives your weapon back and removes the GL-21",
         w ? "OFF" : "hooked", s ? "OFF" : "hooked", t ? "OFF" : "hooked");
 }
