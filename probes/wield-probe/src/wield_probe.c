@@ -31,7 +31,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.2"
+#define VERSION "0.1.3"
 #include "kitbase/kb_core.h"
 
 #define GL21 HF_ENTITY_GL21_GRENADE_LAUNCHER

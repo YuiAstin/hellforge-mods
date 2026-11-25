@@ -66,14 +66,44 @@ KB_FN int HashFind(uintptr_t header, uint32_t key, uint32_t* value)
     }
     return 0;
 }
+/* The game's own lookup of an entity's record (SDK 16: hf->function "EntityDescriptor", game+0xFD9D40), asked for the
+ * first time the fixed offsets below find nothing. A HellForge that makes room for more entities moves the records out
+ * of the manager and rewrites the game's code to follow (its docs/modding/hooks.md, "Fields a mod moved"): the offsets
+ * then read nothing, and every kit lost its Helldiver's unit, so her view and her aim (the nightly of 2026-11-22: "entity
+ * table: 4096 records a world"). The game's function follows the move. */
+KB_VAR uint8_t* (*kb_descriptor_fn)(uint32_t entity);
+KB_VAR int kb_descriptor_seen;   /* the fixed offsets have found an entity: the records are where the game has them */
+KB_VAR unsigned kb_descriptor_asks;
+KB_FN int DescriptorAsk(uint32_t entity, uint8_t out[24])
+{
+#if defined(HF_MOD_SDK_VERSION) && HF_MOD_SDK_VERSION >= 16
+    if (!kb_descriptor_fn && kb_descriptor_asks < 6 && hf && self && hf->size >= offsetof(HfApi, function) + sizeof hf->function)
+    {
+        kb_descriptor_asks++;
+        kb_descriptor_fn = (uint8_t* (*)(uint32_t))hf->function(self, "EntityDescriptor");
+        if (kb_descriptor_fn) hf->log(self, "entities: their records are not at the game's own offsets (HellForge moved them): read through the game's lookup from now on");
+    }
+    if (!kb_descriptor_fn) return 0;
+    uint8_t* d = kb_descriptor_fn(entity);
+    return d && ReadAt((uintptr_t)d, out, 24) && Word(out + 8) == entity;
+#else
+    return 0;
+#endif
+}
 /* An entity's descriptor: its resource (+0), entity (+8), unit (+12), flags (+20, bit 0: this machine's authority) */
 KB_FN int Descriptor(uint32_t entity, uint8_t out[24])
 {
     if (!game || !entity || entity == UINT32_MAX || entity == 0x7FFF) return 0;
+    if (kb_descriptor_fn) return DescriptorAsk(entity, out);
     uintptr_t root = Pointer(game + 0x346BF98);
     uint32_t index;
-    if (!root || !Lookup(root + 0xF1AEB0, entity, 1048576, &index) || index >= 262144) return 0;
-    return ReadAt(root + 0xF32F18 + 24u * index, out, 24) && Word(out + 8) == entity;
+    if (root && Lookup(root + 0xF1AEB0, entity, 1048576, &index) && index < 262144 &&
+        ReadAt(root + 0xF32F18 + 24u * index, out, 24) && Word(out + 8) == entity) { kb_descriptor_seen = 1; return 1; }
+    /* nothing at the fixed offsets: an entity that is gone, or records that moved. While the offsets have found none at
+     * all, the game's lookup is tried; once it answers, it is the one used. */
+    uint8_t probe[24];
+    if (!kb_descriptor_seen && DescriptorAsk(entity, probe)) { memcpy(out, probe, 24); return 1; }
+    return 0;
 }
 /* A node's world position in a unit's scene graph (64-byte matrices, translation at +0x30) */
 KB_FN int UnitNode(uint32_t unit, uint32_t node, float out[3])
@@ -136,7 +166,40 @@ KB_FN int WielderOf(uint32_t e, uint32_t* by)
     if (!e || !m || !Lookup(m + 24, e, 1048576, &i) || i >= 0x10000 || !(arr = Pointer(m + 56))) return 0;
     return ReadAt(arr + 4u * i, by, 4) && *by;
 }
-/* "Shift+Q", "Ctrl+Alt+F", "F5", "Mouse4", "5", or a Windows virtual-key code ("#81") */
+/* keys by name: what the .ini takes (text, any case) and what the HUD and the options screen show (label) */
+typedef struct KbKeyName { int vk; const char* text; const char* label; } KbKeyName;
+static const KbKeyName kb_key_table[] = {
+    {VK_SPACE, "Space", "Space"}, {VK_TAB, "Tab", "Tab"}, {VK_RETURN, "Enter", "Enter"}, {VK_CAPITAL, "CapsLock", "Caps"},
+    {VK_BACK, "Backspace", "Bksp"}, {VK_INSERT, "Insert", "Ins"}, {VK_DELETE, "Delete", "Del"}, {VK_HOME, "Home", "Home"},
+    {VK_END, "End", "End"}, {VK_PRIOR, "PageUp", "PgUp"}, {VK_NEXT, "PageDown", "PgDn"}, {VK_UP, "Up", "Up"},
+    {VK_DOWN, "Down", "Down"}, {VK_LEFT, "Left", "Left"}, {VK_RIGHT, "Right", "Right"},
+    {VK_NUMPAD0, "Num0", "Num0"}, {VK_NUMPAD1, "Num1", "Num1"}, {VK_NUMPAD2, "Num2", "Num2"}, {VK_NUMPAD3, "Num3", "Num3"},
+    {VK_NUMPAD4, "Num4", "Num4"}, {VK_NUMPAD5, "Num5", "Num5"}, {VK_NUMPAD6, "Num6", "Num6"}, {VK_NUMPAD7, "Num7", "Num7"},
+    {VK_NUMPAD8, "Num8", "Num8"}, {VK_NUMPAD9, "Num9", "Num9"}, {VK_MULTIPLY, "NumMultiply", "Num*"}, {VK_ADD, "NumPlus", "Num+"},
+    {VK_SUBTRACT, "NumMinus", "Num-"}, {VK_DECIMAL, "NumPeriod", "Num."}, {VK_DIVIDE, "NumSlash", "Num/"},
+    {VK_OEM_1, "Semicolon", ";"}, {VK_OEM_PLUS, "Equals", "="}, {VK_OEM_COMMA, "Comma", ","}, {VK_OEM_MINUS, "Minus", "-"},
+    {VK_OEM_PERIOD, "Period", "."}, {VK_OEM_2, "Slash", "/"}, {VK_OEM_3, "Backquote", "`"}, {VK_OEM_4, "LeftBracket", "["},
+    {VK_OEM_5, "Backslash", "\\"}, {VK_OEM_6, "RightBracket", "]"}, {VK_OEM_7, "Quote", "'"},
+    {VK_MBUTTON, "Mouse3", "M3"}, {VK_XBUTTON1, "Mouse4", "M4"}, {VK_XBUTTON2, "Mouse5", "M5"},
+};
+/* an upper-cased token against a name, any case */
+KB_FN int KbKeyIs(const char* upper, const char* name)
+{
+    for (; *upper && *name; upper++, name++) if (*upper != toupper((unsigned char)*name)) return 0;
+    return !*upper && !*name;
+}
+KB_FN int KbKeyByName(const char* upper)
+{
+    for (size_t i = 0; i < sizeof kb_key_table / sizeof kb_key_table[0]; i++) if (KbKeyIs(upper, kb_key_table[i].text)) return kb_key_table[i].vk;
+    return 0;
+}
+KB_FN const KbKeyName* KbKeyOf(int vk)
+{
+    for (size_t i = 0; i < sizeof kb_key_table / sizeof kb_key_table[0]; i++) if (kb_key_table[i].vk == vk) return &kb_key_table[i];
+    return NULL;
+}
+
+/* "Shift+Q", "Ctrl+Alt+F", "F5", "Mouse4", "Space", "Num0", "5", or a Windows virtual-key code ("#81") */
 KB_FN int ParseKey(const char* text, Key* out)
 {
     Key k = {0, 0, ""};
@@ -154,6 +217,7 @@ KB_FN int ParseKey(const char* text, Key* out)
         else if (k.vk) return 0;  /* two main keys */
         else if (n == 1 && ((t[0] >= 'A' && t[0] <= 'Z') || (t[0] >= '0' && t[0] <= '9'))) k.vk = t[0];
         else if (t[0] == 'F' && n <= 3 && atoi(t + 1) >= 1 && atoi(t + 1) <= 24) k.vk = VK_F1 + atoi(t + 1) - 1;
+        else if (KbKeyByName(t)) k.vk = KbKeyByName(t);
         else if (!strcmp(t, "MOUSE4")) k.vk = VK_XBUTTON1;
         else if (!strcmp(t, "MOUSE5")) k.vk = VK_XBUTTON2;
         else if (!strcmp(t, "MOUSE3") || !strcmp(t, "MIDDLEMOUSE")) k.vk = VK_MBUTTON;
@@ -172,6 +236,7 @@ KB_FN int ParseKey(const char* text, Key* out)
     char name[24];
     if ((k.vk >= 'A' && k.vk <= 'Z') || (k.vk >= '0' && k.vk <= '9')) snprintf(name, sizeof name, "%c", k.vk);
     else if (k.vk >= VK_F1 && k.vk <= VK_F24) snprintf(name, sizeof name, "F%d", k.vk - VK_F1 + 1);
+    else if (KbKeyOf(k.vk)) snprintf(name, sizeof name, "%s", KbKeyOf(k.vk)->label);
     else if (k.vk == VK_XBUTTON1) snprintf(name, sizeof name, "M4");
     else if (k.vk == VK_XBUTTON2) snprintf(name, sizeof name, "M5");
     else if (k.vk == VK_MBUTTON) snprintf(name, sizeof name, "M3");
