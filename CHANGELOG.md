@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-25: Veterancy System 0.20.0 (test build)
+
+### Fixed
+- **Rocket Sentry Last Stand works on HellForge 0.5.** HellForge 0.5 makes room for 4,096 entities and moves the game's entity records, so Last Stand found no enemies there and nothing dropped. It now finds them through the game's own lookup when the records have moved, as the character kits do. HellForge 0.4 is unchanged.
+
+Not played on 0.5 yet: stays on this branch until tested.
+
 ## 2026-11-11: Veterancy System 0.19.1
 
 ### Fixed

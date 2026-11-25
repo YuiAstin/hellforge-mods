@@ -219,14 +219,46 @@ static int Lookup(uintptr_t at, uint32_t key, uint32_t limit, uint32_t* index)
     }
     return 0;
 }
+/* The game's own lookup of an entity's descriptor (SDK 16: hf->function "EntityDescriptor", game.dll+0xFD9D40). HellForge
+ * 0.5 makes room for 4096 entities a world and moves the records and the entity maps out of the manager (its
+ * entity-table fix, docs/modding/hooks.md "Fields a mod moved"): the fixed offsets below then find nothing, so Last Stand
+ * found no enemy and nothing dropped. The game's function follows the move. As the character kits' base does. */
+static uint8_t* (*g_descriptorFn)(uint32_t entity);
+static int g_descriptorSeen;      /* the fixed offsets have found an entity: the records are where the game has them */
+static unsigned g_descriptorAsks;
+static int DescriptorAsk(uint32_t entity, uint8_t out[24])
+{
+#if defined(HF_MOD_SDK_VERSION) && HF_MOD_SDK_VERSION >= 16
+    if (!g_descriptorFn && g_descriptorAsks < 6 && g_hf->version >= 16 && g_hf->size >= offsetof(HfApi, function) + sizeof g_hf->function &&
+        g_hf->function)
+    {
+        g_descriptorAsks++;
+        g_descriptorFn = (uint8_t* (*)(uint32_t))g_hf->function(g_mod, "EntityDescriptor");
+        if (g_descriptorFn)
+            g_hf->log(g_mod, "entities: their records are not at the game's own offsets (HellForge moved them): read through the game's lookup from now on");
+    }
+    if (!g_descriptorFn) return 0;
+    uint8_t* d = g_descriptorFn(entity);
+    return d && ReadAt((uintptr_t)d, out, 24) && Word(out + 8) == entity;
+#else
+    (void)entity; (void)out;
+    return 0;
+#endif
+}
 /* An entity's descriptor: its resource (+0), entity (+8), unit (+12) */
 static int Descriptor(uint32_t entity, uint8_t out[24])
 {
     if (!entity || entity == UINT32_MAX || entity == 0x7FFF) return 0;
+    if (g_descriptorFn) return DescriptorAsk(entity, out);
     uintptr_t root = Pointer(g_gameDll + 0x346BF98);
     uint32_t index;
-    if (!root || !Lookup(root + 0xF1AEB0, entity, 1048576, &index) || index >= 262144) return 0;
-    return ReadAt(root + 0xF32F18 + 24u * index, out, 24) && Word(out + 8) == entity;
+    if (root && Lookup(root + 0xF1AEB0, entity, 1048576, &index) && index < 262144 &&
+        ReadAt(root + 0xF32F18 + 24u * index, out, 24) && Word(out + 8) == entity) { g_descriptorSeen = 1; return 1; }
+    /* nothing at the fixed offsets: an entity that is gone, or records that moved. While the offsets have found none at
+     * all, the game's lookup is tried; once it answers, it is the one used. */
+    uint8_t probe[24];
+    if (!g_descriptorSeen && DescriptorAsk(entity, probe)) { memcpy(out, probe, 24); return 1; }
+    return 0;
 }
 /* A unit's root position in its scene graph (64-byte matrices, translation at +0x30) */
 static int UnitRoot(uint32_t unit, float out[3])
