@@ -16,6 +16,14 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.7.0: a mine of hers can wear the game's own mine (jib_model 1), once the mission has seen a minefield called in.
+ * Played with 0.6.2's probe: the game's mines are units, spawned with WorldSpawnUnit where the deployer lands (48 a
+ * field; 18 for the anti-tank one), their handles kept in the field's slots (the MD-17's mine is unit 032489cf1d439bba,
+ * the MD-8's 693028644d27ffef, the MD-I4's e49a5ae078aad407; the MD-6's spawns before the probe's window opened). The
+ * hook now keeps every unit spawn's arguments; the latest spawn of a mine's unit is the pattern (its world, resource
+ * and other arguments), and Jack in the Box spawns one more like it where a mine of hers lies, hidden again
+ * (UnitSetUnitVisibility) when the mine goes. Only the look: the kit still trips and blows its own mines. The field
+ * readout names each field's mine unit (UnitResourceName), which gives the MD-6's.
  * 0.6.2: Ambush is on after ambush_after s without firing by default (ambush 2). A mine's marker remembers what it is,
  * so changing jib_marker no longer reads as its markers blowing (played: the Melta Mine spawns and lies inert, as a
  * throwable's entity does; the contact mine is the enemy's map mine). The mine probe (mine_probe 1): after a
@@ -87,7 +95,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.6.2"
+#define VERSION "0.7.0"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12
@@ -109,7 +117,7 @@ KB_ROSTER_EXPORTS(w)
 static int s_rounds = 40, s_rareMax = 4;
 static float s_damage = 3.5f, s_cooldown = 16, s_freezeSeconds = 3, s_freezeRadius = 5;
 static float s_insult = 1.18f, s_splashEvery = 0.4f, s_splashSafe = 8, s_ambushAfter = 10, s_ambushMiss = 0.6f, s_ambushRange = 80, s_visualCut = 60;
-static int s_splash = 1, s_splashExplosion = HF_EXPLOSION_G6_FRAG_DETONATION, s_ambush = 2, s_ambushForget = 0, s_mineProbe = 1;
+static int s_splash = 1, s_splashExplosion = HF_EXPLOSION_G6_FRAG_DETONATION, s_ambush = 2, s_ambushForget = 0, s_mineProbe = 1, s_jibModel = 1;
 static int s_jibCharges = 5, s_jibMax = 30, s_jibExplosion = HF_EXPLOSION_MD6_ANTIPERSONNEL_MINEFIELD_MINE, s_jibMarker = 0;
 static float s_jibEvery = 8, s_jibWidth = 15, s_jibLength = 40, s_jibTrigger = 3, s_jibDelay = 1.5f, s_jibLife = 120, s_jibDamage = 2.8f, s_jibFreeze = 2.2f,
              s_jibFreezeRadius = 5;
@@ -129,7 +137,7 @@ static const KbSetting kSettings[] = {
     KB_I("d12_marks", s_d12Marks, 1, MARKS_MAX), KB_I("d12_explosion", s_d12Explosion, 0, 2000), KB_I("d12_things", s_d12Things, 0, 1), KB_F("d12_range", s_d12Range, 5, 300),
     KB_F("d12_aim", s_d12Aim, 0.5, 10), KB_F("d12_seconds", s_d12Life, 5, 600), KB_F("d12_cooldown", s_d12Cooldown, 0, 600), KB_F("d12_damage", s_d12Damage, 0.1, 50),
     KB_F("d12_freeze", s_d12Freeze, 0, 30), KB_F("d12_freeze_radius", s_d12FreezeRadius, 0.5, 30),
-    KB_I("mine_probe", s_mineProbe, 0, 1), KB_I("options_key", s_optionsKey, 0, 255),
+    KB_I("mine_probe", s_mineProbe, 0, 1), KB_I("jib_model", s_jibModel, 0, 1), KB_I("options_key", s_optionsKey, 0, 255),
 };
 static const KbOption kOptions[] = {
     {"koh_rounds", NULL, &s_rounds}, {"koh_damage", &s_damage, NULL}, {"koh_cooldown", &s_cooldown, NULL}, {"koh_freeze_seconds", &s_freezeSeconds, NULL},
@@ -139,7 +147,7 @@ static const KbOption kOptions[] = {
     {"jib_charges", NULL, &s_jibCharges}, {"jib_charge_every", &s_jibEvery, NULL}, {"jib_max", NULL, &s_jibMax}, {"jib_width", &s_jibWidth, NULL},
     {"jib_length", &s_jibLength, NULL}, {"jib_trigger", &s_jibTrigger, NULL}, {"jib_delay", &s_jibDelay, NULL}, {"jib_seconds", &s_jibLife, NULL},
     {"jib_damage", &s_jibDamage, NULL}, {"jib_freeze", &s_jibFreeze, NULL}, {"jib_freeze_radius", &s_jibFreezeRadius, NULL},
-    {"jib_explosion", NULL, &s_jibExplosion}, {"jib_marker", NULL, &s_jibMarker},
+    {"jib_explosion", NULL, &s_jibExplosion}, {"jib_marker", NULL, &s_jibMarker}, {"jib_model", NULL, &s_jibModel},
     {"d12_marks", NULL, &s_d12Marks}, {"d12_explosion", NULL, &s_d12Explosion}, {"d12_things", NULL, &s_d12Things}, {"d12_range", &s_d12Range, NULL},
     {"d12_aim", &s_d12Aim, NULL}, {"d12_seconds", &s_d12Life, NULL}, {"d12_cooldown", &s_d12Cooldown, NULL}, {"d12_damage", &s_d12Damage, NULL},
     {"d12_freeze", &s_d12Freeze, NULL}, {"d12_freeze_radius", &s_d12FreezeRadius, NULL},
@@ -803,7 +811,30 @@ static void MarkFrame(void)
 
 /* ---- Jack in the Box: mines the kit keeps itself ---------------------------------------------------------------- */
 #define MINES 64
-typedef struct MineT { int on; float pos[3]; double born, boomAt; uint32_t marker; uint64_t markerRes; } MineT;
+typedef struct MineT { int on; float pos[3]; double born, boomAt; uint32_t marker; uint64_t markerRes; uint32_t unit; } MineT;
+/* the game's own mine as a mine's look: the pattern of the latest mine unit the game spawned (the mine probe's hook) */
+typedef struct UnitPattern { int valid; void* world; uint64_t res, name; int hasName; uint32_t s5; uint64_t s6; uint8_t s7; uint64_t s8; } UnitPattern;
+static UnitPattern g_pattern;
+static unsigned g_models;
+static uint32_t ModelSpawn(const float at[3])
+{
+    HfFn_WorldSpawnUnit spawn = hf_fn_WorldSpawnUnit(self);
+    float pose[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, at[0], at[1], at[2], 1};
+    uint32_t handle = 0;
+    if (!s_jibModel || !g_pattern.valid || !spawn || g_models >= 300) return 0;
+    uint64_t res = g_pattern.res, name = g_pattern.name;
+    void* unit = spawn(g_pattern.world, &res, g_pattern.hasName ? &name : NULL, pose, g_pattern.s5, g_pattern.s6, g_pattern.s7, g_pattern.s8);
+    if (!unit || !ReadAt((uintptr_t)unit + 8, &handle, 4)) handle = 0;
+    g_models++;
+    if (g_models <= 6) Log("Jack in the Box: a mine's unit %016llx spawned at %.1f %.1f %.1f: handle %08x", (unsigned long long)res, (double)at[0], (double)at[1], (double)at[2], handle);
+    return handle;
+}
+static void ModelHide(uint32_t handle)
+{
+    HfFn_UnitAlive alive = hf_fn_UnitAlive(self);
+    HfFn_UnitSetUnitVisibility show = hf_fn_UnitSetUnitVisibility(self);
+    if (handle && g_inMission && alive && show && (alive(handle) & 1)) show(handle, 0, 1);
+}
 static MineT g_mine[MINES];
 static int g_charges;
 static double g_chargeAt;
@@ -821,6 +852,7 @@ static void MineOff(MineT* m, int touch)
     HfFn_RemoveEntity remove = hf_fn_RemoveEntity(self);
     void* em = hf_global_EntityManager(self);
     if (touch && m->marker && remove && em && ResOf(m->marker) == m->markerRes) remove(em, m->marker);
+    if (m->unit) ModelHide(m->unit);
     memset(m, 0, sizeof *m);
 }
 static void MinesClear(int touch, const char* why)
@@ -879,7 +911,7 @@ static void JibPlace(void)
     }
     if ((out >= s_jibMax || !m) && oldest >= 0) { MineOff(&g_mine[oldest], 1); m = &g_mine[oldest]; out--; }
     if (!m) return;
-    m->on = 1; m->born = g_now; m->boomAt = 0; m->marker = 0;
+    m->on = 1; m->born = g_now; m->boomAt = 0; m->marker = 0; m->unit = 0;
     m->pos[0] = at[0]; m->pos[1] = at[1]; m->pos[2] = at[2];
     if (g_charges == s_jibCharges) g_chargeAt = g_now;
     g_charges--;
@@ -892,6 +924,7 @@ static void JibPlace(void)
         m->marker = SpawnAt(res, up, "a mine's marker");
         m->markerRes = res;
     }
+    m->unit = ModelSpawn(at);
     if (g_minesLaid <= 30)
         Log("Jack in the Box: mine %u %s at %.1f %.1f %.1f, %.0f m from her (marker %u); %d charges left, %d out", g_minesLaid, found ? "under an enemy" : "at a random spot", (double)at[0],
             (double)at[1], (double)at[2], (double)sqrtf(Dist2(at, me)), m->marker, g_charges, out + 1);
@@ -1211,7 +1244,8 @@ static int g_nMineKinds;
 static double g_censusUntil, g_boomsUntil;
 /* the mine probe: the units the game spawns after a deployer lands, and the minefield manager's fields */
 #define UNITS 512
-typedef struct UnitSeen { volatile uint64_t res; volatile float pos[3]; volatile uint32_t handle; } UnitSeen;
+typedef struct UnitSeen { volatile uint64_t res; volatile float pos[3]; volatile uint32_t handle; void* volatile world; volatile uint64_t name, s6, s8; volatile uint32_t s5, hasName, s7; } UnitSeen;
+static uint64_t g_apRes;   /* the MD-6's mine unit, once a field of it was read */
 static UnitSeen g_unit[UNITS];
 static atomic_uint g_unitHead;
 static atomic_ullong g_unitUntilMs;
@@ -1219,8 +1253,10 @@ static unsigned g_unitTail;
 static HfFn_WorldSpawnUnit original_wsu;
 static void* SpawnUnitDetour(void* world, const uint64_t* resource, const uint64_t* name, const float* pose, uint32_t s5, uint64_t s6, uint8_t s7, uint64_t s8)
 {
+    uint64_t nm = 0;
+    int hasName = name && ReadAt((uintptr_t)name, &nm, 8);
     void* unit = original_wsu(world, resource, name, pose, s5, s6, s7, s8);
-    if (GetTickCount64() < atomic_load(&g_unitUntilMs) && resource)
+    if (resource)
     {
         unsigned h = atomic_fetch_add(&g_unitHead, 1);
         UnitSeen* u = &g_unit[h % UNITS];
@@ -1229,6 +1265,7 @@ static void* SpawnUnitDetour(void* world, const uint64_t* resource, const uint64
         if (pose) { u->pos[0] = pose[12]; u->pos[1] = pose[13]; u->pos[2] = pose[14]; }
         if (unit) ReadAt((uintptr_t)unit + 8, &handle, 4);
         u->handle = handle;
+        u->world = world; u->name = nm; u->hasName = (uint32_t)hasName; u->s5 = s5; u->s6 = s6; u->s7 = s7; u->s8 = s8;
     }
     return unit;
 }
@@ -1258,6 +1295,18 @@ static void FieldDump(void)
             float p[3];
             if (!ReadAt(r + 0x14 + 0x74ull * k, mine, sizeof mine)) continue;
             memcpy(p, mine + 4, 12);
+            if (!k)
+            {
+                HfFn_UnitResourceName nameOf = hf_fn_UnitResourceName(self);
+                HfFn_UnitAlive alive = hf_fn_UnitAlive(self);
+                uint64_t res = nameOf && alive && Word(mine) && (alive(Word(mine)) & 1) ? nameOf(Word(mine)) : 0;
+                Log("mine probe: field %u's mines are unit %016llx", f, (unsigned long long)res);
+                if (res && res != 0x032489CF1D439BBAull && res != 0x693028644D27FFEFull && res != 0xE49A5AE078AAD407ull && res != g_apRes)
+                {
+                    g_apRes = res;
+                    Log("mine probe: %016llx is a mine unit not known before (the MD-6's, if that is the field called in)", (unsigned long long)res);
+                }
+            }
             for (int i = 0; i < 0x74; i++) { if (i && !(i & 3)) strcat(hex, " "); snprintf(hex + strlen(hex), 3, "%02x", mine[i]); }
             Log("mine probe: field %u mine %u: unit %08x at %.1f %.1f %.1f, state %u: %s", f, k, Word(mine), (double)p[0], (double)p[1], (double)p[2], Word(mine + 0x10), hex);
         }
@@ -1274,6 +1323,16 @@ static void UnitFrame(void)
     {
         const UnitSeen* u = &g_unit[g_unitTail % UNITS];
         unsigned k = 0;
+        uint64_t ur = u->res;
+        /* a mine's unit, spawned by the game: the pattern for hers */
+        if (u->handle && u->world && (ur == 0x032489CF1D439BBAull || ur == 0x693028644D27FFEFull || ur == 0xE49A5AE078AAD407ull || (g_apRes && ur == g_apRes)) &&
+            !(g_pattern.valid && g_pattern.res == ur))
+        {
+            g_pattern = (UnitPattern){1, u->world, ur, u->name, (int)u->hasName, u->s5, u->s6, (uint8_t)u->s7, u->s8};
+            Log("Jack in the Box: the game spawned a mine's unit %016llx (world %p, name %s%016llx, s5 %u, s6 %llx, s7 %u, s8 %llx): hers wear it from now", (unsigned long long)ur,
+                u->world, u->hasName ? "" : "none ", (unsigned long long)u->name, u->s5, (unsigned long long)u->s6, u->s7, (unsigned long long)u->s8);
+        }
+        if (GetTickCount64() >= atomic_load(&g_unitUntilMs)) continue;
         open = 1;
         while (k < nk && kinds[k] != u->res) k++;
         if (k == nk) { if (nk >= 24) continue; kinds[nk++] = u->res; counts[k] = 0; }
@@ -1413,6 +1472,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         {
             Abort("the mission ended");
             MinesClear(0, "the mission ended");
+            g_pattern.valid = 0; g_models = 0;
             MarksClear("the mission ended");
             memset(g_thing, 0, sizeof g_thing); g_d12Ready = 0;
             g_cut = 0; g_ambushOn = 0;

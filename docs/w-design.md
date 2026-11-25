@@ -118,3 +118,15 @@ Source kit: W, Sniper (Artilleryman), at rank 10 of each skill. Her module is le
 - The kits' HUD: her three skills beside the stratagem list with her skill icons (the launcher's rounds, the mine
   charges and mines out, the marks and the detonation key on them), the keys on the game's binding menu, the character
   picker. Her mod icon. Played before it: D12 on bug holes (the dynamite closes them), Artilleryman's bursts.
+
+## The game's mines, played (0.6.2's probe) and 0.7.0
+
+- A mine is a unit the game spawns with WorldSpawnUnit where the deployer lands (48 a field, 18 for the MD-17), its
+  handle kept in the field's slot (+0). Mine units: MD-17 032489cf1d439bba, MD-8 693028644d27ffef, MD-I4
+  e49a5ae078aad407; the MD-6's not read yet (0.7.0's field readout names it).
+- A slot (0x74 bytes): +0 unit handle, +4 place, +0x10 state (1 armed, 2 seen on some), +0x18 a small timer, +0x1C the
+  place again, +0x28 a second place, +0x34 a quaternion, +0x44 a third place, +0x50 a quaternion, +0x64 a count.
+  A field: +0x15D4 a float, +0x15D8 a byte 1 once settled.
+- 0.7.0: her mines wear the game's mine unit once a minefield was called in in the mission (the game's own spawn
+  call's arguments are the pattern); the kit still trips and blows them. Next: her own field, or the unit's package
+  loaded without a call-in.
