@@ -16,6 +16,9 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.5.2: a bug hole still was not marked (played; the dynamite does close one). A hole or spawner is now listed whatever
+ * else it is (one the kit also counts an enemy was asked to be alive, and has no health), and a press that marks
+ * nothing logs the nearest hole or spawner and how far it is from her aim line.
  * 0.5.1: D12 marks bug holes and the enemy's other spawners too (played: a bug hole has no health, so it was never in
  * the list): what has the game's bug hole or AI spawner record, taken twice as far from her aim line as other things
  * (they are wide). A hole that closes is logged with what closed it near, and is not marked again.
@@ -71,7 +74,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.5.1"
+#define VERSION "0.5.2"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12
@@ -694,7 +697,33 @@ static void D12Mark(void)
     float eye[3] = {me[0], me[1], me[2] + 1.6f};
     for (int i = 0; i < FOES; i++) D12Consider(g_foe[i], g_foeRes[i], 1, 0, eye, aim, &best, &pick);
     if (s_d12Things) for (int i = 0; i < THINGS; i++) D12Consider(g_thing[i], g_thingRes[i], 0, g_thingWide[i], eye, aim, &best, &pick);
-    if (!pick.on) { static unsigned told; if (told++ < 6) Log("D12: nothing on her aim line within %.0f m to mark", (double)s_d12Range); return; }
+    if (!pick.on)
+    {
+        static unsigned told;
+        if (told++ < 12)
+        {
+            int wide = 0, read = 0;
+            float nearest = 1e9f, nAlong = 0, nSide = 0;
+            uint32_t ne = 0;
+            for (int i = 0; i < THINGS; i++)
+            {
+                uint8_t d[24];
+                float p[3];
+                if (!g_thing[i] || !g_thingWide[i]) continue;
+                wide++;
+                if (!Descriptor(g_thing[i], d) || Quad(d) != g_thingRes[i] || !UnitNode(Word(d + 12), 0, p)) continue;
+                read++;
+                float v[3] = {p[0] - eye[0], p[1] - eye[1], p[2] + 1.0f - eye[2]}, dist = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+                if (dist >= nearest) continue;
+                float along = v[0] * aim[0] + v[1] * aim[1] + v[2] * aim[2];
+                float w[3] = {v[0] - aim[0] * along, v[1] - aim[1] * along, v[2] - aim[2] * along};
+                nearest = dist; nAlong = along; nSide = sqrtf(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]); ne = g_thing[i];
+            }
+            Log("D12: nothing on her aim line within %.0f m to mark; %d holes or spawners listed, %d of them readable; the nearest (entity %u) %.0f m from her, %.1f m along her aim, %.1f m off it",
+                (double)s_d12Range, wide, read, ne, (double)(ne ? nearest : 0), (double)nAlong, (double)nSide);
+        }
+        return;
+    }
     int slot = -1, oldest = -1, n = 0;
     for (int i = 0; i < MARKS; i++)
     {
@@ -1164,13 +1193,16 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
         if (!foe && !FriendRes(s->resource) && !hf->component_record("AvatarComponentData", s->resource, &stride))
             foe = (hf->component_record("TurretComponentData", s->resource, &stride) && hf->component_record("BehaviorComponentData", s->resource, &stride)) ||
                   (hf->component_record("AiEnemyComponentData", s->resource, &stride) && hf->component_record("HealthComponentData", s->resource, &stride));
-        if (foe) AddFoe(s->entity, s->resource);
-        else if (hf->component_record("BugholeComponentData", s->resource, &stride) || hf->component_record("AiSpawnerComponentData", s->resource, &stride))
+        if (hf->component_record("BugholeComponentData", s->resource, &stride) || hf->component_record("AiSpawnerComponentData", s->resource, &stride))
         {
+            static unsigned told;
+            if (told++ < 12) Log("D12: a bug hole or spawner listed: entity %u (%016llx)%s", s->entity, (unsigned long long)s->resource, foe ? ", which the kit also counts an enemy" : "");
+            if (foe) AddFoe(s->entity, s->resource);
             unsigned th = atomic_load(&g_thingHead);
             g_thing[th % THINGS] = s->entity; g_thingRes[th % THINGS] = s->resource; g_thingWide[th % THINGS] = 1;
             atomic_store(&g_thingHead, th + 1);
         }
+        else if (foe) AddFoe(s->entity, s->resource);
         else if (!FriendRes(s->resource) && hf->component_record("HealthComponentData", s->resource, &stride) && !hf->component_record("AvatarComponentData", s->resource, &stride) &&
                  !hf->component_record("SeatCollectionComponentData", s->resource, &stride) && !hf->component_record("WeaponComponentData", s->resource, &stride) &&
                  !hf->component_record("ProjectileComponentData", s->resource, &stride))
