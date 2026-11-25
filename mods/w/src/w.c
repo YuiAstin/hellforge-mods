@@ -16,6 +16,8 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.7.8: a mine's unit is taken away with its mine (played: 0.7.7's stayed), the way the game's minefield takes away
+ * one of its own: the engine's destroy-unit entry it calls, with the game's world and the unit's handle.
  * 0.7.7: the cause of 0.7.2's and 0.7.3's crashes, read from the game's code (helldivers2.exe+0x1A804B, in the spawn's
  * inner half 0x1A7FC0): `mov rax, [r14]` reads WorldSpawnUnit's name argument through its pointer, and the kit's own
  * pattern passed NULL (the pattern copied from the game passed a pointer to 0, which is why hers spawned well after a
@@ -126,7 +128,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.7.7"
+#define VERSION "0.7.8"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12
@@ -962,11 +964,25 @@ static void RowReadout(void)
         Log("mine probe: row +0x178 entry %u: %016llx %016llx", k, (unsigned long long)Quad(e), (unsigned long long)Quad(e + 8));
     }
 }
+/* a mine's unit taken away as the game takes away one of its own that did not land well (game.dll+0x9DDA5F: the
+ * engine's world table's +0x60 with the game's world and the unit's handle). 0.7.7 hid the unit instead, behind a
+ * check that it was alive that never passed (played: the mines stayed after their blasts). */
+static int g_destroyOk;
 static void ModelHide(uint32_t handle)
 {
-    HfFn_UnitAlive alive = hf_fn_UnitAlive(self);
-    HfFn_UnitSetUnitVisibility show = hf_fn_UnitSetUnitVisibility(self);
-    if (handle && g_inMission && alive && show && (alive(handle) & 1)) show(handle, 0, 1);
+    typedef void (*DestroyFn)(void* world, uint32_t unit);
+    static int told;
+    uintptr_t api, table;
+    DestroyFn destroy;
+    void* world;
+    if (!handle || !g_inMission) return;
+    if (!g_destroyOk || !(api = Pointer(game + 0x3326308)) || !(table = Pointer(api + 8)) || !(destroy = (DestroyFn)Pointer(table + 0x60)) ||
+        !(world = (void*)Pointer(game + 0x346BFA0)))
+    {
+        if (!told++) Log("Jack in the Box: a mine's unit could not be taken away (the game's way to it was not found): it stays");
+        return;
+    }
+    destroy(world, handle);
 }
 static MineT g_mine[MINES];
 static int g_charges;
@@ -1688,6 +1704,8 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         g_setVelocity = (SetVecFn)(game + 0x4A7550);
     }
     if (Boundary(game + 0x5B36C0)) g_setDest = (SetVecFn)(game + 0x5B36C0);
+    g_destroyOk = hf->code_matches(game + 0x9DDA5F, "48 8b 05 a2 88 94 02 8b 16 48 8b 0d 31 e5 a8 02 4c 8b 40 08 41 ff 50 60");
+    if (!g_destroyOk) Log("the minefield's code is not the reviewed one: a mine's unit of hers stays after its blast");
     Log("ready: King of Hearts on %s (%d rounds, %.2f times the damage, %.0f s cooldown; the freeze %.1f s within %.1f m); the hold %s", s_key.label, s_rounds,
         (double)s_damage, (double)s_cooldown, (double)s_freezeSeconds, (double)s_freezeRadius, g_setPosition ? "ready" : "off (frozen enemies may slide)");
 }
