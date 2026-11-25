@@ -16,6 +16,11 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.7.6: played: the game lists one package for the minefield's stratagem, the deployer's loadout package (the row's
+ * +0xA8, filled once the stratagem is in a loadout). So the package was right in 0.7.2 and 0.7.3, and the resource
+ * the engine then lacked is one of type eac0b497876adedf under the unit's own name. A mine's unit is now spawned only
+ * when that resource can be had as well, the package is loaded by the kit again, and the log says whenever what can be
+ * had of the mine changes (after the package, after a call-in).
  * 0.7.5: 0.7.4 found no package at all (StratagemPackages answered 0 for the kinds 0 to 7), so nothing was loaded and
  * nothing spawned. The crash's missing resource was a material (type eac0b497876adedf): the mine's unit is in the
  * deployer's loadout package, a material of it is not. To learn where it is: the minefield's stratagem row is read out
@@ -115,7 +120,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.7.5"
+#define VERSION "0.7.6"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12
@@ -835,14 +840,16 @@ typedef struct MineT { int on; float pos[3]; double born, boomAt; uint32_t marke
 /* the game's own mine as a mine's look: the pattern of the latest mine unit the game spawned (the mine probe's hook) */
 typedef struct UnitPattern { int valid; void* world; uint64_t res, name; int hasName; uint32_t s5; uint64_t s6; uint8_t s7; uint64_t s8; } UnitPattern;
 static UnitPattern g_pattern;
+static int g_patternFromGame;             /* 1: copied from a spawn of the game's own (played: those spawn well) */
 static unsigned g_models;
 static int UnitLoaded(uint64_t res);
+static int MaterialLoaded(uint64_t res);
 static uint32_t ModelSpawn(const float at[3])
 {
     HfFn_WorldSpawnUnit spawn = hf_fn_WorldSpawnUnit(self);
     float pose[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, at[0], at[1], at[2], 1};
     uint32_t handle = 0;
-    if (!s_jibModel || !g_pattern.valid || !spawn || g_models >= 300 || !UnitLoaded(g_pattern.res)) return 0;
+    if (!s_jibModel || !g_pattern.valid || !spawn || g_models >= 300 || !UnitLoaded(g_pattern.res) || (!g_patternFromGame && !MaterialLoaded(g_pattern.res))) return 0;
     uint64_t res = g_pattern.res, name = g_pattern.name;
     void* unit = spawn(g_pattern.world, &res, g_pattern.hasName ? &name : NULL, pose, g_pattern.s5, g_pattern.s6, g_pattern.s7, g_pattern.s8);
     if (!unit || !ReadAt((uintptr_t)unit + 8, &handle, 4)) handle = 0;
@@ -859,57 +866,44 @@ static int UnitLoaded(uint64_t res)
     HfFn_CanGetResource can = hf_fn_CanGetResource(self);
     return can && (can(UNIT_TYPE, res) & 1);
 }
+#define MATERIAL_TYPE 0xEAC0B497876ADEDFull   /* the type the engine asked for, under the unit's own name, when spawning one ended the game */
+static int MaterialLoaded(uint64_t res)
+{
+    HfFn_CanGetResource can = hf_fn_CanGetResource(self);
+    return can && (can(MATERIAL_TYPE, res) & 1);
+}
 static void ModelReady(void)
 {
-    static double again, since;
-    static int told, said, npk;
-    static uint64_t pkgs[24];               /* every package the minefield's stratagem names */
-    if (!s_jibModel || g_pattern.valid || g_now < again) return;
+    static double again;
+    static int told, last = -1;
+    if (!s_jibModel || g_now < again) return;
     again = g_now + 0.5;
+    /* what the engine can hand out of the MD-6's mine, said whenever it changes (to learn what a call-in brings) */
+    int state = UnitLoaded(MD6_MINE) | MaterialLoaded(MD6_MINE) << 1;
+    if (state != last)
+    {
+        last = state;
+        Log("Jack in the Box: the MD-6's mine: its unit %s, the resource of type %016llx under its name %s (package state %d)", state & 1 ? "can be had" : "cannot be had",
+            (unsigned long long)MATERIAL_TYPE, state & 2 ? "can be had" : "cannot be had", g_minePackage && g_minePackage != ~0ull ? hf->load_package(self, g_minePackage) : -1);
+    }
+    if (g_pattern.valid) return;
     if (!g_minePackage)
     {
-        /* the game's own list (StratagemPackages, game.dll+0x1753080: the row's +0xA8, its +0xF8 item's package, its
-         * +0x118 entries of one kind (r9) and its +0x178 entries): asked for every kind, the lists joined. 0.7.2 and
-         * 0.7.3 loaded the deployer's loadout package alone: the mine's unit could then be had, but something it is
-         * made of could not, and spawning it ended the game. */
-        HfFn_StratagemPackages list = hf_fn_StratagemPackages(self);
-        char line[600] = "";
-        for (uint32_t kind = 0; list && kind < 8; kind++)
-        {
-            uint64_t out[32] = {0};
-            uint32_t n = list(out, HF_STRATAGEM_MD6_ANTIPERSONNEL_MINEFIELD, 0, kind);
-            for (uint32_t k = 0; k < n && k < 32; k++)
-            {
-                int known = !out[k] || out[k] == ~0ull;
-                for (int q = 0; q < npk; q++) known |= pkgs[q] == out[k];
-                if (!known && npk < 24) { pkgs[npk++] = out[k]; snprintf(line + strlen(line), sizeof line - strlen(line), " %016llx", (unsigned long long)out[k]); }
-            }
-        }
-        g_minePackage = npk ? 1 : ~0ull;
-        since = g_now;
-        Log("Jack in the Box: the minefield's stratagem names %d packages:%s", npk, npk ? line : " none (her mines wear the game's mine only after a minefield is called in)");
+        uint32_t stride = 0;
+        uintptr_t r = hf->component_record("LoadoutPackageComponentData", HF_ENTITY_MD6_ANTIPERSONNEL_MINEFIELD, &stride);
+        if (!r || !ReadAt(r + 8, &g_minePackage, 8) || !g_minePackage) g_minePackage = ~0ull;
+        Log("Jack in the Box: the minefield's package (the deployer's loadout package, the only one the game lists for the stratagem): %016llx", (unsigned long long)g_minePackage);
     }
     if (g_minePackage == ~0ull) return;
-    int all = 1;
-    for (int i = 0; i < npk; i++)
-    {
-        if (!pkgs[i]) continue;
-        int s = hf->load_package(self, pkgs[i]);
-        if (!s) { if (told++ < 4) Log("Jack in the Box: the package %016llx was refused", (unsigned long long)pkgs[i]); g_minePackage = ~0ull; return; }
-        all &= s == HF_PACKAGE_RESIDENT;
-    }
-    /* hers are spawned only with every one of them resident, and the unit to be had */
-    if (!all) return;
-    if (!UnitLoaded(MD6_MINE))
-    {
-        if (!said && g_now - since > 5) { said = 1; Log("Jack in the Box: the packages are resident and the MD-6's mine still cannot be had: only after a minefield is called in"); }
-        return;
-    }
+    int s = hf->load_package(self, g_minePackage);
+    if (!s) { if (!told++) Log("Jack in the Box: the minefield's package was refused"); g_minePackage = ~0ull; return; }
+    if (s != HF_PACKAGE_RESIDENT || state != 3) return;
     HfFn_MainWorld world = hf_fn_MainWorld(self);
     void* w = world ? world() : NULL;
     if (!w) return;
     g_pattern = (UnitPattern){1, w, MD6_MINE, 0, 0, 0, 0, 1, 0};
-    Log("Jack in the Box: all %d of the minefield's packages are resident and the MD-6's mine can be had: her mines wear it (world %p)", npk, w);
+    g_patternFromGame = 0;
+    Log("Jack in the Box: the minefield's package is resident and the MD-6's mine can be had whole: her mines wear it (world %p)", w);
 }
 /* research: the minefield's stratagem row, and the game's own package lists for it */
 typedef struct PkgCall { volatile uint32_t type, kind, n; volatile uint64_t out[6]; } PkgCall;
@@ -1463,6 +1457,7 @@ static void UnitFrame(void)
             !(g_pattern.valid && g_pattern.res == ur))
         {
             g_pattern = (UnitPattern){1, u->world, ur, u->name, (int)u->hasName, u->s5, u->s6, (uint8_t)u->s7, u->s8};
+            g_patternFromGame = 1;
             Log("Jack in the Box: the game spawned a mine's unit %016llx (world %p, name %s%016llx, s5 %u, s6 %llx, s7 %u, s8 %llx): hers wear it from now", (unsigned long long)ur,
                 u->world, u->hasName ? "" : "none ", (unsigned long long)u->name, u->s5, (unsigned long long)u->s6, u->s7, (unsigned long long)u->s8);
         }
@@ -1606,7 +1601,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         {
             Abort("the mission ended");
             MinesClear(0, "the mission ended");
-            g_pattern.valid = 0; g_models = 0;
+            g_pattern.valid = 0; g_models = 0; g_patternFromGame = 0;
             MarksClear("the mission ended");
             memset(g_thing, 0, sizeof g_thing); g_d12Ready = 0;
             g_cut = 0; g_ambushOn = 0;
