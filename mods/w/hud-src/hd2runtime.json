@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "W HUD",
+  "resource": "mods/yui/w_hud",
+  "guid": "3952dbe1-7a12-5930-9e7a-a69533972e5a",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.30.0",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}
