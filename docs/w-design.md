@@ -14,6 +14,8 @@ Source kit: W, Sniper (Artilleryman), at rank 10 of each skill. Her module is le
 - Jack in the Box holds up to 5 charges (her own rule, not Arknights'). A press spends one charge and places one mine:
   under an enemy in front of her, in a box 15 m wide and 40 m long from her (numbers to start with); with no enemy in
   the box, at a random spot inside it.
+  With several enemies in the box: the one nearest her aim line. A charge comes back every 8 s. No limit on mines by
+  design; a cap of 30 out at once by default, for safety (the oldest goes first).
 - D12 marks enemies or structures; a separate key detonates the marks. Default B, rebindable on the options screen (F9).
 - Ambush: both versions built, to choose between by playing them: on 10 s after she lands (and after each reinforce),
   or on after 10 s without firing.
