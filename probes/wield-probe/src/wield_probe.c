@@ -9,6 +9,10 @@
  *                 it (each round spent is logged). Delete alone undoes it all: your weapon back, the GL-21 removed,
  *                 your weapon refilled. The keys below are the single steps (0.1.x found: way A holds until a weapon
  *                 switch; way B is switched away by the game in half a second; 40 rounds read back on a 10-round GL)
+ *   0.3.0: way A fired (29 of the 40 rounds) but the GL-21 hung in the air and her rifle stayed in her hands: Wield
+ *                 alone does not carry it. Insert and Delete now go the game's own way for an item taken in hand
+ *                 (way C): the inventory's set-held-item (game.dll+0x9AB950: the old item unwielded, the new one
+ *                 attached to her and wielded, record +0x10) and SwitchWeapon 5; Delete clears it the same way
  *   Ctrl+Home     your inventory record, your wield slots, the held weapon's magazine
  *   Shift+Insert  loads the GL-21's package and spawns a GL-21 at your feet (RequestEntitySpawn)
  *   Ctrl+Insert   way A: wields it straight into the slot your last observed Wield used (the inventory is untouched)
@@ -35,7 +39,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.0"
+#define VERSION "0.3.0"
 #include "kitbase/kb_core.h"
 
 #define GL21 HF_ENTITY_GL21_GRENADE_LAUNCHER
@@ -345,6 +349,38 @@ static void Refill(void)
     Magazine("End: after (magazine to capacity, one resupply of spares)", held);
 }
 
+/* ---- 0.3.0, way C: the inventory's own "an item taken in hand" (as a carried objective item is) ----------------------- */
+typedef void (*SetHeldFn)(void* inventory, uint32_t entity, uint32_t item, uint8_t consume, uint32_t tell_peers);
+static SetHeldFn g_setHeld;
+static void WieldC(void)
+{
+    HfFn_SwitchWeapon sw = hf_fn_SwitchWeapon(self);
+    void* im = hf_global_InventoryManager(self);
+    uint32_t me = atomic_load(&g_avatar);
+    if (!Mine("Insert") || !HaveGl("Insert")) return;
+    if (!g_setHeld || !sw || !im || !InventoryRecord(me)) { Log("Insert: set-held-item is not the reviewed code, or your inventory is not there: nothing done"); return; }
+    Remember();
+    Log("Insert (way C): SetHeldItem(you, %u), then SwitchWeapon(you, 5) ...", g_gl);
+    g_setHeld(im, me, g_gl, 0, 1);
+    sw(im, me, 5);
+    Log("Insert: returned. Is the GL-21 in her hands now, her rifle put away? Does it aim and fire?");
+}
+static void BackC(void)
+{
+    HfFn_SwitchWeapon sw = hf_fn_SwitchWeapon(self);
+    void* im = hf_global_InventoryManager(self);
+    uint32_t me = atomic_load(&g_avatar), sel = g_selWas && g_selWas != 5 ? g_selWas : 1, held = 0;
+    uintptr_t rec;
+    if (!Mine("Delete")) return;
+    if (!g_setHeld || !sw || !im || !(rec = InventoryRecord(me))) { Log("Delete: set-held-item or your inventory is not there: nothing done"); return; }
+    ReadAt(rec + 0x10, &held, 4);
+    if (held && held == g_gl) { Log("Delete: SetHeldItem(you, none) ..."); g_setHeld(im, me, 0, 0, 1); }
+    else Log("Delete: your held-item slot has %u, not the probe's GL-21: left as it is", held);
+    Log("Delete: SwitchWeapon(you, %u) ...", sel);
+    sw(im, me, sel);
+    Log("Delete: returned. Is your own weapon back in your hands?");
+}
+
 /* ---- 0.2.0: Insert and Delete by themselves do the whole thing ------------------------------------------------------ */
 static int g_give, g_back, g_lastRounds = -1;
 static double g_giveAt, g_backAt;
@@ -360,7 +396,7 @@ static void Give(void)
 static void Back(void)
 {
     Log("Delete: your weapon back, the GL-21 removed, your weapon refilled");
-    GiveBack();
+    BackC();
     g_back = 1;
     g_backAt = g_now + 0.6;
 }
@@ -369,7 +405,7 @@ static void AutoFrame(void)
     if (g_give && g_now >= g_giveAt && !g_wantSpawn)
     {
         if (!g_gl || ResOf(g_gl) != GL21) { if (g_now > g_giveAt + 5) { g_give = 0; Log("Insert: no GL-21 came in 5 s: given up"); } }
-        else { g_give = 0; WieldA(); Fill(); g_lastRounds = -1; }
+        else { g_give = 0; WieldC(); Fill(); g_lastRounds = -1; }
     }
     if (g_back && g_now >= g_backAt)
     {
@@ -437,6 +473,8 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     if (!g || !x || gs != 74727424u || xs != 60719104u) { Log("REFUSED: not build " BUILD); return; }
     game = g;
     exe = x;
+    if (hf->code_matches(game + 0x9AB950, "40 56 57 41 55 48 83 ec 40 3b 15 c1 82 ad 02 45 0f b6 e9 48 89 5c 24 68")) g_setHeld = (SetHeldFn)(game + 0x9AB950);
+    else Log("set-held-item (0x9AB950) is not the reviewed code: Insert and Delete are off");
     int w = hf->hook_function(self, "Wield", (void*)WieldDetour, (void**)&original_wield, 0),
         s = hf->hook_function(self, "SwitchWeapon", (void*)SwitchDetour, (void**)&original_switch, 0),
         t = hf->hook_function(self, "SetWielder", (void*)SetWielderDetour, (void**)&original_setw, 0);
