@@ -332,7 +332,7 @@ local function mines_draw(d)
     end
     local sc = d.scale or 1
     for i = 0, n - 1 do
-        local x, y, z, lit = mbuf[i * 4], mbuf[i * 4 + 1], mbuf[i * 4 + 2] + 0.25, mbuf[i * 4 + 3] > 0.5
+        local x, y, z, lit, mark = mbuf[i * 4], mbuf[i * 4 + 1], mbuf[i * 4 + 2] + 0.25, mbuf[i * 4 + 3] > 0.5 and mbuf[i * 4 + 3] < 1.5, mbuf[i * 4 + 3] > 1.5
         local ax, ay, az = x - cx, y - cy, z - cz
         if ax * fx + ay * fy + az * fz > 0.5 then
             local sx, sy = s.Vector3.to_elements(s.Camera.world_to_screen(c, s.Vector3(x, y, z)))
@@ -341,7 +341,8 @@ local function mines_draw(d)
                 if sx > 0 and sx < W and sy > 0 and sy < H then
                     local dist = math.sqrt(ax * ax + ay * ay + az * az)
                     local half = math.max(4, math.min(12, 90 / math.max(dist, 1))) * sc
-                    local col = lit and {255, 230, 80, math.floor(120 + 135 * (math.sin(mk_t * 20) * 0.5 + 0.5))} or {224, 58, 58, 235}
+                    local col = lit and {255, 230, 80, math.floor(120 + 135 * (math.sin(mk_t * 20) * 0.5 + 0.5))} or mark and {255, 255, 255, 240} or {224, 58, 58, 235}
+                    if mark then half = half * 1.3; d:rect(sx - half * 0.45, sy - half * 0.45, half * 0.9, half * 0.9, {224, 58, 58, 220}, 6) end
                     local tk = math.max(1, 2 * sc)
                     d:rect(sx - half, sy - half, 2 * half, tk, col, 6); d:rect(sx - half, sy + half - tk, 2 * half, tk, col, 6)
                     d:rect(sx - half, sy - half, tk, 2 * half, col, 6); d:rect(sx + half - tk, sy - half, tk, 2 * half, col, 6)
@@ -382,6 +383,8 @@ overlay:draw(function(d, dt)
     elseif skill == 2 then text, colour = ('King of Hearts  %.0f s'):format(math.max(0, st.value)), {170, 170, 170, 230}
     else text, colour = 'King of Hearts  ready', {255, 255, 255, 230} end
     text = text .. ('   |   Jack in the Box  %d  (%d out)'):format(math.floor(st.skill / 65536) % 256, math.floor(st.skill / 16777216) % 256)
+    local marks, cooling = math.floor(st.skill / 512) % 16, math.floor(st.skill / 8192) % 2 == 1
+    text = text .. (cooling and '   |   D12  cooldown' or ('   |   D12  %d marked'):format(marks))
     if ambush then text = text .. '   |   AMBUSH' end
     local x, y = d.width / 2, (d.height or 1080 * sc) - 150 * sc
     d:text(text, x + 2, y + 2, {size = 20 * sc, colour = {0, 0, 0, 200}, z = 4, align = 'center'})

@@ -16,6 +16,12 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.5.0: D12 (C) and its key (B). A press marks what is nearest her aim line within d12_range m (an enemy before a
+ * thing that only has health: a structure, a prop; d12_things 0 leaves those out), up to d12_marks marks (the oldest
+ * goes); a mark follows what it is on, goes with it if it dies, and lasts d12_seconds. The fourth key (key_s4, B) blows
+ * them one after another: the game's explosion d12_explosion (the TED-63 Dynamite's), its damage d12_damage times,
+ * enemies within d12_freeze_radius m held d12_freeze s. The cooldown d12_cooldown runs from the detonation. The HUD
+ * marks them (w_mines' fourth value 2).
  * 0.4.2: a mine whose explosion's package is still loading waits for it (up to 5 s) instead of going off silently (the
  * first mine of a mission did). Played: the "dead" event puts a death while held right (a Bile Titan's too).
  * 0.4.1: a mine is shown on the HUD (w_mines: where each lies and whether its fuse is lit; w_view: her head, for the HUD
@@ -62,9 +68,11 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.4.2"
+#define VERSION "0.5.0"
 #define BUILD "25480438"
 
+#define MARKS_MAX 12
+#define KB_KEYS 4   /* King of Hearts, Jack in the Box, D12, its detonation */
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
@@ -85,6 +93,8 @@ static int s_splash = 1, s_splashExplosion = HF_EXPLOSION_G6_FRAG_DETONATION, s_
 static int s_jibCharges = 5, s_jibMax = 30, s_jibExplosion = HF_EXPLOSION_MD6_ANTIPERSONNEL_MINEFIELD_MINE, s_jibMarker = 0;
 static float s_jibEvery = 8, s_jibWidth = 15, s_jibLength = 40, s_jibTrigger = 3, s_jibDelay = 1.5f, s_jibLife = 120, s_jibDamage = 2.8f, s_jibFreeze = 2.2f,
              s_jibFreezeRadius = 5;
+static int s_d12Marks = 4, s_d12Explosion = HF_EXPLOSION_TED63_DYNAMITE_DETONATION, s_d12Things = 1;
+static float s_d12Range = 80, s_d12Aim = 2.5f, s_d12Life = 90, s_d12Cooldown = 20, s_d12Damage = 3.1f, s_d12Freeze = 5, s_d12FreezeRadius = 6;
 static int s_optionsKey = 0x78;        /* options_key: the virtual key that opens the options screen (120: F9; 0: none) */
 static const KbSetting kSettings[] = {
     KB_I("koh_rounds", s_rounds, 1, 200), KB_F("koh_damage", s_damage, 0.1, 50), KB_F("koh_cooldown", s_cooldown, 0, 600),
@@ -96,6 +106,9 @@ static const KbSetting kSettings[] = {
     KB_F("jib_length", s_jibLength, 2, 150), KB_F("jib_trigger", s_jibTrigger, 0.5, 15), KB_F("jib_delay", s_jibDelay, 0, 10), KB_F("jib_seconds", s_jibLife, 5, 600),
     KB_F("jib_damage", s_jibDamage, 0.1, 50), KB_F("jib_freeze", s_jibFreeze, 0, 30), KB_F("jib_freeze_radius", s_jibFreezeRadius, 0.5, 30),
     KB_I("jib_explosion", s_jibExplosion, 0, 2000), KB_I("jib_marker", s_jibMarker, 0, 3),
+    KB_I("d12_marks", s_d12Marks, 1, MARKS_MAX), KB_I("d12_explosion", s_d12Explosion, 0, 2000), KB_I("d12_things", s_d12Things, 0, 1), KB_F("d12_range", s_d12Range, 5, 300),
+    KB_F("d12_aim", s_d12Aim, 0.5, 10), KB_F("d12_seconds", s_d12Life, 5, 600), KB_F("d12_cooldown", s_d12Cooldown, 0, 600), KB_F("d12_damage", s_d12Damage, 0.1, 50),
+    KB_F("d12_freeze", s_d12Freeze, 0, 30), KB_F("d12_freeze_radius", s_d12FreezeRadius, 0.5, 30),
     KB_I("options_key", s_optionsKey, 0, 255),
 };
 static const KbOption kOptions[] = {
@@ -107,6 +120,9 @@ static const KbOption kOptions[] = {
     {"jib_length", &s_jibLength, NULL}, {"jib_trigger", &s_jibTrigger, NULL}, {"jib_delay", &s_jibDelay, NULL}, {"jib_seconds", &s_jibLife, NULL},
     {"jib_damage", &s_jibDamage, NULL}, {"jib_freeze", &s_jibFreeze, NULL}, {"jib_freeze_radius", &s_jibFreezeRadius, NULL},
     {"jib_explosion", NULL, &s_jibExplosion}, {"jib_marker", NULL, &s_jibMarker},
+    {"d12_marks", NULL, &s_d12Marks}, {"d12_explosion", NULL, &s_d12Explosion}, {"d12_things", NULL, &s_d12Things}, {"d12_range", &s_d12Range, NULL},
+    {"d12_aim", &s_d12Aim, NULL}, {"d12_seconds", &s_d12Life, NULL}, {"d12_cooldown", &s_d12Cooldown, NULL}, {"d12_damage", &s_d12Damage, NULL},
+    {"d12_freeze", &s_d12Freeze, NULL}, {"d12_freeze_radius", &s_d12FreezeRadius, NULL},
     {"ambush", NULL, &s_ambush}, {"ambush_after", &s_ambushAfter, NULL}, {"ambush_miss", &s_ambushMiss, NULL}, {"ambush_range", &s_ambushRange, NULL},
 };
 #define s_key s_keys[0]
@@ -117,7 +133,7 @@ static const KbOption kOptions[] = {
 typedef struct WTarget { uint32_t entity, unit; uint64_t object; float pos[3]; uint32_t pad; } WTarget;
 typedef struct WState
 {
-    uint32_t version, seq, active, skill, count, rare_max;   /* skill: its low byte 0 ready, 1 on, 2 cooling down, 3 busy; bit 8: Ambush is on; bits 16-23 the mine charges, 24-31 the mines out */
+    uint32_t version, seq, active, skill, count, rare_max;   /* skill: its low byte 0 ready, 1 on, 2 cooling down, 3 busy; bit 8: Ambush is on; bits 9-12 the marks, bit 13 D12 cooling down; bits 16-23 the mine charges, 24-31 the mines out */
     uint32_t player_unit, in_mission;
     uint64_t player_object;
     float player_pos[3], value;                               /* value: the rounds left, or the seconds of cooldown */
@@ -277,7 +293,7 @@ static Boom g_boom[32];
 static atomic_uint g_boomHead;
 /* ---- her rounds' blasts: seen as they are asked for, on whatever thread ------------------------------------------------ */
 static atomic_uint g_gl;                    /* the launcher the skill made (0: none) */
-typedef struct Blast { volatile float pos[3]; volatile uint64_t ms; volatile uint32_t kind; } Blast;   /* kind 0: a round's; 1: a mine's */
+typedef struct Blast { volatile float pos[3]; volatile uint64_t ms; volatile uint32_t kind; } Blast;   /* kind 0: a round's; 1: a mine's; 2: a mark's */
 #define BLASTS 16
 static Blast g_blast[BLASTS];
 static atomic_uint g_blastHead;
@@ -335,10 +351,10 @@ static void OnDamagePre(HfMod* mod, HfDamagePreEvent* ev, void* user)
             const Blast* b = &g_blast[i];
             float p[3] = {b->pos[0], b->pos[1], b->pos[2]};
             blast = b->ms && now - b->ms <= 250 && Dist2(p, d->position) <= 12.0f * 12.0f;
-            mine = blast && b->kind == 1;
+            mine = blast ? (int)b->kind : 0;
         }
     double mult = 1;
-    if (blast) { mult *= (double)(mine ? s_jibDamage : s_damage); g_scaled++; hers = 1; }
+    if (blast) { mult *= (double)(mine == 2 ? s_d12Damage : mine == 1 ? s_jibDamage : s_damage); g_scaled++; hers = 1; }
     else
     {
         /* her Helldiver's network id, asked of the game for this hit's owner (the spawn list never gave it) */
@@ -374,7 +390,7 @@ static void BlastFrame(void)
          * (0.2.0 held the ones it killed for a frame, their state machine off as they died: their corpses went wrong) */
         if (GetTickCount64() - b->ms < 150) break;
         g_blastSeen++;
-        float radius = b->kind == 1 ? s_jibFreezeRadius : s_freezeRadius, seconds = b->kind == 1 ? s_jibFreeze : s_freezeSeconds;
+        float radius = b->kind == 2 ? s_d12FreezeRadius : b->kind == 1 ? s_jibFreezeRadius : s_freezeRadius, seconds = b->kind == 2 ? s_d12Freeze : b->kind == 1 ? s_jibFreeze : s_freezeSeconds;
         for (int i = 0; i < FOES && seconds > 0; i++)
         {
             uint32_t e = g_foe[i];
@@ -389,7 +405,7 @@ static void BlastFrame(void)
             fresh += FreezeAdd(e, seconds);
         }
         if (fresh) Publish();
-        if (g_blastSeen <= 12) Log("a %s blast at %.1f %.1f %.1f: %d enemies within %.1f m held (%d newly)", b->kind == 1 ? "mine's" : "round's", (double)at[0], (double)at[1],
+        if (g_blastSeen <= 12) Log("a %s blast at %.1f %.1f %.1f: %d enemies within %.1f m held (%d newly)", b->kind == 2 ? "mark's" : b->kind == 1 ? "mine's" : "round's", (double)at[0], (double)at[1],
             (double)at[2], caught, (double)radius, fresh);
     }
 }
@@ -617,6 +633,113 @@ static void SkillFrame(void)
     }
 }
 
+/* ---- D12: marks, and the key that blows them -------------------------------------------------------------------- */
+#define MARKS 12
+#define THINGS 256
+typedef struct MarkT { int on; uint32_t entity; uint64_t res; int foe; float pos[3]; double born, boomAt; } MarkT;
+static MarkT g_mark[MARKS];
+static uint32_t g_thing[THINGS];            /* what is not an enemy but has health: a structure, a prop (the spawn event's) */
+static uint64_t g_thingRes[THINGS];
+static atomic_uint g_thingHead;
+static double g_d12Ready;
+static unsigned g_marksMade, g_marksBlown;
+static int MarksOn(void) { int n = 0; for (int i = 0; i < MARKS; i++) n += g_mark[i].on; return n; }
+static void MarksClear(const char* why)
+{
+    int n = MarksOn();
+    memset(g_mark, 0, sizeof g_mark);
+    if (n) Log("D12: %d marks gone (%s)", n, why);
+}
+/* where a marked thing is now (its last place if it cannot be read); 0: it is gone or dead */
+static int MarkWhere(MarkT* m)
+{
+    uint8_t d[24];
+    float p[3];
+    if (!Descriptor(m->entity, d) || Quad(d) != m->res) return 0;
+    if (m->foe && !Alive(m->entity)) return 0;
+    if (UnitNode(Word(d + 12), 0, p)) { m->pos[0] = p[0]; m->pos[1] = p[1]; m->pos[2] = p[2]; }
+    return 1;
+}
+static void D12Consider(uint32_t e, uint64_t res, int foe, const float eye[3], const float aim[3], float* best, MarkT* pick)
+{
+    uint8_t d[24];
+    float p[3];
+    if (!e || !Descriptor(e, d) || Quad(d) != res || !UnitNode(Word(d + 12), 0, p)) return;
+    if (foe && !Alive(e)) return;
+    for (int k = 0; k < MARKS; k++) if (g_mark[k].on && g_mark[k].entity == e) return;
+    /* its distance from her aim line, its middle taken a metre over its root */
+    float v[3] = {p[0] - eye[0], p[1] - eye[1], p[2] + 1.0f - eye[2]};
+    float along = v[0] * aim[0] + v[1] * aim[1] + v[2] * aim[2];
+    if (along < 1.5f || along > s_d12Range) return;
+    float w[3] = {v[0] - aim[0] * along, v[1] - aim[1] * along, v[2] - aim[2] * along};
+    float side = sqrtf(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
+    if (side > s_d12Aim + along * 0.03f) return;
+    /* an enemy before a thing; then the nearest to the line */
+    float score = side + (foe ? 0 : 2.0f);
+    if (score >= *best) return;
+    *best = score;
+    pick->on = 1; pick->entity = e; pick->res = res; pick->foe = foe; pick->pos[0] = p[0]; pick->pos[1] = p[1]; pick->pos[2] = p[2];
+}
+static void D12Mark(void)
+{
+    float me[3], aim[3], best = 1e9f;
+    MarkT pick = {0};
+    if (g_now < g_d12Ready) return;
+    for (int i = 0; i < MARKS; i++) if (g_mark[i].on && g_mark[i].boomAt) return;   /* they are blowing */
+    if (!PlayerPose(me, aim)) return;
+    float eye[3] = {me[0], me[1], me[2] + 1.6f};
+    for (int i = 0; i < FOES; i++) D12Consider(g_foe[i], g_foeRes[i], 1, eye, aim, &best, &pick);
+    if (s_d12Things) for (int i = 0; i < THINGS; i++) D12Consider(g_thing[i], g_thingRes[i], 0, eye, aim, &best, &pick);
+    if (!pick.on) { static unsigned told; if (told++ < 6) Log("D12: nothing on her aim line within %.0f m to mark", (double)s_d12Range); return; }
+    int slot = -1, oldest = -1, n = 0;
+    for (int i = 0; i < MARKS; i++)
+    {
+        if (!g_mark[i].on) { if (slot < 0) slot = i; continue; }
+        n++;
+        if (oldest < 0 || g_mark[i].born < g_mark[oldest].born) oldest = i;
+    }
+    if (n >= s_d12Marks || slot < 0) slot = oldest;
+    if (slot < 0) return;
+    pick.born = g_now;
+    g_mark[slot] = pick;
+    g_marksMade++;
+    if (g_marksMade <= 30)
+        Log("D12: mark %u on %s %u (%016llx) %.0f m from her; %d marked", g_marksMade, pick.foe ? "enemy" : "thing", pick.entity, (unsigned long long)pick.res,
+            (double)sqrtf(Dist2(pick.pos, me)), MarksOn());
+}
+static void D12Detonate(void)
+{
+    int n = 0;
+    for (int i = 0; i < MARKS; i++)
+    {
+        if (!g_mark[i].on || g_mark[i].boomAt) continue;
+        g_mark[i].boomAt = g_now + 0.15 * n++;
+    }
+    if (!n) return;
+    g_d12Ready = g_now + s_d12Cooldown;
+    Log("D12: %d marks set off; the cooldown %.0f s from now", n, (double)s_d12Cooldown);
+}
+static void MineBlast(const float at[3], uint32_t kind);
+static void MarkFrame(void)
+{
+    for (int i = 0; i < MARKS; i++)
+    {
+        MarkT* m = &g_mark[i];
+        if (!m->on) continue;
+        if (!MarkWhere(m) && !m->boomAt) { m->on = 0; continue; }     /* dead or gone before the key: its mark with it */
+        if (!m->boomAt) { if (g_now - m->born > s_d12Life) m->on = 0; continue; }
+        if (g_now < m->boomAt) continue;
+        float at[3] = {m->pos[0], m->pos[1], m->pos[2] + (m->foe ? 0.8f : 0.5f)};
+        int r = hf->spawn_explosion ? hf->spawn_explosion(self, (uint32_t)s_d12Explosion, at) : -1;
+        if (r == HF_ACT_WAITING && g_now < m->boomAt + 5) continue;
+        MineBlast(at, 2);
+        g_marksBlown++;
+        if (g_marksBlown <= 30) Log("D12: a mark blew at %.1f %.1f %.1f on %s %u (explosion %d: %s)", (double)at[0], (double)at[1], (double)at[2], m->foe ? "enemy" : "thing", m->entity,
+            s_d12Explosion, r == HF_ACT_DONE || r == HF_ACT_REQUESTED || r == HF_ACT_QUEUED ? "asked" : r == HF_ACT_WAITING ? "its package never came" : "refused");
+        m->on = 0;
+    }
+}
+
 /* ---- Jack in the Box: mines the kit keeps itself ---------------------------------------------------------------- */
 #define MINES 64
 typedef struct MineT { int on; float pos[3]; double born, boomAt; uint32_t marker; } MineT;
@@ -647,16 +770,16 @@ static void MinesClear(int touch, const char* why)
     g_markerSeen = 0; g_markerPkg = 0; g_markerPackage = 0;
 }
 /* a mine's blast, the kit's own or its marker's: the damage multiplied near it for a moment, and the hold */
-static void MineBlast(const float at[3])
+static void MineBlast(const float at[3], uint32_t kind)
 {
     unsigned h = atomic_load(&g_blastHead);
     Blast* b = &g_blast[h % BLASTS];
     b->pos[0] = at[0]; b->pos[1] = at[1]; b->pos[2] = at[2];
-    b->kind = 1;
+    b->kind = kind;
     b->ms = GetTickCount64();
     atomic_store(&g_blastHead, h + 1);
     atomic_store(&g_skillMs, GetTickCount64());
-    g_minesBlown++;
+    if (kind == 1) g_minesBlown++;
 }
 static void JibPlace(void)
 {
@@ -722,6 +845,13 @@ HF_MOD_EXPORT int w_mines(unsigned version, float* out, int max)
         out[n * 4] = m->pos[0]; out[n * 4 + 1] = m->pos[1]; out[n * 4 + 2] = m->pos[2]; out[n * 4 + 3] = m->boomAt ? 1.0f : 0.0f;
         n++;
     }
+    for (int i = 0; i < MARKS && n < max; i++)
+    {
+        const MarkT* m = &g_mark[i];
+        if (!m->on) continue;
+        out[n * 4] = m->pos[0]; out[n * 4 + 1] = m->pos[1]; out[n * 4 + 2] = m->pos[2] + (m->foe ? 1.2f : 0.5f); out[n * 4 + 3] = 2.0f;
+        n++;
+    }
     return n;
 }
 HF_MOD_EXPORT int w_view(unsigned version, float* out)
@@ -759,7 +889,7 @@ static void MineFrame(void)
         {
             static unsigned told;
             if (told++ < 10) Log("Jack in the Box: a mine's marker %u is gone by itself %.1f s after it was laid: counted as the mine's blast", m->marker, g_now - m->born);
-            MineBlast(m->pos);
+            MineBlast(m->pos, 1);
             m->marker = 0;
             MineOff(m, 0);
             continue;
@@ -785,7 +915,7 @@ static void MineFrame(void)
         float at[3] = {m->pos[0], m->pos[1], m->pos[2] + 0.3f};
         int r = hf->spawn_explosion ? hf->spawn_explosion(self, (uint32_t)s_jibExplosion, at) : -1;
         if (r == HF_ACT_WAITING && g_now < m->boomAt + 5) continue;
-        MineBlast(at);
+        MineBlast(at, 1);
         if (g_minesBlown <= 30) Log("Jack in the Box: a mine went off at %.1f %.1f %.1f (explosion %d: %s)", (double)at[0], (double)at[1], (double)at[2], s_jibExplosion,
             r == HF_ACT_DONE || r == HF_ACT_REQUESTED || r == HF_ACT_QUEUED ? "asked" : r == HF_ACT_WAITING ? "waiting for its package" : "refused");
         MineOff(m, 1);
@@ -1031,6 +1161,14 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
             foe = (hf->component_record("TurretComponentData", s->resource, &stride) && hf->component_record("BehaviorComponentData", s->resource, &stride)) ||
                   (hf->component_record("AiEnemyComponentData", s->resource, &stride) && hf->component_record("HealthComponentData", s->resource, &stride));
         if (foe) AddFoe(s->entity, s->resource);
+        else if (!FriendRes(s->resource) && hf->component_record("HealthComponentData", s->resource, &stride) && !hf->component_record("AvatarComponentData", s->resource, &stride) &&
+                 !hf->component_record("SeatCollectionComponentData", s->resource, &stride) && !hf->component_record("WeaponComponentData", s->resource, &stride) &&
+                 !hf->component_record("ProjectileComponentData", s->resource, &stride))
+        {
+            unsigned th = atomic_load(&g_thingHead);
+            g_thing[th % THINGS] = s->entity; g_thingRes[th % THINGS] = s->resource;
+            atomic_store(&g_thingHead, th + 1);
+        }
         return;
     }
     if (!s->authority) return;
@@ -1065,6 +1203,8 @@ static void Tick(HfMod* mod, float dt, void* user)
         {
             Abort("the mission ended");
             MinesClear(0, "the mission ended");
+            MarksClear("the mission ended");
+            memset(g_thing, 0, sizeof g_thing); g_d12Ready = 0;
             g_cut = 0; g_ambushOn = 0;
             memset(g_frozen, 0, sizeof g_frozen);
             g_state.active = 0; g_state.count = 0; g_state.seq++;
@@ -1093,16 +1233,26 @@ static void Tick(HfMod* mod, float dt, void* user)
         int down2 = focused && (GetAsyncKeyState(k2->vk) & 0x8000) != 0 && (mods & ~own2) == k2->mods;
         if (down2 && !prev2 && g_alive && atomic_load(&g_avatar) && g_charges > 0) JibPlace();
         prev2 = down2;
+        static int prev3[2];
+        for (int q = 0; q < 2; q++)
+        {
+            const Key* k = &s_keys[2 + q];
+            int o = k->vk == VK_SHIFT ? KM_SHIFT : k->vk == VK_CONTROL ? KM_CTRL : k->vk == VK_MENU ? KM_ALT : 0;
+            int dn = focused && (GetAsyncKeyState(k->vk) & 0x8000) != 0 && (mods & ~o) == k->mods;
+            if (dn && !prev3[q] && g_alive && atomic_load(&g_avatar)) { if (q) D12Detonate(); else D12Mark(); }
+            prev3[q] = dn;
+        }
     }
     if (!NetOk(g_avatarNet)) LearnNet();
     SkillFrame();
     MineFrame();
+    MarkFrame();
     BlastFrame();
     FreezeFrame();
     PassiveFrame();
     CensusFrame();
     if (!g_alive) FreezeClear("she is down");
-    g_state.skill = (g_k == K_HELD ? 1u : g_k != K_IDLE ? 3u : g_now < g_readyAt ? 2u : 0u) | (g_ambushOn ? 0x100u : 0u) |
+    g_state.skill = (g_k == K_HELD ? 1u : g_k != K_IDLE ? 3u : g_now < g_readyAt ? 2u : 0u) | (g_ambushOn ? 0x100u : 0u) | ((uint32_t)MarksOn() << 9) | (g_now < g_d12Ready ? 0x2000u : 0u) |
                     ((uint32_t)(g_charges < 0 ? 0 : g_charges > 255 ? 255 : g_charges) << 16) | ((uint32_t)MinesOut() << 24);
     g_state.value = g_k == K_HELD ? (float)Rounds(atomic_load(&g_gl)) : g_now < g_readyAt ? (float)(g_readyAt - g_now) : 0;
 }
@@ -1141,6 +1291,9 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     kb_ini = "w.ini";
     kb_key_names[0] = "key_s1";
     kb_key_names[1] = "key_s2";
+    kb_key_names[2] = "key_s3";
+    kb_key_names[3] = "key_s4";
+    s_keys[3] = (Key){'B', 0, "B"};
     KB_SETTINGS(kSettings);
     KB_OPTIONS(kOptions);
     RosterJoin("w", "W");

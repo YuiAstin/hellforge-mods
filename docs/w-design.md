@@ -90,3 +90,11 @@ Source kit: W, Sniper (Artilleryman), at rank 10 of each skill. Her module is le
   own mines means adding to a deployer's field: not researched yet. Until then a mine is a marker on the HUD.
 - An enemy that died while held stood dead in its pose (its state machine was off as it died). The HUD now switches its
   machine on and asks for a death event, and logs which events and animation functions the game's Lua has: to be read.
+
+## 0.5.0
+
+- D12 built: C marks what is nearest her aim line (an enemy before a structure or prop), up to 4; B blows them one
+  after another with the TED-63 Dynamite's explosion, 3.1 times its damage, enemies within 6 m held 5 s; she can mark
+  again 20 s after the detonation. Marks follow what they are on and show on the HUD.
+- Played before it: a death while held is put right by the "dead" animation event (a Bile Titan's too); mines show as
+  HUD markers.
