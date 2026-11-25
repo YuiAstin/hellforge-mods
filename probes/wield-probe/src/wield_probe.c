@@ -13,8 +13,6 @@
  *   Delete        gives your weapon back: the support slot as it was (after way B) and your earlier selection
  *   Shift+Delete  removes the spawned GL-21 (RemoveEntity)
  *   End           refills the weapon you hold: its magazine to capacity, and a resupply's spare ammunition
- *   0.1.1, at game start (no key, on the ship): the call-in package (stratagem row +0xA8) of the three FRVs, rows 26
- *                 (Supply), 105 (Gunner) and 135 (Incinerator), for HellForge's catalogue (Avaleine's ask)
  *
  * Credit: the wielder, inventory and ammunition functions and globals are HellForge's mappings (HD2Runtime by
  * SkyeShade's research); the entity reads are the kit base's. Build 25480438 only. */
@@ -33,7 +31,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.1"
+#define VERSION "0.1.2"
 #include "kitbase/kb_core.h"
 
 #define GL21 HF_ENTITY_GL21_GRENADE_LAUNCHER
@@ -343,28 +341,6 @@ static void Refill(void)
     Magazine("End: after (magazine to capacity, one resupply of spares)", held);
 }
 
-/* ---- 0.1.1: the FRV stratagems' call-in packages (row +0xA8), once the game has its stratagems ------------------------ */
-static void FrvPackages(void)
-{
-    static const struct { uint32_t type; const char* name; } rows[] = {{HF_STRATAGEM_M103_SUPPLY_FRV, "M-103 Supply FRV"},
-        {HF_STRATAGEM_M102_GUNNER_FRV, "M-102 Gunner FRV"}, {HF_STRATAGEM_M104_INCINERATOR_FRV, "M-104 Incinerator FRV"}};
-    static int done, tries;
-    static double next;
-    if (done || g_now < next || !hf->stratagem_row) return;
-    next = g_now + 1;
-    if (!hf->stratagem_row(rows[0].type)) { if (++tries == 180) { done = 1; Log("FRV packages: the stratagem rows were not there in three minutes"); } return; }
-    done = 1;
-    for (unsigned i = 0; i < 3; i++)
-    {
-        uintptr_t row = hf->stratagem_row(rows[i].type);
-        uint32_t type = 0, stable = 0;
-        uint64_t pkg = 0;
-        if (!row || !ReadAt(row, &type, 4) || !ReadAt(row + 4, &stable, 4) || !ReadAt(row + 0xA8, &pkg, 8)) { Log("FRV packages: row %u (%s) is unreadable", rows[i].type, rows[i].name); continue; }
-        Log("FRV packages: stratagem row %u (%s; row +0 type %u, stable id %08x): call-in package at +0xA8 = 0x%016llX", rows[i].type, rows[i].name, type, stable,
-            (unsigned long long)pkg);
-    }
-}
-
 /* ---- events and the frame ------------------------------------------------------------------------------------ */
 static atomic_int g_heldChanged;
 static void OnWeapon(HfMod* mod, const HfEventInfo* info, void* user)
@@ -391,7 +367,6 @@ static void Tick(HfMod* mod, float dt, void* user)
 {
     g_now += dt;
     if (!game) return;
-    FrvPackages();
     Report();
     uint32_t e = atomic_exchange(&g_glSpawned, 0);
     if (e) Log("spawn event: a GL-21, entity %u%s", e, e == g_gl ? " (the probe's)" : "");

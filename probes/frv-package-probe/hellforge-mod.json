@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.frv-package-probe",
+  "name": "FRV Package Probe (research)",
+  "version": "0.1.0",
+  "description": "Research only: logs the call-in package (stratagem row +0xA8) of the M-103 Supply, M-102 Gunner and M-104 Incinerator FRVs at game start, read from copies of their stratagems (kept out of the loadout picker). For HellForge's catalogue. Turn off when done.",
+  "gameplay": false,
+  "code": {
+    "dll": "frv_package_probe.dll",
+    "sdk": 13
+  }
+}

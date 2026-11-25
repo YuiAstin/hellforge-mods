@@ -2,8 +2,8 @@
   "format": 1,
   "id": "yui.wield-probe",
   "name": "Wield Probe (research)",
-  "version": "0.1.1",
-  "description": "Research only, for W's King of Hearts: can a mod put a GL-21 in your Helldiver's hands, fill it to 40 rounds and give your own weapon back? Logs the game's weapon switches; Insert / Home / End / Delete run the steps (the log lists them). At game start it also logs the three FRV stratagems\u0027 call-in packages. Solo or host. Turn off when done.",
+  "version": "0.1.2",
+  "description": "Research only, for W's King of Hearts: can a mod put a GL-21 in your Helldiver's hands, fill it to 40 rounds and give your own weapon back? Logs the game's weapon switches; Insert / Home / End / Delete run the steps (the log lists them). Solo or host. Turn off when done.",
   "gameplay": false,
   "code": {
     "dll": "wield_probe.dll",
