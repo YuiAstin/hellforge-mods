@@ -1,0 +1,57 @@
+# W (Arknights): kit design
+
+Status: design, with the weapon swap proven by the Wield Probe (probes/README.md). Nothing of the kit is built.
+Source kit: W, Sniper (Artilleryman), at rank 10 of each skill. Her module is left out, as Ascalon's is.
+
+## Decisions (Yui, 2026-11-25)
+
+- Skill damage: the grenade launcher's own damage, multiplied. No fixed blast, no health floor.
+- King of Hearts hands her a GL-21 with a 40-round magazine. Each round does skill damage and freezes what it hits in
+  its pose (as the time stop does, so that Bile Titans and the like are held too), not a stun. When the 40 are spent
+  she gets back the weapon she held, with full ammunition: only which weapon it was is kept, nothing else of its state.
+  A support weapon she carries is deleted and a new one of its kind made for her afterwards.
+- Plain GL-21 grenades, not homing.
+- Jack in the Box holds up to 5 charges (her own rule, not Arknights'). A press spends one charge and places one mine:
+  under an enemy in front of her, in a box 15 m wide and 40 m long from her (numbers to start with); with no enemy in
+  the box, at a random spot inside it.
+- D12 marks enemies or structures; a separate key detonates the marks. Default B, rebindable on the options screen (F9).
+- Ambush: both versions built, to choose between by playing them: on 10 s after she lands (and after each reinforce),
+  or on after 10 s without firing.
+
+## Passives
+
+| | Arknights | Here |
+|---|---|---|
+| Artilleryman (trait) | Her attacks deal area physical damage | Her hits also strike the enemies near the one hit, at reduced damage (Executor's and Ascalon's area hits) |
+| Insult to Injury | Enemies in range take +18% physical damage while stunned | Enemies held by her skills take 18% more from her |
+| Ambush | 10 s after deployment: 60% dodge, less likely to be targeted | 60% of hits on her miss and enemies notice her less (Ascalon's hidden state without the invisibility); the trigger in two versions, above |
+
+## Skills
+
+| Key | Skill | Arknights | Here |
+|---|---|---|---|
+| Z | King of Hearts | 16 SP. A grenade: 350% ATK to all hit, stun 3 s | The GL-21 in her hands, 40 rounds, each a multiple of its damage and a pose freeze. The cooldown starts when the launcher is put away. Z again, a weapon switch or her death ends it early |
+| X | Jack in the Box | 8 SP, automatic. A mine in range, 120 s; an enemy passing sets it off after 1.5 s: 280% ATK around it, stun 2.2 s | 5 charges, one mine a press, placed as above. An enemy near it sets it off after 1.5 s: the blast and the hold |
+| C | D12 | 33 SP (20 to start). Bombs on up to 4 enemies, highest health first; after 3 s each deals 310% ATK around it, stun 5 s | A mark on the enemy or structure under her crosshair, up to a cap. The cooldown starts at the detonation |
+| B | Detonate | | Every mark blows: the blast and the hold |
+
+## What is known to work
+
+- The weapon swap, played in three cases (no support weapon; one on her back; one in her hands): the Wield Probe's
+  0.9.0. The weapon's entity spawned, taken into the support slot by the game's own pickup, selected by the
+  Helldiver's own switch request; the reverse, and a new support weapon of the kind she had. 40 rounds hold in a
+  10-round GL-21.
+- The pose freeze: the Time Stop Probe's method 2 with the hold (branch `timestop-probe`): a stun, the enemy's
+  animation state machine switched off from the HUD mod's Lua, and the enemy held where it stands. Yui's choice of the
+  three methods for the time stop. Not yet tried on one enemy at a time, nor on a Bile Titan.
+- Her own blasts spare her and what she carries: Destroyer's handling.
+
+## Open
+
+- The freeze per enemy and on the big ones; how long it lasts.
+- Mines: the game's own mine entity spawned (its own trigger and blast, the kit adds the hold), or spots the kit
+  tracks itself with a marker.
+- Whether a kit blast destroys bug holes and fabricators (D12 on structures).
+- A weapon switch by the player while the launcher is out.
+- A backpack-fed support weapon: the new gun and the backpack she still wears.
+- The numbers: the damage multiples, the splash radius, the mark cap, the mines out at once.
