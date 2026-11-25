@@ -16,6 +16,8 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.8.0: the stunned sign sits over the held enemy's highest part, read from its skeleton as it is caught (w_state's
+ * targets carry it: top).
  * 0.7.9: the HUD puts a stunned sign (its image w_stun) over each enemy her skills hold.
  * 0.7.8: a mine's unit is taken away with its mine (played: 0.7.7's stayed), the way the game's minefield takes away
  * one of its own: the engine's destroy-unit entry it calls, with the game's world and the unit's handle.
@@ -129,7 +131,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.7.9"
+#define VERSION "0.8.0"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12
@@ -192,7 +194,7 @@ static const KbOption kOptions[] = {
 #include "kit_icon.h"      /* kOpIcon, KB_OP_ACCENT */
 
 /* ---- what the HUD mod reads (layout version 1; the same struct in w_hud.lua) --------------------------------------- */
-typedef struct WTarget { uint32_t entity, unit; uint64_t object; float pos[3]; uint32_t pad; } WTarget;
+typedef struct WTarget { uint32_t entity, unit; uint64_t object; float pos[3]; float top; } WTarget;   /* top: how far its highest part is over pos (0: not read) */
 typedef struct WState
 {
     uint32_t version, seq, active, skill, count, rare_max;   /* skill: its low byte 0 ready, 1 on, 2 cooling down, 3 busy; bit 8: Ambush is on; bits 9-12 the marks, bit 13 D12 cooling down; bits 16-23 the mine charges, 24-31 the mines out */
@@ -269,9 +271,33 @@ static int Boundary(uintptr_t at)
 /* ---- the freeze: each enemy with its own end ------------------------------------------------------------------- */
 typedef void (*SetVecFn)(void*, uint32_t, const float*);
 static SetVecFn g_setPosition, g_setVelocity, g_setDest;
-typedef struct Frozen { uint32_t entity, unit; float pos[3]; double until; } Frozen;
+typedef struct Frozen { uint32_t entity, unit; float pos[3]; double until; float top; } Frozen;
 static Frozen g_frozen[TARGETS];
 static unsigned g_frozenTotal, g_pins;
+/* How far a unit's highest part is over its root: from its skeleton's nodes (the unit object's +0x70 count, +0x88 the
+ * nodes' world poses, 64 bytes each, the place at float 12), the 95th percentile of their heights so a stray effect
+ * node far up does not count. 0 when it cannot be read. */
+static int CmpTop(const void* a, const void* b) { float x = *(const float*)a, y = *(const float*)b; return x < y ? -1 : x > y; }
+static float UnitTop(uint32_t unit, const float root[3])
+{
+    uintptr_t object = UnitObject(unit), nodes;
+    uint32_t count = 0;
+    static float m[256 * 16], z[256];
+    int used = 0;
+    if (!object || !ReadAt(object + 0x70, &count, 4) || !count || count > 4096 || !(nodes = Pointer(object + 0x88))) return 0;
+    if (count > 256) count = 256;
+    if (!ReadAt(nodes, m, (size_t)count * 64)) return 0;
+    for (uint32_t i = 0; i < count; i++)
+    {
+        const float* p = m + 16 * i + 12;
+        if (!isfinite(p[0]) || !isfinite(p[1]) || !isfinite(p[2]) || fabsf(p[0] - root[0]) > 25 || fabsf(p[1] - root[1]) > 25 || p[2] < root[2] - 2 || p[2] > root[2] + 30) continue;
+        z[used++] = p[2] - root[2];
+    }
+    if (used < 2) return 0;
+    qsort(z, (size_t)used, sizeof(float), CmpTop);
+    float top = z[(used * 19) / 20 >= used ? used - 1 : (used * 19) / 20];
+    return top < 0.3f ? 0.3f : top;
+}
 static void Publish(void)
 {
     uint8_t d[24];
@@ -282,7 +308,7 @@ static void Publish(void)
         const Frozen* f = &g_frozen[k];
         if (!f->entity) continue;
         WTarget* t = &g_state.t[n++];
-        t->entity = f->entity; t->unit = f->unit; t->object = UnitObject(f->unit); memcpy(t->pos, f->pos, 12);
+        t->entity = f->entity; t->unit = f->unit; t->object = UnitObject(f->unit); memcpy(t->pos, f->pos, 12); t->top = f->top;
     }
     if (Descriptor(avatar, d) && PlayerPose(me, NULL))
     {
@@ -307,6 +333,7 @@ static int FreezeAdd(uint32_t e, float seconds)
     }
     if (room < 0 || !Descriptor(e, d) || !Alive(e) || !UnitNode(Word(d + 12), 0, p)) return 0;
     g_frozen[room].entity = e; g_frozen[room].unit = Word(d + 12); memcpy(g_frozen[room].pos, p, 12); g_frozen[room].until = g_now + seconds;
+    g_frozen[room].top = UnitTop(g_frozen[room].unit, p);
     g_frozenTotal++;
     return 1;
 }

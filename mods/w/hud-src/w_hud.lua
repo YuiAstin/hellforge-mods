@@ -31,7 +31,7 @@ end
 local ffi = require('ffi')
 pcall(ffi.cdef, [[
 typedef struct whud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t s1_on, rounds, charges, charges_max, mines_out, marks, marks_max, blowing, ambush; uint32_t keys[4]; char key_label[4][24]; } whud1_state;
-typedef struct wk1_target { uint32_t entity, unit; uint64_t object; float pos[3]; uint32_t pad; } wk1_target;
+typedef struct wk1_target { uint32_t entity, unit; uint64_t object; float pos[3]; float top; } wk1_target;
 typedef struct wk1_state { uint32_t version, seq, active, skill, count, rare_max; uint32_t player_unit, in_mission;
     uint64_t player_object; float player_pos[3], value; wk1_target t[48]; uint32_t dead_seq, dead[16]; } wk1_state;
 typedef int (*wk1_mines)(unsigned int version, float *out, int max);
@@ -821,7 +821,9 @@ local function stun_draw(d, st)
     local sc = d.scale or 1
     for k = 0, math.min(n, 48) - 1 do
         local t = st.t[k]
-        local x, y, z = t.pos[0], t.pos[1], t.pos[2] + 2.6
+        -- over its highest part (the DLL's reading of its skeleton), with a little room; 2.6 m when that was not read
+        local top = tonumber(t.top)
+        local x, y, z = t.pos[0], t.pos[1], t.pos[2] + (top > 0 and top + math.max(0.45, top * 0.12) or 2.6)
         local ax, ay, az = x - cx, y - cy, z - cz
         if ax * fx + ay * fy + az * fz > 0.5 then
             local sx, sy = s.Vector3.to_elements(s.Camera.world_to_screen(c, s.Vector3(x, y, z)))
