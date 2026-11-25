@@ -16,6 +16,11 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.7.5: 0.7.4 found no package at all (StratagemPackages answered 0 for the kinds 0 to 7), so nothing was loaded and
+ * nothing spawned. The crash's missing resource was a material (type eac0b497876adedf): the mine's unit is in the
+ * deployer's loadout package, a material of it is not. To learn where it is: the minefield's stratagem row is read out
+ * at the mission's start (game.dll+0x37CB600[type]: +0xA8, +0xF8, the entries at +0x118 and +0x178), and the game's own
+ * calls of StratagemPackages for it are logged with their kind and what they answered (hooked).
  * 0.7.4: 0.7.3 ended the game the same way: the engine said the mine's unit could be had (the deployer's loadout
  * package resident) and spawning it still read a null resource: something the unit is made of was missing. The copy's
  * row +0xA8 was 0. The kit now takes the game's own list of the minefield stratagem's packages (StratagemPackages),
@@ -110,7 +115,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.7.4"
+#define VERSION "0.7.5"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12
@@ -906,6 +911,56 @@ static void ModelReady(void)
     g_pattern = (UnitPattern){1, w, MD6_MINE, 0, 0, 0, 0, 1, 0};
     Log("Jack in the Box: all %d of the minefield's packages are resident and the MD-6's mine can be had: her mines wear it (world %p)", npk, w);
 }
+/* research: the minefield's stratagem row, and the game's own package lists for it */
+typedef struct PkgCall { volatile uint32_t type, kind, n; volatile uint64_t out[6]; } PkgCall;
+static PkgCall g_pkgCall[16];
+static atomic_uint g_pkgHead;
+static unsigned g_pkgTail;
+static HfFn_StratagemPackages original_sp;
+static uint32_t PackagesDetour(void* rcx, uint32_t type, uint64_t unused, uint32_t r9)
+{
+    uint32_t n = original_sp(rcx, type, unused, r9);
+    if (type == HF_STRATAGEM_MD6_ANTIPERSONNEL_MINEFIELD && rcx)
+    {
+        PkgCall* c = &g_pkgCall[atomic_fetch_add(&g_pkgHead, 1) % 16];
+        c->type = type; c->kind = r9; c->n = n;
+        for (uint32_t k = 0; k < 6; k++) c->out[k] = k < n ? ((const uint64_t*)rcx)[k] : 0;
+    }
+    return n;
+}
+static void RowReadout(void)
+{
+    static int done;
+    uintptr_t row = Pointer(game + 0x37CB600 + 8ull * HF_STRATAGEM_MD6_ANTIPERSONNEL_MINEFIELD), a, b;
+    uint64_t pkg = 0;
+    uint32_t item = 0, na = 0, nb = 0;
+    for (unsigned head = atomic_load(&g_pkgHead); g_pkgTail != head; g_pkgTail++)
+    {
+        const PkgCall* c = &g_pkgCall[g_pkgTail % 16];
+        Log("mine probe: the game listed the minefield stratagem's packages (kind %u / %08x): %u: %016llx %016llx %016llx %016llx %016llx %016llx", c->kind, c->kind, c->n,
+            (unsigned long long)c->out[0], (unsigned long long)c->out[1], (unsigned long long)c->out[2], (unsigned long long)c->out[3], (unsigned long long)c->out[4],
+            (unsigned long long)c->out[5]);
+    }
+    if (done || !s_mineProbe) return;
+    done = 1;
+    if (!row || !ReadAt(row + 0xA8, &pkg, 8) || !ReadAt(row + 0xF8, &item, 4) || !ReadAt(row + 0x120, &na, 4) || !ReadAt(row + 0x180, &nb, 4))
+    { Log("mine probe: the minefield's stratagem row could not be read"); return; }
+    Log("mine probe: the minefield's stratagem row: +0xA8 %016llx, +0xF8 %08x, %u entries at +0x118, %u at +0x178", (unsigned long long)pkg, item, na, nb);
+    a = Pointer(row + 0x118); b = Pointer(row + 0x178);
+    for (uint32_t k = 0; a && k < na && k < 40; k++)
+    {
+        uint8_t e[0x20];
+        if (!ReadAt(a + 0x20ull * k, e, sizeof e)) break;
+        Log("mine probe: row +0x118 entry %u: key %08x, %08x %016llx %016llx, package %016llx", k, Word(e), Word(e + 4), (unsigned long long)Quad(e + 8), (unsigned long long)Quad(e + 16),
+            (unsigned long long)Quad(e + 24));
+    }
+    for (uint32_t k = 0; b && k < nb && k < 16; k++)
+    {
+        uint8_t e[0x10];
+        if (!ReadAt(b + 0x10ull * k, e, sizeof e)) break;
+        Log("mine probe: row +0x178 entry %u: %016llx %016llx", k, (unsigned long long)Quad(e), (unsigned long long)Quad(e + 8));
+    }
+}
 static void ModelHide(uint32_t handle)
 {
     HfFn_UnitAlive alive = hf_fn_UnitAlive(self);
@@ -1087,6 +1142,7 @@ HF_MOD_EXPORT int w_option_set(const char* name, double value) { return OptionSe
 static void MineFrame(void)
 {
     ModelReady();
+    RowReadout();
     /* the charges */
     if (g_charges >= s_jibCharges) { g_charges = s_jibCharges; g_chargeAt = g_now; }
     else if (g_now - g_chargeAt >= s_jibEvery) { g_charges++; g_chargeAt = g_now; }
@@ -1658,6 +1714,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
              api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_EXPLOSION, OnExplosion, NULL, 0) &&
              !hf_on_damage_pre(mod, OnDamagePre, NULL, 0) && api->on_game_thread(mod, Tick, NULL);   /* the typed helper answers 0 when it is in */
     if (!ok) api->log(mod, "events or the game thread are unavailable: the kit stays off");
+    if (s_mineProbe && hf_hook_StratagemPackages(mod, PackagesDetour, &original_sp, 0)) api->log(mod, "the mine probe's package hook was refused");
     if (s_mineProbe && hf_hook_WorldSpawnUnit(mod, SpawnUnitDetour, &original_wsu, 0)) api->log(mod, "the mine probe's unit hook was refused: no units listed");
     if (!ok) return 0;
     if (hf_on_bughole(mod, OnBughole, NULL, 0)) api->log(mod, "the bug hole event is unavailable: a closed hole can be marked again");
