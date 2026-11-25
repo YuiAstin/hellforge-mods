@@ -16,6 +16,10 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.7.3: 0.7.2 ended the game at the first mine: the deployer's loadout package was resident, the mine's unit was not
+ * in it, and WorldSpawnUnit read a null resource (helldivers2.exe+0x1A804B). A mine's unit is spawned only when the
+ * engine says the resource can be had (CanGetResource, the unit type); the kit loads both the deployer's loadout
+ * package and the stratagem's call-in package, and says in the log when neither brings the unit.
  * 0.7.2: her mines wear the MD-6's mine without a minefield called in (played: 0.7.1's do after one; the game's own
  * call is WorldSpawnUnit(the main world, the unit, no name, 0, 0, 1, 0)). The kit asks the game for the minefield's
  * package itself: the deployer entity's loadout package if it has one, else the stratagem's call-in package (row
@@ -102,7 +106,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.7.2"
+#define VERSION "0.7.3"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12
@@ -823,12 +827,13 @@ typedef struct MineT { int on; float pos[3]; double born, boomAt; uint32_t marke
 typedef struct UnitPattern { int valid; void* world; uint64_t res, name; int hasName; uint32_t s5; uint64_t s6; uint8_t s7; uint64_t s8; } UnitPattern;
 static UnitPattern g_pattern;
 static unsigned g_models;
+static int UnitLoaded(uint64_t res);
 static uint32_t ModelSpawn(const float at[3])
 {
     HfFn_WorldSpawnUnit spawn = hf_fn_WorldSpawnUnit(self);
     float pose[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, at[0], at[1], at[2], 1};
     uint32_t handle = 0;
-    if (!s_jibModel || !g_pattern.valid || !spawn || g_models >= 300) return 0;
+    if (!s_jibModel || !g_pattern.valid || !spawn || g_models >= 300 || !UnitLoaded(g_pattern.res)) return 0;
     uint64_t res = g_pattern.res, name = g_pattern.name;
     void* unit = spawn(g_pattern.world, &res, g_pattern.hasName ? &name : NULL, pose, g_pattern.s5, g_pattern.s6, g_pattern.s7, g_pattern.s8);
     if (!unit || !ReadAt((uintptr_t)unit + 8, &handle, 4)) handle = 0;
@@ -839,7 +844,6 @@ static uint32_t ModelSpawn(const float at[3])
 /* the minefield's package, asked of the game so the mine's unit is there without a call-in */
 static uint32_t g_mineRow;                  /* the hidden copy of the MD-6's stratagem row (0: none) */
 static uint64_t g_minePackage;              /* 0 not looked for yet, ~0 none */
-static int g_minePkg;
 /* the copy is for reading only: taken off the stratagem selection as soon as its row is there */
 static void MineRowHide(void)
 {
@@ -853,34 +857,57 @@ static void MineRowHide(void)
     if (sel & 2) { sel &= (uint8_t)~2; hf->write(row + 0x80, &sel, 1); }
     done = 1;
 }
+#define UNIT_TYPE 0xE0A48D0BE9A7453Full       /* the engine's resource type of a unit */
+#define MD6_MINE 0xEE89CC10D80B6AFBull
+static int UnitLoaded(uint64_t res)
+{
+    HfFn_CanGetResource can = hf_fn_CanGetResource(self);
+    return can && (can(UNIT_TYPE, res) & 1);
+}
 static void ModelReady(void)
 {
-    static double again;
-    static int told;
+    static double again, since;
+    static int told, said;
+    static uint64_t pkgs[2];                /* the deployer's loadout package, the stratagem's call-in package */
     if (!s_jibModel || g_pattern.valid || g_now < again) return;
     again = g_now + 0.5;
     if (!g_minePackage)
     {
         uint32_t stride = 0;
         uintptr_t r = hf->component_record("LoadoutPackageComponentData", HF_ENTITY_MD6_ANTIPERSONNEL_MINEFIELD, &stride), row;
-        const char* from = "the deployer's loadout package";
-        if (!r || !ReadAt(r + 8, &g_minePackage, 8) || !g_minePackage || g_minePackage == ~0ull)
-        {
-            g_minePackage = 0;
-            from = "the stratagem's call-in package";
-            if (!g_mineRow || !(row = hf->stratagem_row(g_mineRow)) || !ReadAt(row + 0xA8, &g_minePackage, 8) || !g_minePackage) g_minePackage = ~0ull;
-        }
-        Log("Jack in the Box: the minefield's package: %s%s (%016llx)", g_minePackage == ~0ull ? "not found: her mines wear the game's mine only after a minefield is called in" : from, "",
-            (unsigned long long)g_minePackage);
+        if (!r || !ReadAt(r + 8, &pkgs[0], 8) || pkgs[0] == ~0ull) pkgs[0] = 0;
+        if (!g_mineRow || !(row = hf->stratagem_row(g_mineRow)) || !ReadAt(row + 0xA8, &pkgs[1], 8) || pkgs[1] == ~0ull) pkgs[1] = 0;
+        if (pkgs[1] == pkgs[0]) pkgs[1] = 0;
+        g_minePackage = pkgs[0] || pkgs[1] ? 1 : ~0ull;
+        since = g_now;
+        Log("Jack in the Box: the minefield's packages: the deployer's loadout package %016llx, the stratagem's call-in package %016llx%s", (unsigned long long)pkgs[0],
+            (unsigned long long)pkgs[1], g_minePackage == ~0ull ? ": none found" : "");
     }
-    if (g_minePackage == ~0ull) return;
-    g_minePkg = hf->load_package(self, g_minePackage);
-    if (g_minePkg != HF_PACKAGE_RESIDENT) { if (!g_minePkg && !told++) Log("Jack in the Box: the minefield's package was refused"); if (!g_minePkg) g_minePackage = ~0ull; return; }
+    /* the mine's unit is spawned only once the engine says it can be had (0.7.2 spawned it with the deployer's package
+     * resident and the unit not in it: the engine read a null resource and the game ended) */
+    if (!UnitLoaded(MD6_MINE))
+    {
+        int all = 1;
+        if (g_minePackage == ~0ull) return;
+        for (int i = 0; i < 2; i++)
+        {
+            if (!pkgs[i]) continue;
+            int s = hf->load_package(self, pkgs[i]);
+            if (!s) { if (told++ < 2) Log("Jack in the Box: the package %016llx was refused", (unsigned long long)pkgs[i]); pkgs[i] = 0; continue; }
+            all &= s == HF_PACKAGE_RESIDENT;
+        }
+        if (all && !said && g_now - since > 3)
+        {
+            said = 1;
+            Log("Jack in the Box: the packages are resident and the MD-6's mine still cannot be had: her mines wear it only after a minefield is called in");
+        }
+        return;
+    }
     HfFn_MainWorld world = hf_fn_MainWorld(self);
     void* w = world ? world() : NULL;
     if (!w) return;
-    g_pattern = (UnitPattern){1, w, 0xEE89CC10D80B6AFBull, 0, 0, 0, 0, 1, 0};
-    Log("Jack in the Box: the minefield's package is resident: her mines wear the MD-6's mine (world %p)", w);
+    g_pattern = (UnitPattern){1, w, MD6_MINE, 0, 0, 0, 0, 1, 0};
+    Log("Jack in the Box: the MD-6's mine can be had: her mines wear it (world %p)", w);
 }
 static void ModelHide(uint32_t handle)
 {
