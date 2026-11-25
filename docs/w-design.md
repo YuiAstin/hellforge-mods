@@ -98,3 +98,17 @@ Source kit: W, Sniper (Artilleryman), at rank 10 of each skill. Her module is le
   again 20 s after the detonation. Marks follow what they are on and show on the HUD.
 - Played before it: a death while held is put right by the "dead" animation event (a Bile Titan's too); mines show as
   HUD markers.
+
+## The game's minefield (read from the game's code, build 25480438; not yet used)
+
+- The minefield manager is the global at game.dll+0x3326958: fields counted at +0x848, a lookup from the deployer's
+  entity to its field at +0x858, the field records at +0x880, 0x15DC bytes each.
+- A field record: its centre (3 floats) at +0, its radius at +0xC, its mine count at +0x10 (48 at most), its mines
+  from +0x14, 0x74 bytes each, a float at +0x15D4.
+- A mine: +0 its unit (an engine unit, not an entity: why the spawn event never saw one), +4 its place (3 floats),
+  +0x10 its state (1: armed), +0x18 a timer, +0x70 the handle of its trigger query.
+- game.dll+0x9DD706 settles a field once its mines have landed: it reads each mine's unit's place, drops the ones that
+  did not land well, arms the rest. +0x9DFA89 is the pass that looks for what steps on an armed mine.
+- So one of the game's mines for Jack in the Box is a unit plus a slot in a field's record. Two ways to it, neither
+  tried: spawn a deployer of her own out of sight and move its mines (their units and their slots) to where she lays
+  them; or spawn the mine's unit and write a slot ourselves.
