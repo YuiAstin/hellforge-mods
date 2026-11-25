@@ -741,6 +741,12 @@ local function cam_unit(s, t)
     end
     return nil
 end
+-- a mine's marker: the face on Jack in the Box's icon (w_mine; the square of before without the image)
+local MINE_ICON
+do
+    local okI, handle = pcall(hd2.resources.image, 'w_mine')
+    if okI and handle then MINE_ICON = handle end
+end
 local function mines_draw(d)
     local s = S_()
     if not minesfn or type(s) ~= 'table' or not (s.Unit and s.Camera and s.Vector3 and s.Quaternion and s.World and s.Application) then return end
@@ -771,11 +777,19 @@ local function mines_draw(d)
                     local half = math.max(4, math.min(12, 90 / math.max(dist, 1))) * sc
                     local col = lit and {255, 230, 80, math.floor(120 + 135 * (math.sin(mk_t * 20) * 0.5 + 0.5))} or mark and {255, 255, 255, 240} or {224, 58, 58, 235}
                     if mark then half = half * 1.3; d:rect(sx - half * 0.45, sy - half * 0.45, half * 0.9, half * 0.9, {224, 58, 58, 220}, 6) end
+                    if MINE_ICON and not mark then
+                        local r = math.max(9, math.min(22, 200 / math.max(dist, 1))) * sc
+                        if lit then r = r * (1.15 + 0.15 * math.sin(mk_t * 20)) end
+                        d:image(MINE_ICON, sx - r, sy - r, 2 * r, 2 * r, {z = 6, colours = {r = lit and {255, 200, 40, 255} or {224, 58, 58, 255}, g = {255, 255, 255, 255}},
+                            colour = {255, 255, 255, 240}})
+                        if dist < 60 then d:text(('%dm'):format(math.floor(dist + 0.5)), sx, sy + r + 2 * sc, {size = 12 * sc, colour = lit and {255, 230, 80, 255} or {255, 255, 255, 235}, z = 6, align = 'center'}) end
+                    else
                     local tk = math.max(1, 2 * sc)
                     d:rect(sx - half, sy - half, 2 * half, tk, col, 6); d:rect(sx - half, sy + half - tk, 2 * half, tk, col, 6)
                     d:rect(sx - half, sy - half, tk, 2 * half, col, 6); d:rect(sx + half - tk, sy - half, tk, 2 * half, col, 6)
                     d:rect(sx - 2 * sc, sy - 2 * sc, 4 * sc, 4 * sc, col, 6)
                     if dist < 60 then d:text(('%dm'):format(math.floor(dist + 0.5)), sx, sy + half + 2 * sc, {size = 12 * sc, colour = col, z = 6, align = 'center'}) end
+                    end
                 end
             end
         end

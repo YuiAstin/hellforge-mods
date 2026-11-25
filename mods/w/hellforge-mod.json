@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.w",
   "name": "W (Arknights kit, first build)",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Not a release: the first builds of W's kit: King of Hearts and her three passives (Artilleryman: her shots burst where they land; Insult to Injury: held enemies take more from her; Ambush: hits on her miss and enemies forget her). Z puts a GL-21 with 40 rounds in her hands; each round's blast does 3.5 times its damage and freezes the enemies it catches in their pose for 3 s; when the rounds are spent (or Z again) she gets her own weapon back, refilled. A support weapon she carries is replaced by a new one of its kind afterwards. Solo or host. Pick W in the character picker on the options screen (F9); her page there has the skill's numbers and its key. The pose freeze and the on-screen line need Bingus Shared Loader and HD2Runtime. Settings on that page and in w.ini.",
   "gameplay": true,
   "code": {

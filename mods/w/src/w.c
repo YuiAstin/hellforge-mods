@@ -16,6 +16,7 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.6.1: a mine's marker is the face on its skill's icon (the HUD's image w_mine).
  * 0.6.0: the kits' HUD: her three skills beside the stratagem list (w_hud_state: cooldowns, the launcher's rounds, the
  * mine charges, the marks), the keys from the game's binding menu (w_input, w_key), the character picker and the
  * options screen's HUD row (w_roster, w_pick, w_option_get, w_option_set). Her icon and her skills' icons.
@@ -80,7 +81,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.6.0"
+#define VERSION "0.6.1"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12
