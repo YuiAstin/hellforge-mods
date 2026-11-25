@@ -1,4 +1,4 @@
-/* W (yui.w): W's kit from Arknights for the Helldiver. Not released yet. It began as King of Hearts only
+/* W (yui.w): W's kit from Arknights for the Helldiver. Released as 0.9.0. It began as King of Hearts only
  * (docs/w-design.md).
  *
  *   King of Hearts (Z): a GL-21 Grenade Launcher in her hands with koh_rounds rounds. Each round's blast does
@@ -16,6 +16,8 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.9.0: first release: 0.8.0 as played, renumbered, with the mine research switched off (mine_probe 0: no hook on the
+ * engine's unit spawn or the stratagem's package list, no readouts, no census lines).
  * 0.8.0: the stunned sign sits over the held enemy's highest part, read from its skeleton as it is caught (w_state's
  * targets carry it: top).
  * 0.7.9: the HUD puts a stunned sign (its image w_stun) over each enemy her skills hold.
@@ -131,7 +133,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.8.0"
+#define VERSION "0.9.0"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12
@@ -153,7 +155,7 @@ KB_ROSTER_EXPORTS(w)
 static int s_rounds = 40, s_rareMax = 4;
 static float s_damage = 3.5f, s_cooldown = 16, s_freezeSeconds = 3, s_freezeRadius = 5;
 static float s_insult = 1.18f, s_splashEvery = 0.4f, s_splashSafe = 8, s_ambushAfter = 10, s_ambushMiss = 0.6f, s_ambushRange = 80, s_visualCut = 60;
-static int s_splash = 1, s_splashExplosion = HF_EXPLOSION_G6_FRAG_DETONATION, s_ambush = 2, s_ambushForget = 0, s_mineProbe = 1, s_jibModel = 1;
+static int s_splash = 1, s_splashExplosion = HF_EXPLOSION_G6_FRAG_DETONATION, s_ambush = 2, s_ambushForget = 0, s_mineProbe = 0, s_jibModel = 1;
 static int s_jibCharges = 5, s_jibMax = 30, s_jibExplosion = HF_EXPLOSION_MD6_ANTIPERSONNEL_MINEFIELD_MINE, s_jibMarker = 0;
 static float s_jibEvery = 8, s_jibWidth = 15, s_jibLength = 40, s_jibTrigger = 3, s_jibDelay = 1.5f, s_jibLife = 120, s_jibDamage = 2.8f, s_jibFreeze = 2.2f,
              s_jibFreezeRadius = 5;
@@ -1535,7 +1537,7 @@ static void CensusFrame(void)
     {
         uint32_t e = g_cEnt[g_cTail % CENSUS];
         uint64_t r = g_cRes[g_cTail % CENSUS];
-        if (r == HF_ENTITY_MD6_ANTIPERSONNEL_MINEFIELD)
+        if (r == HF_ENTITY_MD6_ANTIPERSONNEL_MINEFIELD && s_mineProbe)
         {
             g_censusUntil = g_now + 25;
             g_boomsUntil = g_now + 180;
