@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-26: W 0.9.0 (first release, for HellForge 0.5)
+
+- First release: W's kit from Arknights for your Helldiver, a mercenary with a grenade launcher, mines and remote bombs whose blasts freeze enemies in their pose. Solo or host; no character model included. It needs HellForge 0.5.
+- The freeze: an enemy caught by one of her skills' blasts is held where it stands, in its pose, like stopped time, whatever its size (a Bile Titan too). A stunned sign shows over each one. One that dies frozen falls as it should.
+- King of Hearts (Z): a GL-21 Grenade Launcher in her hands with 40 rounds. Each round's blast deals 3.5x its damage and freezes what it catches for 3 s. When the rounds are spent, or Z again, her own weapon comes back refilled; a support weapon she carried is replaced by a new one of its kind. Cooldown 16 s.
+- Jack in the Box (X): up to 5 charges, one back every 8 s. Each press lays a mine under the enemy nearest her aim line in a box 15 m wide and 40 m ahead, or at a random spot in it. An enemy within 3 m sets it off after 1.5 s: the MD-6 mine's blast at 2.8x its damage, and a 2.2 s freeze. Up to 30 mines out, 120 s each. Her mines are the game's own mine model, marked on the HUD.
+- D12 (C, and B): C marks the enemy, bug hole or structure nearest her aim line within 80 m, up to 4 marks. B blows them one after another: a dynamite blast at 3.1x its damage and a 5 s freeze. It closes bug holes. Cooldown 20 s from the detonation.
+- Artilleryman: a shot of hers that lands on an enemy sets off a small blast there (not within 8 m of her, not while the launcher is out).
+- Insult to Injury: an enemy her skills hold takes 18% more from her.
+- Ambush: after 10 s without firing, 60% of the hits on her miss and enemies see her from 60% less far, until she fires. A second mode instead turns it on some seconds after she lands.
+- HUD: her skills beside the stratagem list with icons, keys and cooldowns, the launcher's rounds, the mine charges and the marks. Her numbers, her four keys and the character picker are on the character kits' options screen (F9).
+- The HUD, the freeze and the markers need Bingus Shared Loader and HD2Runtime.
+
 ## 2026-11-25: every character kit, for HellForge 0.5 (Alva 0.2.11, Ascalon 0.7.6, Executor 0.3.7, Exusiai 0.3.7, Faelynn 0.4.7, Koleda 0.4.23, Lemuen 0.1.17, Lenna 0.3.7, Leva 0.6.6, Vector 0.2.9, Voymastina 0.4.9)
 
 - These versions need HellForge 0.5 (they do not load on 0.4). 0.5 keeps the game's entities in a larger table of its own; the kits now find an entity's record through the game's own lookup there.
