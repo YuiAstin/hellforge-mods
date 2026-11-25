@@ -19,6 +19,12 @@
  *                 switch weapons, drop it. The carry function (game.dll+0x8BF870) is logged with who called it, with
  *                 the Wield, SwitchWeapon and SetWielder calls: that names the game's support-weapon pickup.
  *                 Delete removes the probe's GL-21
+ *   0.4.0: the pickup by hand named the game's own functions: take an item into an inventory slot
+ *                 (game.dll+0x9AE030: inventory, Helldiver, item, slot 3 = support, 0; it carries it through 0x9AA290
+ *                 and 0x8BF870) and drop it (0x9A8840). Insert now spawns a GL-21, takes it into your support slot
+ *                 that way, selects it and gives it 40 rounds (way D); Delete drops it, gives your weapon back,
+ *                 removes it and refills. With a support weapon already carried, Insert does nothing (it would be
+ *                 dropped)
  *   Ctrl+Home     your inventory record, your wield slots, the held weapon's magazine
  *   Shift+Insert  loads the GL-21's package and spawns a GL-21 at your feet (RequestEntitySpawn)
  *   Ctrl+Insert   way A: wields it straight into the slot your last observed Wield used (the inventory is untouched)
@@ -45,7 +51,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.1"
+#define VERSION "0.4.0"
 #include "kitbase/kb_core.h"
 
 #define GL21 HF_ENTITY_GL21_GRENADE_LAUNCHER
@@ -368,33 +374,37 @@ static void Refill(void)
     Magazine("End: after (magazine to capacity, one resupply of spares)", held);
 }
 
-/* ---- 0.3.0, way C: the inventory's own "an item taken in hand" (as a carried objective item is) ----------------------- */
-typedef void (*SetHeldFn)(void* inventory, uint32_t entity, uint32_t item, uint8_t consume, uint32_t tell_peers);
-static SetHeldFn g_setHeld;
-static void WieldC(void)
+/* ---- 0.4.0, way D: the game's own pickup into the support slot, and its drop ------------------------------------------ */
+typedef void (*TakeFn)(void* inventory, uint32_t entity, uint32_t item, uint32_t slot, uint8_t flag);
+typedef void (*DropFn)(void* inventory, uint32_t entity, uint32_t item, uint8_t flag, uint64_t zero, uint8_t one);
+static TakeFn g_take;
+static DropFn g_drop;
+static void WieldD(void)
 {
     HfFn_SwitchWeapon sw = hf_fn_SwitchWeapon(self);
     void* im = hf_global_InventoryManager(self);
-    uint32_t me = atomic_load(&g_avatar);
+    uint32_t me = atomic_load(&g_avatar), support = 0;
+    uintptr_t rec;
     if (!Mine("Insert") || !HaveGl("Insert")) return;
-    if (!g_setHeld || !sw || !im || !InventoryRecord(me)) { Log("Insert: set-held-item is not the reviewed code, or your inventory is not there: nothing done"); return; }
+    if (!g_take || !sw || !im || !(rec = InventoryRecord(me)) || !ReadAt(rec + 8, &support, 4)) { Log("Insert: the pickup (0x9AE030) is not the reviewed code, or your inventory is not there: nothing done"); return; }
+    if (support) { Log("Insert: you carry a support weapon (entity %u): drop it first (the pickup would drop it)", support); return; }
     Remember();
-    Log("Insert (way C): SetHeldItem(you, %u), then SwitchWeapon(you, 5) ...", g_gl);
-    g_setHeld(im, me, g_gl, 0, 1);
-    sw(im, me, 5);
+    Log("Insert (way D): Take(you, %u, slot 3), then SwitchWeapon(you, 3) ...", g_gl);
+    g_take(im, me, g_gl, 3, 0);
+    sw(im, me, 3);
     Log("Insert: returned. Is the GL-21 in her hands now, her rifle put away? Does it aim and fire?");
 }
-__attribute__((unused)) static void BackC(void) /* way C crashes the game: not reachable since 0.3.1 */
+static void BackD(void)
 {
     HfFn_SwitchWeapon sw = hf_fn_SwitchWeapon(self);
     void* im = hf_global_InventoryManager(self);
-    uint32_t me = atomic_load(&g_avatar), sel = g_selWas && g_selWas != 5 ? g_selWas : 1, held = 0;
+    uint32_t me = atomic_load(&g_avatar), sel = g_selWas && g_selWas != 3 ? g_selWas : 1, support = 0;
     uintptr_t rec;
     if (!Mine("Delete")) return;
-    if (!g_setHeld || !sw || !im || !(rec = InventoryRecord(me))) { Log("Delete: set-held-item or your inventory is not there: nothing done"); return; }
-    ReadAt(rec + 0x10, &held, 4);
-    if (held && held == g_gl) { Log("Delete: SetHeldItem(you, none) ..."); g_setHeld(im, me, 0, 0, 1); }
-    else Log("Delete: your held-item slot has %u, not the probe's GL-21: left as it is", held);
+    if (!g_drop || !sw || !im || !(rec = InventoryRecord(me))) { Log("Delete: the drop (0x9A8840) is not the reviewed code, or your inventory is not there: nothing done"); return; }
+    ReadAt(rec + 8, &support, 4);
+    if (support && support == g_gl) { Log("Delete: Drop(you, %u) ...", g_gl); g_drop(im, me, g_gl, 0, 0, 1); }
+    else Log("Delete: your support slot has %u, not the probe's GL-21: left as it is", support);
     Log("Delete: SwitchWeapon(you, %u) ...", sel);
     sw(im, me, sel);
     Log("Delete: returned. Is your own weapon back in your hands?");
@@ -407,22 +417,24 @@ static void Give(void)
 {
     if (!Mine("Insert")) return;
     if (g_gl && ResOf(g_gl) == GL21 && atomic_load(&g_held) == g_gl) { Log("Insert: the GL-21 is in your hands already (Delete gives your weapon back)"); return; }
-    Log("Insert: a GL-21 at your feet. Pick it up by hand, switch to your primary and back, then drop it (hold the drop key). Delete removes it");
+    Log("Insert: a GL-21 into your support slot and your hands, with 40 rounds. Fire it; Delete gives your weapon back");
     if (!g_gl || ResOf(g_gl) != GL21) Spawn();
-    else Log("Insert: GL-21 %u is still there", g_gl);
+    g_give = 1;
+    g_giveAt = g_now + 0.3;
 }
 static void Back(void)
 {
-    Log("Delete: the probe's GL-21 removed");
-    if (g_gl && ResOf(g_gl) == GL21 && atomic_load(&g_held) != g_gl) Remove();
-    else Log("Delete: none to remove, or you hold it (drop it first)");
+    Log("Delete: the GL-21 dropped, your weapon back, the GL-21 removed, your weapon refilled");
+    BackD();
+    g_back = 1;
+    g_backAt = g_now + 0.6;
 }
 static void AutoFrame(void)
 {
     if (g_give && g_now >= g_giveAt && !g_wantSpawn)
     {
         if (!g_gl || ResOf(g_gl) != GL21) { if (g_now > g_giveAt + 5) { g_give = 0; Log("Insert: no GL-21 came in 5 s: given up"); } }
-        else { g_give = 0; WieldC(); Fill(); g_lastRounds = -1; }
+        else { g_give = 0; WieldD(); Fill(); g_lastRounds = -1; }
     }
     if (g_back && g_now >= g_backAt)
     {
@@ -490,15 +502,17 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     if (!g || !x || gs != 74727424u || xs != 60719104u) { Log("REFUSED: not build " BUILD); return; }
     game = g;
     exe = x;
-    if (hf->code_matches(game + 0x9AB950, "40 56 57 41 55 48 83 ec 40 3b 15 c1 82 ad 02 45 0f b6 e9 48 89 5c 24 68")) g_setHeld = (SetHeldFn)(game + 0x9AB950);
-    else Log("set-held-item (0x9AB950) is not the reviewed code: Insert and Delete are off");
+    if (hf->code_matches(game + 0x9AE030, "40 53 55 41 55 48 83 ec 40 48 89 7c 24 68 41 8b e8 4c 89 64 24 70 8b da")) g_take = (TakeFn)(game + 0x9AE030);
+    else Log("the pickup (0x9AE030) is not the reviewed code: Insert is off");
+    if (hf->code_matches(game + 0x9A8840, "40 53 56 41 56 48 81 ec a0 00 00 00 48 8b 05 bd 37 c9 01 48 33 c4 48 89")) g_drop = (DropFn)(game + 0x9A8840);
+    else Log("the drop (0x9A8840) is not the reviewed code: Delete is off");
     if (!hf->code_matches(game + 0x8BF870, "4c 8b dc 55 53 41 56 49 8d 6b a8 48 81 ec 40 01 00 00") ||
         hf->hook(self, game + 0x8BF870, (void*)CarryDetour, (void**)&original_carry)) { original_carry = NULL; Log("the carry function (0x8BF870) is not the reviewed code or its hook was refused: not logged"); }
     int w = hf->hook_function(self, "Wield", (void*)WieldDetour, (void**)&original_wield, 0),
         s = hf->hook_function(self, "SwitchWeapon", (void*)SwitchDetour, (void**)&original_switch, 0),
         t = hf->hook_function(self, "SetWielder", (void*)SetWielderDetour, (void**)&original_setw, 0);
-    Log("ready: Wield %s, SwitchWeapon %s, SetWielder %s. In a mission: Insert drops a GL-21 at your feet; pick it up by hand, switch weapons, drop it; "
-        "Delete removes it",
+    Log("ready: Wield %s, SwitchWeapon %s, SetWielder %s. In a mission, with no support weapon carried: Insert puts a GL-21 with 40 rounds in your hands (the game's own pickup); fire it; "
+        "Delete gives your weapon back and removes it",
         w ? "OFF" : "hooked", s ? "OFF" : "hooked", t ? "OFF" : "hooked");
 }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
