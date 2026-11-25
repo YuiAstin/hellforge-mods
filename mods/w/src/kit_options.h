@@ -1,4 +1,4 @@
-/* w: the options screen's rows. hand-written (the first build has no HUD OPTIONS table for tools/optgen.py to read). */
+/* w: the options screen's rows. hand-written (her HUD has no OPTIONS table for tools/optgen.py to read). */
 static const OpRow kOpRows[] = {
     {"koh_rounds", "King of Hearts", "Rounds", OP_FIELD, 1, 200, 1,
      "Rounds the launcher is handed with."},

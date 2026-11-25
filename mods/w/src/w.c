@@ -1,4 +1,4 @@
-/* W (yui.w): W's kit from Arknights for the Helldiver. First build, not a release: King of Hearts only
+/* W (yui.w): W's kit from Arknights for the Helldiver. Not released yet. It began as King of Hearts only
  * (docs/w-design.md).
  *
  *   King of Hearts (Z): a GL-21 Grenade Launcher in her hands with koh_rounds rounds. Each round's blast does
@@ -1628,7 +1628,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     RosterJoin("w", "W");
     LoadSettings();
     KbOptionsStart(api, mod, "w", "W", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, s_optionsKey);
-    api->log(mod, "W %s (first build: King of Hearts on %s)", VERSION, s_key.label);
+    api->log(mod, "W %s (King of Hearts on %s, Jack in the Box on %s, D12 on %s, its detonation on %s)", VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_keys[3].label);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
              api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_DOWN, OnPlayer, NULL, 0) &&
