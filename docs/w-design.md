@@ -1,6 +1,6 @@
 # W (Arknights): kit design
 
-Status: design, with the weapon swap proven by the Wield Probe (probes/README.md). Nothing of the kit is built.
+Status: first builds (mods/w, 0.2.1): King of Hearts played 2026-11-25, with her page on the options screen. The rest is design.
 Source kit: W, Sniper (Artilleryman), at rank 10 of each skill. Her module is left out, as Ascalon's is.
 
 ## Decisions (Yui, 2026-11-25)
@@ -45,12 +45,14 @@ Source kit: W, Sniper (Artilleryman), at rank 10 of each skill. Her module is le
   10-round GL-21.
 - The pose freeze: the Time Stop Probe's method 2 with the hold (branch `timestop-probe`): a stun, the enemy's
   animation state machine switched off from the HUD mod's Lua, and the enemy held where it stands. Yui's choice of the
-  three methods for the time stop. Not yet tried on one enemy at a time, nor on a Bile Titan.
+  three methods for the time stop. In W 0.2.0 it runs per enemy, each with its own end, and held a Bile Titan (Yui).
+  An enemy a round kills is left to die as the game has it: the hold takes only those a blast left alive (0.2.1).
+- King of Hearts' damage: 3.5 times the launcher's reads right in play (Yui).
 - Her own blasts spare her and what she carries: Destroyer's handling.
 
 ## Open
 
-- The freeze per enemy and on the big ones; how long it lasts.
+- How long the freeze lasts (3 s to start). An enemy already held and then killed by a later round.
 - Mines: the game's own mine entity spawned (its own trigger and blast, the kit adds the hold), or spots the kit
   tracks itself with a marker.
 - Whether a kit blast destroys bug holes and fabricators (D12 on structures).
