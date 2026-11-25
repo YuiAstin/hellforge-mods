@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-25: every character kit, for HellForge 0.5 (Alva 0.2.11, Ascalon 0.7.6, Executor 0.3.7, Exusiai 0.3.7, Faelynn 0.4.7, Koleda 0.4.23, Lemuen 0.1.17, Lenna 0.3.7, Leva 0.6.6, Vector 0.2.9, Voymastina 0.4.9)
+
+- These versions need HellForge 0.5 (they do not load on 0.4). 0.5 keeps the game's entities in a larger table of its own; the kits now find an entity's record through the game's own lookup there.
+- The character kits' options screen (F9, over the game): the installed kits with their icons in a column at the right, with an Off; a click picks the character (from the next mission start) and shows its numbers. Its three skill keys are bound by pressing them, and an Advanced section holds the rest of the kit's .ini. The key is `options_key` in `HellForgeMods\kits.ini`.
+- With the screen there, the kits' HUD rows (always show cooldowns, the roster) leave the Mod Options Menu; the kits' numbers stay on its MODS tab too.
+- A friend is never kept as an enemy: skills no longer go for SEAF troopers (Koleda's Sinveiler shot at them).
+- Koleda: the Sinveiler heals, takes her share of damage and has its broken parts mended by The Winner through the game's own functions. A Sinveiler Self-Destruct stratagem while one is out (RRLLR; RRLLL for the FRV): the exosuit runs at the nearest enemy and blows up beside it, or after 5 s where it stands; the FRV blows up where it stands. Both are kept out of the loadout picker. Her own M-103 is no longer taken for an enemy. The Hellbomb When Exhausted switch is in her options, as the other GFL2 kits have it.
+- Executor: his heals stop at his maximum health (an overheal crashed the game).
+- Vector: the log says why her view could not be read.
+
 ## 2026-11-21: Vector 0.2.2 (first release) · Alva 0.2.5
 
 ### Vector 0.2.2
