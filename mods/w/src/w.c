@@ -16,6 +16,7 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.2.1: an enemy a round kills dies as the game has it; the hold takes only those the blast left alive (Yui).
  * Solo or host. 0.1.2: in the character picker (the roster). 0.2.0: her page on the options screen (F9): the skill's
  * numbers and its key, through the kit base's settings and options. Research: HellForge's mappings and HD2Runtime by SkyeShade; entity, unit
  * and health reads from Helldiver Survival Rework by enochlophobianumerophobia (MIT), through the kit base. */
@@ -35,7 +36,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -267,6 +268,9 @@ static void BlastFrame(void)
         const Blast* b = &g_blast[g_blastTail % BLASTS];
         float at[3] = {b->pos[0], b->pos[1], b->pos[2]};
         int caught = 0, fresh = 0;
+        /* 0.2.1: a blast's enemies are held 0.15 s after it, once its damage has landed: only the ones it left alive
+         * (0.2.0 held the ones it killed for a frame, their state machine off as they died: their corpses went wrong) */
+        if (GetTickCount64() - b->ms < 150) break;
         g_blastSeen++;
         for (int i = 0; i < FOES && s_freezeSeconds > 0; i++)
         {
