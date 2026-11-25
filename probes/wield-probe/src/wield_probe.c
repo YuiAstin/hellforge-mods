@@ -5,12 +5,16 @@
  *   always        the game's own Wield, SwitchWeapon and SetWielder calls on your Helldiver are logged (switch weapons
  *                 and pick a support weapon up by hand first: that shows the slots and Wield's fifth argument), and
  *                 what you hold whenever it changes
- *   Insert        your inventory record, your wield slots, the held weapon's magazine
+ *   0.2.0: Insert alone does it all: spawns a GL-21, puts it in your hands (way A) and gives it 40 rounds; fire
+ *                 it (each round spent is logged). Delete alone undoes it all: your weapon back, the GL-21 removed,
+ *                 your weapon refilled. The keys below are the single steps (0.1.x found: way A holds until a weapon
+ *                 switch; way B is switched away by the game in half a second; 40 rounds read back on a 10-round GL)
+ *   Ctrl+Home     your inventory record, your wield slots, the held weapon's magazine
  *   Shift+Insert  loads the GL-21's package and spawns a GL-21 at your feet (RequestEntitySpawn)
  *   Ctrl+Insert   way A: wields it straight into the slot your last observed Wield used (the inventory is untouched)
  *   Alt+Insert    way B: writes it into your inventory's support slot (record +8) and selects it (SwitchWeapon 3)
  *   Home          its magazine to 40 rounds (AddMagazineRounds)
- *   Delete        gives your weapon back: the support slot as it was (after way B) and your earlier selection
+ *   Ctrl+Delete   gives your weapon back: the support slot as it was (after way B) and your earlier selection
  *   Shift+Delete  removes the spawned GL-21 (RemoveEntity)
  *   End           refills the weapon you hold: its magazine to capacity, and a resupply's spare ammunition
  *
@@ -31,7 +35,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.3"
+#define VERSION "0.2.0"
 #include "kitbase/kb_core.h"
 
 #define GL21 HF_ENTITY_GL21_GRENADE_LAUNCHER
@@ -69,7 +73,7 @@ DETOUR(SwitchDetour, g_switch, g_switchN, original_switch)
 DETOUR(SetWielderDetour, g_setw, g_setwN, original_setw)
 
 /* her last Wield, as the game made it: the slot and the fifth argument way A repeats */
-static int g_haveWield;
+static int g_haveWield = 1;                 /* 0.2.0: slot 0 and a fifth argument of 0, as every switch seen made it */
 static uint32_t g_wieldSlot, g_wieldS5;
 
 static const char* Name(uint64_t r, char* out, size_t n)
@@ -269,7 +273,7 @@ static void WieldB(void)
     uintptr_t rec;
     if (!Mine("Alt+Insert") || !HaveGl("Alt+Insert")) return;
     if (!sw || !im || !(rec = InventoryRecord(me)) || !ReadAt(rec + 8, &was, 4)) { Log("Alt+Insert: SwitchWeapon or your inventory record is not there: nothing done"); return; }
-    if (g_bWritten) { Log("Alt+Insert: the support slot is already the probe's (Delete first)"); return; }
+    if (g_bWritten) { Log("Alt+Insert: the support slot is already the probe's (Ctrl+Delete first)"); return; }
     Remember();
     Log("Alt+Insert (way B): your support slot (record +8) %u -> %u, SetWielder, SwitchWeapon(you, 3) ...", was, g_gl);
     if (hf->write(rec + 8, &g_gl, 4)) { Log("Alt+Insert: the write was refused: nothing done"); return; }
@@ -341,6 +345,48 @@ static void Refill(void)
     Magazine("End: after (magazine to capacity, one resupply of spares)", held);
 }
 
+/* ---- 0.2.0: Insert and Delete by themselves do the whole thing ------------------------------------------------------ */
+static int g_give, g_back, g_lastRounds = -1;
+static double g_giveAt, g_backAt;
+static void Give(void)
+{
+    if (!Mine("Insert")) return;
+    if (g_gl && ResOf(g_gl) == GL21 && atomic_load(&g_held) == g_gl) { Log("Insert: the GL-21 is in your hands already (Delete gives your weapon back)"); return; }
+    Log("Insert: a GL-21 into your hands with 40 rounds. Fire it; Delete gives your weapon back");
+    if (!g_gl || ResOf(g_gl) != GL21) Spawn();
+    g_give = 1;
+    g_giveAt = g_now + 0.3;
+}
+static void Back(void)
+{
+    Log("Delete: your weapon back, the GL-21 removed, your weapon refilled");
+    GiveBack();
+    g_back = 1;
+    g_backAt = g_now + 0.6;
+}
+static void AutoFrame(void)
+{
+    if (g_give && g_now >= g_giveAt && !g_wantSpawn)
+    {
+        if (!g_gl || ResOf(g_gl) != GL21) { if (g_now > g_giveAt + 5) { g_give = 0; Log("Insert: no GL-21 came in 5 s: given up"); } }
+        else { g_give = 0; WieldA(); Fill(); g_lastRounds = -1; }
+    }
+    if (g_back && g_now >= g_backAt)
+    {
+        g_back = 0;
+        if (g_gl && ResOf(g_gl) == GL21) Remove();
+        Refill();
+    }
+    /* the rounds she spends from it */
+    HfFn_MagazineRounds rounds = hf_fn_MagazineRounds(self);
+    void* wm = hf_global_WeaponManager(self);
+    if (g_gl && atomic_load(&g_held) == g_gl && rounds && wm && ResOf(g_gl) == GL21)
+    {
+        int r = rounds(wm, g_gl);
+        if (r != g_lastRounds) { if (g_lastRounds >= 0) Log("the GL-21's magazine: %d -> %d", g_lastRounds, r); g_lastRounds = r; }
+    }
+}
+
 /* ---- events and the frame ------------------------------------------------------------------------------------ */
 static atomic_int g_heldChanged;
 static void OnWeapon(HfMod* mod, const HfEventInfo* info, void* user)
@@ -372,14 +418,15 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (e) Log("spawn event: a GL-21, entity %u%s", e, e == g_gl ? " (the probe's)" : "");
     if (atomic_exchange(&g_heldChanged, 0)) State("held changed");
     SpawnFrame();
+    AutoFrame();
     static int prev[4];
     int focused = Focused(), shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0, ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0,
         alt = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
     int k[4] = {focused && (GetAsyncKeyState(VK_INSERT) & 0x8000), focused && (GetAsyncKeyState(VK_HOME) & 0x8000),
         focused && (GetAsyncKeyState(VK_DELETE) & 0x8000), focused && (GetAsyncKeyState(VK_END) & 0x8000)};
-    if (k[0] && !prev[0]) { if (shift) Spawn(); else if (ctrl) WieldA(); else if (alt) WieldB(); else State("Insert"); }
-    if (k[1] && !prev[1]) Fill();
-    if (k[2] && !prev[2]) { if (shift) Remove(); else GiveBack(); }
+    if (k[0] && !prev[0]) { if (shift) Spawn(); else if (ctrl) WieldA(); else if (alt) WieldB(); else Give(); }
+    if (k[1] && !prev[1]) { if (ctrl) State("Ctrl+Home"); else Fill(); }
+    if (k[2] && !prev[2]) { if (shift) Remove(); else if (ctrl) GiveBack(); else Back(); }
     if (k[3] && !prev[3]) Refill();
     memcpy(prev, k, sizeof prev);
 }
@@ -393,8 +440,8 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     int w = hf->hook_function(self, "Wield", (void*)WieldDetour, (void**)&original_wield, 0),
         s = hf->hook_function(self, "SwitchWeapon", (void*)SwitchDetour, (void**)&original_switch, 0),
         t = hf->hook_function(self, "SetWielder", (void*)SetWielderDetour, (void**)&original_setw, 0);
-    Log("ready: Wield %s, SwitchWeapon %s, SetWielder %s. First switch weapons and pick a support weapon up by hand; then Shift+Insert (spawn a GL-21), "
-        "Ctrl+Insert or Alt+Insert (wield it: way A or B), Home (40 rounds), Delete (your weapon back), Shift+Delete (remove it), End (refill); Insert logs the state",
+    Log("ready: Wield %s, SwitchWeapon %s, SetWielder %s. In a mission: Insert puts a GL-21 with 40 rounds in your hands (fire it, do not switch weapons); "
+        "Delete gives your weapon back, removes the GL-21 and refills your weapon",
         w ? "OFF" : "hooked", s ? "OFF" : "hooked", t ? "OFF" : "hooked");
 }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
