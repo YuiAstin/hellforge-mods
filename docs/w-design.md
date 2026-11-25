@@ -130,3 +130,10 @@ Source kit: W, Sniper (Artilleryman), at rank 10 of each skill. Her module is le
 - 0.7.0: her mines wear the game's mine unit once a minefield was called in in the mission (the game's own spawn
   call's arguments are the pattern); the kit still trips and blows them. Next: her own field, or the unit's package
   loaded without a call-in.
+
+## 0.7.7: spawning a mine's unit ourselves
+
+- WorldSpawnUnit(the main world, &resource, &name, pose, 0, 0, 1, 0). `name` is a pointer the engine always reads
+  (helldivers2.exe+0x1A804B); point it at 0 for no name. A NULL there ended the game twice (0.7.2, 0.7.3).
+- The MD-6's mine (unit ee89cc10d80b6afb) is in the deployer's loadout package (a4946425b2c70017,
+  packages/generated/loadout/mine_launcher), the one package the game lists for the stratagem.

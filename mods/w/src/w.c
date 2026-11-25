@@ -16,6 +16,12 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.7.7: the cause of 0.7.2's and 0.7.3's crashes, read from the game's code (helldivers2.exe+0x1A804B, in the spawn's
+ * inner half 0x1A7FC0): `mov rax, [r14]` reads WorldSpawnUnit's name argument through its pointer, and the kit's own
+ * pattern passed NULL (the pattern copied from the game passed a pointer to 0, which is why hers spawned well after a
+ * call-in). The package was right and nothing was missing: the resource of type eac0b497876adedf is an optional
+ * override looked for only when the name is not 0. The name is always passed by pointer now; the extra check of
+ * 0.7.6 is gone, and her mines wear the MD-6's mine as soon as the kit's package request is resident.
  * 0.7.6: played: the game lists one package for the minefield's stratagem, the deployer's loadout package (the row's
  * +0xA8, filled once the stratagem is in a loadout). So the package was right in 0.7.2 and 0.7.3, and the resource
  * the engine then lacked is one of type eac0b497876adedf under the unit's own name. A mine's unit is now spawned only
@@ -120,7 +126,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.7.6"
+#define VERSION "0.7.7"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12
@@ -849,9 +855,10 @@ static uint32_t ModelSpawn(const float at[3])
     HfFn_WorldSpawnUnit spawn = hf_fn_WorldSpawnUnit(self);
     float pose[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, at[0], at[1], at[2], 1};
     uint32_t handle = 0;
-    if (!s_jibModel || !g_pattern.valid || !spawn || g_models >= 300 || !UnitLoaded(g_pattern.res) || (!g_patternFromGame && !MaterialLoaded(g_pattern.res))) return 0;
+    if (!s_jibModel || !g_pattern.valid || !spawn || g_models >= 300 || !UnitLoaded(g_pattern.res)) return 0;
     uint64_t res = g_pattern.res, name = g_pattern.name;
-    void* unit = spawn(g_pattern.world, &res, g_pattern.hasName ? &name : NULL, pose, g_pattern.s5, g_pattern.s6, g_pattern.s7, g_pattern.s8);
+    /* the name is read through its pointer whatever it holds (0: none): never NULL (0.7.2 and 0.7.3 passed NULL and the game ended there) */
+    void* unit = spawn(g_pattern.world, &res, &name, pose, g_pattern.s5, g_pattern.s6, g_pattern.s7, g_pattern.s8);
     if (!unit || !ReadAt((uintptr_t)unit + 8, &handle, 4)) handle = 0;
     g_models++;
     if (g_models <= 6) Log("Jack in the Box: a mine's unit %016llx spawned at %.1f %.1f %.1f: handle %08x", (unsigned long long)res, (double)at[0], (double)at[1], (double)at[2], handle);
@@ -897,13 +904,13 @@ static void ModelReady(void)
     if (g_minePackage == ~0ull) return;
     int s = hf->load_package(self, g_minePackage);
     if (!s) { if (!told++) Log("Jack in the Box: the minefield's package was refused"); g_minePackage = ~0ull; return; }
-    if (s != HF_PACKAGE_RESIDENT || state != 3) return;
+    if (s != HF_PACKAGE_RESIDENT || !(state & 1)) return;
     HfFn_MainWorld world = hf_fn_MainWorld(self);
     void* w = world ? world() : NULL;
     if (!w) return;
     g_pattern = (UnitPattern){1, w, MD6_MINE, 0, 0, 0, 0, 1, 0};
     g_patternFromGame = 0;
-    Log("Jack in the Box: the minefield's package is resident and the MD-6's mine can be had whole: her mines wear it (world %p)", w);
+    Log("Jack in the Box: the minefield's package is resident and the MD-6's mine can be had: her mines wear it (world %p)", w);
 }
 /* research: the minefield's stratagem row, and the game's own package lists for it */
 typedef struct PkgCall { volatile uint32_t type, kind, n; volatile uint64_t out[6]; } PkgCall;
