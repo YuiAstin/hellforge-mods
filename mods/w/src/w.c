@@ -16,6 +16,9 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.6.0: the kits' HUD: her three skills beside the stratagem list (w_hud_state: cooldowns, the launcher's rounds, the
+ * mine charges, the marks), the keys from the game's binding menu (w_input, w_key), the character picker and the
+ * options screen's HUD row (w_roster, w_pick, w_option_get, w_option_set). Her icon and her skills' icons.
  * 0.5.3: Artilleryman never went off (played; the log: "dealer 571, owner 567 (hers: network 567): not hers"). Her
  * shots name her weapon as their dealer, and the kit base's test takes such a hit only with its hit hook, which this kit
  * does not install. A hit she owns whose dealer is a weapon in her inventory (primary, secondary, support) is hers.
@@ -77,7 +80,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.5.3"
+#define VERSION "0.6.0"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12
@@ -90,6 +93,7 @@
 #include "kitbase/kb_options.h"
 #include "kitbase/kb_roster.h"
 KB_OPTIONS_EXPORTS(w)
+KB_ROSTER_EXPORTS(w)
 
 #define GL21 HF_ENTITY_GL21_GRENADE_LAUNCHER
 #define TARGETS 48
@@ -911,6 +915,57 @@ HF_MOD_EXPORT int w_view(unsigned version, float* out)
     if (version != 1 || !out || !g_inMission || !Descriptor(avatar, id) || Quad(id) != AVATAR) return 0;
     return UnitNode(Word(id + 12), NODE_HEAD, out) ? 1 : 0;
 }
+/* ---- the HUD state (read by the W HUD addon through LuaJIT's ffi) ------------------------------------------------ */
+typedef struct WHud
+{
+    uint32_t version, in_mission;
+    float cd[3], cd_max[3];            /* seconds left, full cooldowns: King of Hearts, Jack in the Box (its next charge), D12 */
+    uint32_t s1_on, rounds;            /* the launcher is out; its rounds */
+    uint32_t charges, charges_max, mines_out;
+    uint32_t marks, marks_max, blowing, ambush;
+    uint32_t keys[4];
+    char key_label[4][24];
+} WHud;
+static WHud g_hud = {.version = 1};
+static int Rounds(uint32_t weapon);
+HF_MOD_EXPORT WHud* w_hud_state(void)
+{
+    int blowing = 0;
+    for (int i = 0; i < MARKS; i++) blowing |= g_mark[i].on && g_mark[i].boomAt != 0;
+    g_hud.in_mission = (uint32_t)(g_inMission && g_alive && kb_kit_on);
+    g_hud.cd[0] = g_k != K_IDLE ? 0 : (float)fmax(0, g_readyAt - g_now); g_hud.cd_max[0] = s_cooldown;
+    g_hud.cd[1] = g_charges > 0 ? 0 : (float)fmax(0, s_jibEvery - (g_now - g_chargeAt)); g_hud.cd_max[1] = s_jibEvery;
+    g_hud.cd[2] = (float)fmax(0, g_d12Ready - g_now); g_hud.cd_max[2] = s_d12Cooldown;
+    g_hud.s1_on = (uint32_t)(g_k != K_IDLE);
+    int r = g_k == K_HELD ? Rounds(atomic_load(&g_gl)) : 0;
+    g_hud.rounds = (uint32_t)(r > 0 ? r : 0);
+    g_hud.charges = (uint32_t)(g_charges > 0 ? g_charges : 0); g_hud.charges_max = (uint32_t)s_jibCharges; g_hud.mines_out = (uint32_t)MinesOut();
+    g_hud.marks = (uint32_t)MarksOn(); g_hud.marks_max = (uint32_t)s_d12Marks; g_hud.blowing = (uint32_t)blowing; g_hud.ambush = (uint32_t)g_ambushOn;
+    for (int i = 0; i < 4; i++)
+    {
+        g_hud.keys[i] = (uint32_t)s_keys[i].vk;
+        memcpy(g_hud.key_label[i], s_keys[i].label, sizeof g_hud.key_label[i]);
+    }
+    return &g_hud;
+}
+static _Atomic unsigned long long g_bindMs;
+static atomic_int g_bindPress;
+HF_MOD_EXPORT int w_input(unsigned version, int skill)
+{
+    if (version != 1) return 0;
+    atomic_store(&g_bindMs, GetTickCount64());
+    if (skill >= 1 && skill <= 3) atomic_fetch_or(&g_bindPress, 1 << (skill - 1));
+    return 1;
+}
+HF_MOD_EXPORT int w_key(unsigned version, int skill, int* vk, int* mods)
+{
+    if (version != 1 || skill < 1 || skill > 3 || !vk || !mods) return 0;
+    *vk = s_keys[skill - 1].vk;
+    *mods = s_keys[skill - 1].mods;
+    return 1;
+}
+HF_MOD_EXPORT int w_option_get(const char* name, double* out) { return OptionGet(name, out); }
+HF_MOD_EXPORT int w_option_set(const char* name, double value) { return OptionSet(name, value); }
 static void MineFrame(void)
 {
     /* the charges */
@@ -1287,7 +1342,10 @@ static void Tick(HfMod* mod, float dt, void* user)
                          ((GetAsyncKeyState(VK_MENU) & 0x8000) ? KM_ALT : 0) : 0;
     int own = s_key.vk == VK_SHIFT ? KM_SHIFT : s_key.vk == VK_CONTROL ? KM_CTRL : s_key.vk == VK_MENU ? KM_ALT : 0;
     int down = focused && (GetAsyncKeyState(s_key.vk) & 0x8000) != 0 && (mods & ~own) == s_key.mods;
-    if (down && !prev && g_alive && atomic_load(&g_avatar))
+    int presses = atomic_exchange(&g_bindPress, 0);   /* the game's binding menu's, through the HUD */
+    static unsigned long long fired[3];
+    #define PRESSED(i, edge) (((edge) || (presses >> (i) & 1)) && GetTickCount64() - fired[i] > 120 && g_alive && atomic_load(&g_avatar) && (fired[i] = GetTickCount64(), 1))
+    if (PRESSED(0, down && !prev))
     {
         if (g_k == K_HELD) End("the key again");
         else if (g_k == K_IDLE && g_now >= g_readyAt) Start();
@@ -1298,7 +1356,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         const Key* k2 = &s_keys[1];
         int own2 = k2->vk == VK_SHIFT ? KM_SHIFT : k2->vk == VK_CONTROL ? KM_CTRL : k2->vk == VK_MENU ? KM_ALT : 0;
         int down2 = focused && (GetAsyncKeyState(k2->vk) & 0x8000) != 0 && (mods & ~own2) == k2->mods;
-        if (down2 && !prev2 && g_alive && atomic_load(&g_avatar) && g_charges > 0) JibPlace();
+        if (PRESSED(1, down2 && !prev2) && g_charges > 0) JibPlace();
         prev2 = down2;
         static int prev3[2];
         for (int q = 0; q < 2; q++)
@@ -1306,7 +1364,7 @@ static void Tick(HfMod* mod, float dt, void* user)
             const Key* k = &s_keys[2 + q];
             int o = k->vk == VK_SHIFT ? KM_SHIFT : k->vk == VK_CONTROL ? KM_CTRL : k->vk == VK_MENU ? KM_ALT : 0;
             int dn = focused && (GetAsyncKeyState(k->vk) & 0x8000) != 0 && (mods & ~o) == k->mods;
-            if (dn && !prev3[q] && g_alive && atomic_load(&g_avatar)) { if (q) D12Detonate(); else D12Mark(); }
+            if (q ? dn && !prev3[q] && g_alive && atomic_load(&g_avatar) : PRESSED(2, dn && !prev3[q])) { if (q) D12Detonate(); else D12Mark(); }
             prev3[q] = dn;
         }
     }

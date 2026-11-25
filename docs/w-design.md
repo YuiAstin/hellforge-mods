@@ -112,3 +112,9 @@ Source kit: W, Sniper (Artilleryman), at rank 10 of each skill. Her module is le
 - So one of the game's mines for Jack in the Box is a unit plus a slot in a field's record. Two ways to it, neither
   tried: spawn a deployer of her own out of sight and move its mines (their units and their slots) to where she lays
   them; or spawn the mine's unit and write a slot ourselves.
+
+## 0.6.0
+
+- The kits' HUD: her three skills beside the stratagem list with her skill icons (the launcher's rounds, the mine
+  charges and mines out, the marks and the detonation key on them), the keys on the game's binding menu, the character
+  picker. Her mod icon. Played before it: D12 on bug holes (the dynamite closes them), Artilleryman's bursts.

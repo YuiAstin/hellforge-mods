@@ -1,19 +1,36 @@
--- W (mods/yui/w_hud): the Lua half of the HellForge kit yui.w, first build. The DLL (w.dll) picks the enemies King of
--- Hearts' rounds hold and times each one's hold; this finds each enemy's unit in the game's Lua and switches its
--- animation state machine off while it is held, then on again (the Time Stop Probe's pose freeze, per enemy). It also
--- draws the skill's line. What it learns is written to the DLL's log (mod-yui.w.log) through w_log.
--- Requires Bingus Shared Loader and HD2Runtime (by SkyeShade, https://github.com/SkyeShade/HD2Runtime; its overlay
--- gives the frame callback). The rare-type rule for reading a unit's place is Exo Autopilot's finding (marti).
+-- W HUD (mods/yui/w_hud): W's skills beside the mission's stratagem list (shown with it, as the stratagems are: icon,
+-- name, key, cooldown), her mines and marks marked in the world, and the pose freeze of what her skills hold, drawn
+-- with HD2Runtime's screen overlay (hd2.ui.overlay). W is a HellForge code mod; this reads its state through LuaJIT's
+-- ffi (w.dll exports w_hud_state, layout version 1, and w_state for the freeze) every frame. Requires Bingus Shared
+-- Loader and HD2Runtime; uses HD2Runtime by SkyeShade (https://github.com/SkyeShade/HD2Runtime) through its public API.
+-- The freeze: the DLL picks the enemies her skills hold and times each one's hold; this finds each enemy's unit in the
+-- game's Lua and switches its animation state machine off while it is held, then on again (the Time Stop Probe's pose
+-- freeze, per enemy); one that died held gets its "dead" animation event. The rare-type rule for reading a unit's
+-- place is Exo Autopilot's finding (marti).
 local OWNER = 'mods/yui/w_hud'
+
+local sink, sink_tried
+local function log(message)
+    pcall(print, message)
+    if not sink_tried then
+        sink_tried = true
+        local ok, result = pcall(function() return CowboyBingusModLoader.open_log('WHUD.log') end)
+        if ok then sink = result end
+    end
+    if sink then
+        if not pcall(function() sink:write(message .. '\n'); if sink.flush then sink:flush() end end) then sink = nil end
+    end
+end
 
 local ok, hd2 = pcall(require, 'mods/skyeshade/hd2runtime')
 if not ok or type(hd2) ~= 'table' or type(hd2.ui) ~= 'table' or type(hd2.ui.overlay) ~= 'function' then
-    pcall(print, '[W] HD2Runtime with hd2.ui.overlay is not available: the pose freeze and the skill line are off')
+    log('[W HUD] HD2Runtime with hd2.ui.overlay is not available: no HUD, no pose freeze (' .. tostring(hd2) .. ')')
     return
 end
 
 local ffi = require('ffi')
 pcall(ffi.cdef, [[
+typedef struct whud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t s1_on, rounds, charges, charges_max, mines_out, marks, marks_max, blowing, ambush; uint32_t keys[4]; char key_label[4][24]; } whud1_state;
 typedef struct wk1_target { uint32_t entity, unit; uint64_t object; float pos[3]; uint32_t pad; } wk1_target;
 typedef struct wk1_state { uint32_t version, seq, active, skill, count, rare_max; uint32_t player_unit, in_mission;
     uint64_t player_object; float player_pos[3], value; wk1_target t[48]; uint32_t dead_seq, dead[16]; } wk1_state;
@@ -25,13 +42,424 @@ void *wk1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress
 ]])
 local k32 = ffi.load('kernel32')
 
+local ELECTRIC, YELLOW, INK, PANEL, TEXT, MUTED = {224, 58, 58}, {255, 232, 0}, {8, 9, 10}, {12, 14, 16}, {240, 243, 245}, {150, 156, 160}
+local NAMES = {'KING OF HEARTS', 'JACK IN THE BOX', 'D12'}
+
+-- the kit, for the shared parts below
+local KIT = {name = 'W', id = 'w', module = k32.wk1_GetModuleHandleA, proc = k32.wk1_GetProcAddress}
+-- kitbase:bindings.lua begin. Shared by the GFL2 kits' HUDs: written by tools/kitbase_sync.py from kitbase/hud/bindings.lua, so edit
+-- it there (the kit names itself in KIT, above).
+-------------------------------- GFL2_SHARED: cooldowns while the list is closed, in-game key bindings (same in each kit) --
+-- Cooldowns: with the GFL2 KITS HUD option "<Kit>: Always Show Cooldowns" on (the default), the skills on cooldown stay
+-- on screen while the stratagem list is closed, each on its own (only the ones recharging), where the list shows them.
+-- Key bindings: the three skills are registered with Mod Bindings Menu (Vanilla Plus Megapack: ESC > OPTIONS > the
+-- keyboard or controller binding page > MODS) as native game actions, the game's own binding rows (they start unbound:
+-- only the menu's fixed slots get keyboard defaults); with every native action taken they fall back to extended bindings
+-- (MORE MODS) with the .ini's keys as defaults. Each press is passed to the DLL (<kit>_input); the .ini's keys keep
+-- working beside them (a press of both within 0.3 s counts once).
+local X = {kit = KIT.name, id = KIT.id, always = true, opt_done = false, opt_wait = 0, bind_done = false, bind_wait = 0,
+    ids = {}, prev = {}, labels = {}, beat = 0, label_wait = 0, last_box = nil}
+pcall(ffi.cdef, [[
+typedef int (*gfl2bind_input)(unsigned int version, int skill);
+typedef int (*gfl2bind_key)(unsigned int version, int skill, int *vk, int *mods);
+]])
+local VK_NAMES = {[0x08] = 'backspace', [0x09] = 'tab', [0x0D] = 'enter', [0x14] = 'caps lock', [0x20] = 'space',
+    [0x21] = 'page up', [0x22] = 'page down', [0x23] = 'end', [0x24] = 'home', [0x25] = 'left', [0x26] = 'up',
+    [0x27] = 'right', [0x28] = 'down', [0x2D] = 'insert', [0x2E] = 'delete', [0x10] = 'left shift', [0x11] = 'left ctrl',
+    [0x12] = 'left alt', [0xA0] = 'left shift', [0xA1] = 'right shift', [0xA2] = 'left ctrl', [0xA3] = 'right ctrl',
+    [0xA4] = 'left alt', [0xA5] = 'right alt'}
+local VK_MOUSE = {[0x04] = 'middle', [0x05] = 'extra 1', [0x06] = 'extra 2'}
+-- the .ini key as a binding default ({button, modifiers} with the engine's names), nil when it has no engine name
+local function default_spec(vk, mods)
+    local button, device
+    if vk >= 0x41 and vk <= 0x5A then button = string.char(vk + 32)
+    elseif vk >= 0x30 and vk <= 0x39 then button = string.char(vk)
+    elseif vk >= 0x70 and vk <= 0x87 then button = 'f' .. (vk - 0x6F)
+    elseif vk >= 0x60 and vk <= 0x69 then button = 'numpad ' .. (vk - 0x60)
+    elseif VK_MOUSE[vk] then button, device = VK_MOUSE[vk], 'mouse'
+    else button = VK_NAMES[vk] end
+    if not button then return nil end
+    local m = {}
+    if mods % 2 == 1 and button ~= 'left shift' then m[#m + 1] = 'left shift' end
+    if math.floor(mods / 2) % 2 == 1 and button ~= 'left ctrl' then m[#m + 1] = 'left ctrl' end
+    if math.floor(mods / 4) % 2 == 1 and button ~= 'left alt' then m[#m + 1] = 'left alt' end
+    return {{button = button, device = device, modifiers = #m > 0 and m or nil}}
+end
+local function gfl2_dll(name)
+    local module = KIT.module(X.id .. '.dll')
+    if module == nil then return nil end
+    local p = KIT.proc(module, name)
+    return p ~= nil and p or nil
+end
+-- "<Kit>: Always Show Cooldowns" on the MODS tab (its own GFL2 KITS HUD entry: each kit's own entry is full)
+pcall(ffi.cdef, [[
+typedef int (*gfl2opt_screen)(unsigned int version);
+typedef int (*gfl2opt_get)(const char *name, double *out);
+]])
+-- the character kits' options screen (HellForge's screens over the game) is there: nothing on the Mod Options Menu,
+-- "Always Show Cooldowns" read from the screen's HUD row once a second
+local function gfl2_screen()
+    if X.screen == nil then
+        local sp, gp = gfl2_dll(X.id .. '_options_screen'), gfl2_dll(X.id .. '_option_get')
+        if not sp then return false end                             -- its DLL not loaded yet, or from before the screen
+        X.screen = ffi.cast('gfl2opt_screen', sp)(1) == 1 and gp ~= nil
+        if X.screen then X.get, X.out = ffi.cast('gfl2opt_get', gp), ffi.new('double[1]') end
+    end
+    return X.screen
+end
+local function gfl2_options(dt)
+    if X.opt_done == 'screen' then
+        X.opt_wait = X.opt_wait - dt
+        if X.opt_wait > 0 then return end
+        X.opt_wait = 1
+        if X.get('hud_cooldowns', X.out) == 1 then X.always = X.out[0] ~= 0 end
+        return
+    end
+    if X.opt_done then return end
+    X.opt_wait = X.opt_wait - dt
+    if X.opt_wait > 0 then return end
+    X.opt_wait = 2
+    if gfl2_screen() then
+        X.opt_done = 'screen'
+        log('[' .. X.kit .. ' HUD] the GFL2 Kits HUD rows (cooldowns, the character picker) are on the options screen, not the Mod Options Menu')
+        return
+    end
+    local menu = rawget(_G, 'ModOptionsMenu')
+    if not menu or menu.api ~= 1 then return end
+    X.opt_done = true
+    local id = 'yui.gfl2hud.' .. X.id .. '.cooldowns'
+    local ok, why = menu.register_option(id, {type = 'toggle', label = X.kit .. ': Always Show Cooldowns', mod = 'GFL2 Kits HUD',
+        mod_id = 'yui.gfl2hud', default = true,
+        description = X.kit .. "'s skills on cooldown stay on screen while the stratagem list is closed."})
+    if not ok then log('[' .. X.kit .. ' HUD] cooldowns option not added: ' .. tostring(why)) return end
+    local saved = menu.get(id)
+    if saved ~= nil then X.always = saved and true or false end
+    menu.on_change(id, function(value) X.always = value and true or false end)
+end
+-- the bound keys' names for the list ('CTRL+A'), refreshed once a second
+local function binding_label(mbm, id)
+    local ok, list = pcall(mbm.binding, id)
+    if not ok or type(list) ~= 'table' then return nil end
+    local alt = list[1]
+    if type(alt) ~= 'table' then return 'UNBOUND' end
+    local parts = {}
+    for _, m in ipairs(type(alt.modifiers) == 'table' and alt.modifiers or {}) do parts[#parts + 1] = tostring(m):gsub('^left ', ''):gsub('^right ', '') end
+    parts[#parts + 1] = tostring(alt.button or '?')
+    return string.upper(table.concat(parts, '+'))
+end
+local function gfl2_bindings(dt)
+    if X.bind_done == 'off' then return end
+    local mbm = rawget(_G, 'ModBindingsMenu')
+    if not X.bind_done then
+        X.bind_wait = X.bind_wait - dt
+        if X.bind_wait > 0 then return end
+        X.bind_wait = 2
+        if type(mbm) ~= 'table' or type(mbm.register_binding) ~= 'function' or type(mbm.is_down) ~= 'function' then return end
+        if (tonumber(mbm.version) or 0) < 4 then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings: Mod Bindings Menu is too old (version ' .. tostring(mbm.version) .. ')') return end
+        local ip, kp = gfl2_dll(X.id .. '_input'), gfl2_dll(X.id .. '_key')
+        if not ip or not kp then
+            if gfl2_dll(X.id .. '_hud_state') then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings: this ' .. X.id .. '.dll has none (update it)') end
+            return
+        end
+        X.input = ffi.cast('gfl2bind_input', ip)
+        local key = ffi.cast('gfl2bind_key', kp)
+        local vk, mods = ffi.new('int[1]'), ffi.new('int[1]')
+        for i = 1, 3 do
+            local spec = nil
+            if key(1, i, vk, mods) == 1 then spec = default_spec(tonumber(vk[0]), tonumber(mods[0])) end
+            local id = 'yui.' .. X.id .. '.key' .. i   -- not '.skill': those ids were extended bindings (0.2.6), which stay extended
+            local ok, res, why = pcall(mbm.register_binding, id, X.kit .. ': ' .. NAMES[i], nil, {category = X.kit, default = spec})
+            if not ok or not res then
+                X.bind_done = 'off'
+                log('[' .. X.kit .. ' HUD] key bindings: ' .. id .. ' not registered (' .. tostring(ok and why or res) .. '): the .ini keys stay')
+                return
+            end
+            X.ids[i] = id
+        end
+        X.bind_done = true
+        local info = mbm.binding_info and mbm.binding_info(X.ids[1])
+        log('[' .. X.kit .. ' HUD] key bindings: registered with Mod Bindings Menu as ' .. tostring(type(info) == 'table' and info.backend or '?') .. ' bindings (the binding pages\' MODS tab); the .ini keys keep working')
+    end
+    for i = 1, 3 do
+        local down = mbm.is_down(X.ids[i]) == true
+        if down and not X.prev[i] then X.input(1, i) end
+        X.prev[i] = down
+    end
+    X.beat = X.beat - dt
+    if X.beat <= 0 then X.beat = 0.5; X.input(1, 0) end
+    X.label_wait = X.label_wait - dt
+    if X.label_wait <= 0 then
+        X.label_wait = 1
+        for i = 1, 3 do X.labels[i] = binding_label(mbm, X.ids[i]) end
+    end
+end
+-- The roster: with two or more character kits installed, an "Active Character" choice on the MODS tab (GFL2 Kits HUD);
+-- only the picked kit acts, from the next mission start (kitbase/kb_roster.h). Each HUD passes the pick to its own DLL;
+-- every kit reads the same shared answer. One kit alone: no row, it simply acts.
+pcall(ffi.cdef, [[
+typedef int (*gfl2roster_text)(char *out, int size);
+typedef int (*gfl2roster_pick)(const char *id);
+]])
+local R = {done = false, wait = 0, tries = 0}
+local function gfl2_roster(dt)
+    if R.done then return end
+    R.wait = R.wait - dt
+    if R.wait > 0 then return end
+    R.wait = 2
+    if gfl2_screen() then R.done = true return end                  -- the screen's character column picks
+    local menu = rawget(_G, 'ModOptionsMenu')
+    if not menu or menu.api ~= 1 then return end
+    local tp, pp = gfl2_dll(X.id .. '_roster'), gfl2_dll(X.id .. '_pick')
+    if not tp or not pp then R.done = true return end              -- a DLL from before the roster
+    local buf = ffi.new('char[1024]')
+    local n = ffi.cast('gfl2roster_text', tp)(buf, 1024)
+    R.tries = R.tries + 1
+    if n < 2 then if R.tries >= 5 then R.done = true end return end  -- alone: nothing to pick
+    R.done = true
+    local list, active = ffi.string(buf):match('^(.*)|(.*)$')
+    local ids, names, default = {}, {}, 1
+    for entry in (list or ''):gmatch('[^;]+') do
+        local id, name = entry:match('^([^:]+):(.*)$')
+        if id then ids[#ids + 1] = id; names[#names + 1] = name; if id == active then default = #ids end end
+    end
+    if #ids < 2 or #ids > 16 then return end
+    local key = 0                                                    -- a short id for this roster (a new kit: a new row)
+    for _, id in ipairs(ids) do for c = 1, #id do key = (key * 31 + id:byte(c)) % 2147483647 end end
+    local option = 'yui.gfl2hud.character.' .. key
+    local ok, why = menu.register_option(option, {type = 'choice', label = 'Active Character', mod = 'GFL2 Kits HUD', mod_id = 'yui.gfl2hud',
+        choices = names, default = default,
+        description = 'Several character kits are installed: only the picked one acts (keys, body, skills, HUD). Takes effect at the next mission start.'})
+    if not ok then log('[' .. X.kit .. ' HUD] roster: the picker row was not added here (' .. tostring(why) .. '): another kit\'s HUD may have it') end
+    local pick = ffi.cast('gfl2roster_pick', pp)
+    local saved = menu.get(option)
+    if type(saved) == 'number' and ids[saved] then pick(ids[saved]) end
+    menu.on_change(option, function(value) if ids[value] then pick(ids[value]) end end)
+    log('[' .. X.kit .. ' HUD] roster: ' .. #ids .. ' character kits installed: ' .. table.concat(names, ', ') .. '; picked: ' ..
+        tostring(names[(type(saved) == 'number' and ids[saved]) and saved or default]))
+end
+local function gfl2_step(dt)
+    local okR, errR = pcall(gfl2_roster, dt)
+    if not okR then R.done = true; log('[' .. X.kit .. ' HUD] roster failed: ' .. tostring(errR)) end
+    local ok, err = pcall(gfl2_options, dt)
+    if not ok then X.opt_done = true; log('[' .. X.kit .. ' HUD] cooldowns option failed: ' .. tostring(err)) end
+    ok, err = pcall(gfl2_bindings, dt)
+    if not ok then X.bind_done = 'off'; log('[' .. X.kit .. ' HUD] key bindings failed, the .ini keys stay: ' .. tostring(err)) end
+end
+-- kitbase:bindings.lua end
+local SHORT = {'S1', 'S2', 'S3'}
+
+local state, refresh, find_wait = nil, nil, 0
+local function find(dt)
+    if state ~= nil then refresh() return state end
+    find_wait = find_wait - dt
+    if find_wait > 0 then return nil end
+    find_wait = 2
+    local module = k32.wk1_GetModuleHandleA('w.dll')
+    if module == nil then return nil end
+    local proc = k32.wk1_GetProcAddress(module, 'w_hud_state')
+    if proc == nil then return nil end
+    local fn = ffi.cast('whud1_state *(*)(void)', proc)
+    local s = fn()
+    if s == nil or s.version < 1 then return nil end
+    refresh = function() fn() end
+    state = s
+    log('[W HUD] connected to W')
+    return state
+end
+
+local function rgba(c, a) return {c[1], c[2], c[3], math.floor(255 * (a or 1) + 0.5)} end
+-- text with a drop shadow; sizes stay at 17 px and up (at 1080p) so the strokes stay solid
+local function heavy(d, str, x, y, size, font, colour, align)
+    local s = d.scale
+    d:text(str, x + math.max(1, 2 * s), y + math.max(1, 2 * s), {size = size, font = font, colour = rgba(INK, 0.75), z = 4, align = align})
+    d:text(str, x, y, {size = size, font = font, colour = colour, z = 5, align = align})
+end
+
+local RED, WARN_AT, WARN = {255, 48, 40}, 0.25, {t = 0}
+local SOS_BEACON = 145   -- StratagemType of the SOS Beacon
+local ORANGE, GREY = {224, 58, 58}, {120, 124, 128}
+local ICONS = {}
+for i, id in ipairs({'w_s1', 'w_s2', 'w_s3'}) do
+    local okI, handle = pcall(hd2.resources.image, id)
+    if okI and handle then ICONS[i] = handle end
+end
+
+-- kitbase:list.lua begin. Shared by the GFL2 kits' HUDs: written by tools/kitbase_sync.py from kitbase/hud/list.lua, so edit
+-- it there (the kit names itself in KIT, above).
+-------------------------------------------------------------------------- the stratagem list, to sit beside --
+-- The list's entries and their icons' rectangles come from HD2Runtime's slot overlay (code / research from
+-- HD2Runtime by SkyeShade, its internal modules); without them the abilities show at a fixed place under the list.
+local L = {on = true, entries = nil, wait = 0, proven = false}
+local okA, SO = pcall(require, 'hd2runtime/runtime/stratagem_slot_overlay')
+local okB, W = pcall(require, 'hd2runtime/runtime/event_world')
+local okC, SEL = pcall(require, 'hd2runtime/runtime/stratagem_selector')
+if not (okA and okB and okC and type(SO) == 'table' and type(SO.hud_entries) == 'function' and type(SO.rect) == 'function'
+        and type(W) == 'table' and type(W.open) == 'function' and type(SEL) == 'table' and type(SEL.prove) == 'function') then
+    L.on = false
+    log('[' .. X.kit .. ' HUD] the stratagem list cannot be followed on this HD2Runtime: abilities always shown')
+end
+local said = {}
+local function why_not(what, why)
+    local key = what .. ': ' .. tostring(why)
+    if said[key] then return end
+    said[key] = true
+    log('[' .. X.kit .. ' HUD] list: ' .. key)
+end
+-- {left, top, right, size, step, alpha} of the open list (top-left origin), false when it is closed, nil when unknown
+local function list_box(d, dt)
+    if not L.on then return nil end
+    local world = W.open()
+    if not world then why_not('no world', 'not open') return nil end
+    if not L.proven then
+        local proven, why = SEL.prove(world)
+        if not proven then why_not('not proven yet', why) return nil end
+        L.proven = true
+        log('[' .. X.kit .. ' HUD] the stratagem list can be followed on this build')
+    end
+    L.wait = L.wait - dt
+    if not L.entries or L.wait <= 0 then
+        L.wait = 0.5
+        local entries, why = SO.hud_entries(world)
+        L.entries = entries
+        if not entries then why_not('no list', why) end
+    end
+    if not L.entries then L.full = nil return nil end
+    local H = d.height or (d.width * 9 / 16)
+    local box, tops, total = nil, {}, 0
+    local seen, sos, sos_shown, reinforce = {}, false, false, nil
+    for idx, e in pairs(L.entries) do
+        if idx == 0 then reinforce = e end
+        local kind = tonumber(e.type) or 0
+        if kind == SOS_BEACON then sos = true end
+        local used = kind ~= 0 and kind ~= 0xFFFFFFFF
+        if used then total = total + 1 end
+        local r = SO.rect(world, e.icon)
+        seen[#seen + 1] = string.format('%s:%d%s', tostring(idx), kind, r and string.format('@%.0f', H - (r.y + r.h)) or '-')
+        if r and kind == SOS_BEACON then sos_shown = true end
+        if r then
+            local top = H - (r.y + r.h)
+            tops[#tops + 1] = top
+            if not box then box = {left = r.x, top = top, bottom = top + r.h, size = r.h, alpha = r.alpha or 1}
+            else
+                box.left = math.min(box.left, r.x); box.top = math.min(box.top, top); box.bottom = math.max(box.bottom, top + r.h)
+                box.alpha = math.max(box.alpha, r.alpha or 1)
+            end
+        end
+    end
+    table.sort(seen)
+    local view = string.format('%d of %d used entries shown: %s', #tops, total, table.concat(seen, ' '))
+    if view ~= L.last_view and (L.views or 0) < 40 then L.last_view = view; L.views = (L.views or 0) + 1; log('[' .. X.kit .. ' HUD] list: ' .. view) end
+    -- open or closed, by how many icons show: the open list shows the whole loadout (7, more with event stratagems;
+    -- limited-use ones stay listed), and its most this mission is learned the first time it opens; the closed list
+    -- keeps only Reinforce and the few stratagems inbound or recharging. Open: the most, or one fewer (the SOS Beacon
+    -- hidden while it recharges).
+    if not box then return false end
+    L.full = math.max(L.full or 0, #tops)
+    if L.full < 4 or #tops < L.full - 1 then return false end
+    table.sort(tops)
+    local step
+    for i = 2, #tops do
+        local gap = tops[i] - tops[i - 1]
+        if gap > box.size * 0.5 and (not step or gap < step) then step = gap end
+    end
+    step = step or box.size * 1.2
+    box.step = step
+    return box
+end
+
+-- kitbase:list.lua end
+---------------------------------------------------------------------------------------------- the abilities --
+local function ability(d, i, x, y, size, alpha)
+    local s = d.scale
+    local left, full = tonumber(state.cd[i - 1]), math.max(0.01, tonumber(state.cd_max[i - 1]))
+    local ready = left <= 0.05
+    local on = i == 1 and state.s1_on ~= 0                                  -- the launcher is out
+    local marks, charges = tonumber(state.marks), tonumber(state.charges)
+    local a = alpha
+    -- the icon's tile, framed like a stratagem's
+    local t = math.max(1, 2 * s)
+    local frame = ready and rgba(ELECTRIC, a) or rgba(GREY, a * 0.8)
+    d:rect(x, y, size, size, rgba(INK, a * 0.9), 1)
+    d:rect(x, y, size, t, frame, 2); d:rect(x, y + size - t, size, t, frame, 2)
+    d:rect(x, y, t, size, frame, 2); d:rect(x + size - t, y, t, size, frame, 2)
+    if ICONS[i] then
+        local pad = size * 0.08
+        d:image(ICONS[i], x + pad, y + pad, size - 2 * pad, size - 2 * pad, {z = 3,
+            colours = ready and {r = rgba(ORANGE, 1), g = {255, 255, 255, 255}} or {r = rgba(GREY, 1), g = {150, 154, 158, 255}},
+            colour = {255, 255, 255, math.floor(255 * a + 0.5)}})
+    else
+        heavy(d, SHORT[i], x + size / 2, y + size * 0.3, math.max(17 * s, size * 0.34), 'title', ready and rgba(TEXT, a) or rgba(MUTED, a), 'center')
+    end
+    -- on the tile: the launcher's rounds, the mine charges, the marks
+    local count
+    if i == 1 and on then count = state.rounds > 0 and ('%d'):format(tonumber(state.rounds)) or '...'
+    elseif i == 2 and ready then count = ('%d'):format(charges)
+    elseif i == 3 and ready and marks > 0 then count = ('%d/%d'):format(marks, tonumber(state.marks_max)) end
+    if count then heavy(d, count, x + size / 2, y + size * 0.58, math.max(17 * s, size * 0.34), 'title', rgba(YELLOW, a), 'center') end
+    if not ready then
+        -- the part of the cooldown left, darkening the icon from the top
+        d:rect(x + t, y + t, size - 2 * t, (size - 2 * t) * math.min(1, left / full), rgba(INK, a * 0.55), 4)
+        heavy(d, string.format('%.0f', math.ceil(left)), x + size / 2, y + size * 0.25, math.max(20 * s, size * 0.42), 'title', rgba(TEXT, a), 'center')
+    end
+    -- the name, and the key where a stratagem shows its code
+    local tx = x + size + 10 * s
+    local nsize = math.max(17 * s, size * 0.36)
+    heavy(d, NAMES[i], tx, y + size * 0.02, nsize, 'title', ready and rgba(TEXT, a) or rgba(MUTED, a))
+    local label = X.labels[i] or ffi.string(state.key_label[i - 1])
+    local ksize = math.max(18 * s, size * 0.4)
+    heavy(d, label, tx, y + size * 0.5, ksize, 'title', ready and rgba(YELLOW, a) or rgba(MUTED, a))
+    local kw = d:text_width(label, ksize, 'title') or (ksize * #label * 0.6)
+    local more
+    if not ready then more = string.format('%.0fs', math.ceil(left))
+    elseif i == 1 and on then more = 'AGAIN TO END'
+    elseif i == 2 then more = ('%d OUT'):format(tonumber(state.mines_out))
+    elseif i == 3 and marks > 0 then more = ffi.string(state.key_label[3]) .. ' TO DETONATE' end
+    if more then heavy(d, more, tx + kw + 12 * s, y + size * 0.5, ksize, 'title', rgba(TEXT, a * 0.8)) end
+end
+
+local function abilities(d, box, only)
+    local s = d.scale
+    local size, step, x, y, a
+    if box then
+        size, step, a = box.size, box.step, box.alpha
+        x = box.left + 290 * s          -- past the list's names
+        y = box.top
+    else
+        size, step, a = 44 * s, 52 * s, 1
+        x, y = 330 * s, 90 * s
+    end
+    local shown = {}
+    for i = 1, 3 do
+        -- while the list is closed: the ones recharging, the launcher while it is out, her marks while she has some
+        local busy = tonumber(state.cd[i - 1]) > 0.05 or (i == 1 and state.s1_on ~= 0) or (i == 3 and state.marks > 0) or (i == 2 and state.charges < state.charges_max)
+        if not only or busy then shown[#shown + 1] = i end
+    end
+    if #shown == 0 then return end
+    -- a panel like the list's
+    local w = size + 10 * s + math.max(230 * s, size * 5)
+    d:rect(x - 10 * s, y - 10 * s, w + 20 * s, step * #shown + 20 * s - (step - size), rgba(PANEL, a * 0.72), 0)
+    d:rect(x - 10 * s, y - 10 * s, 3 * s, step * #shown + 20 * s - (step - size), rgba(ELECTRIC, a), 1)
+    for k, i in ipairs(shown) do ability(d, i, x, y + (k - 1) * step, size, a) end
+end
+
+-------------------------------------------------------------------------------------- Ambush, bottom middle --
+local function status_bar(d)
+    if state.ambush == 0 then return end
+    local s = d.scale
+    local H = d.height or (d.width * 9 / 16)
+    heavy(d, 'AMBUSH', d.width / 2, H - 70 * s, 20 * s, 'title', rgba(ELECTRIC, 1), 'center')
+end
+
+-------------------------------------------------------------- the pose freeze, and her mines and marks in the world --
+-- (in a function of its own: the main chunk's locals are nearly used up)
+local world = (function()
 local state, logfn, pending, lines = nil, nil, {}, 0
 local minesfn, viewfn = nil, nil
 local function log(m)
     m = tostring(m)
     lines = lines + 1
     if lines > 300 then return end
-    pcall(print, '[W] ' .. m)
+    pcall(print, '[W HUD] ' .. m)
     if logfn then pcall(logfn, 1, m) elseif #pending < 100 then pending[#pending + 1] = m end
 end
 local find_wait = 0
@@ -354,40 +782,59 @@ local function mines_draw(d)
     end
 end
 local mines_failed = false
-
-local overlay = hd2.ui.overlay({id = 'w', owner = OWNER})
 local failed = false
-overlay:draw(function(d, dt)
-    if failed then return end
+return function(d, dt)
     local st = connect(dt or 0)
     if not st then return end
-    local okF, err = pcall(function()
-        if st.in_mission == 0 then
-            -- the mission ended: forget them, their units left alone
-            if next(held) ~= nil then held = {} end
-            last_seq = st.seq
-        elseif st.seq ~= last_seq then sync(st) end
-    end)
-    if not okF then failed = true; log('failed, off for this session: ' .. tostring(err)) return end
+    if not failed then
+        local okF, err = pcall(function()
+            if st.in_mission == 0 then
+                -- the mission ended: forget them, their units left alone
+                if next(held) ~= nil then held = {} end
+                last_seq = st.seq
+            elseif st.seq ~= last_seq then sync(st) end
+        end)
+        if not okF then failed = true; log('the freeze failed, off for this session: ' .. tostring(err)) end
+    end
     if st.in_mission == 0 then return end
     mk_t = mk_t + (tonumber(dt) or 0)
     if not mines_failed then
         local okM, errM = pcall(mines_draw, d)
         if not okM then mines_failed = true; log('the mines\' markers failed, off for this session: ' .. tostring(errM)) end
     end
-    local sc = d.scale or 1
-    local text, colour
-    local skill, ambush = st.skill % 256, math.floor(st.skill / 256) % 2 == 1
-    if skill == 1 then text, colour = ('KING OF HEARTS  %d'):format(math.max(0, math.floor(st.value + 0.5))), {255, 90, 90, 255}
-    elseif skill == 3 then text, colour = 'KING OF HEARTS  ...', {255, 200, 120, 255}
-    elseif skill == 2 then text, colour = ('King of Hearts  %.0f s'):format(math.max(0, st.value)), {170, 170, 170, 230}
-    else text, colour = 'King of Hearts  ready', {255, 255, 255, 230} end
-    text = text .. ('   |   Jack in the Box  %d  (%d out)'):format(math.floor(st.skill / 65536) % 256, math.floor(st.skill / 16777216) % 256)
-    local marks, cooling = math.floor(st.skill / 512) % 16, math.floor(st.skill / 8192) % 2 == 1
-    text = text .. (cooling and '   |   D12  cooldown' or ('   |   D12  %d marked'):format(marks))
-    if ambush then text = text .. '   |   AMBUSH' end
-    local x, y = d.width / 2, (d.height or 1080 * sc) - 150 * sc
-    d:text(text, x + 2, y + 2, {size = 20 * sc, colour = {0, 0, 0, 200}, z = 4, align = 'center'})
-    d:text(text, x, y, {size = 20 * sc, colour = colour, z = 5, align = 'center'})
+end
+end)()
+
+local overlay = hd2.ui.overlay({id = 'kit', owner = OWNER})
+overlay:draw(function(d, dt)
+    dt = tonumber(dt) or 0
+    WARN.dt = dt
+    gfl2_step(dt)
+    local okW, errW = pcall(world, d, dt)
+    if not okW and not WARN.world then WARN.world = true; log('[W HUD] the world part failed: ' .. tostring(errW)) end
+    if not find(dt) then return end
+    if state.in_mission == 0 then return end
+    status_bar(d)
+    local okL, box = pcall(list_box, d, dt)
+    if not okL then L.on = false; log('[W HUD] following the list failed, abilities always shown: ' .. tostring(box)); box = nil end
+    if box == false then                 -- the list is closed: the skills in use or on cooldown only, under where the open list ends
+        if X.always then
+            local s = d.scale
+            local H = d.height or (d.width * 9 / 16)
+            local lb = X.last_box
+            local size = lb and lb.size or 44 * s
+            local step = lb and lb.step or 52 * s
+            local left = math.max(20 * s, lb and lb.left or 40 * s)
+            local top = lb and (lb.bottom + step * 0.6) or H * 0.45
+            abilities(d, {alpha = 1, size = size, step = step, left = left - 290 * s, top = top}, true)
+        end
+        return
+    end
+    -- remembered only while the list is fully shown and on screen (it slides off to the left as it closes)
+    if box and (box.alpha or 1) >= 0.95 and box.left >= 0 and (not X.last_box or box.left >= X.last_box.left - 2) then
+        X.last_box = {left = box.left, top = box.top, bottom = box.bottom, size = box.size, step = box.step}
+    end
+    abilities(d, box or nil)
 end)
-pcall(print, '[W] ready (waiting for w.dll)')
+
+log('[W HUD] ready (waiting for W)')
