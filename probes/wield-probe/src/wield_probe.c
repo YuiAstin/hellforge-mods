@@ -171,7 +171,8 @@ static void Report(void)
         if (!who || who != atomic_load(&g_avatar)) continue;
         if (g_swObj != (uintptr_t)c->a[0]) Log("game: your switch-request object is at %p", (void*)(uintptr_t)c->a[0]);
         g_swObj = (uintptr_t)c->a[0];
-        Log("game: SwitchRequest(you, wanted selection %u; +0x14 was %u) from game+0x%llX", want, (uint32_t)c->a[2], (unsigned long long)(c->ret - game));
+        static unsigned reqLogged;
+        if (reqLogged++ < 120) Log("game: SwitchRequest(you, wanted selection %u; +0x14 was %u) from game+0x%llX", want, (uint32_t)c->a[2], (unsigned long long)(c->ret - game));
     }
     static unsigned attLogged;
     {
