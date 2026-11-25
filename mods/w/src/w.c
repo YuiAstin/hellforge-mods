@@ -16,7 +16,8 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
- * Solo or host. 0.1.2: in the character picker (the roster), without a page of its own on the options screen yet. Research: HellForge's mappings and HD2Runtime by SkyeShade; entity, unit
+ * Solo or host. 0.1.2: in the character picker (the roster). 0.2.0: her page on the options screen (F9): the skill's
+ * numbers and its key, through the kit base's settings and options. Research: HellForge's mappings and HD2Runtime by SkyeShade; entity, unit
  * and health reads from Helldiver Survival Rework by enochlophobianumerophobia (MIT), through the kit base. */
 #include <ctype.h>
 #include <errno.h>
@@ -34,47 +35,37 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.1.2"
+#define VERSION "0.2.0"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
+#include "kitbase/kb_body.h"
+#include "kitbase/kb_settings.h"
+#include "kitbase/kb_options.h"
 #include "kitbase/kb_roster.h"
+KB_OPTIONS_EXPORTS(w)
 
 #define GL21 HF_ENTITY_GL21_GRENADE_LAUNCHER
 #define TARGETS 48
 
 /* ---- settings ---------------------------------------------------------------------------------------------------- */
-static Key s_key = {'Z', 0, "Z"};
 static int s_rounds = 40, s_rareMax = 4;
 static float s_damage = 3.5f, s_cooldown = 16, s_freezeSeconds = 3, s_freezeRadius = 5;
-static void LoadIni(void)
-{
-    char path[MAX_PATH * 2], line[256];
-    snprintf(path, sizeof path, "%s\\w.ini", hf->mod_folder(self));
-    FILE* f = OpenUtf8(path, L"r");
-    if (!f) { Log("settings: no w.ini, so the defaults"); return; }
-    while (fgets(line, sizeof line, f))
-    {
-        char* c = strchr(line, ';');
-        if (c) *c = 0;
-        char* eq = strchr(line, '=');
-        if (!eq) continue;
-        *eq = 0;
-        char key[64];
-        if (sscanf(line, " %63s", key) != 1) continue;
-        if (!strcmp(key, "koh_key")) { Key k; if (ParseKey(eq + 1, &k)) s_key = k; else Log("w.ini: koh_key could not be read; %s stays", s_key.label); continue; }
-        double v = strtod(eq + 1, NULL);
-        if (!strcmp(key, "koh_rounds")) s_rounds = (int)(v < 1 ? 1 : v > 200 ? 200 : v);
-        else if (!strcmp(key, "koh_damage")) s_damage = (float)(v < 0.1 ? 0.1 : v > 50 ? 50 : v);
-        else if (!strcmp(key, "koh_cooldown")) s_cooldown = (float)(v < 0 ? 0 : v > 600 ? 600 : v);
-        else if (!strcmp(key, "koh_freeze_seconds")) s_freezeSeconds = (float)(v < 0 ? 0 : v > 30 ? 30 : v);
-        else if (!strcmp(key, "koh_freeze_radius")) s_freezeRadius = (float)(v < 0.5 ? 0.5 : v > 30 ? 30 : v);
-        else if (!strcmp(key, "rare_max")) s_rareMax = (int)(v < 1 ? 1 : v > 64 ? 64 : v);
-    }
-    fclose(f);
-}
+static int s_optionsKey = 0x78;        /* options_key: the virtual key that opens the options screen (120: F9; 0: none) */
+static const KbSetting kSettings[] = {
+    KB_I("koh_rounds", s_rounds, 1, 200), KB_F("koh_damage", s_damage, 0.1, 50), KB_F("koh_cooldown", s_cooldown, 0, 600),
+    KB_F("koh_freeze_seconds", s_freezeSeconds, 0, 30), KB_F("koh_freeze_radius", s_freezeRadius, 0.5, 30), KB_I("rare_max", s_rareMax, 1, 64),
+    KB_I("options_key", s_optionsKey, 0, 255),
+};
+static const KbOption kOptions[] = {
+    {"koh_rounds", NULL, &s_rounds}, {"koh_damage", &s_damage, NULL}, {"koh_cooldown", &s_cooldown, NULL}, {"koh_freeze_seconds", &s_freezeSeconds, NULL},
+    {"koh_freeze_radius", &s_freezeRadius, NULL}, {"rare_max", NULL, &s_rareMax},
+};
+#define s_key s_keys[0]
+#include "kit_options.h"   /* kOpRows: the options screen's rows (kitbase/kb_options.h) */
+#include "kit_icon.h"      /* kOpIcon, KB_OP_ACCENT */
 
 /* ---- what the HUD mod reads (layout version 1; the same struct in w_hud.lua) --------------------------------------- */
 typedef struct WTarget { uint32_t entity, unit; uint64_t object; float pos[3]; uint32_t pad; } WTarget;
@@ -549,6 +540,7 @@ static void Tick(HfMod* mod, float dt, void* user)
 {
     double step = dt > 0 && dt < 1 ? dt : 0;
     g_now += step;
+    KbOptionsTick();   /* the options screen's changes, in a mission or not */
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission)
     {
@@ -616,8 +608,13 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     self = mod;
     if (!api || api->version < 16 || api->size < offsetof(HfApi, global) + sizeof api->global) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
-    LoadIni();
+    kb_ini = "w.ini";
+    kb_key_names[0] = "key_s1";
+    KB_SETTINGS(kSettings);
+    KB_OPTIONS(kOptions);
     RosterJoin("w", "W");
+    LoadSettings();
+    KbOptionsStart(api, mod, "w", "W", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, s_optionsKey);
     api->log(mod, "W %s (first build: King of Hearts on %s)", VERSION, s_key.label);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
