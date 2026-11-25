@@ -16,7 +16,7 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
- * Solo or host. Not in the character picker yet. Research: HellForge's mappings and HD2Runtime by SkyeShade; entity, unit
+ * Solo or host. 0.1.2: in the character picker (the roster), without a page of its own on the options screen yet. Research: HellForge's mappings and HD2Runtime by SkyeShade; entity, unit
  * and health reads from Helldiver Survival Rework by enochlophobianumerophobia (MIT), through the kit base. */
 #include <ctype.h>
 #include <errno.h>
@@ -34,12 +34,13 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.1.1"
+#define VERSION "0.1.2"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
+#include "kitbase/kb_roster.h"
 
 #define GL21 HF_ENTITY_GL21_GRENADE_LAUNCHER
 #define TARGETS 48
@@ -552,6 +553,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (inMission != g_inMission)
     {
         g_inMission = inMission;
+        if (inMission) KitDecide();
         if (!inMission)
         {
             Abort("the mission ended");
@@ -561,8 +563,8 @@ static void Tick(HfMod* mod, float dt, void* user)
             g_readyAt = 0;
         }
     }
-    g_state.in_mission = (uint32_t)g_inMission;
-    if (!g_inMission || !game) { g_state.skill = 0; return; }
+    g_state.in_mission = (uint32_t)(g_inMission && kb_kit_on);
+    if (!g_inMission || !game || !kb_kit_on) { g_state.skill = 0; return; }
     static int prev;
     int focused = Focused();
     int mods = focused ? ((GetAsyncKeyState(VK_SHIFT) & 0x8000) ? KM_SHIFT : 0) | ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? KM_CTRL : 0) |
@@ -615,6 +617,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 16 || api->size < offsetof(HfApi, global) + sizeof api->global) return 1;
     if (!api->build_id() || strcmp(api->build_id(), BUILD)) { api->log(mod, "REFUSED: game build must be " BUILD); return 1; }
     LoadIni();
+    RosterJoin("w", "W");
     api->log(mod, "W %s (first build: King of Hearts on %s)", VERSION, s_key.label);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
