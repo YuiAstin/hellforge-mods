@@ -1,4 +1,4 @@
-/* Equip Probe (yui.equip-probe): research for W's King of Hearts. Can a mod put a GL-21 Grenade Launcher in the
+/* Wield Probe (yui.wield-probe): research for W's King of Hearts. Can a mod put a GL-21 Grenade Launcher in the
  * Helldiver's hands, give it 40 rounds, and hand her own weapon back afterwards? Nothing here has run yet. Solo or
  * host; turn it off when done. Each step has its own key, so the log shows which one a crash follows.
  *
@@ -402,7 +402,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     hf = api;
     self = mod;
     if (!api || api->version < 16 || api->size < offsetof(HfApi, global) + sizeof api->global || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
-    Log("Equip Probe " VERSION ": research for W's King of Hearts (a GL-21 into your hands and your weapon back)");
+    Log("Wield Probe " VERSION ": research for W's King of Hearts (a GL-21 into your hands and your weapon back)");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->on_game_thread(mod, Tick, NULL);
