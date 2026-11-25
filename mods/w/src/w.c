@@ -16,6 +16,7 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.7.9: the HUD puts a stunned sign (its image w_stun) over each enemy her skills hold.
  * 0.7.8: a mine's unit is taken away with its mine (played: 0.7.7's stayed), the way the game's minefield takes away
  * one of its own: the engine's destroy-unit entry it calls, with the game's world and the unit's handle.
  * 0.7.7: the cause of 0.7.2's and 0.7.3's crashes, read from the game's code (helldivers2.exe+0x1A804B, in the spawn's
@@ -128,7 +129,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.7.8"
+#define VERSION "0.7.9"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12

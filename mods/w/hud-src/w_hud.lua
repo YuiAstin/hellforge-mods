@@ -796,6 +796,49 @@ local function mines_draw(d)
     end
 end
 local mines_failed = false
+-- what her skills hold: the stunned sign over each (0.7.9), where the DLL holds it (w_state's targets)
+local STUN_ICON
+do
+    local okI, handle = pcall(hd2.resources.image, 'w_stun')
+    if okI and handle then STUN_ICON = handle end
+end
+local function stun_draw(d, st)
+    local s = S_()
+    local n = tonumber(st.count)
+    if not STUN_ICON or n <= 0 or type(s) ~= 'table' or not (s.Unit and s.Camera and s.Vector3 and s.Quaternion and s.World and s.Application) then return end
+    local u = cam_unit(s, mk_t)
+    if not u then return end
+    local c = s.Unit.camera(u, 1)
+    if not c then return end
+    local cx, cy, cz = s.Vector3.to_elements(s.Camera.world_position(c))
+    local fx, fy, fz = s.Vector3.to_elements(s.Quaternion.forward(s.Camera.world_rotation(c)))
+    local W, H = d.width, d.height or (d.width * 9 / 16)
+    local bw, bh = W, H
+    if s.Application.back_buffer_size then
+        local okb, a, b = pcall(s.Application.back_buffer_size)
+        if okb and type(a) == 'number' and a > 0 then bw, bh = a, b end
+    end
+    local sc = d.scale or 1
+    for k = 0, math.min(n, 48) - 1 do
+        local t = st.t[k]
+        local x, y, z = t.pos[0], t.pos[1], t.pos[2] + 2.6
+        local ax, ay, az = x - cx, y - cy, z - cz
+        if ax * fx + ay * fy + az * fz > 0.5 then
+            local sx, sy = s.Vector3.to_elements(s.Camera.world_to_screen(c, s.Vector3(x, y, z)))
+            if type(sx) == 'number' then
+                sx, sy = sx * W / bw, H - sy * H / bh
+                if sx > 0 and sx < W and sy > 0 and sy < H then
+                    local dist = math.sqrt(ax * ax + ay * ay + az * az)
+                    local r = math.max(12, math.min(34, 420 / math.max(dist, 1))) * sc
+                    -- a slow sway, each one out of step with the next
+                    local sway = math.sin(mk_t * 3 + k * 1.7)
+                    d:image(STUN_ICON, sx - r + sway * r * 0.08, sy - r, 2 * r, 2 * r, {z = 6, colour = {255, 255, 255, math.floor(215 + 40 * sway)}})
+                end
+            end
+        end
+    end
+end
+local stun_failed = false
 local failed = false
 return function(d, dt)
     local st = connect(dt or 0)
@@ -815,6 +858,10 @@ return function(d, dt)
     if not mines_failed then
         local okM, errM = pcall(mines_draw, d)
         if not okM then mines_failed = true; log('the mines\' markers failed, off for this session: ' .. tostring(errM)) end
+    end
+    if not stun_failed then
+        local okS, errS = pcall(stun_draw, d, st)
+        if not okS then stun_failed = true; log('the stunned signs failed, off for this session: ' .. tostring(errS)) end
     end
 end
 end)()

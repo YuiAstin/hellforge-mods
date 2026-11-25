@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.w",
   "name": "W",
-  "version": "0.7.8",
+  "version": "0.7.9",
   "icon": "icon.png",
   "description": "W's kit from Arknights for the Helldiver (not released yet: still being played in). King of Hearts (Z): a GL-21 with 40 rounds in her hands; each round's blast does 3.5 times its damage and freezes the enemies it catches in their pose; her own weapon comes back refilled afterwards. Jack in the Box (X): up to 5 charges, each lays a mine under the enemy nearest her aim (or at a random spot ahead); an enemy sets it off: a blast and a freeze. D12 (C): marks enemies, bug holes and structures on her aim line, and B blows the marks. Passives: Artilleryman (her shots burst where they land), Insult to Injury (enemies her skills hold take more from her), Ambush (while she has not fired for a while, most hits on her miss and enemies see her from less far). Solo or host. Pick W in the character picker on the options screen (F9); her page there has every skill's numbers and keys. Her HUD, the pose freeze and the mines' markers need Bingus Shared Loader and HD2Runtime. Settings on that page and in w.ini.",
   "gameplay": true,
