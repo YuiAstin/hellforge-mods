@@ -16,6 +16,9 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.5.1: D12 marks bug holes and the enemy's other spawners too (played: a bug hole has no health, so it was never in
+ * the list): what has the game's bug hole or AI spawner record, taken twice as far from her aim line as other things
+ * (they are wide). A hole that closes is logged with what closed it near, and is not marked again.
  * 0.5.0: D12 (C) and its key (B). A press marks what is nearest her aim line within d12_range m (an enemy before a
  * thing that only has health: a structure, a prop; d12_things 0 leaves those out), up to d12_marks marks (the oldest
  * goes); a mark follows what it is on, goes with it if it dies, and lasts d12_seconds. The fourth key (key_s4, B) blows
@@ -68,7 +71,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.5.0"
+#define VERSION "0.5.1"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12
@@ -640,6 +643,7 @@ typedef struct MarkT { int on; uint32_t entity; uint64_t res; int foe; float pos
 static MarkT g_mark[MARKS];
 static uint32_t g_thing[THINGS];            /* what is not an enemy but has health: a structure, a prop (the spawn event's) */
 static uint64_t g_thingRes[THINGS];
+static uint8_t g_thingWide[THINGS];         /* 1: a bug hole or a spawner */
 static atomic_uint g_thingHead;
 static double g_d12Ready;
 static unsigned g_marksMade, g_marksBlown;
@@ -660,7 +664,7 @@ static int MarkWhere(MarkT* m)
     if (UnitNode(Word(d + 12), 0, p)) { m->pos[0] = p[0]; m->pos[1] = p[1]; m->pos[2] = p[2]; }
     return 1;
 }
-static void D12Consider(uint32_t e, uint64_t res, int foe, const float eye[3], const float aim[3], float* best, MarkT* pick)
+static void D12Consider(uint32_t e, uint64_t res, int foe, int wide, const float eye[3], const float aim[3], float* best, MarkT* pick)
 {
     uint8_t d[24];
     float p[3];
@@ -673,9 +677,9 @@ static void D12Consider(uint32_t e, uint64_t res, int foe, const float eye[3], c
     if (along < 1.5f || along > s_d12Range) return;
     float w[3] = {v[0] - aim[0] * along, v[1] - aim[1] * along, v[2] - aim[2] * along};
     float side = sqrtf(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
-    if (side > s_d12Aim + along * 0.03f) return;
+    if (side > s_d12Aim * (wide ? 2.5f : 1) + along * 0.03f) return;
     /* an enemy before a thing; then the nearest to the line */
-    float score = side + (foe ? 0 : 2.0f);
+    float score = (wide ? side * 0.4f : side) + (foe ? 0 : 2.0f);
     if (score >= *best) return;
     *best = score;
     pick->on = 1; pick->entity = e; pick->res = res; pick->foe = foe; pick->pos[0] = p[0]; pick->pos[1] = p[1]; pick->pos[2] = p[2];
@@ -688,8 +692,8 @@ static void D12Mark(void)
     for (int i = 0; i < MARKS; i++) if (g_mark[i].on && g_mark[i].boomAt) return;   /* they are blowing */
     if (!PlayerPose(me, aim)) return;
     float eye[3] = {me[0], me[1], me[2] + 1.6f};
-    for (int i = 0; i < FOES; i++) D12Consider(g_foe[i], g_foeRes[i], 1, eye, aim, &best, &pick);
-    if (s_d12Things) for (int i = 0; i < THINGS; i++) D12Consider(g_thing[i], g_thingRes[i], 0, eye, aim, &best, &pick);
+    for (int i = 0; i < FOES; i++) D12Consider(g_foe[i], g_foeRes[i], 1, 0, eye, aim, &best, &pick);
+    if (s_d12Things) for (int i = 0; i < THINGS; i++) D12Consider(g_thing[i], g_thingRes[i], 0, g_thingWide[i], eye, aim, &best, &pick);
     if (!pick.on) { static unsigned told; if (told++ < 6) Log("D12: nothing on her aim line within %.0f m to mark", (double)s_d12Range); return; }
     int slot = -1, oldest = -1, n = 0;
     for (int i = 0; i < MARKS; i++)
@@ -1161,12 +1165,18 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
             foe = (hf->component_record("TurretComponentData", s->resource, &stride) && hf->component_record("BehaviorComponentData", s->resource, &stride)) ||
                   (hf->component_record("AiEnemyComponentData", s->resource, &stride) && hf->component_record("HealthComponentData", s->resource, &stride));
         if (foe) AddFoe(s->entity, s->resource);
+        else if (hf->component_record("BugholeComponentData", s->resource, &stride) || hf->component_record("AiSpawnerComponentData", s->resource, &stride))
+        {
+            unsigned th = atomic_load(&g_thingHead);
+            g_thing[th % THINGS] = s->entity; g_thingRes[th % THINGS] = s->resource; g_thingWide[th % THINGS] = 1;
+            atomic_store(&g_thingHead, th + 1);
+        }
         else if (!FriendRes(s->resource) && hf->component_record("HealthComponentData", s->resource, &stride) && !hf->component_record("AvatarComponentData", s->resource, &stride) &&
                  !hf->component_record("SeatCollectionComponentData", s->resource, &stride) && !hf->component_record("WeaponComponentData", s->resource, &stride) &&
                  !hf->component_record("ProjectileComponentData", s->resource, &stride))
         {
             unsigned th = atomic_load(&g_thingHead);
-            g_thing[th % THINGS] = s->entity; g_thingRes[th % THINGS] = s->resource;
+            g_thing[th % THINGS] = s->entity; g_thingRes[th % THINGS] = s->resource; g_thingWide[th % THINGS] = 0;
             atomic_store(&g_thingHead, th + 1);
         }
         return;
@@ -1175,6 +1185,14 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     g_spawnEntity[g_spawnNext % 8] = s->entity;
     g_spawnNet[g_spawnNext % 8] = s->network;
     g_spawnNext++;
+}
+static void OnBughole(HfMod* mod, const HfBugholeEvent* b, void* user)
+{
+    static unsigned told;
+    for (int i = 0; i < THINGS; i++) if (g_thing[i] == b->entity) g_thing[i] = 0;
+    for (int i = 0; i < MARKS; i++) if (g_mark[i].on && g_mark[i].entity == b->entity && !g_mark[i].boomAt) g_mark[i].on = 0;
+    if (told++ < 20) Log("a bug hole closed: entity %u (%016llx), stage %u; %llu ms after her last skill blast", b->entity, (unsigned long long)b->resource, b->stage,
+        (unsigned long long)(GetTickCount64() - atomic_load(&g_skillMs)));
 }
 static void OnKill(HfMod* mod, const HfEventInfo* info, void* user) { DropFoe(((const HfKillEvent*)info)->victim); }
 static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
@@ -1306,5 +1324,6 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
              api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_EXPLOSION, OnExplosion, NULL, 0) &&
              !hf_on_damage_pre(mod, OnDamagePre, NULL, 0) && api->on_game_thread(mod, Tick, NULL);   /* the typed helper answers 0 when it is in */
     if (!ok) api->log(mod, "events or the game thread are unavailable: the kit stays off");
+    else if (hf_on_bughole(mod, OnBughole, NULL, 0)) api->log(mod, "the bug hole event is unavailable: a closed hole can be marked again");
     return 0;
 }
