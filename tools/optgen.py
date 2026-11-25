@@ -26,7 +26,7 @@ import lupa
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SIZE = 96
 ACCENT = {'alva': 0x96D6FF, 'ascalon': 0xC83C50, 'destroyer': 0xFF5C78, 'executor': 0xE6C878, 'exusiai': 0xFF5A46, 'faelynn': 0x8CD2FF, 'koleda': 0x50C8FF,
-          'lemuen': 0xFFB4D2, 'lenna': 0x78C8FF, 'leva': 0xFFA03C, 'vector': 0xFF8A24, 'voymastina': 0xFFAA3C}
+          'lemuen': 0xFFB4D2, 'lenna': 0x78C8FF, 'leva': 0xFFA03C, 'vector': 0xFF8A24, 'voymastina': 0xFFAA3C, 'w': 0xE03A3A}
 
 
 def kits():
