@@ -16,6 +16,10 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.3.1: Artilleryman never went off (her Helldiver's network id was never learned, so no hit read as hers): it is now
+ * asked of the game for a hit's owner. Its burst is a G-6 Frag's by default (Yui), at most one every 0.4 s and not
+ * within 8 m of her. Ambush is Ascalon's cut of her visibility (ambush_visual_cut percent of the range enemies see her
+ * at), with the hits that miss; the forgetting is a switch, off by default (ambush_forget).
  * 0.3.0: her three passives. Artilleryman: a shot of hers that lands on an enemy also sets off a small blast there
  * (splash_explosion; not while the launcher is out, nor within 5 m of her). Insult to Injury: an enemy her skills hold
  * takes insult_mult times her damage. Ambush, in two versions to play (ambush 1: on ambush_after s after she lands;
@@ -42,7 +46,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.3.0"
+#define VERSION "0.3.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -60,13 +64,14 @@ KB_OPTIONS_EXPORTS(w)
 /* ---- settings ---------------------------------------------------------------------------------------------------- */
 static int s_rounds = 40, s_rareMax = 4;
 static float s_damage = 3.5f, s_cooldown = 16, s_freezeSeconds = 3, s_freezeRadius = 5;
-static float s_insult = 1.18f, s_splashEvery = 0.15f, s_ambushAfter = 10, s_ambushMiss = 0.6f, s_ambushRange = 80;
-static int s_splash = 1, s_splashExplosion = HF_EXPLOSION_PLAS1_SCORCHER_IMPACT, s_ambush = 1;
+static float s_insult = 1.18f, s_splashEvery = 0.4f, s_splashSafe = 8, s_ambushAfter = 10, s_ambushMiss = 0.6f, s_ambushRange = 80, s_visualCut = 60;
+static int s_splash = 1, s_splashExplosion = HF_EXPLOSION_G6_FRAG_DETONATION, s_ambush = 1, s_ambushForget = 0;
 static int s_optionsKey = 0x78;        /* options_key: the virtual key that opens the options screen (120: F9; 0: none) */
 static const KbSetting kSettings[] = {
     KB_I("koh_rounds", s_rounds, 1, 200), KB_F("koh_damage", s_damage, 0.1, 50), KB_F("koh_cooldown", s_cooldown, 0, 600),
     KB_F("koh_freeze_seconds", s_freezeSeconds, 0, 30), KB_F("koh_freeze_radius", s_freezeRadius, 0.5, 30), KB_I("rare_max", s_rareMax, 1, 64),
     KB_F("insult_mult", s_insult, 1, 5), KB_I("splash", s_splash, 0, 1), KB_I("splash_explosion", s_splashExplosion, 0, 2000), KB_F("splash_every", s_splashEvery, 0.02, 5),
+    KB_F("splash_safe", s_splashSafe, 0, 30), KB_F("ambush_visual_cut", s_visualCut, 0, 95), KB_I("ambush_forget", s_ambushForget, 0, 1),
     KB_I("ambush", s_ambush, 0, 2), KB_F("ambush_after", s_ambushAfter, 0, 120), KB_F("ambush_miss", s_ambushMiss, 0, 1), KB_F("ambush_range", s_ambushRange, 5, 300),
     KB_I("options_key", s_optionsKey, 0, 255),
 };
@@ -74,6 +79,7 @@ static const KbOption kOptions[] = {
     {"koh_rounds", NULL, &s_rounds}, {"koh_damage", &s_damage, NULL}, {"koh_cooldown", &s_cooldown, NULL}, {"koh_freeze_seconds", &s_freezeSeconds, NULL},
     {"koh_freeze_radius", &s_freezeRadius, NULL}, {"rare_max", NULL, &s_rareMax},
     {"insult_mult", &s_insult, NULL}, {"splash", NULL, &s_splash}, {"splash_explosion", NULL, &s_splashExplosion}, {"splash_every", &s_splashEvery, NULL},
+    {"splash_safe", &s_splashSafe, NULL}, {"ambush_visual_cut", &s_visualCut, NULL}, {"ambush_forget", NULL, &s_ambushForget},
     {"ambush", NULL, &s_ambush}, {"ambush_after", &s_ambushAfter, NULL}, {"ambush_miss", &s_ambushMiss, NULL}, {"ambush_range", &s_ambushRange, NULL},
 };
 #define s_key s_keys[0]
@@ -298,7 +304,16 @@ static void OnDamagePre(HfMod* mod, HfDamagePreEvent* ev, void* user)
         }
     double mult = 1;
     if (blast) { mult *= (double)s_damage; g_scaled++; hers = 1; }
-    else hers = MineHit(d);
+    else
+    {
+        /* her Helldiver's network id, asked of the game for this hit's owner (the spawn list never gave it) */
+        if (!NetOk(g_avatarNet) && NetOk(d->owner) && hf->entity_of_network && hf->entity_of_network(self, d->owner) == me)
+        {
+            g_avatarNet = d->owner;
+            Log("her Helldiver: entity %u, network %u (from a hit's owner)", me, g_avatarNet);
+        }
+        hers = MineHit(d);
+    }
     if (!hers) return;
     g_dealtMs = now;
     /* Insult to Injury: what her skills hold takes more from her */
@@ -646,6 +661,43 @@ static void ForgetPass(void)
         g_forgot += (unsigned)had;
     }
 }
+/* Ambush as Ascalon is hidden: her row in the visibility table (game.dll+0x3326540: map +0x20, rows +0x40, 20 bytes each:
+ * base +0, floor +12) cut by ambush_visual_cut percent while it is on, and put back */
+static float g_oldBase, g_wroteBase, g_wroteFloor, g_oldFloor;
+static int g_cut;
+static void VisCut(int on)
+{
+    uint32_t me = atomic_load(&g_avatar), i;
+    uintptr_t m = Pointer(game + 0x3326540), rows, row;
+    float base, floor;
+    if (!me || !m || !Lookup(m + 0x20, me, 1048576, &i) || i >= 262144 || !(rows = Pointer(m + 0x40))) { g_cut = 0; return; }
+    row = rows + 20ull * i;
+    if (!ReadAt(row, &base, 4) || !ReadAt(row + 12, &floor, 4)) { g_cut = 0; return; }
+    float mult = 1 - s_visualCut / 100;
+    if (on)
+    {
+        if (!(base >= 0 && base <= 10) || !(floor >= 0 && floor <= 10)) return;
+        if (!g_cut || fabsf(base - g_wroteBase) > 1e-6f)
+        {
+            if (!g_cut && !(base >= 0.1f)) return;                       /* not a row the research knows */
+            if (!g_cut) Log("Ambush: her visibility %.3f -> %.3f (floor %.3f -> %.3f)", (double)base, (double)(base * mult), (double)floor, (double)(floor * mult));
+            g_oldBase = base; g_wroteBase = base * mult;
+            hf->write(row, &g_wroteBase, 4);
+        }
+        if (!g_cut || fabsf(floor - g_wroteFloor) > 1e-6f)
+        {
+            g_oldFloor = floor; g_wroteFloor = floor * mult;
+            hf->write(row + 12, &g_wroteFloor, 4);
+        }
+        g_cut = 1;
+    }
+    else if (g_cut)
+    {
+        if (fabsf(base - g_wroteBase) <= 1e-6f) hf->write(row, &g_oldBase, 4);
+        if (fabsf(floor - g_wroteFloor) <= 1e-6f) hf->write(row + 12, &g_oldFloor, 4);
+        g_cut = 0;
+    }
+}
 static double g_landAt, g_firedAt, g_forgetAt;
 static atomic_int g_landed;
 static void PassiveFrame(void)
@@ -657,9 +709,11 @@ static void PassiveFrame(void)
     g_nsplash = 0;
     for (int i = 0; i < n && hf->spawn_explosion && PlayerPose(mp, NULL); i++)
     {
-        if (Dist2(g_splashAt[i], mp) < 5.0f * 5.0f) continue;
-        hf->spawn_explosion(self, (uint32_t)s_splashExplosion, g_splashAt[i]);
+        if (Dist2(g_splashAt[i], mp) < s_splashSafe * s_splashSafe) continue;
+        int r = hf->spawn_explosion(self, (uint32_t)s_splashExplosion, g_splashAt[i]);
         g_splashes++;
+        if (g_splashes <= 6) Log("Artilleryman: a burst (explosion %d) where her shot landed, %.0f m from her: %s", s_splashExplosion, (double)sqrtf(Dist2(g_splashAt[i], mp)),
+            r == HF_ACT_DONE || r == HF_ACT_REQUESTED || r == HF_ACT_QUEUED ? "asked" : r == HF_ACT_WAITING ? "waiting for its package" : "refused");
     }
     /* Ambush */
     if (atomic_exchange(&g_landed, 0)) g_landAt = g_firedAt = g_now;
@@ -680,7 +734,8 @@ static void PassiveFrame(void)
     static unsigned told;
     if (g_ambushOn != was && told++ < 30)
         Log(g_ambushOn ? "Ambush on (%s)" : "Ambush off (%s): %u hits on her missed, %u enemies made to forget her so far", s_ambush == 1 ? "after landing" : "not firing", g_missed, g_forgot);
-    if (g_ambushOn && g_now >= g_forgetAt) { g_forgetAt = g_now + 0.5; ForgetPass(); }
+    VisCut(g_ambushOn && s_visualCut > 0);
+    if (g_ambushOn && s_ambushForget && g_now >= g_forgetAt) { g_forgetAt = g_now + 0.5; ForgetPass(); }
 }
 
 /* ---- for Jack in the Box: what a minefield spawns (logged; call an MD-6 Anti-Personnel Minefield in once) -------------- */
@@ -781,6 +836,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         if (!inMission)
         {
             Abort("the mission ended");
+            g_cut = 0; g_ambushOn = 0;
             memset(g_frozen, 0, sizeof g_frozen);
             g_state.active = 0; g_state.count = 0; g_state.seq++;
             memset(g_foe, 0, sizeof g_foe); memset(g_foeRes, 0, sizeof g_foeRes);
