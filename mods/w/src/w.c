@@ -16,6 +16,8 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.4.2: a mine whose explosion's package is still loading waits for it (up to 5 s) instead of going off silently (the
+ * first mine of a mission did). Played: the "dead" event puts a death while held right (a Bile Titan's too).
  * 0.4.1: a mine is shown on the HUD (w_mines: where each lies and whether its fuse is lit; w_view: her head, for the HUD
  * to pick the camera by), since nothing was put where one lay (the contact mine entity is never spawned by a minefield:
  * its mines' blasts come from the deployer itself, so the game's mines are not entities; jib_marker is now 0 by default).
@@ -60,7 +62,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.4.1"
+#define VERSION "0.4.2"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -781,8 +783,9 @@ static void MineFrame(void)
         }
         if (g_now < m->boomAt) continue;
         float at[3] = {m->pos[0], m->pos[1], m->pos[2] + 0.3f};
-        MineBlast(at);
         int r = hf->spawn_explosion ? hf->spawn_explosion(self, (uint32_t)s_jibExplosion, at) : -1;
+        if (r == HF_ACT_WAITING && g_now < m->boomAt + 5) continue;
+        MineBlast(at);
         if (g_minesBlown <= 30) Log("Jack in the Box: a mine went off at %.1f %.1f %.1f (explosion %d: %s)", (double)at[0], (double)at[1], (double)at[2], s_jibExplosion,
             r == HF_ACT_DONE || r == HF_ACT_REQUESTED || r == HF_ACT_QUEUED ? "asked" : r == HF_ACT_WAITING ? "waiting for its package" : "refused");
         MineOff(m, 1);
