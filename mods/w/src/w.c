@@ -16,6 +16,10 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.4.1: a mine is shown on the HUD (w_mines: where each lies and whether its fuse is lit; w_view: her head, for the HUD
+ * to pick the camera by), since nothing was put where one lay (the contact mine entity is never spawned by a minefield:
+ * its mines' blasts come from the deployer itself, so the game's mines are not entities; jib_marker is now 0 by default).
+ * An enemy that died while held: the HUD is told (dead, below), so it can start the animation the death missed.
  * 0.4.0: Jack in the Box (X), with mines the kit keeps itself (the game's own mine is not found yet: a minefield's
  * deployer spawns nothing mine-like through the spawn event). jib_charges charges, one back every jib_charge_every s; a
  * press spends one and lays one mine under the living enemy nearest her aim line in a box jib_width m wide and
@@ -56,7 +60,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.4.0"
+#define VERSION "0.4.1"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -76,7 +80,7 @@ static int s_rounds = 40, s_rareMax = 4;
 static float s_damage = 3.5f, s_cooldown = 16, s_freezeSeconds = 3, s_freezeRadius = 5;
 static float s_insult = 1.18f, s_splashEvery = 0.4f, s_splashSafe = 8, s_ambushAfter = 10, s_ambushMiss = 0.6f, s_ambushRange = 80, s_visualCut = 60;
 static int s_splash = 1, s_splashExplosion = HF_EXPLOSION_G6_FRAG_DETONATION, s_ambush = 1, s_ambushForget = 0;
-static int s_jibCharges = 5, s_jibMax = 30, s_jibExplosion = HF_EXPLOSION_MD6_ANTIPERSONNEL_MINEFIELD_MINE, s_jibMarker = 3;
+static int s_jibCharges = 5, s_jibMax = 30, s_jibExplosion = HF_EXPLOSION_MD6_ANTIPERSONNEL_MINEFIELD_MINE, s_jibMarker = 0;
 static float s_jibEvery = 8, s_jibWidth = 15, s_jibLength = 40, s_jibTrigger = 3, s_jibDelay = 1.5f, s_jibLife = 120, s_jibDamage = 2.8f, s_jibFreeze = 2.2f,
              s_jibFreezeRadius = 5;
 static int s_optionsKey = 0x78;        /* options_key: the virtual key that opens the options screen (120: F9; 0: none) */
@@ -116,6 +120,7 @@ typedef struct WState
     uint64_t player_object;
     float player_pos[3], value;                               /* value: the rounds left, or the seconds of cooldown */
     WTarget t[TARGETS];
+    uint32_t dead_seq, dead[16];                              /* the held enemies that died held: a ring, dead_seq the count so far */
 } WState;
 static WState g_state = {.version = 1};
 static unsigned g_lines;
@@ -243,6 +248,11 @@ static void FreezeFrame(void)
         uint8_t d[24];
         float p[3];
         if (!f->entity) continue;
+        if (g_now < f->until && Descriptor(f->entity, d) && Word(d + 12) == f->unit && !Alive(f->entity))
+        {
+            g_state.dead[g_state.dead_seq % 16] = f->entity;
+            g_state.dead_seq++;
+        }
         if (g_now >= f->until || !Descriptor(f->entity, d) || Word(d + 12) != f->unit || !Alive(f->entity) || !UnitNode(f->unit, 0, p)) { f->entity = 0; changed = 1; continue; }
         any = 1;
         if (stun && hf->apply_status) hf->apply_status(self, f->entity, HF_STATUS_STUN_LARGE, 100.0f);
@@ -698,6 +708,26 @@ static void JibPlace(void)
     if (g_minesLaid <= 30)
         Log("Jack in the Box: mine %u %s at %.1f %.1f %.1f, %.0f m from her (marker %u); %d charges left, %d out", g_minesLaid, found ? "under an enemy" : "at a random spot", (double)at[0],
             (double)at[1], (double)at[2], (double)sqrtf(Dist2(at, me)), m->marker, g_charges, out + 1);
+}
+HF_MOD_EXPORT int w_mines(unsigned version, float* out, int max)
+{
+    int n = 0;
+    if (version != 1 || !out || !g_inMission) return 0;
+    for (int i = 0; i < MINES && n < max; i++)
+    {
+        const MineT* m = &g_mine[i];
+        if (!m->on) continue;
+        out[n * 4] = m->pos[0]; out[n * 4 + 1] = m->pos[1]; out[n * 4 + 2] = m->pos[2]; out[n * 4 + 3] = m->boomAt ? 1.0f : 0.0f;
+        n++;
+    }
+    return n;
+}
+HF_MOD_EXPORT int w_view(unsigned version, float* out)
+{
+    uint8_t id[24];
+    uint32_t avatar = atomic_load(&g_avatar);
+    if (version != 1 || !out || !g_inMission || !Descriptor(avatar, id) || Quad(id) != AVATAR) return 0;
+    return UnitNode(Word(id + 12), NODE_HEAD, out) ? 1 : 0;
 }
 static void MineFrame(void)
 {

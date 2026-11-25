@@ -16,7 +16,9 @@ local ffi = require('ffi')
 pcall(ffi.cdef, [[
 typedef struct wk1_target { uint32_t entity, unit; uint64_t object; float pos[3]; uint32_t pad; } wk1_target;
 typedef struct wk1_state { uint32_t version, seq, active, skill, count, rare_max; uint32_t player_unit, in_mission;
-    uint64_t player_object; float player_pos[3], value; wk1_target t[48]; } wk1_state;
+    uint64_t player_object; float player_pos[3], value; wk1_target t[48]; uint32_t dead_seq, dead[16]; } wk1_state;
+typedef int (*wk1_mines)(unsigned int version, float *out, int max);
+typedef int (*wk1_view)(unsigned int version, float *out);
 typedef int (*wk1_log)(unsigned int version, const char *text);
 void *wk1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
 void *wk1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
@@ -24,6 +26,7 @@ void *wk1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress
 local k32 = ffi.load('kernel32')
 
 local state, logfn, pending, lines = nil, nil, {}, 0
+local minesfn, viewfn = nil, nil
 local function log(m)
     m = tostring(m)
     lines = lines + 1
@@ -44,6 +47,9 @@ local function connect(dt)
     local s = ffi.cast('wk1_state *(*)(void)', p1)()
     if s == nil or s.version ~= 1 then return nil end
     logfn = ffi.cast('wk1_log', p2)
+    local p3, p4 = k32.wk1_GetProcAddress(module, 'w_mines'), k32.wk1_GetProcAddress(module, 'w_view')
+    if p3 ~= nil then minesfn = ffi.cast('wk1_mines', p3) end
+    if p4 ~= nil then viewfn = ffi.cast('wk1_view', p4) end
     state = s
     for _, m in ipairs(pending) do pcall(logfn, 1, m) end
     pending = {}
@@ -125,6 +131,30 @@ local held = {}       -- entity -> {u = unit, off = bool}
 local last_seq = -1
 local can_freeze = nil
 
+-- an enemy that died while held: its state machine was off as it died, so the animation its death asks for never
+-- started (a big enemy stood dead in its pose and was not cleared away). Its machine is switched on again and the
+-- first of these events its machine has is asked for; which it has is logged.
+local DEATH = {'death', 'dead', 'die', 'dying', 'killed', 'death_default', 'death_front', 'death_back', 'ragdoll', 'to_ragdoll', 'death_ragdoll', 'explode', 'gib'}
+local dead_seq, dead, death_told, unit_told = 0, {}, 0, false
+local function died(s, u)
+    if type(s.Unit.has_animation_event) ~= 'function' or type(s.Unit.animation_event) ~= 'function' then
+        if death_told < 1 then death_told = 1; log('Unit.has_animation_event / animation_event are not in this game\'s Lua: a death while held cannot be put right here') end
+        return
+    end
+    local has, fired = {}, nil
+    for _, name in ipairs(DEATH) do
+        local okH, h = pcall(s.Unit.has_animation_event, u, name)
+        if okH and h == true then
+            has[#has + 1] = name
+            if not fired and pcall(s.Unit.animation_event, u, name) then fired = name end
+        end
+    end
+    if death_told < 8 then
+        death_told = death_told + 1
+        local okR, r = pcall(s.Unit.resource_name, u)
+        log(('died while held: %s: its machine has %s; asked for %s'):format(okR and tostring(r) or '?', #has > 0 and table.concat(has, ', ') or 'none of the events tried', fired or 'nothing'))
+    end
+end
 local function release(s, e, touch)
     local h = held[e]
     held[e] = nil
@@ -132,6 +162,7 @@ local function release(s, e, touch)
     local okA, alive = pcall(s.Unit.alive, h.u)
     if okA and alive == true then
         local okE = pcall(s.Unit.enable_animation_state_machine, h.u)
+        if okE and dead[e] then dead[e] = nil; pcall(died, s, h.u) end
         return okE and 1 or 0
     end
     return 0
@@ -141,6 +172,25 @@ local function sync(st)
     local s = S_()
     last_seq = st.seq
     if type(s) ~= 'table' or not (s.Unit and s.World and s.Application and s.Vector3) then return end
+    while dead_seq ~= st.dead_seq do
+        if st.dead_seq - dead_seq > 16 then dead_seq = st.dead_seq - 16 end
+        dead[st.dead[dead_seq % 16]] = true
+        dead_seq = dead_seq + 1
+    end
+    if not unit_told then
+        unit_told = true
+        local names = {}
+        for k, f in pairs(s.Unit) do
+            if type(k) == 'string' and type(f) == 'function' and (k:find('anim') or k:find('state_machine') or k:find('ragdoll') or k:find('time_scale')) then names[#names + 1] = k end
+        end
+        table.sort(names)
+        local line = ''
+        for _, k in ipairs(names) do
+            if #line + #k > 360 then log('Unit: ' .. line); line = '' end
+            line = line .. k .. ' '
+        end
+        if line ~= '' then log('Unit: ' .. line) end
+    end
     if can_freeze == nil then
         can_freeze = type(s.Unit.disable_animation_state_machine) == 'function' and type(s.Unit.enable_animation_state_machine) == 'function'
         if not can_freeze then log('Unit.disable_animation_state_machine / enable_animation_state_machine are not in this game\'s Lua: no pose freeze') end
@@ -200,6 +250,110 @@ local function sync(st)
     log(('freeze %d: %d new (%d units found, %d held in pose), %d let go, %d held in all'):format(st.seq, #fresh, found, off, on, st.count))
 end
 
+-- ---- Jack in the Box's mines on the HUD (0.4.1) -------------------------------------------------------------------
+-- Parts adapted from Chef Shared Loader by Th3chef (github.com/Th3chef/Chef-Shared-Loader, src/loader.lua), as the other
+-- kits' markers are, with Th3chef's permission: the view camera (a living unit with Unit.num_cameras > 0, searched a few
+-- hundred units a frame; the one nearest her head, which w.dll's w_view gives), a world point projected with
+-- Camera.world_to_screen (bottom-left origin) and the behind-the-camera check.
+local CAM = {unit = nil, list = nil, i = 0, retry = 0, checked = 0, told = 0}
+local vbuf, mbuf, mk_t = ffi.new('float[3]'), ffi.new('float[256]'), 0
+local function cam_gap(s, u, hx, hy, hz)
+    local okc, c = pcall(s.Unit.camera, u, 1)
+    if not (okc and c) then return nil end
+    local okp, p = pcall(s.Camera.world_position, c)
+    if not (okp and p) then return nil end
+    local x, y, z = s.Vector3.to_elements(p)
+    if type(x) ~= 'number' then return nil end
+    return math.sqrt((x - hx) ^ 2 + (y - hy) ^ 2 + (z - hz) ^ 2)
+end
+local function cam_unit(s, t)
+    if not viewfn or viewfn(1, vbuf) ~= 1 then return nil end
+    local hx, hy, hz = vbuf[0], vbuf[1], vbuf[2]
+    if CAM.unit then
+        local ok, alive = pcall(s.Unit.alive, CAM.unit)
+        if ok and alive == true then
+            if t < CAM.checked then return CAM.unit end
+            CAM.checked = t + 1
+            local gap = cam_gap(s, CAM.unit, hx, hy, hz)
+            if gap and gap < 6 then return CAM.unit end
+        end
+        CAM.unit = nil
+    end
+    if not CAM.list then
+        if t < CAM.retry then return nil end
+        local okw, w = pcall(s.Application.main_world)
+        if not (okw and w) then CAM.retry = t + 2; return nil end
+        local oku, units = pcall(s.World.units, w)
+        if not (oku and type(units) == 'table') then CAM.retry = t + 2; return nil end
+        CAM.list, CAM.i, CAM.best, CAM.gap, CAM.seen = units, 0, nil, nil, 0
+    end
+    local last = math.min(#CAM.list, CAM.i + 500)
+    for i = CAM.i + 1, last do
+        local u = CAM.list[i]
+        local oka, alive = pcall(s.Unit.alive, u)
+        if oka and alive == true then
+            local okn, n = pcall(s.Unit.num_cameras, u)
+            if okn and type(n) == 'number' and n > 0 then
+                CAM.seen = CAM.seen + 1
+                local gap = cam_gap(s, u, hx, hy, hz)
+                if gap and (not CAM.gap or gap < CAM.gap) then CAM.best, CAM.gap = u, gap end
+            end
+        end
+    end
+    CAM.i = last
+    if last >= #CAM.list then
+        local found = CAM.best and CAM.gap and CAM.gap < 6
+        if CAM.told < 4 then
+            CAM.told = CAM.told + 1
+            log(('camera: %d cameras in the world, nearest to her head %s'):format(CAM.seen, CAM.gap and ('%.1f m away%s'):format(CAM.gap, found and ' (taken)' or ' (too far: none taken)') or 'none'))
+        end
+        CAM.list = nil
+        if found then CAM.unit = CAM.best; CAM.checked = t + 1; return CAM.unit end
+        CAM.retry = t + 2
+    end
+    return nil
+end
+local function mines_draw(d)
+    local s = S_()
+    if not minesfn or type(s) ~= 'table' or not (s.Unit and s.Camera and s.Vector3 and s.Quaternion and s.World and s.Application) then return end
+    local n = minesfn(1, mbuf, 64)
+    if n <= 0 then return end
+    local u = cam_unit(s, mk_t)
+    if not u then return end
+    local c = s.Unit.camera(u, 1)
+    if not c then return end
+    local cx, cy, cz = s.Vector3.to_elements(s.Camera.world_position(c))
+    local fx, fy, fz = s.Vector3.to_elements(s.Quaternion.forward(s.Camera.world_rotation(c)))
+    local W, H = d.width, d.height or (d.width * 9 / 16)
+    local bw, bh = W, H
+    if s.Application.back_buffer_size then
+        local okb, a, b = pcall(s.Application.back_buffer_size)
+        if okb and type(a) == 'number' and a > 0 then bw, bh = a, b end
+    end
+    local sc = d.scale or 1
+    for i = 0, n - 1 do
+        local x, y, z, lit = mbuf[i * 4], mbuf[i * 4 + 1], mbuf[i * 4 + 2] + 0.25, mbuf[i * 4 + 3] > 0.5
+        local ax, ay, az = x - cx, y - cy, z - cz
+        if ax * fx + ay * fy + az * fz > 0.5 then
+            local sx, sy = s.Vector3.to_elements(s.Camera.world_to_screen(c, s.Vector3(x, y, z)))
+            if type(sx) == 'number' then
+                sx, sy = sx * W / bw, H - sy * H / bh
+                if sx > 0 and sx < W and sy > 0 and sy < H then
+                    local dist = math.sqrt(ax * ax + ay * ay + az * az)
+                    local half = math.max(4, math.min(12, 90 / math.max(dist, 1))) * sc
+                    local col = lit and {255, 230, 80, math.floor(120 + 135 * (math.sin(mk_t * 20) * 0.5 + 0.5))} or {224, 58, 58, 235}
+                    local tk = math.max(1, 2 * sc)
+                    d:rect(sx - half, sy - half, 2 * half, tk, col, 6); d:rect(sx - half, sy + half - tk, 2 * half, tk, col, 6)
+                    d:rect(sx - half, sy - half, tk, 2 * half, col, 6); d:rect(sx + half - tk, sy - half, tk, 2 * half, col, 6)
+                    d:rect(sx - 2 * sc, sy - 2 * sc, 4 * sc, 4 * sc, col, 6)
+                    if dist < 60 then d:text(('%dm'):format(math.floor(dist + 0.5)), sx, sy + half + 2 * sc, {size = 12 * sc, colour = col, z = 6, align = 'center'}) end
+                end
+            end
+        end
+    end
+end
+local mines_failed = false
+
 local overlay = hd2.ui.overlay({id = 'w', owner = OWNER})
 local failed = false
 overlay:draw(function(d, dt)
@@ -215,6 +369,11 @@ overlay:draw(function(d, dt)
     end)
     if not okF then failed = true; log('failed, off for this session: ' .. tostring(err)) return end
     if st.in_mission == 0 then return end
+    mk_t = mk_t + (tonumber(dt) or 0)
+    if not mines_failed then
+        local okM, errM = pcall(mines_draw, d)
+        if not okM then mines_failed = true; log('the mines\' markers failed, off for this session: ' .. tostring(errM)) end
+    end
     local sc = d.scale or 1
     local text, colour
     local skill, ambush = st.skill % 256, math.floor(st.skill / 256) % 2 == 1

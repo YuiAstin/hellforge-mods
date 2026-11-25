@@ -82,3 +82,11 @@ Source kit: W, Sniper (Artilleryman), at rank 10 of each skill. Her module is le
 - A weapon switch by the player while the launcher is out.
 - A backpack-fed support weapon: the new gun and the backpack she still wears.
 - The numbers: the damage multiples, the splash radius, the mark cap, the mines out at once.
+
+## 0.4.1
+
+- The game's mines are not entities: a minefield's blasts (type 366) come from its deployer, and the game's code has a
+  MinefieldComponent (128 a field) and a MineSpawnerComponent (game.dll 0x9DB8A0 to 0x9E2600). Laying one of the game's
+  own mines means adding to a deployer's field: not researched yet. Until then a mine is a marker on the HUD.
+- An enemy that died while held stood dead in its pose (its state machine was off as it died). The HUD now switches its
+  machine on and asks for a death event, and logs which events and animation functions the game's Lua has: to be read.
