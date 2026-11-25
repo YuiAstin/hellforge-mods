@@ -1,0 +1,350 @@
+{
+ "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
+ "when": {
+  "s1_stagger_1": "restart",
+  "s1_stagger_2": "restart",
+  "gl_arming": "mission",
+  "gl_homing": "mission",
+  "one_handed": "mission",
+  "one_hand_grip": "mission",
+  "homing_missile": "restart"
+ },
+ "advanced": [
+  [
+   "grenades_max",
+   "Stacks",
+   "Grenades At Most",
+   "Most Grenade points she holds."
+  ],
+  [
+   "grenade_mult",
+   "Stacks",
+   "Per Grenade",
+   "Each Grenade a stage of Annihilation Directive spends adds this to its damage (0.4: +40%)."
+  ],
+  [
+   "frenzy_start",
+   "Stacks",
+   "Frenzy At Mission Start",
+   "Frenzy stacks she starts a mission with."
+  ],
+  [
+   "frenzy_max",
+   "Stacks",
+   "Frenzy At Most",
+   "Most Frenzy stacks she holds."
+  ],
+  [
+   "frenzy_mult",
+   "Stacks",
+   "Per Frenzy",
+   "A skill that spends a Frenzy stack deals this much more (0.6: +60%)."
+  ],
+  [
+   "mech_range",
+   "Sangvis Ferri",
+   "Range",
+   "Metres: enemies this close count for her damage bonus."
+  ],
+  [
+   "mech_each",
+   "Sangvis Ferri",
+   "Per Enemy",
+   "Each one adds this to her skill damage (0.05: +5%)."
+  ],
+  [
+   "mech_max",
+   "Sangvis Ferri",
+   "At Most",
+   "The most that bonus can be (0.5: +50%)."
+  ],
+  [
+   "mech_hp",
+   "Sangvis Ferri",
+   "Health Share",
+   "Her skill hits add this share of the health of an enemy that is not boss-sized."
+  ],
+  [
+   "mech_taken",
+   "Sangvis Ferri",
+   "Damage Taken Less",
+   "She takes this much less damage (0.3: 30%)."
+  ],
+  [
+   "boss_armour",
+   "Sangvis Ferri",
+   "Boss-Sized From Armour",
+   "Armour this high or above is boss-sized (4: heavy)."
+  ],
+  [
+   "offense_window",
+   "Offense Only",
+   "Window",
+   "Seconds after a spent stack that further hits also do nothing (one attack is often many hits)."
+  ],
+  [
+   "ammo_loaded",
+   "Annihilation Directive",
+   "Ammo Loaded",
+   "After the cone, her next skill deals this much more (0.5: +50%)."
+  ],
+  [
+   "denied_seconds",
+   "Denied Exit",
+   "Protection",
+   "Seconds nothing hurts her after a denied killing hit."
+  ],
+  [
+   "s1_radius",
+   "Annihilation Directive",
+   "Leap Blast Radius",
+   "Metres around where she lands its enemies are hit."
+  ],
+  [
+   "s1_window",
+   "Annihilation Directive",
+   "Stage Window",
+   "Seconds the next stage stays open after a hit."
+  ],
+  [
+   "s1_line",
+   "Annihilation Directive",
+   "Line Range",
+   "Metres the line of rounds reaches."
+  ],
+  [
+   "s1_line_width",
+   "Annihilation Directive",
+   "Line Width",
+   "Metres across the line's rounds land, left and right in turn."
+  ],
+  [
+   "s1_cone",
+   "Annihilation Directive",
+   "Cone Range",
+   "Metres the cone of rounds reaches."
+  ],
+  [
+   "s1_triple",
+   "Annihilation Directive",
+   "Triple Bonus",
+   "An enemy all three stages hit takes this many times the cone's damage more."
+  ],
+  [
+   "s1_haste",
+   "Annihilation Directive",
+   "Haste",
+   "Seconds of faster sprint after a stage that hits."
+  ],
+  [
+   "haste_mult",
+   "Annihilation Directive",
+   "Haste Speed",
+   "Her jog and sprint, times this, during Haste."
+  ],
+  [
+   "s1_stagger_1",
+   "Annihilation Directive",
+   "Line Push",
+   "The stagger and push of a line round that hits an enemy itself."
+  ],
+  [
+   "s1_stagger_2",
+   "Annihilation Directive",
+   "Cone Push",
+   "The stagger and push of a cone round that hits an enemy itself."
+  ],
+  [
+   "s1_rounds",
+   "Annihilation Directive",
+   "Rounds",
+   "Rounds in the line and in the cone, each with a blast where it lands."
+  ],
+  [
+   "s1_burst",
+   "Annihilation Directive",
+   "Line Burst Length",
+   "Seconds the line's rounds take to all be fired (0: all at once; some blasts then go silent)."
+  ],
+  [
+   "s1_cone_burst",
+   "Annihilation Directive",
+   "Cone Burst Length",
+   "Seconds the cone's rounds take to all be fired (0: all at once; some blasts then go silent)."
+  ],
+  [
+   "s1_cone_angle",
+   "Annihilation Directive",
+   "Cone Angle",
+   "Degrees to each side the cone's rounds spread."
+  ],
+  [
+   "s1_explosion",
+   "Annihilation Directive",
+   "Round Blast",
+   "The explosion where each round lands, by its row: 175 HE grenade, 361 grenade launcher, 234 autocannon sentry, 266 gatling barrage, 343 precision strike."
+  ],
+  [
+   "s1_shield",
+   "Annihilation Directive",
+   "No Knockdown",
+   "Seconds without knockdown after each stage."
+  ],
+  [
+   "s2_length",
+   "Doom Barrage",
+   "Box Length",
+   "Metres ahead the box reaches."
+  ],
+  [
+   "s2_width",
+   "Doom Barrage",
+   "Box Width",
+   "Metres across."
+  ],
+  [
+   "s2_grenade",
+   "Doom Barrage",
+   "Per Grenade",
+   "Each Grenade spent adds this to its damage (0.2: +20%)."
+  ],
+  [
+   "s2_crit",
+   "Doom Barrage",
+   "Critical",
+   "With 3 or more Grenades spent its damage is times this."
+  ],
+  [
+   "s2_step",
+   "Doom Barrage",
+   "Blast Interval",
+   "Seconds between its blasts."
+  ],
+  [
+   "s3_width",
+   "Party Time",
+   "Path Width",
+   "Metres across the path its blasts cover."
+  ],
+  [
+   "s3_step",
+   "Party Time",
+   "Blast Interval",
+   "Seconds between its blasts, from where she stood to where she landed."
+  ],
+  [
+   "frenzy_range",
+   "Ammo Frenzy",
+   "Target Range",
+   "Metres: how far the target may be."
+  ],
+  [
+   "frenzy_cone",
+   "Ammo Frenzy",
+   "Aim Cone",
+   "Degrees off her crosshair the target may be."
+  ],
+  [
+   "frenzy_ring",
+   "Ammo Frenzy",
+   "Ring Blasts",
+   "Extra blasts on a ring around the first."
+  ],
+  [
+   "hunting_taken",
+   "Ammo Frenzy",
+   "Hunting Order Damage",
+   "Enemies under Hunting Order take this much more of her damage (0.2: +20%)."
+  ],
+  [
+   "frenzy_refund",
+   "Ammo Frenzy",
+   "Cooldown Refund",
+   "Seconds it takes off her other cooldowns."
+  ],
+  [
+   "gl_safe",
+   "Her Hands",
+   "Own Blasts Spare Her",
+   "The blasts of the weapons she holds do not hurt or throw her."
+  ],
+  [
+   "homing_missile",
+   "Her Hands",
+   "Homing Shot",
+   "0: her grenades steer themselves. 1: fired as the FAF-14 Spear's missile. 2: as the P-33 Missile Pistol's."
+  ],
+  [
+   "homing_cone",
+   "Her Hands",
+   "Homing Cone",
+   "Degrees off where she looks a homing grenade may pick an enemy."
+  ],
+  [
+   "homing_range",
+   "Her Hands",
+   "Homing Range",
+   "Metres from her a homing grenade may pick an enemy within."
+  ],
+  [
+   "homing_turn",
+   "Her Hands",
+   "Homing Turn Speed",
+   "Degrees a second a homing grenade turns."
+  ],
+  [
+   "homing_delay",
+   "Her Hands",
+   "Homing Delay",
+   "Seconds a grenade flies as fired before it starts to home, so it can be lobbed over something.",
+   {
+    "step": 0.1
+   }
+  ],
+  [
+   "homing_arm",
+   "Her Hands",
+   "Homing From",
+   "Metres a grenade flies before it starts to steer.",
+   {
+    "step": 0.5
+   }
+  ],
+  [
+   "flak_radius",
+   "Her Hands",
+   "Close-In Radius",
+   "A homing grenade this many metres from an enemy turns straight into it (a missile goes off there). 0: never.",
+   {
+    "step": 0.5
+   }
+  ],
+  [
+   "one_hand_grip",
+   "Her Hands",
+   "One-Handed Grip",
+   "The pose she holds a weapon in: 70 the one-handed SMG grip, 1 a pistol's, 0 the weapon's own."
+  ],
+  [
+   "leap_climb",
+   "Leaps",
+   "Climb At Most",
+   "Metres higher a leap may land."
+  ],
+  [
+   "leap_drop",
+   "Leaps",
+   "Drop At Most",
+   "Metres lower a leap may land."
+  ]
+ ],
+ "hidden": [
+  "explosion_small",
+  "explosion_big",
+  "hellbomb_explosion",
+  "hellbomb_hold",
+  "s1_round",
+  "s1_round_damage",
+  "s1_round_speed"
+ ]
+}

@@ -10,6 +10,23 @@
 - Executor: his heals stop at his maximum health (an overheal crashed the game).
 - Vector: the log says why her view could not be read.
 
+## 2026-11-25: Destroyer 0.2.16 (first release, for HellForge 0.5)
+
+- First release: Destroyer's kit from Girls' Frontline 2 for your Helldiver, a leaping shotgunner who pays for her skills with her own health. Solo or host; no character model included. It needs HellForge 0.5: it does not load on 0.4.
+- Health as the price: Annihilation Directive costs 20% of her health a stage and Doom Barrage 30%, never taking her below 10%. The less health she has, the harder she hits and the less she takes.
+- Annihilation Directive (Z), three stages on one key: a leap of up to 15 m with a blast where she lands, then Annihilation Directive I, a 25 m line of high-explosive rounds, then Annihilation Directive II, a 12 m cone of them. A stage opens only if the one before hit something. An enemy hit by all three takes a bonus hit. Cooldown 10 s.
+- Doom Barrage (X): a barrage of blasts in a 15 m by 9 m box ahead of her. Spends all her Grenades, each adding 20%; with 3 or more it deals 1.5x. +1 Fang. Cooldown 18 s.
+- Party Time (C): a leap of up to 18 m with blasts chaining along the path from where she stood to where she lands. Each enemy hit heals 20% of her health (a heavily armoured one: all of it) and gives Frenzy; her Grenades are refilled. +1 Fang. Cooldown 90 s.
+- Ammo Frenzy (B, at 3 Fang): one 500 kg strike on the enemy in her crosshair with a ring of blasts around it; its damage is shared evenly among every enemy within 24 m, and each takes 20% more of her damage for 10 s (Hunting Order).
+- Grenades, Fang and Frenzy: Grenades (3) add 40% to a skill each; a Frenzy stack adds 60% and gives a Grenade back.
+- Sangvis Ferri: in a mission against Automatons she deals 5% more for each one within 40 m (up to 50%), her skills add 10% of a lighter Automaton's full health, and she takes 30% less from them.
+- Offense Only and Ammo Loaded: each stage of Annihilation Directive gives a stack that makes the next hit on her do nothing (up to 3); after Annihilation Directive II her next skill deals 50% more.
+- Denied Exit: a killing hit leaves her at 1 health and nothing hurts her for 2 s. Once every 180 s.
+- Her hands: she holds every weapon in one hand, so a ballistic shield stays up with any of them. The grenades of a launcher she holds have no arming distance, home on the enemy ahead of her after half a second of free flight, and turn straight into an enemy that is within 4 m. Her own blasts, her launcher's and those on a shield she carries do not hurt or throw her.
+- T-Doll body: 1.5x health and 2x stamina; running her stamina dry sets off a Hellbomb on her (a toggle).
+- HUD: her skills beside the stratagem list with icons and cooldowns, her Grenades, Fang and Frenzy, the low-stamina warning. Her numbers and the character picker are on the character kits' options screen (F9).
+- The HUD needs Bingus Shared Loader and HD2Runtime.
+
 ## 2026-11-21: Vector 0.2.2 (first release) · Alva 0.2.5
 
 ### Vector 0.2.2

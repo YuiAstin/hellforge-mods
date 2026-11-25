@@ -202,12 +202,12 @@ KB_FN void OpKitsSave(const char* id)
  * from the .ini's is saved like the other choices, as the .ini writes it (key_s1 = Shift+Q). A key another of her skills
  * has is swapped with it. F5 and F8 (HellForge's) and this screen's own key are refused. */
 KB_VAR float g_opScroll, g_opT;
-KB_VAR Key g_opKeyIni[3], g_opKeyWant[3];
-KB_VAR atomic_uint g_opKeyDirty[3];
+KB_VAR Key g_opKeyIni[KB_KEYS], g_opKeyWant[KB_KEYS];
+KB_VAR atomic_uint g_opKeyDirty[KB_KEYS];
 KB_VAR int g_opKeyEdit = -1, g_opKeyHeld, g_opKeyX1, g_opKeyX2;
 KB_VAR char g_opKeyMsg[160];
 KB_VAR float g_opKeyMsgUntil;
-KB_FN int OpKeys(void) { int n = 0; while (n < 3 && kb_key_names[n]) n++; return n; }
+KB_FN int OpKeys(void) { int n = 0; while (n < KB_KEYS && kb_key_names[n]) n++; return n; }
 KB_FN int OpKeySame(const Key* a, const Key* b) { return a->vk == b->vk && a->mods == b->mods; }
 KB_FN Key OpKeyShown(int k) { return atomic_load(&g_opKeyDirty[k]) ? g_opKeyWant[k] : s_keys[k]; }
 /* as the .ini writes it: ParseKey reads it back */

@@ -14,7 +14,8 @@
  *     restore             her armour penetration put back (Unshred)
  *     kb_hit_after        kit: change the result (extra damage, demolition)
  *   hits she takes (all three):
- *     her own blasts      a blast from within 14 m of one she set off in the last 1.2 s does nothing to her
+ *     her own blasts      a blast from within 14 m of one she set off in the last 1.2 s does nothing to her, nor to
+ *                         what she carries that takes hits of its own (g_hers: a shield in her hand)
  *     kb_hit_taken        kit: its own handling; nonzero stops here (Voymastina: Predation armour, her Hellbomb)
  *     knockdown guard     while s_steady, or inside the knockdown window (g_shieldUntilMs): no knockdown;
  *                         with s_unshaken no stagger, push or flinch either
@@ -47,6 +48,17 @@ KB_VAR _Atomic unsigned long long g_ownMs[KB_OWN_SLOTS];
 KB_VAR float g_ownPos[KB_OWN_SLOTS][3];
 KB_VAR atomic_int g_ownEmp[KB_OWN_SLOTS];
 KB_VAR unsigned g_ownNext;
+
+/* What she carries that takes hits of its own (a ballistic shield): entities the kit names; her own blasts spare them
+ * too (a blast on the shield in her hand threw her) */
+#define KB_HERS 4
+KB_VAR _Atomic uint32_t g_hers[KB_HERS];
+KB_VAR unsigned g_hersNext;
+KB_FN void KbHers(uint32_t entity)
+{
+    for (int i = 0; i < KB_HERS; i++) if (atomic_load(&g_hers[i]) == entity) return;
+    atomic_store(&g_hers[g_hersNext++ % KB_HERS], entity);
+}
 
 #define RESULT_SIZE 0x24u
 KB_VAR _Atomic unsigned g_kdStopped;
@@ -102,7 +114,14 @@ KB_FN void Steady(const void* hit, void* result)
     if (!atomic_load(&g_hooked) || !hit || !result || !kb_kit_on) return;
     uint8_t h[HIT_SIZE], r[RESULT_SIZE];
     uint32_t me = atomic_load(&g_avatar);
-    if (!me || !ReadAt((uintptr_t)hit, h, sizeof h) || Word(h + 0x20) != me) return;
+    if (!me || !ReadAt((uintptr_t)hit, h, sizeof h)) return;
+    uint32_t target = Word(h + 0x20);
+    int carried = 0;
+    if (target != me)
+    {
+        for (int i = 0; i < KB_HERS && !carried; i++) carried = target && atomic_load(&g_hers[i]) == target;
+        if (!carried) return;
+    }
     unsigned long long now = GetTickCount64();
     if (OwnBlast(h, NULL))
     {
@@ -110,6 +129,7 @@ KB_FN void Steady(const void* hit, void* result)
         atomic_fetch_add(&g_ownStopped, 1);
         return;
     }
+    if (carried) return;
     if (kb_hit_taken && kb_hit_taken(h, result, now)) return;
     if (!s_steady && now > atomic_load(&g_shieldUntilMs)) return;
     if (!ReadAt((uintptr_t)result, r, sizeof r)) return;
