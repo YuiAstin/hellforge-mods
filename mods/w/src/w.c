@@ -16,6 +16,8 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.7.1: the MD-6's mine is unit ee89cc10d80b6afb (played: 48 of it spawned with the deployer; the field readout's
+ * UnitResourceName answered 0, so 0.7.0 never learned it and no mine of hers wore one). Known from the start now.
  * 0.7.0: a mine of hers can wear the game's own mine (jib_model 1), once the mission has seen a minefield called in.
  * Played with 0.6.2's probe: the game's mines are units, spawned with WorldSpawnUnit where the deployer lands (48 a
  * field; 18 for the anti-tank one), their handles kept in the field's slots (the MD-17's mine is unit 032489cf1d439bba,
@@ -95,7 +97,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.7.0"
+#define VERSION "0.7.1"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12
@@ -1325,7 +1327,7 @@ static void UnitFrame(void)
         unsigned k = 0;
         uint64_t ur = u->res;
         /* a mine's unit, spawned by the game: the pattern for hers */
-        if (u->handle && u->world && (ur == 0x032489CF1D439BBAull || ur == 0x693028644D27FFEFull || ur == 0xE49A5AE078AAD407ull || (g_apRes && ur == g_apRes)) &&
+        if (u->handle && u->world && (ur == 0xEE89CC10D80B6AFBull || ur == 0x032489CF1D439BBAull || ur == 0x693028644D27FFEFull || ur == 0xE49A5AE078AAD407ull || (g_apRes && ur == g_apRes)) &&
             !(g_pattern.valid && g_pattern.res == ur))
         {
             g_pattern = (UnitPattern){1, u->world, ur, u->name, (int)u->hasName, u->s5, u->s6, (uint8_t)u->s7, u->s8};
