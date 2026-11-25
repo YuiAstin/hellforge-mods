@@ -16,6 +16,10 @@
  * enemy's animation state machine switched off (the HUD mod's Lua: hud-src/w_hud.lua reads w_state() and logs through
  * w_log()), and the enemy kept where it stood. Here it is per enemy, each with its own end.
  *
+ * 0.7.4: 0.7.3 ended the game the same way: the engine said the mine's unit could be had (the deployer's loadout
+ * package resident) and spawning it still read a null resource: something the unit is made of was missing. The copy's
+ * row +0xA8 was 0. The kit now takes the game's own list of the minefield stratagem's packages (StratagemPackages),
+ * loads every one, and spawns hers only with all of them resident. The hidden copy of the row is gone.
  * 0.7.3: 0.7.2 ended the game at the first mine: the deployer's loadout package was resident, the mine's unit was not
  * in it, and WorldSpawnUnit read a null resource (helldivers2.exe+0x1A804B). A mine's unit is spawned only when the
  * engine says the resource can be had (CanGetResource, the unit type); the kit loads both the deployer's loadout
@@ -106,7 +110,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.7.3"
+#define VERSION "0.7.4"
 #define BUILD "25480438"
 
 #define MARKS_MAX 12
@@ -842,21 +846,7 @@ static uint32_t ModelSpawn(const float at[3])
     return handle;
 }
 /* the minefield's package, asked of the game so the mine's unit is there without a call-in */
-static uint32_t g_mineRow;                  /* the hidden copy of the MD-6's stratagem row (0: none) */
 static uint64_t g_minePackage;              /* 0 not looked for yet, ~0 none */
-/* the copy is for reading only: taken off the stratagem selection as soon as its row is there */
-static void MineRowHide(void)
-{
-    static int done;
-    static double again;
-    uintptr_t row;
-    uint8_t sel = 0;
-    if (done || !g_mineRow || g_now < again) return;
-    again = g_now + 1;
-    if (!(row = hf->stratagem_row(g_mineRow)) || !ReadAt(row + 0x80, &sel, 1)) return;
-    if (sel & 2) { sel &= (uint8_t)~2; hf->write(row + 0x80, &sel, 1); }
-    done = 1;
-}
 #define UNIT_TYPE 0xE0A48D0BE9A7453Full       /* the engine's resource type of a unit */
 #define MD6_MINE 0xEE89CC10D80B6AFBull
 static int UnitLoaded(uint64_t res)
@@ -867,47 +857,54 @@ static int UnitLoaded(uint64_t res)
 static void ModelReady(void)
 {
     static double again, since;
-    static int told, said;
-    static uint64_t pkgs[2];                /* the deployer's loadout package, the stratagem's call-in package */
+    static int told, said, npk;
+    static uint64_t pkgs[24];               /* every package the minefield's stratagem names */
     if (!s_jibModel || g_pattern.valid || g_now < again) return;
     again = g_now + 0.5;
     if (!g_minePackage)
     {
-        uint32_t stride = 0;
-        uintptr_t r = hf->component_record("LoadoutPackageComponentData", HF_ENTITY_MD6_ANTIPERSONNEL_MINEFIELD, &stride), row;
-        if (!r || !ReadAt(r + 8, &pkgs[0], 8) || pkgs[0] == ~0ull) pkgs[0] = 0;
-        if (!g_mineRow || !(row = hf->stratagem_row(g_mineRow)) || !ReadAt(row + 0xA8, &pkgs[1], 8) || pkgs[1] == ~0ull) pkgs[1] = 0;
-        if (pkgs[1] == pkgs[0]) pkgs[1] = 0;
-        g_minePackage = pkgs[0] || pkgs[1] ? 1 : ~0ull;
+        /* the game's own list (StratagemPackages, game.dll+0x1753080: the row's +0xA8, its +0xF8 item's package, its
+         * +0x118 entries of one kind (r9) and its +0x178 entries): asked for every kind, the lists joined. 0.7.2 and
+         * 0.7.3 loaded the deployer's loadout package alone: the mine's unit could then be had, but something it is
+         * made of could not, and spawning it ended the game. */
+        HfFn_StratagemPackages list = hf_fn_StratagemPackages(self);
+        char line[600] = "";
+        for (uint32_t kind = 0; list && kind < 8; kind++)
+        {
+            uint64_t out[32] = {0};
+            uint32_t n = list(out, HF_STRATAGEM_MD6_ANTIPERSONNEL_MINEFIELD, 0, kind);
+            for (uint32_t k = 0; k < n && k < 32; k++)
+            {
+                int known = !out[k] || out[k] == ~0ull;
+                for (int q = 0; q < npk; q++) known |= pkgs[q] == out[k];
+                if (!known && npk < 24) { pkgs[npk++] = out[k]; snprintf(line + strlen(line), sizeof line - strlen(line), " %016llx", (unsigned long long)out[k]); }
+            }
+        }
+        g_minePackage = npk ? 1 : ~0ull;
         since = g_now;
-        Log("Jack in the Box: the minefield's packages: the deployer's loadout package %016llx, the stratagem's call-in package %016llx%s", (unsigned long long)pkgs[0],
-            (unsigned long long)pkgs[1], g_minePackage == ~0ull ? ": none found" : "");
+        Log("Jack in the Box: the minefield's stratagem names %d packages:%s", npk, npk ? line : " none (her mines wear the game's mine only after a minefield is called in)");
     }
-    /* the mine's unit is spawned only once the engine says it can be had (0.7.2 spawned it with the deployer's package
-     * resident and the unit not in it: the engine read a null resource and the game ended) */
+    if (g_minePackage == ~0ull) return;
+    int all = 1;
+    for (int i = 0; i < npk; i++)
+    {
+        if (!pkgs[i]) continue;
+        int s = hf->load_package(self, pkgs[i]);
+        if (!s) { if (told++ < 4) Log("Jack in the Box: the package %016llx was refused", (unsigned long long)pkgs[i]); g_minePackage = ~0ull; return; }
+        all &= s == HF_PACKAGE_RESIDENT;
+    }
+    /* hers are spawned only with every one of them resident, and the unit to be had */
+    if (!all) return;
     if (!UnitLoaded(MD6_MINE))
     {
-        int all = 1;
-        if (g_minePackage == ~0ull) return;
-        for (int i = 0; i < 2; i++)
-        {
-            if (!pkgs[i]) continue;
-            int s = hf->load_package(self, pkgs[i]);
-            if (!s) { if (told++ < 2) Log("Jack in the Box: the package %016llx was refused", (unsigned long long)pkgs[i]); pkgs[i] = 0; continue; }
-            all &= s == HF_PACKAGE_RESIDENT;
-        }
-        if (all && !said && g_now - since > 3)
-        {
-            said = 1;
-            Log("Jack in the Box: the packages are resident and the MD-6's mine still cannot be had: her mines wear it only after a minefield is called in");
-        }
+        if (!said && g_now - since > 5) { said = 1; Log("Jack in the Box: the packages are resident and the MD-6's mine still cannot be had: only after a minefield is called in"); }
         return;
     }
     HfFn_MainWorld world = hf_fn_MainWorld(self);
     void* w = world ? world() : NULL;
     if (!w) return;
     g_pattern = (UnitPattern){1, w, MD6_MINE, 0, 0, 0, 0, 1, 0};
-    Log("Jack in the Box: the MD-6's mine can be had: her mines wear it (world %p)", w);
+    Log("Jack in the Box: all %d of the minefield's packages are resident and the MD-6's mine can be had: her mines wear it (world %p)", npk, w);
 }
 static void ModelHide(uint32_t handle)
 {
@@ -1544,7 +1541,6 @@ static void Tick(HfMod* mod, float dt, void* user)
     double step = dt > 0 && dt < 1 ? dt : 0;
     g_now += step;
     KbOptionsTick();   /* the options screen's changes, in a mission or not */
-    MineRowHide();
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
     if (inMission != g_inMission)
     {
@@ -1662,15 +1658,6 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
              api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_EXPLOSION, OnExplosion, NULL, 0) &&
              !hf_on_damage_pre(mod, OnDamagePre, NULL, 0) && api->on_game_thread(mod, Tick, NULL);   /* the typed helper answers 0 when it is in */
     if (!ok) api->log(mod, "events or the game thread are unavailable: the kit stays off");
-    if (s_jibModel && api->add_stratagem && api->stratagem_row)
-    {
-        /* a hidden copy of the MD-6's row: its call-in package is read from it (a vanilla row is not handed out) */
-        HfStratagem st = {sizeof st};
-        st.base = HF_STRATAGEM_MD6_ANTIPERSONNEL_MINEFIELD;
-        st.name = "yui/w/minefield_package";
-        g_mineRow = api->add_stratagem(mod, &st);
-        if (!g_mineRow) api->log(mod, "the copy of the minefield's stratagem row was refused: its call-in package cannot be read");
-    }
     if (s_mineProbe && hf_hook_WorldSpawnUnit(mod, SpawnUnitDetour, &original_wsu, 0)) api->log(mod, "the mine probe's unit hook was refused: no units listed");
     if (!ok) return 0;
     if (hf_on_bughole(mod, OnBughole, NULL, 0)) api->log(mod, "the bug hole event is unavailable: a closed hole can be marked again");
