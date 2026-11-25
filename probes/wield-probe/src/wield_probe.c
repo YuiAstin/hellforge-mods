@@ -50,6 +50,14 @@
  *                 and the wanted selection at +4) is what a key press runs. Insert (try 4): the GL-21 into the
  *                 support slot (none carried), then that request for selection 3, on the object seen at her last
  *                 switch by hand. Delete: the request for her earlier selection, then the GL-21 let go and removed
+ *   0.9.0: try 4 played whole (in her hands, 17 rounds fired, her rifle back). Insert and Delete are now the skill
+ *                 as the kit would run it (Yui: a support weapon she carries is deleted, and a new one of its kind
+ *                 made for her afterwards: only which weapon it was is kept). No switch by hand first: her
+ *                 switch-request object is the Avatar manager's +0x53DCD0 + 0x1238 x her index (as 0x9AC750 and
+ *                 0x9A2D9C build it), checked against the one a switch by hand shows. Insert: the GL-21 made, her
+ *                 support weapon (if any) dropped by the take and removed, the GL-21 selected, 40 rounds. Delete:
+ *                 her earlier weapon selected, the GL-21 removed, a new support weapon of the kind she had made and
+ *                 taken, everything refilled. The other keys are the earlier single steps
  *   Ctrl+Home     your inventory record, your wield slots, the held weapon's magazine
  *   Shift+Insert  loads the GL-21's package and spawns a GL-21 at your feet (RequestEntitySpawn)
  *   Ctrl+Insert   way A: wields it straight into the slot your last observed Wield used (the inventory is untouched)
@@ -76,7 +84,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.8.0"
+#define VERSION "0.9.0"
 #include "kitbase/kb_core.h"
 
 #define GL21 HF_ENTITY_GL21_GRENADE_LAUNCHER
@@ -412,7 +420,7 @@ static void Fill(void)
     if (have < ROUNDS) add(NULL, g_gl, ROUNDS - have);
     Magazine("Home: after (asked for 40)", g_gl);
 }
-static void GiveBack(void)
+__attribute__((unused)) static void GiveBack(void)
 {
     HfFn_SwitchWeapon sw = hf_fn_SwitchWeapon(self);
     void* im = hf_global_InventoryManager(self);
@@ -636,6 +644,157 @@ static void AutoFrame(void)
     }
 }
 
+/* ---- 0.9.0: the skill as the kit would run it ------------------------------------------------------------------------ */
+static uintptr_t SwitchObject(uint32_t e)
+{
+    uintptr_t am = (uintptr_t)hf_global_AvatarManager(self), obj;
+    uint32_t i, who = 0;
+    if (!am || !Lookup(am + 0xF8, e, 1048576, &i) || i >= 1024) return 0;
+    obj = am + 0x53DCD0 + (uintptr_t)0x1238 * i;
+    return ReadAt(obj, &who, 4) && who == e ? obj : 0;
+}
+static int Ask(uint32_t selection, const char* why)
+{
+    uint32_t me = atomic_load(&g_avatar);
+    uintptr_t obj = SwitchObject(me);
+    if (!obj) { Log("skill: her switch-request object was not found (%s)", why); return 0; }
+    if (g_swObj && g_swObj != obj) Log("skill: NOTE the object found (%p) is not the one a switch by hand showed (%p)", (void*)obj, (void*)g_swObj);
+    if (!g_request || hf->write(obj + 4, &selection, 4)) { Log("skill: the switch request is off or the write was refused (%s)", why); return 0; }
+    Log("skill: SwitchRequest(you, %u) (%s)", selection, why);
+    g_request((void*)obj);
+    return 1;
+}
+static uint32_t SpawnRes(uint64_t res, const char* what)
+{
+    HfFn_RequestEntitySpawn spawn = hf_fn_RequestEntitySpawn(self);
+    uint8_t d[24];
+    float p[3];
+    uint32_t me = atomic_load(&g_avatar), out = 0;
+    if (!spawn || !Descriptor(me, d) || !UnitNode(Word(d + 12), 0, p)) { Log("skill: %s could not be asked for", what); return 0; }
+    struct { uint32_t one, network; float pose[16]; void* context; uint64_t pad; } info;
+    memset(&info, 0, sizeof info);
+    memset(g_context, 0, sizeof g_context);
+    info.one = 1;
+    info.network = 0x7FFF;
+    info.pose[0] = info.pose[5] = info.pose[10] = info.pose[15] = 1.0f;
+    info.pose[12] = p[0]; info.pose[13] = p[1]; info.pose[14] = p[2] + 1.0f;
+    info.context = g_context;
+    spawn(&out, res, &info);
+    if (!out || out == UINT32_MAX) { Log("skill: %s: no entity came back", what); return 0; }
+    Log("skill: %s made: entity %u", what, out);
+    return out;
+}
+static void FillUp(uint32_t weapon, const char* what)
+{
+    HfFn_MagazineRounds rounds = hf_fn_MagazineRounds(self);
+    HfFn_MagazineCapacity capacity = hf_fn_MagazineCapacity(self);
+    HfFn_AddMagazineRounds add = hf_fn_AddMagazineRounds(self);
+    HfFn_WeaponRefill refill = hf_fn_WeaponRefill(self);
+    void* wm = hf_global_WeaponManager(self);
+    uint32_t stride = 0;
+    uint64_t res = ResOf(weapon);
+    if (!weapon || !res) return;
+    if (hf->component_record("WeaponMagazineComponentData", res, &stride) && rounds && capacity && add && wm)
+    {
+        int have = rounds(wm, weapon), cap = capacity(NULL, weapon);
+        if (cap > have) add(NULL, weapon, cap - have);
+    }
+    if (refill) for (int i = 0; i < 6; i++) refill(0, weapon, 1.0f);
+    Magazine(what, weapon);
+}
+enum { K_IDLE, K_WAITGL, K_PUTAWAY, K_TAKE, K_ASK, K_HELD, K_LETGO, K_REMOVE, K_WAITS };
+static int g_k;
+static double g_kAt;
+static uint32_t g_kSel, g_kOld, g_kNew;     /* her selection at the start; the support weapon she had; its replacement */
+static uint64_t g_kOldRes;
+static void SkillStart(void)
+{
+    uint32_t me = atomic_load(&g_avatar), slots[8] = {0};
+    uintptr_t rec;
+    if (!Mine("Insert")) return;
+    if (g_k != K_IDLE) { Log("Insert: the skill is %s", g_k == K_HELD ? "on (Delete ends it)" : "busy"); return; }
+    if (!g_take || !g_drop || !g_request || !(rec = InventoryRecord(me)) || !ReadAt(rec, slots, sizeof slots) || !SwitchObject(me))
+    { Log("Insert: the pickup, the drop or the switch request is not the reviewed code, or her inventory or switch object was not found: nothing done"); return; }
+    g_kSel = slots[7] >= 1 && slots[7] <= 3 ? slots[7] : 1;
+    g_kOld = slots[2];
+    g_kOldRes = ResOf(g_kOld);
+    g_kNew = 0;
+    char nm[40];
+    Log("skill start: selection %u; her support weapon: %u (%s)", g_kSel, g_kOld, g_kOld ? Name(g_kOldRes, nm, sizeof nm) : "none");
+    if (!g_gl || ResOf(g_gl) != GL21) Spawn();
+    g_k = K_WAITGL;
+    g_kAt = g_now + 6;
+}
+static void SkillEnd(void)
+{
+    if (g_k != K_HELD) { Log("Delete: the skill is not on"); return; }
+    Ask(g_kSel == 3 ? 1 : g_kSel, "her own weapon back in hand");
+    g_k = K_LETGO;
+    g_kAt = g_now + 1.0;
+}
+static void SkillFrame(void)
+{
+    void* im = hf_global_InventoryManager(self);
+    void* em = hf_global_EntityManager(self);
+    HfFn_RemoveEntity remove = hf_fn_RemoveEntity(self);
+    uint32_t me = atomic_load(&g_avatar), now = 0;
+    uintptr_t rec;
+    if (g_k == K_IDLE || g_k == K_HELD) return;
+    if (!im || !ResOf(me) || !(rec = InventoryRecord(me))) { Log("skill: she is gone: stopped"); g_k = K_IDLE; return; }
+    switch (g_k)
+    {
+    case K_WAITGL:
+        if (g_wantSpawn) break;
+        if (!g_gl || ResOf(g_gl) != GL21) { if (g_now > g_kAt) { g_k = K_IDLE; Log("skill: no GL-21 came: stopped"); } break; }
+        if (g_now < g_madeAt + 0.75) break;
+        if (g_kSel == 3 && g_kOld) { Ask(1, "her support weapon is in her hands: put away first"); g_k = K_PUTAWAY; g_kAt = g_now + 0.8; }
+        else g_k = K_TAKE;
+        break;
+    case K_PUTAWAY:
+        if (g_now >= g_kAt) g_k = K_TAKE;
+        break;
+    case K_TAKE:
+        Log("skill: Take(you, GL-21 %u, slot 3)%s", g_gl, g_kOld ? " (the game drops her support weapon)" : "");
+        g_take(im, me, g_gl, 3, 0);
+        g_k = K_ASK; g_kAt = g_now + 0.1;
+        break;
+    case K_ASK:
+        if (g_now < g_kAt) break;
+        if (g_kOld && ResOf(g_kOld) == g_kOldRes && remove && em) { Log("skill: her dropped support weapon %u removed", g_kOld); remove(em, g_kOld); }
+        Ask(3, "the GL-21 in hand");
+        Fill();
+        g_lastRounds = -1;
+        g_k = K_HELD;
+        Log("skill on: fire the GL-21. Delete ends it");
+        break;
+    case K_LETGO:
+        if (g_now < g_kAt) break;
+        Log("skill: Drop(you, GL-21 %u), her support slot emptied", g_gl);
+        g_drop(im, me, g_gl, 0, 0, 1);
+        if (ReadAt(rec + 8, &now, 4) && now == g_gl) { now = 0; hf->write(rec + 8, &now, 4); }
+        g_k = K_REMOVE; g_kAt = g_now + 0.4;
+        break;
+    case K_REMOVE:
+        if (g_now < g_kAt) break;
+        if (g_gl && ResOf(g_gl) == GL21 && remove && em) { remove(em, g_gl); Log("skill: the GL-21 removed"); }
+        g_gl = 0;
+        if (g_kOldRes) { g_kNew = SpawnRes(g_kOldRes, "a new support weapon of her kind"); g_k = g_kNew ? K_WAITS : K_IDLE; g_kAt = g_now + 0.75; }
+        else { FillUp(atomic_load(&g_held), "skill over: her weapon"); g_k = K_IDLE; }
+        break;
+    case K_WAITS:
+        if (g_now < g_kAt) break;
+        if (ResOf(g_kNew) != g_kOldRes) { Log("skill: the new support weapon does not read as hers: left"); g_k = K_IDLE; break; }
+        Log("skill: Take(you, her new support weapon %u, slot 3)", g_kNew);
+        g_take(im, me, g_kNew, 3, 0);
+        FillUp(g_kNew, "skill over: her new support weapon");
+        if (g_kSel == 3) Ask(3, "she had it in hand when the skill began");
+        else FillUp(atomic_load(&g_held), "skill over: her weapon");
+        g_k = K_IDLE;
+        break;
+    default: g_k = K_IDLE;
+    }
+}
+
 /* ---- events and the frame ------------------------------------------------------------------------------------ */
 static atomic_int g_heldChanged;
 static void OnWeapon(HfMod* mod, const HfEventInfo* info, void* user)
@@ -668,6 +827,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (atomic_exchange(&g_heldChanged, 0)) State("held changed");
     SpawnFrame();
     AutoFrame();
+    SkillFrame();
     static int prev[4];
     int focused = Focused(), shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0, ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0,
         alt = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
@@ -675,9 +835,9 @@ static void Tick(HfMod* mod, float dt, void* user)
         focused && (GetAsyncKeyState(VK_DELETE) & 0x8000), focused && (GetAsyncKeyState(VK_END) & 0x8000)};
     if (k[0] && !prev[0]) Log("key: Insert pressed%s%s%s", shift ? " +Shift" : "", ctrl ? " +Ctrl" : "", alt ? " +Alt" : "");
     if (k[2] && !prev[2]) Log("key: Delete pressed%s%s", shift ? " +Shift" : "", ctrl ? " +Ctrl" : "");
-    if (k[0] && !prev[0]) { if (shift) Spawn(); else if (ctrl) Give(2); else if (alt) Give(3); else Give(4); }
+    if (k[0] && !prev[0]) { if (shift) Spawn(); else if (ctrl) Give(4); else if (alt) Give(3); else SkillStart(); }
     if (k[1] && !prev[1]) { if (ctrl) State("Ctrl+Home"); else Fill(); }
-    if (k[2] && !prev[2]) { if (shift) Remove(); else if (ctrl) GiveBack(); else Back(); }
+    if (k[2] && !prev[2]) { if (shift) Remove(); else if (ctrl) Back(); else SkillEnd(); }
     if (k[3] && !prev[3]) Refill();
     memcpy(prev, k, sizeof prev);
 }
@@ -701,8 +861,8 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     int w = hf->hook_function(self, "Wield", (void*)WieldDetour, (void**)&original_wield, 0),
         s = hf->hook_function(self, "SwitchWeapon", (void*)SwitchDetour, (void**)&original_switch, 0),
         t = hf->hook_function(self, "SetWielder", (void*)SetWielderDetour, (void**)&original_setw, 0);
-    Log("ready: Wield %s, SwitchWeapon %s, SetWielder %s. In a mission, with a weapon in hand: first switch weapons once by hand. Then, with NO support weapon carried, Insert (try 4) takes a GL-21 with 40 rounds into the support slot and asks the Helldiver to select it; "
-        "Delete gives your weapon back and removes the GL-21",
+    Log("ready: Wield %s, SwitchWeapon %s, SetWielder %s. In a mission, with a weapon in hand: Insert starts the skill (a GL-21 with 40 rounds in her hands; a support weapon she carries is replaced, and a new one of its kind made afterwards); "
+        "Delete ends it",
         w ? "OFF" : "hooked", s ? "OFF" : "hooked", t ? "OFF" : "hooked");
 }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
