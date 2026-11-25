@@ -42,6 +42,14 @@
  *                 and selects that, as a pickup by hand does. And the game's AttachToUnit is logged for her items
  *                 and the GL-21 (child, node, who called), so a switch by hand shows what moves a weapon to her
  *                 hands and what the tries lack
+ *   0.8.0: the switch by hand showed it. A weapon goes to her back from 0x8C06A3 (node 27 a rifle, 11 a sidearm,
+ *                 30 a support weapon) and to her hand (node 84) from 0x8C0B70 a frame or two after the switch; a
+ *                 GL-21 taken into the support slot went to her hands when Yui selected it by hand, and the game
+ *                 switched her back to the primary after the probe's own SwitchWeapon. The Helldiver keeps its own
+ *                 wanted selection: its switch request (game.dll+0xA93430, on an object that starts with her entity
+ *                 and the wanted selection at +4) is what a key press runs. Insert (try 4): the GL-21 into the
+ *                 support slot (none carried), then that request for selection 3, on the object seen at her last
+ *                 switch by hand. Delete: the request for her earlier selection, then the GL-21 let go and removed
  *   Ctrl+Home     your inventory record, your wield slots, the held weapon's magazine
  *   Shift+Insert  loads the GL-21's package and spawns a GL-21 at your feet (RequestEntitySpawn)
  *   Ctrl+Insert   way A: wields it straight into the slot your last observed Wield used (the inventory is untouched)
@@ -68,7 +76,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.7.0"
+#define VERSION "0.8.0"
 #include "kitbase/kb_core.h"
 
 #define GL21 HF_ENTITY_GL21_GRENADE_LAUNCHER
@@ -108,6 +116,20 @@ static Call g_carry[RING];
 static volatile uint64_t g_carryN;
 static Fn8 original_carry;
 DETOUR(CarryDetour, g_carry, g_carryN, original_carry)
+static Call g_req[RING];
+static volatile uint64_t g_reqN;
+static Fn8 original_req;
+__attribute__((noinline)) static uintptr_t RequestDetour(uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7, uintptr_t a8)
+{
+    uint64_t i_ = g_reqN;
+    Call* c_ = &g_req[i_ % RING];
+    c_->a[0] = a1; c_->a[1] = 0;
+    if (a1 >= 0x10000 && a1 < 0x7FFFFFFF0000ull && !(a1 & 3)) { const volatile uint32_t* p_ = (const volatile uint32_t*)a1; c_->a[1] = (uint64_t)p_[0] | ((uint64_t)p_[1] << 32); c_->a[2] = p_[5]; }
+    c_->ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    c_->seq = i_ + 1;
+    g_reqN = i_ + 1;
+    return original_req(a1, a2, a3, a4, a5, a6, a7, a8);
+}
 static Call g_att[RING * 4];
 static volatile uint64_t g_attN;
 static Fn8 original_att;
@@ -123,6 +145,7 @@ __attribute__((noinline)) static uintptr_t AttachDetour(uintptr_t a1, uintptr_t 
     return original_att(a1, a2, a3, a4, a5, a6, a7, a8);
 }
 
+static uintptr_t g_swObj;                   /* her switch-request object, as her last switch by hand passed it */
 static uint32_t g_gl, g_oldItem;            /* the GL-21 the probe spawned; the weapon it stands in for */
 static uintptr_t InventoryRecord(uint32_t e);
 /* her last Wield, as the game made it: the slot and the fifth argument way A repeats */
@@ -139,7 +162,17 @@ static const char* Name(uint64_t r, char* out, size_t n)
 static uint64_t ResOf(uint32_t e) { uint8_t d[24]; return Descriptor(e, d) ? Quad(d) : 0; }
 static void Report(void)
 {
-    static uint64_t seenW, seenS, seenT, seenC, seenA;
+    static uint64_t seenW, seenS, seenT, seenC, seenA, seenR;
+    for (uint64_t now = g_reqN; seenR < now; seenR++)
+    {
+        if (now - seenR > RING) seenR = now - RING;
+        Call* c = &g_req[seenR % RING];
+        uint32_t who = (uint32_t)c->a[1], want = (uint32_t)(c->a[1] >> 32);
+        if (!who || who != atomic_load(&g_avatar)) continue;
+        if (g_swObj != (uintptr_t)c->a[0]) Log("game: your switch-request object is at %p", (void*)(uintptr_t)c->a[0]);
+        g_swObj = (uintptr_t)c->a[0];
+        Log("game: SwitchRequest(you, wanted selection %u; +0x14 was %u) from game+0x%llX", want, (uint32_t)c->a[2], (unsigned long long)(c->ret - game));
+    }
     static unsigned attLogged;
     {
         uint32_t mine[6] = {0}, me2 = atomic_load(&g_avatar);
@@ -435,7 +468,19 @@ typedef void (*DropFn)(void* inventory, uint32_t entity, uint32_t item, uint8_t 
 static TakeFn g_take;
 static DropFn g_drop;
 static uint32_t g_slot;                 /* way E: the slot the GL-21 took (g_oldItem: the weapon that was in it) */
+static int g_give, g_back;
+static double g_giveAt, g_backAt;
+typedef void (*RequestFn)(void* object);
+static RequestFn g_request;
 static int g_seq, g_mode = 1, g_lastRounds = -1;
+static int AskSelection(uint32_t selection)
+{
+    uint32_t me = atomic_load(&g_avatar), who = 0;
+    if (!g_request || !g_swObj || !ReadAt(g_swObj, &who, 4) || who != me) { Log("the switch request: her object is not known or not hers any more"); return 0; }
+    if (hf->write(g_swObj + 4, &selection, 4)) { Log("the switch request: the write was refused"); return 0; }
+    g_request((void*)g_swObj);
+    return 1;
+}
 static double g_seqAt;
 static void SeqLog(const char* what) { Log("Insert (try %d): %s", g_mode, what); }
 static void WieldD(void)
@@ -448,6 +493,20 @@ static void WieldD(void)
     if (!g_take || !g_drop || !sw || !im || !(rec = InventoryRecord(me)) || !ReadAt(rec + 0x1C, &sel, 4)) { Log("Insert: the pickup (0x9AE030) is not the reviewed code, or your inventory is not there: nothing done"); return; }
     if (sel < 1 || sel > 3) { Log("Insert: you hold no weapon (selection %u): take your primary, secondary or support weapon in hand first", sel); return; }
     ReadAt(rec + 4u * (sel - 1), &old, 4);
+    if (g_mode == 4)
+    {
+        uint32_t support = 0, who = 0;
+        ReadAt(rec + 8, &support, 4);
+        if (support) { Log("Insert (try 4): you carry a support weapon (entity %u): drop it first", support); return; }
+        if (!g_request || !g_swObj || !ReadAt(g_swObj, &who, 4) || who != me) { Log("Insert (try 4): your switch-request object is not known (switch weapons once by hand first), or 0xA93430 is not the reviewed code"); return; }
+        Remember();
+        g_slot = 3;
+        g_oldItem = 0;
+        Log("Insert (try 4): Take(you, %u, slot 3 = support), then the Helldiver's own switch request for selection 3 ...", g_gl);
+        g_take(im, me, g_gl, 3, 0);
+        g_seq = 20; g_seqAt = g_now + 0.1;
+        return;
+    }
     if (g_mode == 3)
     {
         uint32_t support = 0;
@@ -492,6 +551,17 @@ static void SeqFrame(void)
     case 2: SeqLog("SwitchWeapon(you, her slot): the game's own draw ..."); sw(im, me, g_slot); g_seq = 3; g_seqAt = g_now + 0.1; break;
     case 10: SeqLog("Drop(you, GL-21) the game's way ..."); g_drop(im, me, g_gl, 0, 0, 1); g_seq = 11; g_seqAt = g_now + 0.7; break;
     case 11: SeqLog("Take(you, GL-21, her slot) again, SwitchWeapon(you, her slot) ..."); g_take(im, me, g_gl, g_slot, 0); sw(im, me, g_slot); g_seq = 3; g_seqAt = g_now + 0.1; break;
+    case 20: SeqLog("SwitchRequest(you, 3) ..."); AskSelection(3); g_seq = 3; g_seqAt = g_now + 0.2; break;
+    case 30:
+    {
+        uint32_t now = 0;
+        uintptr_t rec = InventoryRecord(me);
+        Log("Delete: Drop(you, %u), her support slot emptied ...", g_gl);
+        g_drop(im, me, g_gl, 0, 0, 1);
+        if (rec && ReadAt(rec + 8, &now, 4) && now == g_gl) { now = 0; hf->write(rec + 8, &now, 4); Log("Delete: the support slot still named it: cleared by the probe"); }
+        g_seq = 0; g_slot = 0; g_back = 1; g_backAt = g_now + 0.4;
+        break;
+    }
     case 3: Fill(); g_lastRounds = -1; g_seq = 0; SeqLog("done. Is the GL-21 in her HANDS now (not on her back)? Fire it; Delete gives your weapon back"); break;
     default: g_seq = 0;
     }
@@ -503,6 +573,14 @@ static void BackD(void)
     uint32_t me = atomic_load(&g_avatar), now = 0;
     uintptr_t rec;
     if (!Mine("Delete")) return;
+    if (g_mode == 4 && g_slot == 3 && g_gl && im && g_drop)
+    {
+        uint32_t back = g_selWas && g_selWas != 3 ? g_selWas : 1;
+        Log("Delete: SwitchRequest(you, %u) (her own weapon, the game's way), then the GL-21 let go ...", back);
+        AskSelection(back);
+        g_seq = 30; g_seqAt = g_now + 1.0;
+        return;
+    }
     if (!g_take || !g_drop || !sw || !im || !(rec = InventoryRecord(me)) || g_slot < 1 || g_slot > 3) { Log("Delete: nothing of the probe's to give back (or the pickup is not the reviewed code)"); return; }
     ReadAt(rec + 4u * (g_slot - 1), &now, 4);
     if (!now || now != g_gl) { Log("Delete: slot %u has %u, not the probe's GL-21: left as it is", g_slot, now); return; }
@@ -516,8 +594,6 @@ static void BackD(void)
 }
 
 /* ---- 0.2.0: Insert and Delete by themselves do the whole thing ------------------------------------------------------ */
-static int g_give, g_back;
-static double g_giveAt, g_backAt;
 static void Give(int mode)
 {
     g_mode = mode;
@@ -533,8 +609,7 @@ static void Back(void)
 {
     Log("Delete: the GL-21 dropped, your weapon back, the GL-21 removed, your weapon refilled");
     BackD();
-    g_back = 1;
-    g_backAt = g_now + 0.6;
+    if (g_seq != 30) { g_back = 1; g_backAt = g_now + 0.6; }
 }
 static void AutoFrame(void)
 {
@@ -599,7 +674,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         focused && (GetAsyncKeyState(VK_DELETE) & 0x8000), focused && (GetAsyncKeyState(VK_END) & 0x8000)};
     if (k[0] && !prev[0]) Log("key: Insert pressed%s%s%s", shift ? " +Shift" : "", ctrl ? " +Ctrl" : "", alt ? " +Alt" : "");
     if (k[2] && !prev[2]) Log("key: Delete pressed%s%s", shift ? " +Shift" : "", ctrl ? " +Ctrl" : "");
-    if (k[0] && !prev[0]) { if (shift) Spawn(); else if (ctrl) Give(2); else if (alt) Give(3); else Give(1); }
+    if (k[0] && !prev[0]) { if (shift) Spawn(); else if (ctrl) Give(2); else if (alt) Give(3); else Give(4); }
     if (k[1] && !prev[1]) { if (ctrl) State("Ctrl+Home"); else Fill(); }
     if (k[2] && !prev[2]) { if (shift) Remove(); else if (ctrl) GiveBack(); else Back(); }
     if (k[3] && !prev[3]) Refill();
@@ -618,11 +693,14 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     else Log("the drop (0x9A8840) is not the reviewed code: Delete is off");
     if (!hf->code_matches(game + 0x8BF870, "4c 8b dc 55 53 41 56 49 8d 6b a8 48 81 ec 40 01 00 00") ||
         hf->hook(self, game + 0x8BF870, (void*)CarryDetour, (void**)&original_carry)) { original_carry = NULL; Log("the carry function (0x8BF870) is not the reviewed code or its hook was refused: not logged"); }
+    if (!hf->code_matches(game + 0xA93430, "48 89 5c 24 18 48 89 6c 24 20 56 57 41 54 41 56 41 57 48 83 ec 50 48 8b 05 c3") ||
+        hf->hook(self, game + 0xA93430, (void*)RequestDetour, (void**)&original_req)) { original_req = NULL; Log("the switch request (0xA93430) is not the reviewed code or its hook was refused: Insert is off"); }
+    else g_request = (RequestFn)(game + 0xA93430);
     if (hf->hook_function(self, "AttachToUnit", (void*)AttachDetour, (void**)&original_att, 0)) Log("AttachToUnit: hook refused: not logged");
     int w = hf->hook_function(self, "Wield", (void*)WieldDetour, (void**)&original_wield, 0),
         s = hf->hook_function(self, "SwitchWeapon", (void*)SwitchDetour, (void**)&original_switch, 0),
         t = hf->hook_function(self, "SetWielder", (void*)SetWielderDetour, (void**)&original_setw, 0);
-    Log("ready: Wield %s, SwitchWeapon %s, SetWielder %s. In a mission, with a weapon in hand: first switch primary / secondary by hand a few times (logged). Then, with NO support weapon carried, Alt+Insert (try 3) takes a GL-21 with 40 rounds into the support slot; "
+    Log("ready: Wield %s, SwitchWeapon %s, SetWielder %s. In a mission, with a weapon in hand: first switch weapons once by hand. Then, with NO support weapon carried, Insert (try 4) takes a GL-21 with 40 rounds into the support slot and asks the Helldiver to select it; "
         "Delete gives your weapon back and removes the GL-21",
         w ? "OFF" : "hooked", s ? "OFF" : "hooked", t ? "OFF" : "hooked");
 }
