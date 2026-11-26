@@ -33,7 +33,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.1"
+#define VERSION "0.2.2"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
@@ -166,7 +166,7 @@ static uint32_t g_watch;
 static double g_watchSince;
 static uint8_t g_snap[2][R_N][MAXR], g_noise[R_N][MAXR / 4];
 static int g_haveSnap, g_cur, g_baselineSaid;
-static unsigned g_diffLines;
+static unsigned g_diffLines[R_N];
 
 static uintptr_t InManager(uintptr_t cell, uint32_t mapOff, uint32_t recOff, uint32_t stride, uint32_t e)
 {
@@ -224,6 +224,7 @@ static void Ids(int r, const uint8_t* b)
 static void Watch(uint32_t e)
 {
     g_watch = e; g_haveSnap = 0; g_baselineSaid = 0; g_watchSince = g_now;
+    memset(g_diffLines, 0, sizeof g_diffLines);
     memset(g_noise, 0, sizeof g_noise);
     char found[300];
     int n = 0;
@@ -239,9 +240,10 @@ static void Diff(int r, const uint8_t* a, const uint8_t* b, int baseline)
         if (x == y) continue;
         if (baseline) { if (*noise < 255) (*noise)++; continue; }
         if (*noise && !*Whose(y) && !*Whose(x)) continue;   /* noise, unless an id comes or goes */
+        if (r == R_BEH && !*Whose(y) && !*Whose(x)) continue; /* its fighting fills the behaviour record: only ids there (0.2.1's log) */
         float fx, fy;
         memcpy(&fx, &x, 4); memcpy(&fy, &y, 4);
-        if (g_diffLines++ < 600)
+        if (g_diffLines[r]++ < 300)
             Log("  %s +0x%04x: %08x -> %08x (u %u -> %u, f %g -> %g)%s%s", kRegion[r], o, x, y, x, y, (double)fx, (double)fy, Whose(y), *Whose(x) && !*Whose(y) ? "  (an id went)" : "");
     }
 }
@@ -256,7 +258,17 @@ static void WatchFrame(void)
     {
         uintptr_t at = Region(r);
         if (!at || !ReadAt(at, g_snap[cur][r], kSize[r])) memset(g_snap[cur][r], 0, kSize[r]);
-        if (!g_haveSnap) Ids(r, g_snap[cur][r]);
+        if (!g_haveSnap)
+        {
+            Ids(r, g_snap[cur][r]);
+            if (r == R_NPCHEAD || r == R_NPC28 || r == R_NPC20)
+            {
+                char line[400];
+                int n = 0;
+                for (uint32_t o = 0; o < kSize[r] && o < 0x60; o += 4) n += snprintf(line + n, sizeof line - n, " %08x", Word(g_snap[cur][r] + o));
+                Log("    %s, its first words:%s", kRegion[r], line);
+            }
+        }
         else Diff(r, g_snap[prev][r], g_snap[cur][r], baseline);
     }
     if (!baseline && !g_baselineSaid) { g_baselineSaid = 1; Log("baseline done for escort %u: from now on, changes only (give your orders)", g_watch); }
