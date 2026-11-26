@@ -26,7 +26,11 @@
  * Its blast reaches d12_radius m (8; 0: the dynamite's own): a copy of the explosion d12_explosion under a type of W's
  * own (HellForge's add_explosion, SDK 17: its effect and sound stay the dynamite's). Yui: an Illuminate spawner breaks
  * only to a hit of demolition 50 or more on its door or hull, and the dynamite's blast at its middle reached neither
- * (its health stayed 4250 through four blasts of demolition 60).
+ * (its health stayed 4250 through four blasts of demolition 60). Played with the 8 m copy: dozens of hits a blast were
+ * raised to 60 on the hook and it still stood, so the force that breaks things is the explosion's own damage row's
+ * (DamageInfo +0x1C): the copy deals a damage type of W's own, a copy of the dynamite's (add_damage) with its demolition
+ * d12_demolition, set once the game's damage list is in (HF_EVENT_PROJECTILES_READY). A Blast Type changed in the game
+ * now takes effect (the copy is used only while d12_explosion is the explosion it copied).
  * 0.9.0: first release: 0.8.0 as played, renumbered, with the mine research switched off (mine_probe 0: no hook on the
  * engine's unit spawn or the stratagem's package list, no readouts, no census lines).
  * 0.8.0: the stunned sign sits over the held enemy's highest part, read from its skeleton as it is caught (w_state's
@@ -173,7 +177,7 @@ static float s_jibEvery = 8, s_jibWidth = 15, s_jibLength = 40, s_jibTrigger = 3
 static int s_d12Marks = 4, s_d12Explosion = HF_EXPLOSION_TED63_DYNAMITE_DETONATION, s_d12Fallback = HF_EXPLOSION_ORBITAL_PRECISION_STRIKE_SHELL_IMPACT, s_d12Things = 1;
 static int g_d12UseFallback;
 static float s_d12Demolition = 60, s_d12Radius = 8;
-static uint32_t g_d12Big;   /* the dynamite with d12_radius (add_explosion), 0: none */
+static uint32_t g_d12Big, g_d12BigBase, g_d12Damage;   /* the dynamite with d12_radius (add_explosion), the explosion it copies, its damage (add_damage); 0: none */
 /* D12's blasts lately, for the explosion hook (another thread) */
 static _Atomic unsigned long long g_d12BlastMs[8];
 static float g_d12BlastPos[8][3];
@@ -857,8 +861,17 @@ static void D12Mark(void)
         Log("D12: mark %u on %s %u (%016llx) %.0f m from her; %d marked", g_marksMade, pick.foe ? "enemy" : "thing", pick.entity, (unsigned long long)pick.res,
             (double)sqrtf(Dist2(pick.pos, me)), MarksOn());
 }
+static void D12DemolitionNow(void)
+{
+    static float applied = -1;
+    HfDamageInfo* row = g_d12Damage && hf->damage_row ? (HfDamageInfo*)hf->damage_row(g_d12Damage) : NULL;
+    if (!row || applied == s_d12Demolition) return;
+    applied = s_d12Demolition;
+    if (s_d12Demolition > 0 && (uint32_t)s_d12Demolition > row->demolition) row->demolition = (uint32_t)s_d12Demolition;
+}
 static void D12Detonate(void)
 {
+    D12DemolitionNow();
     int n = 0;
     for (int i = 0; i < MARKS; i++)
     {
@@ -906,7 +919,7 @@ static void MarkFrame(void)
             if (top * 0.5f > at[2] - m->pos[2]) at[2] = m->pos[2] + top * 0.5f;
             if (g_marksBlown < 30 && top > 0) Log("D12: its height %.1f m: the blast %.1f m over its root", (double)top, (double)(at[2] - m->pos[2]));
         }
-        int primary = g_d12Big ? (int)g_d12Big : s_d12Explosion;
+        int primary = g_d12Big && s_d12Explosion == (int)g_d12BigBase ? (int)g_d12Big : s_d12Explosion;
         int ok = 0, kind = g_d12UseFallback ? s_d12Fallback : primary, r = -1;
         if (!g_d12UseFallback && hf->spawn_explosion)
         {
@@ -1814,6 +1827,15 @@ static void BlastDispatch(uintptr_t a, void* out, const void* hit)
         return;
     }
 }
+/* D12's damage: its demolition force set in its own row once the damage list is in */
+static void D12DamageReady(HfMod* mod, HfEvent event, void* user)
+{
+    HfDamageInfo* row = g_d12Damage && hf->damage_row ? (HfDamageInfo*)hf->damage_row(g_d12Damage) : NULL;
+    if (!row) { Log("D12's damage %u: its row is not there: the dynamite's demolition force", g_d12Damage); return; }
+    uint32_t before = row->demolition;
+    if (s_d12Demolition > 0 && (uint32_t)s_d12Demolition > before) row->demolition = (uint32_t)s_d12Demolition;
+    Log("D12's damage %u: demolition force %u -> %u (standard %d, durable %d)", g_d12Damage, before, row->demolition, row->standard_damage, row->durable_damage);
+}
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {
     size_t gameSize = 0, exeSize = 0;
@@ -1862,17 +1884,27 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (s_d12Radius > 0 && s_d12Explosion >= 1 && s_d12Explosion <= 422 && api->size >= offsetof(HfApi, explosion_row) + sizeof api->explosion_row && api->add_explosion)
     {
         HfExplosion blast = {sizeof blast};
+        if (s_d12Explosion == HF_EXPLOSION_TED63_DYNAMITE_DETONATION && api->add_damage)
+        {
+            HfDamage dmg = {sizeof dmg};
+            dmg.base = HF_DAMAGE_TED63_DYNAMITE_DETONATION;
+            dmg.name = "yui/w/d12_damage";
+            g_d12Damage = api->add_damage(mod, &dmg);
+            blast.damage = g_d12Damage;
+        }
         blast.base = (uint32_t)s_d12Explosion;
         blast.name = "yui/w/d12_blast";
         blast.outer_radius = s_d12Radius;
         blast.shockwave_radius = s_d12Radius;
         g_d12Big = api->add_explosion(mod, &blast);
-        if (g_d12Big) api->log(mod, "D12's blast: explosion %u, a copy of %d reaching %.1f m", g_d12Big, s_d12Explosion, (double)s_d12Radius);
+        g_d12BigBase = (uint32_t)s_d12Explosion;
+        if (g_d12Big) api->log(mod, "D12's blast: explosion %u, a copy of %d reaching %.1f m, its damage %u", g_d12Big, s_d12Explosion, (double)s_d12Radius, g_d12Damage);
         else api->log(mod, "D12's blast: the copy of %d was refused: the plain one", s_d12Explosion);
     }
     KbOptionsStart(api, mod, "w", "W", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, s_optionsKey);
     api->log(mod, "W %s (King of Hearts on %s, Jack in the Box on %s, D12 on %s, its detonation on %s)", VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_keys[3].label);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
+    if (g_d12Damage && api->on(mod, HF_EVENT_PROJECTILES_READY, D12DamageReady, NULL)) api->log(mod, "D12's damage row can't be set: the dynamite's demolition force");
     int ok = api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &&
              api->subscribe(mod, HF_ON_PLAYER_SPAWN, OnPlayer, NULL, 0) && api->subscribe(mod, HF_ON_PLAYER_DOWN, OnPlayer, NULL, 0) &&
              api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_EXPLOSION, OnExplosion, NULL, 0) &&
