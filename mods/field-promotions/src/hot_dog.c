@@ -33,7 +33,8 @@ static uintptr_t g_game;
 static int g_kills, g_level = 1;
 static double g_now;
 static uint32_t g_dog, g_avatar;
-static uint32_t g_dogs[4];   /* every Hot Dog entity spawned: the backpack on you and the dog itself (0.21.6 logged two) */
+static uint32_t g_dogs[4];
+static uint32_t g_dogBody;   /* the dog itself (resource HOTDOG_DOG) */   /* every Hot Dog entity spawned: the backpack on you and the dog itself (0.21.6 logged two) */
 static int g_fireElem = -1;
 static uint32_t g_boltType, g_boltDamage;
 static int g_boltReady;
@@ -224,23 +225,20 @@ static int Bolt_(uint32_t target)
 {
     float from[3], to[3];
     if (!Aim(target, to)) return 0;
-    /* from the dog: of the Hot Dog's entities, the one farthest from you (the other is the backpack on your back:
-     * 0.21.6 fired from it, so the bolt was only seen where it landed) */
-    float me[3] = {0, 0, 0}, best = -1;
+    /* from the dog itself: the entity of resource 0x65CD4325BA23F3C6. 0.21.7 took the Hot Dog entity farthest from
+     * you, which was the backpack's (0x3015626AA69F8D4D): its position stays where it was picked up, 14 m off */
+    float me[3] = {0, 0, 0}, best = 0;
     int haveMe = g_avatar && fp_entity_pos(g_avatar, me);
-    uint32_t src = 0;
-    for (int i = 0; i < 4; i++)
+    uint32_t src = g_dogBody && fp_entity_pos(g_dogBody, from) ? g_dogBody : 0;
+    if (src)
     {
-        float q[3];
-        if (!g_dogs[i] || !fp_entity_pos(g_dogs[i], q)) continue;
-        float d2 = haveMe ? (q[0] - me[0]) * (q[0] - me[0]) + (q[1] - me[1]) * (q[1] - me[1]) + (q[2] - me[2]) * (q[2] - me[2]) : 0;
-        if (d2 > best) { best = d2; src = g_dogs[i]; memcpy(from, q, 12); }
+        from[2] += 0.6f;
+        if (haveMe) best = (from[0] - me[0]) * (from[0] - me[0]) + (from[1] - me[1]) * (from[1] - me[1]) + (from[2] - me[2]) * (from[2] - me[2]);
     }
-    if (src && (!haveMe || best > 1.0f)) from[2] += 0.6f;
-    else if (haveMe) { memcpy(from, me, 12); from[2] += 1.6f; src = 0; }
+    else if (haveMe) { memcpy(from, me, 12); from[2] += 1.6f; }
     else return 0;
     static unsigned told;
-    if (told++ < 6) g_hf->log(g_mod, "Hot Dog: the bolt leaves %s, %.1f m from you", src ? "the dog" : "you (no dog away from you found)", haveMe && best > 0 ? (double)sqrtf(best) : 0.0);
+    if (told++ < 6) g_hf->log(g_mod, "Hot Dog: the bolt leaves %s, %.1f m from you", src ? "the dog" : "you (the dog's position was not read)", haveMe && best > 0 ? (double)sqrtf(best) : 0.0);
     float dir[3] = {to[0] - from[0], to[1] - from[1], to[2] - from[2]}, n = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
     if (n < 0.1f) return 0;
     for (int k = 0; k < 3; k++) { dir[k] /= n; from[k] += dir[k] * 0.8f; }
@@ -319,6 +317,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     int slot = 0;
     for (int i = 0; i < 4; i++) if (!g_dogs[i]) { slot = i; break; } else if (i == 3) slot = 0;
     g_dogs[slot] = e->entity;
+    if (e->resource == HOTDOG_DOG) g_dogBody = e->entity;
     static unsigned told;
     if (told++ < 4) g_hf->log(g_mod, "Hot Dog: one spawned (entity %u, resource %016llX, authority %u)", e->entity, (unsigned long long)e->resource, e->authority);
 }
@@ -327,6 +326,7 @@ static void OnKill(HfMod* mod, const HfEventInfo* info, void* user)
     const HfKillEvent* k = (const HfKillEvent*)info;
     if (k->victim == g_dog && g_dog) { g_dog = 0; g_hf->log(g_mod, "Hot Dog: it was destroyed"); }
     for (int i = 0; i < 4; i++) if (g_dogs[i] == k->victim) g_dogs[i] = 0;
+    if (k->victim == g_dogBody) g_dogBody = 0;
     Burn* b = BurnOf(k->victim, 0);
     if (b) memset(b, 0, sizeof *b);
 }
@@ -405,6 +405,7 @@ void hd_reset(void)
     g_pool = 0;
     g_dog = 0;
     memset(g_dogs, 0, sizeof g_dogs);
+    g_dogBody = 0;
     g_kills = 0;
     g_hits = g_doubled = g_lit = g_cancelled = g_bolts = g_refired = g_playerStacks = 0;
     g_topStacks = 0;
