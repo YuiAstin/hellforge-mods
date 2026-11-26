@@ -52,7 +52,7 @@ static double g_now;
 
 /* inigen:begin */
 static int s_mdL2 = 30, s_mdL3 = 150, s_mdRegrow = 1, s_mdLaunch = 1;
-static float s_mdRegrowSeconds = 10, s_mdRegrowWindow = 180, s_mdTrigger = 2.5f, s_mdFuse = 0.4f;
+static float s_mdRegrowSeconds = 10, s_mdRegrowWindow = 180, s_mdTrigger = 2.5f, s_mdFuse = 0.4f, s_mdArm = 2;
 static float s_mdLaunchRange = 10, s_mdLaunchSpeed = 35, s_mdLaunchFree = 0.3f, s_mdLaunchTurn = 540, s_mdLaunchCatch = 2.5f;
 /* inigen:end */
 
@@ -66,6 +66,7 @@ int md_setting(const char* key, double v)
     else if (!strcmp(key, "md_regrow_window")) s_mdRegrowWindow = (float)CL(v, 0, 7200);
     else if (!strcmp(key, "md_trigger")) s_mdTrigger = (float)CL(v, 0.5, 10);
     else if (!strcmp(key, "md_fuse")) s_mdFuse = (float)CL(v, 0, 5);
+    else if (!strcmp(key, "md_arm_seconds")) s_mdArm = (float)CL(v, 0, 30);
     else if (!strcmp(key, "md_launch")) s_mdLaunch = v != 0;
     else if (!strcmp(key, "md_launch_range")) s_mdLaunchRange = (float)CL(v, 1, 40);
     else if (!strcmp(key, "md_launch_speed")) s_mdLaunchSpeed = (float)CL(v, 5, 200);
@@ -84,12 +85,13 @@ void md_write_defaults(FILE* f)
                "; From level 2 a field of yours is run by the mod as it lands (the game's mines swapped for the mod's, same\n"
                "; spots, same look and blast). An enemy within md_trigger m sets a mine off after md_fuse s.\nmd_trigger = %g\nmd_fuse = %g\n"
                "; Level 2: 1 a mine that went off grows back on its spot md_regrow_seconds later, for md_regrow_window s after\n"
-               "; the field lands (0: the whole mission); 0 off.\nmd_regrow = %d\nmd_regrow_seconds = %g\nmd_regrow_window = %g\n"
+               "; the field lands (0: the whole mission); 0 off. A mine grown back is armed md_arm_seconds later (it shows first).\n"
+               "md_regrow = %d\nmd_regrow_seconds = %g\nmd_regrow_window = %g\nmd_arm_seconds = %g\n"
                "; Level 3: 1 an enemy within md_launch_range m makes a mine launch a shot straight up (md_launch_free s), which\n"
                "; then turns md_launch_turn degrees a second onto that enemy at md_launch_speed m/s and lands the mine's blast;\n"
                "; within md_launch_catch m of any enemy it turns straight into it. 0: level 3 mines go off as level 2's.\n"
                "md_launch = %d\nmd_launch_range = %g\nmd_launch_speed = %g\nmd_launch_free = %g\nmd_launch_turn = %g\nmd_launch_catch = %g\n",
-        s_mdL2, s_mdL3, (double)s_mdTrigger, (double)s_mdFuse, s_mdRegrow, (double)s_mdRegrowSeconds, (double)s_mdRegrowWindow, s_mdLaunch,
+        s_mdL2, s_mdL3, (double)s_mdTrigger, (double)s_mdFuse, s_mdRegrow, (double)s_mdRegrowSeconds, (double)s_mdRegrowWindow, (double)s_mdArm, s_mdLaunch,
         (double)s_mdLaunchRange, (double)s_mdLaunchSpeed, (double)s_mdLaunchFree, (double)s_mdLaunchTurn, (double)s_mdLaunchCatch);
 }
 /* inigen:end */
@@ -152,12 +154,12 @@ static void ModelHide(uint32_t handle)
 }
 
 /* ---- the fields the mod runs ------------------------------------------------------------------------------------- */
-typedef struct Mine { int on; float pos[3]; uint32_t unit; double boomAt, blownAt; } Mine;
+typedef struct Mine { int on; float pos[3]; uint32_t unit; double boomAt, blownAt, armAt; } Mine;
 typedef struct Field { int on; float centre[3]; double born; int n; Mine mine[MINES]; } Field;
 static Field g_field[FIELDS];
 typedef struct Beacon { float pos[3]; double at; } Beacon;
 static Beacon g_beacon[4];
-static unsigned g_taken, g_blasts, g_launches, g_regrown, g_ownKills, g_corpses;
+static unsigned g_taken, g_blasts, g_launches, g_regrown, g_ownKills, g_corpses, g_noLook;
 /* the mod's own blasts, for the kills they make */
 typedef struct Boom { float pos[3]; double at; } Boom;
 static Boom g_boom[32];
@@ -453,8 +455,13 @@ static void MinesFrame(void)
                 {
                     float p[3];
                     if (Nearest(m->pos, s_mdTrigger + 1, p)) { m->blownAt = g_now - s_mdRegrowSeconds + 1; continue; }   /* not under an enemy's feet */
+                    /* grown back only with its look, and armed md_arm_seconds later: 0.21.3 regrew mines among the enemies
+                     * that launched the same update, so shots came from spots with no mine to be seen */
+                    uint32_t unit = ModelSpawn(m->pos);
+                    if (!unit) { m->blownAt = g_now - s_mdRegrowSeconds + 1; if (g_noLook++ < 4) g_hf->log(g_mod, "MD-6 minefield: a mine could not grow back (its look was not spawned): tried again in 1 s"); continue; }
                     m->on = 1; m->boomAt = 0; m->blownAt = 0;
-                    m->unit = ModelSpawn(m->pos);
+                    m->unit = unit;
+                    m->armAt = g_now + s_mdArm;
                     g_regrown++;
                 }
                 else if (regrow && m->blownAt > 0) live++;
@@ -462,6 +469,7 @@ static void MinesFrame(void)
             }
             live++;
             float p[3];
+            if (g_now < m->armAt) continue;
             if (!m->boomAt)
             {
                 uint32_t e = level >= 3 && s_mdLaunch && g_launchReady ? Nearest(m->pos, s_mdLaunchRange, p) : 0;
@@ -565,7 +573,7 @@ void md_reset(void)
     g_pool = 0;
     g_models = 0;
     g_kills = 0;
-    g_taken = g_blasts = g_launches = g_regrown = g_ownKills = g_corpses = 0;
+    g_taken = g_blasts = g_launches = g_regrown = g_ownKills = g_corpses = g_noLook = 0;
     g_level = Level();
 }
 
