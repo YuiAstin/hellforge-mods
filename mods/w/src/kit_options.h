@@ -73,7 +73,7 @@ static const OpRow kOpRows[] = {
     {"d12_fallback", "D12", "Fallback Blast", OP_FIELD, 0, 2000, 1,
      "The blast used when that one is refused or not ready (343: the Orbital Precision Strike's).", NULL, 1, OP_LIVE},
     {"d12_demolition", "D12", "Demolition Force", OP_SLIDER, 0, 200, 5,
-     "A mark's blast's demolition force, at the least (what it can break).", NULL, 1, OP_LIVE},
+     "A mark's blast's demolition force (what it can break; an Illuminate spawner needs 50).", NULL, 1, OP_LIVE},
     {"d12_radius", "D12", "Blast Reach", OP_SLIDER, 0, 20, 0.5f,
      "How far a mark's blast reaches, in metres (0: the dynamite's own).", NULL, 1, OP_RESTART},
     {"splash_explosion", "Artilleryman", "Burst Type", OP_FIELD, 0, 2000, 1,

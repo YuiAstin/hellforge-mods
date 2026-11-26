@@ -20,15 +20,12 @@
  * refused or its package hasn't come 1.5 s after the key (Yui: the dynamite is a warbond's; for players without it), and
  * once it was needed, for the rest of the session. A structure's blast is at half its height (its skeleton's top, as the
  * stunned sign reads it), no longer 0.5 m over its root (Yui: too low on an Illuminate spawner). Its blasts' demolition
- * force is d12_demolition at the least (60; Yui), on the game's explosion dispatch (game.dll+0x129D180, the hook
- * Voymastina's fists use: the result's +0x08; a blast is hers when its origin, the hit's +0x40, is within 2 m of a mark's
- * blast of the last 1.5 s). The fallback waits 3 s for the dynamite's package, as Voymastina's blasts do.
+ * force is d12_demolition (60; Yui). The fallback waits 3 s for the dynamite's package, as Voymastina's blasts do.
  * Its blast reaches d12_radius m (8; 0: the dynamite's own): a copy of the explosion d12_explosion under a type of W's
  * own (HellForge's add_explosion, SDK 17: its effect and sound stay the dynamite's). Yui: an Illuminate spawner breaks
  * only to a hit of demolition 50 or more on its door or hull, and the dynamite's blast at its middle reached neither
- * (its health stayed 4250 through four blasts of demolition 60). Played with the 8 m copy: dozens of hits a blast were
- * raised to 60 on the hook and it still stood, so the force that breaks things is the explosion's own damage row's
- * (DamageInfo +0x1C): the copy deals a damage type of W's own, a copy of the dynamite's (add_damage) with its demolition
+ * (its health stayed 4250 through four blasts of demolition 60). The force that breaks things is the explosion's own damage row's
+ * (DamageInfo +0x1C; a hook raising each hit's result to 60 left the spawner standing): the copy deals a damage type of W's own, a copy of the dynamite's (add_damage) with its demolition
  * d12_demolition, set once the game's damage list is in (HF_EVENT_PROJECTILES_READY). A Blast Type changed in the game
  * now takes effect (the copy is used only while d12_explosion is the explosion it copied).
  * 0.9.0: first release: 0.8.0 as played, renumbered, with the mine research switched off (mine_probe 0: no hook on the
@@ -178,10 +175,7 @@ static int s_d12Marks = 4, s_d12Explosion = HF_EXPLOSION_TED63_DYNAMITE_DETONATI
 static int g_d12UseFallback;
 static float s_d12Demolition = 60, s_d12Radius = 8;
 static uint32_t g_d12Big, g_d12BigBase, g_d12Damage;   /* the dynamite with d12_radius (add_explosion), the explosion it copies, its damage (add_damage); 0: none */
-/* D12's blasts lately, for the explosion hook (another thread) */
-static _Atomic unsigned long long g_d12BlastMs[8];
-static float g_d12BlastPos[8][3];
-static atomic_uint g_d12BlastNext, g_d12Demolished;   /* the dynamite failed once: the fallback from then on */
+   /* the dynamite failed once: the fallback from then on */
 static float s_d12Range = 80, s_d12Aim = 2.5f, s_d12Life = 90, s_d12Cooldown = 20, s_d12Damage = 3.1f, s_d12Freeze = 5, s_d12FreezeRadius = 6;
 static int s_optionsKey = 0x78;        /* options_key: the virtual key that opens the options screen (120: F9; 0: none) */
 static const KbSetting kSettings[] = {
@@ -941,11 +935,6 @@ static void MarkFrame(void)
         if (g_marksBlown < 30)
             for (int i = 0; i < 8; i++)
                 if (!g_d12After[i].entity) { g_d12After[i].entity = m->entity; g_d12After[i].before = HealthNow(m->entity); g_d12After[i].at = g_now + 1.5; break; }
-        {
-            unsigned k = atomic_fetch_add(&g_d12BlastNext, 1) % 8;
-            memcpy(g_d12BlastPos[k], at, sizeof g_d12BlastPos[k]);
-            atomic_store(&g_d12BlastMs[k], GetTickCount64());
-        }
         MineBlast(at, 2);
         g_marksBlown++;
         if (g_marksBlown <= 30) Log("D12: a mark blew at %.1f %.1f %.1f on %s %u (explosion %d: %s)", (double)at[0], (double)at[1], (double)at[2], m->foe ? "enemy" : "thing", m->entity,
@@ -1799,34 +1788,6 @@ static void Pin(void** slot, uintptr_t at, const char* pattern, const char* what
     if (hf->code_matches(at, pattern)) *slot = (void*)at;
     else Log("%s is not the reviewed code: King of Hearts is off", what);
 }
-/* D12's blasts: demolition force d12_demolition at the least, on the game's explosion dispatch */
-typedef void (*BlastDispatchFn)(uintptr_t, void*, const void*);
-static BlastDispatchFn original_dispatch;
-static void BlastDispatch(uintptr_t a, void* out, const void* hit)
-{
-    original_dispatch(a, out, hit);
-    if (!out || s_d12Demolition <= 0 || !kb_kit_on) return;
-    uint8_t h[0x4C];
-    if (!ReadAt((uintptr_t)hit, h, sizeof h) || Word(h) != 4) return;
-    float o[3];
-    memcpy(o, h + 0x40, sizeof o);
-    unsigned long long now = GetTickCount64();
-    for (int k = 0; k < 8; k++)
-    {
-        unsigned long long at = atomic_load(&g_d12BlastMs[k]);
-        if (!at || now - at > 1500 || Dist2(o, g_d12BlastPos[k]) > 2.0f * 2.0f) continue;
-        int32_t demo;
-        memcpy(&demo, (uint8_t*)out + 0x08, 4);
-        if (demo < (int32_t)s_d12Demolition)
-        {
-            int32_t before = demo;
-            demo = (int32_t)s_d12Demolition;
-            memcpy((uint8_t*)out + 0x08, &demo, 4);
-            if (atomic_fetch_add(&g_d12Demolished, 1) < 60) Log("D12: a mark's blast's demolition force %d -> %d (its origin %.1f %.1f %.1f)", before, demo, (double)o[0], (double)o[1], (double)o[2]);
-        }
-        return;
-    }
-}
 /* D12's damage: its demolition force set in its own row once the damage list is in */
 static void D12DamageReady(HfMod* mod, HfEvent event, void* user)
 {
@@ -1853,10 +1814,6 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         g_setVelocity = (SetVecFn)(game + 0x4A7550);
     }
     if (Boundary(game + 0x5B36C0)) g_setDest = (SetVecFn)(game + 0x5B36C0);
-    if (!hf->code_matches(game + 0x129D180, "48 89 4c 24 08 53 55 56 57 41 55 48 83 ec 60 41 8b 40 20 33 f6 3b 05 85 6a 1e 02 49 8b f8 44 0f"))
-        Log("D12's demolition force off: the explosion dispatch (game.dll+0x129D180) is not the reviewed code");
-    else if (hf->hook(self, game + 0x129D180, (void*)BlastDispatch, (void**)&original_dispatch))
-        Log("D12's demolition force off: its hook could not be placed");
     g_destroyOk = hf->code_matches(game + 0x9DDA5F, "48 8b 05 a2 88 94 02 8b 16 48 8b 0d 31 e5 a8 02 4c 8b 40 08 41 ff 50 60");
     if (!g_destroyOk) Log("the minefield's code is not the reviewed one: a mine's unit of hers stays after its blast");
     Log("ready: King of Hearts on %s (%d rounds, %.2f times the damage, %.0f s cooldown; the freeze %.1f s within %.1f m); the hold %s", s_key.label, s_rounds,
