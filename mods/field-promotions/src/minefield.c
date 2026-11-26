@@ -260,9 +260,7 @@ static void WatchFields(void)
 {
     uintptr_t m = Pointer(g_game + 0x3326958), recs;
     uint32_t n = 0;
-    HfFn_UnitResourceName nameOf = hf_fn_UnitResourceName(g_mod);
-    HfFn_UnitAlive alive = hf_fn_UnitAlive(g_mod);
-    if (!m || !ReadAt(m + 0x848, &n, 4) || n > 128 || !(recs = Pointer(m + 0x880)) || !nameOf || !alive) return;
+    if (!m || !ReadAt(m + 0x848, &n, 4) || n > 128 || !(recs = Pointer(m + 0x880))) return;
     for (uint32_t i = 0; i < n; i++)
     {
         uintptr_t r = recs + FIELD_STRIDE * i;
@@ -274,8 +272,9 @@ static void WatchFields(void)
         int mine = 0;
         for (int b = 0; b < 4 && !mine; b++) mine = g_beacon[b].at > 0 && g_now - g_beacon[b].at < 30 && Dist2(g_beacon[b].pos, c) < 40.0f * 40.0f;
         if (!mine || !ReadAt(r + 0x14, first, sizeof first)) continue;
-        uint32_t unit = Word(first);
-        if (!unit || !(alive(unit) & 1) || nameOf(unit) != MD6_MINE_UNIT) continue;   /* the MD-6's, and its mines are out */
+        /* its mines are out (armed, with a unit). Which mines they are is told by the beacon: an MD-6's (HellForge 0.5 maps
+         * no unit-resource lookup: 0.21.0 asked for UnitResourceName and UnitAlive, and took over nothing) */
+        if (!Word(first) || Word(first + 0x10) != 1) continue;
         TakeOver(r, c, count);
     }
 }

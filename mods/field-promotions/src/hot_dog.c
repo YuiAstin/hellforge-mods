@@ -20,9 +20,12 @@
 #include "hellforge_mod.h"
 #include "hellforge_components.h"
 #include "hellforge_content.h"
+#include "hellforge_functions.h"
 #include "field_promotions.h"
 
 #define HOTDOG HF_ENTITY_AXFLAM75_HOT_DOG
+#define HOTDOG_DOG 0x65CD4325BA23F3C6ull   /* the dog itself: the mission stats credit its kills and damage to this (0.21.0, played) */
+static int IsDog(uint64_t r) { return r == HOTDOG || r == HOTDOG_DOG; }
 
 static const HfApi* g_hf;
 static HfMod* g_mod;
@@ -118,6 +121,23 @@ static int IsFoe(uint32_t e)
     return 0;
 }
 
+/* a dealer's resource: the gas doctrine's map of network ids (the entities it saw spawn), else the game's own lookup
+ * (the dog's fire comes from network ids the doctrine never saw: 0.21.0 logged them as unmapped) */
+static uint64_t DealerResource(uint32_t network, uint32_t* entity)
+{
+    uint64_t r = gas_dealer_resource(network, entity);
+    if (r) return r;
+    HfFn_EntityDescriptor descriptor = hf_fn_EntityDescriptor(g_mod);
+    if (!network || network >= 0x7FFF || !descriptor || g_hf->size < offsetof(HfApi, entity_of_network) + sizeof g_hf->entity_of_network || !g_hf->entity_of_network) return 0;
+    uint32_t e = g_hf->entity_of_network(g_mod, network);
+    if (e == 0xFFFFFFFFu || !e) return 0;
+    uint8_t* d = descriptor(e);
+    uint64_t res = 0;
+    if (!d || !ReadAt((uintptr_t)d, &res, 8)) return 0;
+    if (entity) *entity = e;
+    return res;
+}
+
 static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
 {
     HfDamagePreEvent* e = (HfDamagePreEvent*)info;
@@ -125,8 +145,8 @@ static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
     int level = Level();
     if (!fp_in_mission() || level < 2) return;
     uint32_t dealer = 0, owner = 0;
-    uint64_t dr = gas_dealer_resource(d->dealer, &dealer), orr = gas_dealer_resource(d->owner, &owner);
-    int dog = dr == HOTDOG || orr == HOTDOG;
+    uint64_t dr = DealerResource(d->dealer, &dealer), orr = DealerResource(d->owner, &owner);
+    int dog = IsDog(dr) || IsDog(orr);
     if (dog && g_fireElem < 0 && d->amount > 0)
     {
         g_fireElem = (int)d->element;
@@ -274,7 +294,7 @@ static void StacksFrame(void)
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* e = (const HfSpawnEvent*)info;
-    if (e->resource != HOTDOG || !fp_in_mission()) return;
+    if (!IsDog(e->resource) || !fp_in_mission()) return;
     g_dog = e->entity;
     static unsigned told;
     if (told++ < 4) g_hf->log(g_mod, "Hot Dog: one spawned (entity %u, authority %u)", e->entity, e->authority);
@@ -332,7 +352,7 @@ static void CheckLevel(void)
 }
 void hd_kills(uint64_t resource, int added)
 {
-    if (resource != HOTDOG || added <= 0) return;
+    if (!IsDog(resource) || added <= 0) return;
     g_kills += added;
     CheckLevel();
 }
