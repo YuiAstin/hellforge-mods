@@ -23,6 +23,10 @@
  * force is d12_demolition at the least (60; Yui), on the game's explosion dispatch (game.dll+0x129D180, the hook
  * Voymastina's fists use: the result's +0x08; a blast is hers when its origin, the hit's +0x40, is within 2 m of a mark's
  * blast of the last 1.5 s). The fallback waits 3 s for the dynamite's package, as Voymastina's blasts do.
+ * Its blast reaches d12_radius m (8; 0: the dynamite's own): a copy of the explosion d12_explosion under a type of W's
+ * own (HellForge's add_explosion, SDK 17: its effect and sound stay the dynamite's). Yui: an Illuminate spawner breaks
+ * only to a hit of demolition 50 or more on its door or hull, and the dynamite's blast at its middle reached neither
+ * (its health stayed 4250 through four blasts of demolition 60).
  * 0.9.0: first release: 0.8.0 as played, renumbered, with the mine research switched off (mine_probe 0: no hook on the
  * engine's unit spawn or the stratagem's package list, no readouts, no census lines).
  * 0.8.0: the stunned sign sits over the held enemy's highest part, read from its skeleton as it is caught (w_state's
@@ -168,7 +172,8 @@ static float s_jibEvery = 8, s_jibWidth = 15, s_jibLength = 40, s_jibTrigger = 3
              s_jibFreezeRadius = 5;
 static int s_d12Marks = 4, s_d12Explosion = HF_EXPLOSION_TED63_DYNAMITE_DETONATION, s_d12Fallback = HF_EXPLOSION_ORBITAL_PRECISION_STRIKE_SHELL_IMPACT, s_d12Things = 1;
 static int g_d12UseFallback;
-static float s_d12Demolition = 60;
+static float s_d12Demolition = 60, s_d12Radius = 8;
+static uint32_t g_d12Big;   /* the dynamite with d12_radius (add_explosion), 0: none */
 /* D12's blasts lately, for the explosion hook (another thread) */
 static _Atomic unsigned long long g_d12BlastMs[8];
 static float g_d12BlastPos[8][3];
@@ -185,7 +190,7 @@ static const KbSetting kSettings[] = {
     KB_F("jib_length", s_jibLength, 2, 150), KB_F("jib_trigger", s_jibTrigger, 0.5, 15), KB_F("jib_delay", s_jibDelay, 0, 10), KB_F("jib_seconds", s_jibLife, 5, 600),
     KB_F("jib_damage", s_jibDamage, 0.1, 50), KB_F("jib_freeze", s_jibFreeze, 0, 30), KB_F("jib_freeze_radius", s_jibFreezeRadius, 0.5, 30),
     KB_I("jib_explosion", s_jibExplosion, 0, 2000), KB_I("jib_marker", s_jibMarker, 0, 3),
-    KB_I("d12_marks", s_d12Marks, 1, MARKS_MAX), KB_I("d12_explosion", s_d12Explosion, 0, 2000), KB_I("d12_fallback", s_d12Fallback, 0, 2000), KB_F("d12_demolition", s_d12Demolition, 0, 1000), KB_I("d12_things", s_d12Things, 0, 1), KB_F("d12_range", s_d12Range, 5, 300),
+    KB_I("d12_marks", s_d12Marks, 1, MARKS_MAX), KB_I("d12_explosion", s_d12Explosion, 0, 2000), KB_I("d12_fallback", s_d12Fallback, 0, 2000), KB_F("d12_demolition", s_d12Demolition, 0, 1000), KB_F("d12_radius", s_d12Radius, 0, 50), KB_I("d12_things", s_d12Things, 0, 1), KB_F("d12_range", s_d12Range, 5, 300),
     KB_F("d12_aim", s_d12Aim, 0.5, 10), KB_F("d12_seconds", s_d12Life, 5, 600), KB_F("d12_cooldown", s_d12Cooldown, 0, 600), KB_F("d12_damage", s_d12Damage, 0.1, 50),
     KB_F("d12_freeze", s_d12Freeze, 0, 30), KB_F("d12_freeze_radius", s_d12FreezeRadius, 0.5, 30),
     KB_I("mine_probe", s_mineProbe, 0, 1), KB_I("jib_model", s_jibModel, 0, 1), KB_I("options_key", s_optionsKey, 0, 255),
@@ -199,7 +204,7 @@ static const KbOption kOptions[] = {
     {"jib_length", &s_jibLength, NULL}, {"jib_trigger", &s_jibTrigger, NULL}, {"jib_delay", &s_jibDelay, NULL}, {"jib_seconds", &s_jibLife, NULL},
     {"jib_damage", &s_jibDamage, NULL}, {"jib_freeze", &s_jibFreeze, NULL}, {"jib_freeze_radius", &s_jibFreezeRadius, NULL},
     {"jib_explosion", NULL, &s_jibExplosion}, {"jib_marker", NULL, &s_jibMarker}, {"jib_model", NULL, &s_jibModel},
-    {"d12_marks", NULL, &s_d12Marks}, {"d12_explosion", NULL, &s_d12Explosion}, {"d12_fallback", NULL, &s_d12Fallback}, {"d12_demolition", &s_d12Demolition, NULL}, {"d12_things", NULL, &s_d12Things}, {"d12_range", &s_d12Range, NULL},
+    {"d12_marks", NULL, &s_d12Marks}, {"d12_explosion", NULL, &s_d12Explosion}, {"d12_fallback", NULL, &s_d12Fallback}, {"d12_demolition", &s_d12Demolition, NULL}, {"d12_radius", &s_d12Radius, NULL}, {"d12_things", NULL, &s_d12Things}, {"d12_range", &s_d12Range, NULL},
     {"d12_aim", &s_d12Aim, NULL}, {"d12_seconds", &s_d12Life, NULL}, {"d12_cooldown", &s_d12Cooldown, NULL}, {"d12_damage", &s_d12Damage, NULL},
     {"d12_freeze", &s_d12Freeze, NULL}, {"d12_freeze_radius", &s_d12FreezeRadius, NULL},
     {"ambush", NULL, &s_ambush}, {"ambush_after", &s_ambushAfter, NULL}, {"ambush_miss", &s_ambushMiss, NULL}, {"ambush_range", &s_ambushRange, NULL},
@@ -901,17 +906,18 @@ static void MarkFrame(void)
             if (top * 0.5f > at[2] - m->pos[2]) at[2] = m->pos[2] + top * 0.5f;
             if (g_marksBlown < 30 && top > 0) Log("D12: its height %.1f m: the blast %.1f m over its root", (double)top, (double)(at[2] - m->pos[2]));
         }
-        int ok = 0, kind = g_d12UseFallback ? s_d12Fallback : s_d12Explosion, r = -1;
+        int primary = g_d12Big ? (int)g_d12Big : s_d12Explosion;
+        int ok = 0, kind = g_d12UseFallback ? s_d12Fallback : primary, r = -1;
         if (!g_d12UseFallback && hf->spawn_explosion)
         {
-            r = hf->spawn_explosion(self, (uint32_t)s_d12Explosion, at);
+            r = hf->spawn_explosion(self, (uint32_t)primary, at);
             ok = r == HF_ACT_DONE || r == HF_ACT_REQUESTED || r == HF_ACT_QUEUED;
             if (r == HF_ACT_WAITING && g_now < m->boomAt + 3) continue;
             if (!ok)
             {
                 g_d12UseFallback = 1;
                 kind = s_d12Fallback;
-                Log("D12: the blast %d was %s: the fallback %d (the Orbital Precision Strike's) from now on", s_d12Explosion, r == HF_ACT_WAITING ? "not ready 3 s after the key" : "refused", s_d12Fallback);
+                Log("D12: the blast %d was %s: the fallback %d (the Orbital Precision Strike's) from now on", primary, r == HF_ACT_WAITING ? "not ready 3 s after the key" : "refused", s_d12Fallback);
             }
         }
         if (!ok && hf->spawn_explosion)
@@ -1851,6 +1857,19 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     KB_OPTIONS(kOptions);
     RosterJoin("w", "W");
     LoadSettings();
+    /* D12's blast with its own reach: a copy of the dynamite's (settings are read now: d12_radius and d12_explosion take
+     * effect at start-up) */
+    if (s_d12Radius > 0 && s_d12Explosion >= 1 && s_d12Explosion <= 422 && api->size >= offsetof(HfApi, explosion_row) + sizeof api->explosion_row && api->add_explosion)
+    {
+        HfExplosion blast = {sizeof blast};
+        blast.base = (uint32_t)s_d12Explosion;
+        blast.name = "yui/w/d12_blast";
+        blast.outer_radius = s_d12Radius;
+        blast.shockwave_radius = s_d12Radius;
+        g_d12Big = api->add_explosion(mod, &blast);
+        if (g_d12Big) api->log(mod, "D12's blast: explosion %u, a copy of %d reaching %.1f m", g_d12Big, s_d12Explosion, (double)s_d12Radius);
+        else api->log(mod, "D12's blast: the copy of %d was refused: the plain one", s_d12Explosion);
+    }
     KbOptionsStart(api, mod, "w", "W", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, s_optionsKey);
     api->log(mod, "W %s (King of Hearts on %s, Jack in the Box on %s, D12 on %s, its detonation on %s)", VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_keys[3].label);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;

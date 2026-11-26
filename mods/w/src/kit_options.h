@@ -74,6 +74,8 @@ static const OpRow kOpRows[] = {
      "The blast used when that one is refused or not ready (343: the Orbital Precision Strike's).", NULL, 1, OP_LIVE},
     {"d12_demolition", "D12", "Demolition Force", OP_SLIDER, 0, 200, 5,
      "A mark's blast's demolition force, at the least (what it can break).", NULL, 1, OP_LIVE},
+    {"d12_radius", "D12", "Blast Reach", OP_SLIDER, 0, 20, 0.5f,
+     "How far a mark's blast reaches, in metres (0: the dynamite's own).", NULL, 1, OP_RESTART},
     {"splash_explosion", "Artilleryman", "Burst Type", OP_FIELD, 0, 2000, 1,
      "The game's explosion type her shots set off (257: the G-6 Frag's; 155: the PLAS-1 Scorcher's).", NULL, 1, OP_LIVE},
     {"splash_every", "Artilleryman", "Burst Every", OP_SLIDER, 0.05f, 2, 0.05f,
