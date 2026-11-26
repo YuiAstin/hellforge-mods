@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-27: W 0.9.1
+
+- D12 now destroys Illuminate spawners. A mark's blast reaches 8 m, carries a demolition force of 60 (a spawner needs 50), and on a tall target goes off at half its height instead of at its base.
+- D12 falls back to the Orbital Precision Strike's blast if the TED-63 Dynamite's (a warbond's) is refused or doesn't load.
+- New D12 settings on her options page (F9): Fallback Blast, Demolition Force, and Blast Reach (takes effect when the game starts).
+
 ## 2026-11-26: Primed Sure Footed 0.1.1 (works on HellForge 0.5)
 
 - Fixed: on HellForge 0.5 your Helldiver was knocked down and ragdolled as if the mod were off. 0.5 keeps the game's entities in a larger table of its own, so the mod could no longer tell that a hit was landing on you; it now finds your Helldiver through the game's own lookup there. Still works on HellForge 0.4.
