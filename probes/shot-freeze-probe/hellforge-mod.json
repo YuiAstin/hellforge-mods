@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.shot-freeze-probe",
+  "name": "Shot Freeze Probe (research)",
+  "version": "0.1.0",
+  "description": "Research only, towards a true time stop: can shots in flight be held where they are and let go as they were? In a mission it runs on its own: every 12 s it fires four shots upward from over your Helldiver, freezes every shot in flight for 3 s, lets them go and logs what each did (10 cycles). Ctrl+F11 freezes every shot in flight by hand until pressed again. Solo or host. Turn off when done.",
+  "gameplay": false,
+  "code": {
+    "dll": "shot_freeze_probe.dll",
+    "sdk": 16
+  }
+}
