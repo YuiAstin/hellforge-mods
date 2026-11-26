@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-26: Primed Sure Footed 0.1.1 (works on HellForge 0.5)
+
+- Fixed: on HellForge 0.5 your Helldiver was knocked down and ragdolled as if the mod were off. 0.5 keeps the game's entities in a larger table of its own, so the mod could no longer tell that a hit was landing on you; it now finds your Helldiver through the game's own lookup there. Still works on HellForge 0.4.
+
 ## 2026-11-26: W 0.9.0 (first release, for HellForge 0.5)
 
 - First release: W's kit from Arknights for your Helldiver, a mercenary with a grenade launcher, mines and remote bombs whose blasts freeze enemies in their pose. Solo or host; no character model included. It needs HellForge 0.5.
