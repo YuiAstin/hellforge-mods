@@ -11,7 +11,14 @@
  *   Home     following on / off (on: one more than 5 m away is sent to a point 2.5 m behind you, every second)
  *   Delete   takes them all away
  * Every 2 s the log has each one's distance, health and whether it walks; and the hits each takes (from what, how much),
- * and when one dies. Spawns within 3 s of one of ours are logged too (does it come with a squad?). */
+ * and when one dies. Spawns within 3 s of one of ours are logged too (does it come with a squad?).
+ *
+ * 0.2.0, finding the game's own "follow me": the SEAF answer the comm wheel's Follow (comm_follow), so the order lands
+ * somewhere in their records. For the newest escort the probe snapshots its behaviour record ([game+0x3326740], 0x1F8
+ * bytes; +0x68 the entity it perceives through: its squad) and its squad's record (AiSquadManager [game+0x33265A0],
+ * 0x2510 bytes) four times a second, and logs every 4-byte word that changes, after a 4 s baseline that marks the words
+ * that change by themselves (timers, positions) as noise. A value that is your Helldiver's entity, unit or network id is
+ * flagged. Following now starts OFF. Test: Insert, stand still 6 s, comm wheel Follow, walk 10 s; Hold; Move. */
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -26,7 +33,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.1.0"
+#define VERSION "0.2.0"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
@@ -38,7 +45,8 @@
 
 typedef struct Escort { uint32_t entity, net; double since; int hits, taken, maxHp, lastHp, dead, sent; } Escort;
 static Escort g_esc[ESCORTS];
-static int g_follow = 1, g_want, g_spawns;
+static void Watch(uint32_t e);
+static int g_follow = 0, g_want, g_spawns;
 static double g_wantSince, g_lastSpawnAt = -100;
 
 static void Line(Escort* e, const char* why)
@@ -88,6 +96,7 @@ static void SpawnFrame(void)
     if (HealthOf(e, &hp, &life)) x->maxHp = x->lastHp = hp;
     g_spawns++;
     g_lastSpawnAt = g_now;
+    Watch(e);
     Log("Insert: a SEAF trooper, entity %u, at %.1f %.1f %.1f; health %d; friend table says %s; walks %d", e, (double)at[0], (double)at[1], (double)at[2], hp,
         FriendRes(SEAF) ? "a friend" : "NOT a friend", Walks(e));
 }
@@ -142,6 +151,90 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     if (shown++ < 40) Log("  spawned near our call: entity %u, resource %016llx%s", s->entity, (unsigned long long)s->resource, s->resource == SEAF ? " (a trooper)" : "");
 }
 
+/* ---- 0.2.0: what an order changes ---------------------------------------------------------------------------------- */
+#define BEH 0x1F8
+#define SQ 0x2510
+static uint32_t g_watch, g_squad;
+static double g_watchSince;
+static uint8_t g_beh[2][BEH], g_sq[2][SQ], g_noiseB[BEH / 4], g_noiseS[SQ / 4];
+static int g_haveSnap, g_cur, g_baselineSaid;
+static unsigned g_diffLines;
+
+static uintptr_t SquadRecord(uint32_t squad)
+{
+    uintptr_t m = Pointer(game + 0x33265A0), recs;
+    uint32_t i, count;
+    if (!m || !squad || !Lookup(m + 0x20, squad, 1048576, &i) || !ReadAt(m + 0xC, &count, 4) || i >= 4096 || !(recs = Pointer(m + 0x40))) return 0;
+    return recs + 0x2510ull * i;
+}
+static uintptr_t BehaviourOf(uint32_t e)
+{
+    uintptr_t m = Pointer(game + 0x3326740), recs;
+    uint32_t i, count;
+    if (!m || !Lookup(m + 0x40, e, 1048576, &i) || !ReadAt(m + 0x20, &count, 4) || i >= count || i >= 16384 || !(recs = Pointer(m + 0x60))) return 0;
+    return recs + 0x1F8ull * i;
+}
+static const char* Whose(uint32_t v)
+{
+    uint8_t d[24];
+    uint32_t me = atomic_load(&g_avatar);
+    if (!v) return "";
+    if (v == me) return "  <- YOUR HELLDIVER (entity)";
+    if (g_avatarNet && v == g_avatarNet) return "  <- your Helldiver's network id";
+    if (me && Descriptor(me, d) && v == Word(d + 12)) return "  <- your Helldiver's unit";
+    if (v == g_watch) return "  <- the escort itself";
+    if (v == g_squad) return "  <- its squad";
+    return "";
+}
+static void Watch(uint32_t e)
+{
+    g_watch = e; g_squad = 0; g_haveSnap = 0; g_baselineSaid = 0; g_watchSince = g_now;
+    memset(g_noiseB, 0, sizeof g_noiseB); memset(g_noiseS, 0, sizeof g_noiseS);
+    uintptr_t br = BehaviourOf(e);
+    if (br) ReadAt(br + 0x68, &g_squad, 4);
+    uint8_t d[24];
+    Log("watching escort %u: behaviour record %s, squad entity %u (%s), squad record %s", e, br ? "found" : "NOT found", g_squad,
+        g_squad && Descriptor(g_squad, d) ? "readable" : "unreadable", SquadRecord(g_squad) ? "found" : "NOT found");
+}
+static void Diff(const char* what, const uint8_t* a, const uint8_t* b, size_t n, uint8_t* noise, int baseline)
+{
+    for (size_t o = 0; o + 4 <= n; o += 4)
+    {
+        uint32_t x = Word(a + o), y = Word(b + o);
+        if (x == y) continue;
+        if (baseline) { if (noise[o / 4] < 255) noise[o / 4]++; continue; }
+        if (noise[o / 4]) continue;
+        float fx, fy;
+        memcpy(&fx, &x, 4); memcpy(&fy, &y, 4);
+        if (g_diffLines++ < 400)
+            Log("  %s +0x%04zx: %08x -> %08x (u %u -> %u, f %g -> %g)%s", what, o, x, y, x, y, (double)fx, (double)fy, Whose(y));
+    }
+}
+static void WatchFrame(void)
+{
+    static double next;
+    if (!g_watch || g_now < next) return;
+    next = g_now + 0.25;
+    uintptr_t br = BehaviourOf(g_watch), sr;
+    uint32_t sq = 0;
+    if (!br) { Log("escort %u: its behaviour record is gone (dead or taken away): watch ended", g_watch); g_watch = 0; return; }
+    ReadAt(br + 0x68, &sq, 4);
+    if (sq != g_squad) { Log("  escort %u now perceives through %u (was %u)%s", g_watch, sq, g_squad, Whose(sq)); g_squad = sq; g_haveSnap = 0; }
+    int cur = g_cur, prev = !g_cur;
+    if (!ReadAt(br, g_beh[cur], BEH)) return;
+    sr = SquadRecord(g_squad);
+    if (!sr || !ReadAt(sr, g_sq[cur], SQ)) memset(g_sq[cur], 0, SQ);
+    int baseline = g_now - g_watchSince < 4.0;
+    if (g_haveSnap)
+    {
+        Diff("behaviour", g_beh[prev], g_beh[cur], BEH, g_noiseB, baseline);
+        Diff("squad", g_sq[prev], g_sq[cur], SQ, g_noiseS, baseline);
+    }
+    if (!baseline && !g_baselineSaid) { g_baselineSaid = 1; Log("baseline done for escort %u: from now on, changes only (give your orders)", g_watch); }
+    g_haveSnap = 1;
+    g_cur = prev;
+}
+
 static void Tick(HfMod* mod, float dt, void* user)
 {
     static int prev[3];
@@ -162,6 +255,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     memcpy(prev, k, sizeof prev);
     SpawnFrame();
     FollowFrame();
+    WatchFrame();
 }
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {
