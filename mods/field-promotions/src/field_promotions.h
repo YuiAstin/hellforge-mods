@@ -122,6 +122,7 @@ uint32_t fp_entity_unit(uint32_t entity);
 int fp_side_ok(void);
 uint32_t fp_side(uint32_t entity);   /* its faction mask (0: none or not readable) */
 void fp_drop_foe(uint32_t entity);
+int fp_living(uint32_t entity);     /* 1 living, 0 dead (its health record), -1 not read */
 
 /* minefield.c: the MD-6 Anti-Personnel Minefield */
 int md_init(const HfApi* hf, HfMod* mod);

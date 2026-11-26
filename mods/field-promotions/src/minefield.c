@@ -157,7 +157,7 @@ typedef struct Field { int on; float centre[3]; double born; int n; Mine mine[MI
 static Field g_field[FIELDS];
 typedef struct Beacon { float pos[3]; double at; } Beacon;
 static Beacon g_beacon[4];
-static unsigned g_taken, g_blasts, g_launches, g_regrown, g_ownKills;
+static unsigned g_taken, g_blasts, g_launches, g_regrown, g_ownKills, g_corpses;
 /* the mod's own blasts, for the kills they make */
 typedef struct Boom { float pos[3]; double at; } Boom;
 static Boom g_boom[32];
@@ -190,6 +190,8 @@ static void Snapshot(int shots)
         float q[3];
         uint32_t e = fp_foe(i);
         if (!e || !fp_foe_pos(i, q) || (!Near(q, 80) && !shots) || !Hostile(e, 0)) continue;
+        /* a body stays listed when its death came with no kill event: its health record says (0.21.1 shot at bodies) */
+        if (fp_living(e) == 0) { fp_drop_foe(e); g_corpses++; continue; }
         g_snap[g_nsnap].e = e;
         memcpy(g_snap[g_nsnap].p, q, 12);
         g_nsnap++;
@@ -510,8 +512,8 @@ void md_tick(double now, float dt)
 }
 void md_reset(void)
 {
-    if (g_taken || g_blasts) g_hf->log(g_mod, "MD-6 minefield: %u fields run by the mod, %u blasts, %u launches, %u mines grown back, %u kills by its own mines", g_taken, g_blasts,
-        g_launches, g_regrown, g_ownKills);
+    if (g_taken || g_blasts) g_hf->log(g_mod, "MD-6 minefield: %u fields run by the mod, %u blasts, %u launches, %u mines grown back, %u kills by its own mines, %u bodies dropped from its enemies",
+        g_taken, g_blasts, g_launches, g_regrown, g_ownKills, g_corpses);
     for (int i = 0; i < FIELDS; i++) if (g_field[i].on && fp_in_mission()) for (int k = 0; k < g_field[i].n; k++) if (g_field[i].mine[k].unit) ModelHide(g_field[i].mine[k].unit);
     memset(g_field, 0, sizeof g_field);
     memset(g_beacon, 0, sizeof g_beacon);
@@ -520,7 +522,7 @@ void md_reset(void)
     g_pool = 0;
     g_models = 0;
     g_kills = 0;
-    g_taken = g_blasts = g_launches = g_regrown = g_ownKills = 0;
+    g_taken = g_blasts = g_launches = g_regrown = g_ownKills = g_corpses = 0;
     g_level = Level();
 }
 

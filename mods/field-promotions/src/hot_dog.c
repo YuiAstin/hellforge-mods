@@ -36,7 +36,9 @@ static uint32_t g_dog, g_avatar;
 static int g_fireElem = -1;
 static uint32_t g_boltType, g_boltDamage;
 static int g_boltReady;
-static unsigned g_hits, g_doubled, g_lit, g_cancelled, g_bolts, g_refired;
+static unsigned g_hits, g_doubled, g_lit, g_cancelled, g_bolts, g_refired, g_playerStacks;
+static int g_topStacks;
+static long long g_dmgBefore, g_dmgAfter;
 
 /* inigen:begin */
 static int s_hdL2 = 30, s_hdL3 = 150, s_hdIgnite = 1, s_hdImmune = 1, s_hdStacks = 10, s_hdBoltDamage = 1000, s_hdBoltAp = 6, s_hdBoltRound = 57;
@@ -166,8 +168,10 @@ static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
         g_hits++;
         if (d->amount > 0 && s_hdMult != 1)
         {
+            g_dmgBefore += d->amount;
             double a = floor(d->amount * (double)s_hdMult + 0.5);
             d->amount = a > 2147483647.0 ? 2147483647 : (int32_t)a;
+            g_dmgAfter += d->amount;
             g_doubled++;
         }
         b = BurnOf(d->target, 1);
@@ -186,7 +190,7 @@ static void OnDamagePre(HfMod* mod, const HfEventInfo* info, void* user)
     if (level >= 3 && g_avatar && (dealer == g_avatar || owner == g_avatar) && (d->kind == 0 || d->kind == 1 || d->kind == 3 || d->kind == 5))
     {
         b = BurnOf(d->target, 0);
-        if (b && b->litAt && b->burnUntil > g_now && g_now - b->playerAt >= s_hdPlayerGap) { b->playerAt = g_now; b->stacks++; }
+        if (b && b->litAt && b->burnUntil > g_now && g_now - b->playerAt >= s_hdPlayerGap) { b->playerAt = g_now; b->stacks++; g_playerStacks++; }
     }
 }
 
@@ -286,6 +290,7 @@ static void StacksFrame(void)
         if (b->burnUntil <= g_now) { b->stacks = 0; b->litAt = 0; continue; }   /* it stopped burning: back to 0 */
         if (!b->litAt) continue;
         while (g_now >= b->nextStack) { b->stacks++; b->nextStack += 1.0; }
+        if (b->stacks > g_topStacks) g_topStacks = b->stacks;
         if (b->stacks >= s_hdStacks && Bolt_(b->e)) b->stacks = 0;
     }
 }
@@ -356,24 +361,34 @@ void hd_kills(uint64_t resource, int added)
     g_kills += added;
     CheckLevel();
 }
+static void Report(void)
+{
+    g_hf->log(g_mod, "Hot Dog (level %d, %d kills): %u hits of its fire seen, %u raised (%lld damage -> %lld), %u set alight, %u fire hits on you cancelled; "
+        "most stacks on one enemy %d, %u from your shots, %u plasma bolts (%u fired again after a miss)", Level(), g_kills, g_hits, g_doubled, g_dmgBefore, g_dmgAfter, g_lit,
+        g_cancelled, g_topStacks, g_playerStacks, g_bolts, g_refired);
+}
 void hd_tick(double now, float dt)
 {
     (void)dt;
     g_now = now;
+    static double next;
+    static unsigned lastHits;
+    if (fp_in_mission() && now >= next) { next = now + 30; if (g_hits != lastHits) { lastHits = g_hits; Report(); } }
     if (!fp_in_mission() || Level() < 3) return;
     StacksFrame();
     if (g_boltType && g_game) BoltsFrame();
 }
 void hd_reset(void)
 {
-    if (g_hits || g_bolts) g_hf->log(g_mod, "Hot Dog: %u hits of its fire seen, %u raised, %u set alight, %u fire hits on you cancelled, %u plasma bolts (%u fired again after a miss)",
-        g_hits, g_doubled, g_lit, g_cancelled, g_bolts, g_refired);
+    if (g_hits || g_bolts) Report();
     memset(g_burn, 0, sizeof g_burn);
     g_nbolt = g_nwait = 0;
     g_pool = 0;
     g_dog = 0;
     g_kills = 0;
-    g_hits = g_doubled = g_lit = g_cancelled = g_bolts = g_refired = 0;
+    g_hits = g_doubled = g_lit = g_cancelled = g_bolts = g_refired = g_playerStacks = 0;
+    g_topStacks = 0;
+    g_dmgBefore = g_dmgAfter = 0;
     g_level = Level();
 }
 

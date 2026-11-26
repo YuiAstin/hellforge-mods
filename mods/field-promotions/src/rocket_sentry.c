@@ -159,6 +159,9 @@ static Kind g_kinds[256];
 
 static uint32_t Word(const uint8_t* p) { uint32_t v; memcpy(&v, p, 4); return v; }
 static uint64_t Quad(const uint8_t* p) { uint64_t v; memcpy(&v, p, 8); return v; }
+static void LearnDeadLife(uint32_t e);
+static void PendingKills(void);
+static double g_lifeNow;
 static int AddressOk(uintptr_t a, size_t n) { return n && a >= 0x10000 && a < UINT64_C(0x800000000000) && n <= UINT64_C(0x800000000000) - a; }
 static int ReadAt(uintptr_t a, void* out, size_t n) { return AddressOk(a, n) && g_hf->read(a, out, n) == 0; }
 static uintptr_t Pointer(uintptr_t a) { uintptr_t v = 0; return ReadAt(a, &v, 8) && AddressOk(v, 1) ? v : 0; }
@@ -435,6 +438,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 static void OnKill(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfKillEvent* k = (const HfKillEvent*)info;
+    LearnDeadLife(k->victim);
     for (int i = 0; i < FOES; i++) if (g_foe[i] == k->victim) g_foe[i] = 0;
     for (int i = 0; i < 8; i++)
         if (g_sentries[i].entity && g_sentries[i].entity == k->victim)
@@ -466,6 +470,8 @@ void rs_shots(uint64_t resource, int added)
 }
 void rs_tick(double now)
 {
+    g_lifeNow = now;
+    PendingKills();
     for (int i = 0; i < 8; i++)
     {
         Sentry* s = &g_sentries[i];
@@ -475,6 +481,77 @@ void rs_tick(double now)
         if (now >= s->until - 0.5) { s->done = 1; g_hf->log(g_mod, "Rocket Sentry: its time is up (no Last Stand)"); }
     }
     if (g_nshots) RunShots(now);
+}
+
+/* ---- living or dead: an enemy's health record (the Exusiai kit's reader, as Faelynn's) ------------------------------
+ * The enemy list drops an entity at its kill event, but not every death comes with one, so a body could stay listed:
+ * the minefield's launcher mines then shot at bodies (0.21.1). An entity counts as living while its health record has
+ * health above 0 and its life state is not one a kill has shown to be dead (learned a second after each kill, as
+ * Exusiai 0.2.14 does: the kill event comes while the victim still has its living state). */
+static int HealthOf(uint32_t entity, int32_t* health, uint32_t* life)
+{
+    uintptr_t m = Pointer(g_gameDll + 53634696u);
+    uint8_t h[88];
+    if (!entity || !m || !ReadAt(m + 4112, h, sizeof h)) return 0;
+    uint32_t live = Word(h + 16), cap = Word(h + 40), empty = Word(h + 44), mult = Word(h + 48);
+    uintptr_t buckets = (uintptr_t)Quad(h + 32), records = (uintptr_t)Quad(h + 72);
+    if (!buckets || !records || !cap || cap > 65536 || (cap & (cap - 1)) || live > 4096) return 0;
+    uint32_t start = entity * mult;
+    for (uint32_t k = 0; k < cap; k++)
+    {
+        uint8_t b[8];
+        if (!ReadAt(buckets + 8u * ((start + k) & (cap - 1)), b, 8)) return 0;
+        uint32_t key = Word(b), index = Word(b + 4);
+        if (key == empty) return 0;
+        if (key != entity) continue;
+        if (index >= live) return 0;
+        uint8_t r[416];
+        if (!ReadAt(records + 440u * index, r, sizeof r)) return 0;
+        *health = (int32_t)Word(r + 20);
+        *life = Word(r + 412);
+        return 1;
+    }
+    return 0;
+}
+static uint32_t g_deadLife[8];
+static int g_ndeadLife;
+static int DeadLife(uint32_t life)
+{
+    for (int i = 0; i < g_ndeadLife; i++) if (g_deadLife[i] == life) return 1;
+    return 0;
+}
+#define PENDKILL 16
+static struct { uint32_t e, life0; double at; } g_pendKill[PENDKILL];
+static unsigned g_pendKillN;
+static void LearnDeadLife(uint32_t e)
+{
+    int32_t hp = 0;
+    uint32_t life = 0;
+    if (!ReadsOk() || !HealthOf(e, &hp, &life)) return;
+    unsigned i = g_pendKillN++ % PENDKILL;
+    g_pendKill[i].e = e; g_pendKill[i].life0 = life; g_pendKill[i].at = g_lifeNow + 1.0;
+}
+static void PendingKills(void)
+{
+    for (unsigned i = 0; i < PENDKILL; i++)
+    {
+        if (!g_pendKill[i].e || g_lifeNow < g_pendKill[i].at) continue;
+        uint32_t e = g_pendKill[i].e, life0 = g_pendKill[i].life0, life = 0;
+        int32_t hp = 0;
+        g_pendKill[i].e = 0;
+        if (!HealthOf(e, &hp, &life) || !life || life == life0 || DeadLife(life) || g_ndeadLife >= 8) continue;
+        g_deadLife[g_ndeadLife++] = life;
+        g_hf->log(g_mod, "enemies: a kill changed life state %u -> %u (health %d left): an enemy in state %u counts as dead", life0, life, hp, life);
+    }
+}
+/* 1 living, 0 dead, -1 no health record read (left to the caller: treated as living) */
+int fp_living(uint32_t e)
+{
+    int32_t hp = 0;
+    uint32_t life = 0;
+    if (!ReadsOk() || !HealthOf(e, &hp, &life)) return -1;
+    if (hp <= 0) return 0;
+    return !life || !DeadLife(life);
 }
 
 /* ---- the enemies, for the other gear (minefield.c, hot_dog.c) ------------------------------------------------------- */
