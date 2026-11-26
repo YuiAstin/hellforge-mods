@@ -24,6 +24,13 @@ A function-by-function comparison of the four kit sources (Voymastina 0.4.0, Lev
 4. **Every game-address block says whether it is available** and turns itself off cleanly after a game update.
 5. **AK-12 is the test.** If her kit is mostly blocks plus her own skills, the base is right. If the base keeps
    changing to fit her, it is not ready.
+6. **Vanilla content only when unchanged** (Yui, 2026-11-27). A kit uses the game's own stratagem, explosion, damage,
+   projectile or other content type as it is only when it changes none of its numbers or behaviour. Anything a kit
+   changes (a radius, demolition force, damage, a status, how it behaves) gets a copy of its own (`add_explosion`,
+   `add_damage`, `add_projectile`, `add_stratagem`, ...), changed at the source. Never a hook that patches the game's
+   results afterwards, and never an edit of the vanilla row, which would change it for every use and every player.
+   Why: W's D12 raised each hit's demolition to 60 on the explosion hook and an Illuminate spawner still stood; a copy of
+   the dynamite's damage type with demolition 60 broke it, because the game reads the force from the damage row.
 
 ## Layout
 
