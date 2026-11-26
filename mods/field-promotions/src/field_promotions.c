@@ -33,7 +33,7 @@
 #include "hellforge_content.h"
 #include "field_promotions.h"
 
-#define VERSION "0.21.4"
+#define VERSION "0.21.5"
 
 #define MORTAR_SENTRY HF_ENTITY_AM12_MORTAR_SENTRY
 #define MORTAR_SHELL HF_PROJECTILE_AM12_MORTAR_SENTRY

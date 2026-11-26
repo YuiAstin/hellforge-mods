@@ -154,12 +154,12 @@ static void ModelHide(uint32_t handle)
 }
 
 /* ---- the fields the mod runs ------------------------------------------------------------------------------------- */
-typedef struct Mine { int on; float pos[3]; uint32_t unit; double boomAt, blownAt, armAt; } Mine;
+typedef struct Mine { int on; float pos[3]; uint32_t unit; double boomAt, blownAt, armAt, launchedAt; } Mine;
 typedef struct Field { int on; float centre[3]; double born; int n; Mine mine[MINES]; } Field;
 static Field g_field[FIELDS];
 typedef struct Beacon { float pos[3]; double at; } Beacon;
 static Beacon g_beacon[4];
-static unsigned g_taken, g_blasts, g_launches, g_regrown, g_ownKills, g_corpses, g_noLook;
+static unsigned g_taken, g_blasts, g_launches, g_regrown, g_ownKills, g_corpses, g_noLook, g_launchLog;
 /* the mod's own blasts, for the kills they make */
 typedef struct Boom { float pos[3]; double at; } Boom;
 static Boom g_boom[32];
@@ -296,6 +296,7 @@ static void WatchFields(void)
 /* ---- the launch shots ------------------------------------------------------------------------------------------- */
 typedef struct Launch { int slot; uint32_t target; double at; float flown, last[3]; int snapped; } Launch;
 static Launch g_shot[24];
+static unsigned g_shotsSeen;
 static int g_nshot;
 typedef struct Pending { uint32_t target; double at; } Pending;
 static Pending g_pending[24];
@@ -337,6 +338,7 @@ static void ShotsFrame(float dt)
         if (!ReadAt(pool + 0xE5040 + (uintptr_t)slot * 4, &type, 4) || type != g_launchType || g_nshot >= 24) continue;
         Launch* s = &g_shot[g_nshot++];
         memset(s, 0, sizeof *s);
+        g_shotsSeen++;
         s->slot = slot;
         s->target = g_pending[0].target;
         s->at = g_now;
@@ -475,6 +477,13 @@ static void MinesFrame(void)
                 uint32_t e = level >= 3 && s_mdLaunch && g_launchReady ? Nearest(m->pos, s_mdLaunchRange, p) : 0;
                 if (e && Launch_(m->pos, e))
                 {
+                    /* every launch logged (40 a mission): which mine, whether its look was there, how long since its last */
+                    HfFn_UnitFromHandle unitOf = hf_fn_UnitFromHandle(g_mod);
+                    int seen = m->unit && unitOf && unitOf(m->unit);
+                    if (g_launchLog++ < 40)
+                        g_hf->log(g_mod, "MD-6 launch %u: field %d mine %d at %.1f %.1f %.1f (look %s)%s%.1f s since its last", g_launches, fi, k, (double)m->pos[0], (double)m->pos[1],
+                            (double)m->pos[2], seen ? "shown" : "NOT SHOWN", m->launchedAt > 0 ? ", " : ", first; ", m->launchedAt > 0 ? g_now - m->launchedAt : 0.0);
+                    m->launchedAt = g_now;
                     if (m->unit) ModelHide(m->unit);
                     m->unit = 0; m->on = 0; m->blownAt = g_now;
                     continue;
@@ -563,17 +572,18 @@ void md_tick(double now, float dt)
 }
 void md_reset(void)
 {
-    if (g_taken || g_blasts) g_hf->log(g_mod, "MD-6 minefield: %u fields run by the mod, %u blasts, %u launches, %u mines grown back, %u kills by its own mines, %u bodies dropped from its enemies",
-        g_taken, g_blasts, g_launches, g_regrown, g_ownKills, g_corpses);
+    if (g_taken || g_blasts) g_hf->log(g_mod, "MD-6 minefield: %u fields run by the mod, %u blasts, %u launches (%u shots seen in flight), %u mines grown back, %u kills by its own mines, %u bodies dropped from its enemies",
+        g_taken, g_blasts, g_launches, g_shotsSeen, g_regrown, g_ownKills, g_corpses);
     for (int i = 0; i < FIELDS; i++) if (g_field[i].on && fp_in_mission()) for (int k = 0; k < g_field[i].n; k++) if (g_field[i].mine[k].unit) ModelHide(g_field[i].mine[k].unit);
     memset(g_field, 0, sizeof g_field);
     memset(g_beacon, 0, sizeof g_beacon);
     memset(g_boom, 0, sizeof g_boom);
     g_nshot = g_npend = 0;
+    g_shotsSeen = 0;
     g_pool = 0;
     g_models = 0;
     g_kills = 0;
-    g_taken = g_blasts = g_launches = g_regrown = g_ownKills = g_corpses = g_noLook = 0;
+    g_taken = g_blasts = g_launches = g_regrown = g_ownKills = g_corpses = g_noLook = g_launchLog = 0;
     g_level = Level();
 }
 

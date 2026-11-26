@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-11-27: Veterancy System 0.21.4 (test build)
+## 2026-11-27: Veterancy System 0.21.5 (test build)
 
 Needs HellForge 0.5.
 
