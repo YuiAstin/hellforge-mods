@@ -19,7 +19,10 @@
  * 0.9.1: D12's marks blow with the Orbital Precision Strike's shell (d12_fallback) when the TED-63 Dynamite's blast is
  * refused or its package hasn't come 1.5 s after the key (Yui: the dynamite is a warbond's; for players without it), and
  * once it was needed, for the rest of the session. A structure's blast is at half its height (its skeleton's top, as the
- * stunned sign reads it), no longer 0.5 m over its root (Yui: too low on an Illuminate spawner).
+ * stunned sign reads it), no longer 0.5 m over its root (Yui: too low on an Illuminate spawner). Its blasts' demolition
+ * force is d12_demolition at the least (60; Yui), on the game's explosion dispatch (game.dll+0x129D180, the hook
+ * Voymastina's fists use: the result's +0x08; a blast is hers when its origin, the hit's +0x40, is within 2 m of a mark's
+ * blast of the last 1.5 s). The fallback waits 3 s for the dynamite's package, as Voymastina's blasts do.
  * 0.9.0: first release: 0.8.0 as played, renumbered, with the mine research switched off (mine_probe 0: no hook on the
  * engine's unit spawn or the stratagem's package list, no readouts, no census lines).
  * 0.8.0: the stunned sign sits over the held enemy's highest part, read from its skeleton as it is caught (w_state's
@@ -164,7 +167,12 @@ static int s_jibCharges = 5, s_jibMax = 30, s_jibExplosion = HF_EXPLOSION_MD6_AN
 static float s_jibEvery = 8, s_jibWidth = 15, s_jibLength = 40, s_jibTrigger = 3, s_jibDelay = 1.5f, s_jibLife = 120, s_jibDamage = 2.8f, s_jibFreeze = 2.2f,
              s_jibFreezeRadius = 5;
 static int s_d12Marks = 4, s_d12Explosion = HF_EXPLOSION_TED63_DYNAMITE_DETONATION, s_d12Fallback = HF_EXPLOSION_ORBITAL_PRECISION_STRIKE_SHELL_IMPACT, s_d12Things = 1;
-static int g_d12UseFallback;   /* the dynamite failed once: the fallback from then on */
+static int g_d12UseFallback;
+static float s_d12Demolition = 60;
+/* D12's blasts lately, for the explosion hook (another thread) */
+static _Atomic unsigned long long g_d12BlastMs[8];
+static float g_d12BlastPos[8][3];
+static atomic_uint g_d12BlastNext, g_d12Demolished;   /* the dynamite failed once: the fallback from then on */
 static float s_d12Range = 80, s_d12Aim = 2.5f, s_d12Life = 90, s_d12Cooldown = 20, s_d12Damage = 3.1f, s_d12Freeze = 5, s_d12FreezeRadius = 6;
 static int s_optionsKey = 0x78;        /* options_key: the virtual key that opens the options screen (120: F9; 0: none) */
 static const KbSetting kSettings[] = {
@@ -177,7 +185,7 @@ static const KbSetting kSettings[] = {
     KB_F("jib_length", s_jibLength, 2, 150), KB_F("jib_trigger", s_jibTrigger, 0.5, 15), KB_F("jib_delay", s_jibDelay, 0, 10), KB_F("jib_seconds", s_jibLife, 5, 600),
     KB_F("jib_damage", s_jibDamage, 0.1, 50), KB_F("jib_freeze", s_jibFreeze, 0, 30), KB_F("jib_freeze_radius", s_jibFreezeRadius, 0.5, 30),
     KB_I("jib_explosion", s_jibExplosion, 0, 2000), KB_I("jib_marker", s_jibMarker, 0, 3),
-    KB_I("d12_marks", s_d12Marks, 1, MARKS_MAX), KB_I("d12_explosion", s_d12Explosion, 0, 2000), KB_I("d12_fallback", s_d12Fallback, 0, 2000), KB_I("d12_things", s_d12Things, 0, 1), KB_F("d12_range", s_d12Range, 5, 300),
+    KB_I("d12_marks", s_d12Marks, 1, MARKS_MAX), KB_I("d12_explosion", s_d12Explosion, 0, 2000), KB_I("d12_fallback", s_d12Fallback, 0, 2000), KB_F("d12_demolition", s_d12Demolition, 0, 1000), KB_I("d12_things", s_d12Things, 0, 1), KB_F("d12_range", s_d12Range, 5, 300),
     KB_F("d12_aim", s_d12Aim, 0.5, 10), KB_F("d12_seconds", s_d12Life, 5, 600), KB_F("d12_cooldown", s_d12Cooldown, 0, 600), KB_F("d12_damage", s_d12Damage, 0.1, 50),
     KB_F("d12_freeze", s_d12Freeze, 0, 30), KB_F("d12_freeze_radius", s_d12FreezeRadius, 0.5, 30),
     KB_I("mine_probe", s_mineProbe, 0, 1), KB_I("jib_model", s_jibModel, 0, 1), KB_I("options_key", s_optionsKey, 0, 255),
@@ -191,7 +199,7 @@ static const KbOption kOptions[] = {
     {"jib_length", &s_jibLength, NULL}, {"jib_trigger", &s_jibTrigger, NULL}, {"jib_delay", &s_jibDelay, NULL}, {"jib_seconds", &s_jibLife, NULL},
     {"jib_damage", &s_jibDamage, NULL}, {"jib_freeze", &s_jibFreeze, NULL}, {"jib_freeze_radius", &s_jibFreezeRadius, NULL},
     {"jib_explosion", NULL, &s_jibExplosion}, {"jib_marker", NULL, &s_jibMarker}, {"jib_model", NULL, &s_jibModel},
-    {"d12_marks", NULL, &s_d12Marks}, {"d12_explosion", NULL, &s_d12Explosion}, {"d12_fallback", NULL, &s_d12Fallback}, {"d12_things", NULL, &s_d12Things}, {"d12_range", &s_d12Range, NULL},
+    {"d12_marks", NULL, &s_d12Marks}, {"d12_explosion", NULL, &s_d12Explosion}, {"d12_fallback", NULL, &s_d12Fallback}, {"d12_demolition", &s_d12Demolition, NULL}, {"d12_things", NULL, &s_d12Things}, {"d12_range", &s_d12Range, NULL},
     {"d12_aim", &s_d12Aim, NULL}, {"d12_seconds", &s_d12Life, NULL}, {"d12_cooldown", &s_d12Cooldown, NULL}, {"d12_damage", &s_d12Damage, NULL},
     {"d12_freeze", &s_d12Freeze, NULL}, {"d12_freeze_radius", &s_d12FreezeRadius, NULL},
     {"ambush", NULL, &s_ambush}, {"ambush_after", &s_ambushAfter, NULL}, {"ambush_miss", &s_ambushMiss, NULL}, {"ambush_range", &s_ambushRange, NULL},
@@ -878,18 +886,23 @@ static void MarkFrame(void)
         {
             r = hf->spawn_explosion(self, (uint32_t)s_d12Explosion, at);
             ok = r == HF_ACT_DONE || r == HF_ACT_REQUESTED || r == HF_ACT_QUEUED;
-            if (r == HF_ACT_WAITING && g_now < m->boomAt + 1.5) continue;
+            if (r == HF_ACT_WAITING && g_now < m->boomAt + 3) continue;
             if (!ok)
             {
                 g_d12UseFallback = 1;
                 kind = s_d12Fallback;
-                Log("D12: the blast %d was %s: the fallback %d (the Orbital Precision Strike's) from now on", s_d12Explosion, r == HF_ACT_WAITING ? "not ready 1.5 s after the key" : "refused", s_d12Fallback);
+                Log("D12: the blast %d was %s: the fallback %d (the Orbital Precision Strike's) from now on", s_d12Explosion, r == HF_ACT_WAITING ? "not ready 3 s after the key" : "refused", s_d12Fallback);
             }
         }
         if (!ok && hf->spawn_explosion)
         {
             r = hf->spawn_explosion(self, (uint32_t)s_d12Fallback, at);
             if (r == HF_ACT_WAITING && g_now < m->boomAt + 5) continue;
+        }
+        {
+            unsigned k = atomic_fetch_add(&g_d12BlastNext, 1) % 8;
+            memcpy(g_d12BlastPos[k], at, sizeof g_d12BlastPos[k]);
+            atomic_store(&g_d12BlastMs[k], GetTickCount64());
         }
         MineBlast(at, 2);
         g_marksBlown++;
@@ -1744,6 +1757,34 @@ static void Pin(void** slot, uintptr_t at, const char* pattern, const char* what
     if (hf->code_matches(at, pattern)) *slot = (void*)at;
     else Log("%s is not the reviewed code: King of Hearts is off", what);
 }
+/* D12's blasts: demolition force d12_demolition at the least, on the game's explosion dispatch */
+typedef void (*BlastDispatchFn)(uintptr_t, void*, const void*);
+static BlastDispatchFn original_dispatch;
+static void BlastDispatch(uintptr_t a, void* out, const void* hit)
+{
+    original_dispatch(a, out, hit);
+    if (!out || s_d12Demolition <= 0 || !kb_kit_on) return;
+    uint8_t h[0x4C];
+    if (!ReadAt((uintptr_t)hit, h, sizeof h) || Word(h) != 4) return;
+    float o[3];
+    memcpy(o, h + 0x40, sizeof o);
+    unsigned long long now = GetTickCount64();
+    for (int k = 0; k < 8; k++)
+    {
+        unsigned long long at = atomic_load(&g_d12BlastMs[k]);
+        if (!at || now - at > 1500 || Dist2(o, g_d12BlastPos[k]) > 2.0f * 2.0f) continue;
+        int32_t demo;
+        memcpy(&demo, (uint8_t*)out + 0x08, 4);
+        if (demo < (int32_t)s_d12Demolition)
+        {
+            int32_t before = demo;
+            demo = (int32_t)s_d12Demolition;
+            memcpy((uint8_t*)out + 0x08, &demo, 4);
+            if (atomic_fetch_add(&g_d12Demolished, 1) < 4) Log("D12: a mark's blast's demolition force %d -> %d", before, demo);
+        }
+        return;
+    }
+}
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {
     size_t gameSize = 0, exeSize = 0;
@@ -1761,6 +1802,10 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
         g_setVelocity = (SetVecFn)(game + 0x4A7550);
     }
     if (Boundary(game + 0x5B36C0)) g_setDest = (SetVecFn)(game + 0x5B36C0);
+    if (!hf->code_matches(game + 0x129D180, "48 89 4c 24 08 53 55 56 57 41 55 48 83 ec 60 41 8b 40 20 33 f6 3b 05 85 6a 1e 02 49 8b f8 44 0f"))
+        Log("D12's demolition force off: the explosion dispatch (game.dll+0x129D180) is not the reviewed code");
+    else if (hf->hook(self, game + 0x129D180, (void*)BlastDispatch, (void**)&original_dispatch))
+        Log("D12's demolition force off: its hook could not be placed");
     g_destroyOk = hf->code_matches(game + 0x9DDA5F, "48 8b 05 a2 88 94 02 8b 16 48 8b 0d 31 e5 a8 02 4c 8b 40 08 41 ff 50 60");
     if (!g_destroyOk) Log("the minefield's code is not the reviewed one: a mine's unit of hers stays after its blast");
     Log("ready: King of Hearts on %s (%d rounds, %.2f times the damage, %.0f s cooldown; the freeze %.1f s within %.1f m); the hold %s", s_key.label, s_rounds,
