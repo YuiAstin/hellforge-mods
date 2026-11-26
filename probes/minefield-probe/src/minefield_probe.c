@@ -11,7 +11,14 @@
  *     mine's unit, +4 its place, +0x10 its state, 1 armed; W's research) is read once a second and its changes logged.
  *     In a mission, F7 takes away every other armed mine of the newest field: its state is set to 0 and its unit removed
  *     the way W removes her mines' units (the game's own unit removal). Then walk enemies, or yourself, through the field:
- *     every MD-6 blast is matched against the taken mines' places, so the log says whether a taken mine still blew. */
+ *     every MD-6 blast is matched against the taken mines' places, so the log says whether a taken mine still blew.
+ *  3. (0.2.0) Can a blown mine be grown back in the game's own field? F6 takes up to 6 blown mines (state 0) of the newest
+ *     field, spawns the MD-6's mine unit on each place (WorldSpawnUnit, as W's mines do: 0xEE89CC10D80B6AFB, the main
+ *     world, no name, 0, 0, 1, 0) and writes the unit (+0) and state 1 (armed) into its slot. Watch whether an enemy then
+ *     sets one off: every blast is matched against the grown mines' places, and the field's states are logged.
+ * 0.1.0, played 2026-11-26: the game credits the MD-6's kills to it (the mission stats' kills from 0xF00C349422E8E320,
+ * 9 from one field); a mine's state is 1 armed, 2 set off (its fuse running), 0 blown, and a blown mine's unit is
+ * gone. Its blasts come from the deployer's entity, with no creditor. F7 was not tried. */
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -19,8 +26,9 @@
 #include <string.h>
 #include <windows.h>
 #include "hellforge_mod.h"
+#include "hellforge_functions.h"
 
-#define VERSION "0.1.0"
+#define VERSION "0.2.0"
 #define BUILD "25480438"
 #define MD6_DEPLOYER 0xF00C349422E8E320ull
 #define MD6_BLAST 366u
@@ -37,6 +45,11 @@ static unsigned g_logs;
 typedef struct Taken { float pos[3]; double at; int blew; } Taken;
 static Taken g_taken[TAKEN];
 static int g_nTaken;
+static Taken g_grown[TAKEN];
+static int g_nGrown;
+static unsigned g_grownBlasts;
+#define MD6_MINE 0xEE89CC10D80B6AFBull
+#define UNIT_TYPE 0xE0A48D0BE9A7453Full
 static uint32_t g_lastFields, g_lastArmed[8], g_lastCount[8];
 static unsigned g_md6Kills, g_md6Blasts, g_takenBlasts;
 
@@ -143,6 +156,45 @@ static void TakeHalf(void)
     Log("F7: %d mines of field %u switched off, %d of their units removed. Walk enemies through the field: a blast on a taken mine's place is logged as one", took, n - 1, removed);
 }
 
+/* F6: up to 6 blown mines of the newest field grown back in their slots */
+static void Regrow(void)
+{
+    uint32_t n;
+    uintptr_t recs = Fields(&n);
+    HfFn_WorldSpawnUnit spawn = hf_fn_WorldSpawnUnit(self);
+    HfFn_MainWorld mainWorld = hf_fn_MainWorld(self);
+    HfFn_CanGetResource can = hf_fn_CanGetResource(self);
+    void* world = mainWorld ? mainWorld() : NULL;
+    if (!recs || !n) { Log("F6: no minefield out"); return; }
+    if (!spawn || !world || !can) { Log("F6: the game's unit spawn or main world was not given (SDK 16): nothing grown"); return; }
+    if (!(can(UNIT_TYPE, MD6_MINE) & 1)) { Log("F6: the MD-6's mine unit cannot be had (its package is not resident): nothing grown"); return; }
+    uintptr_t r = recs + FIELD_STRIDE * (n - 1);
+    uint32_t count = 0;
+    if (!ReadAt(r + 0x10, &count, 4) || count > 48) { Log("F6: the newest field could not be read"); return; }
+    int grown = 0;
+    for (uint32_t k = 0; k < count && grown < 6 && g_nGrown < TAKEN; k++)
+    {
+        uintptr_t at = r + 0x14 + MINE_STRIDE * k;
+        uint8_t mine[MINE_STRIDE];
+        if (!ReadAt(at, mine, sizeof mine) || Word(mine + 0x10) != 0) continue;
+        float p[3];
+        memcpy(p, mine + 4, 12);
+        float pose[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, p[0], p[1], p[2], 1};
+        uint64_t res = MD6_MINE, name = 0;
+        uint32_t handle = 0, one = 1;
+        void* unit = spawn(world, &res, &name, pose, 0, 0, 1, 0);
+        if (!unit || !ReadAt((uintptr_t)unit + 8, &handle, 4) || !handle) { Log("F6: mine %u: its unit was not spawned", k); continue; }
+        int w1 = hf->write(at, &handle, 4) == 0, w2 = hf->write(at + 0x10, &one, 4) == 0;
+        Taken* g = &g_grown[g_nGrown++];
+        memcpy(g->pos, p, 12);
+        g->at = g_now; g->blew = 0;
+        grown++;
+        Log("F6: mine %u at %.1f %.1f %.1f grown back: unit %08x, slot %s, state %s", k, (double)p[0], (double)p[1], (double)p[2], handle, w1 ? "written" : "NOT written",
+            w2 ? "1 (armed)" : "NOT written");
+    }
+    Log("F6: %d blown mines of field %u grown back%s", grown, n - 1, grown ? ": walk an enemy over one" : " (none blown yet)");
+}
+
 static void OnStat(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfStatEvent* e = (const HfStatEvent*)info;
@@ -174,6 +226,14 @@ static void OnExplosion(HfMod* mod, const HfEventInfo* info, void* user)
         if (d < best) { best = d; match = i; }
     }
     if (match >= 0) { g_taken[match].blew++; g_takenBlasts++; }
+    int grown = -1;
+    for (int i = 0; i < g_nGrown && match < 0; i++)
+    {
+        float dx = e->position[0] - g_grown[i].pos[0], dy = e->position[1] - g_grown[i].pos[1], dz = e->position[2] - g_grown[i].pos[2];
+        if (dx * dx + dy * dy + dz * dz < 2.25f && g_now - g_grown[i].at > 0.5) { grown = i; break; }
+    }
+    if (grown >= 0) { g_grown[grown].blew++; g_grownBlasts++; }
+    if (grown >= 0) Log("MD-6 blast %u at %.1f %.1f %.1f: ON A GROWN-BACK MINE'S PLACE (the grown mine went off by itself)", g_md6Blasts, (double)e->position[0], (double)e->position[1], (double)e->position[2]);
     if (g_md6Blasts <= 60 || match >= 0)
         Log("MD-6 blast %u at %.1f %.1f %.1f from %u (owner %u, creditor %llx)%s", g_md6Blasts, (double)e->position[0], (double)e->position[1], (double)e->position[2], e->source,
             e->owner, (unsigned long long)e->creditor, match >= 0 ? ": ON A TAKEN MINE'S PLACE (the switched-off mine still blew)" : "");
@@ -181,9 +241,10 @@ static void OnExplosion(HfMod* mod, const HfEventInfo* info, void* user)
 
 static void OnMission(HfMod* mod, const HfEventInfo* info, void* user)
 {
-    if (info->kind == HF_ON_MISSION_START) { g_inMission = 1; g_nTaken = 0; g_md6Kills = g_md6Blasts = g_takenBlasts = 0; Log("mission start"); return; }
+    if (info->kind == HF_ON_MISSION_START) { g_inMission = 1; g_nTaken = 0; g_nGrown = 0; g_grownBlasts = 0; g_md6Kills = g_md6Blasts = g_takenBlasts = 0; Log("mission start"); return; }
     g_inMission = 0;
-    Log("mission end: the MD-6 was credited %u kills; %u MD-6 blasts, %u of them on the %d taken mines' places", g_md6Kills, g_md6Blasts, g_takenBlasts, g_nTaken);
+    Log("mission end: the MD-6 was credited %u kills; %u MD-6 blasts, %u of them on the %d taken mines' places, %u on the %d grown-back mines' places", g_md6Kills, g_md6Blasts, g_takenBlasts, g_nTaken,
+        g_grownBlasts, g_nGrown);
 }
 
 static void Tick(HfMod* mod, float dt, void* user)
@@ -193,9 +254,11 @@ static void Tick(HfMod* mod, float dt, void* user)
     g_now += dt;
     if (!game || !g_inMission) return;
     if (g_now >= next) { next = g_now + 1.0; Watch(); }
-    int down = Focused() && (GetAsyncKeyState(VK_F7) & 0x8000) != 0;
+    static int was6;
+    int focused = Focused(), down = focused && (GetAsyncKeyState(VK_F7) & 0x8000) != 0, down6 = focused && (GetAsyncKeyState(VK_F6) & 0x8000) != 0;
     if (down && !was) TakeHalf();
-    was = down;
+    if (down6 && !was6) Regrow();
+    was = down; was6 = down6;
 }
 
 static void Loaded(HfMod* mod, HfEvent event, void* user)
@@ -205,7 +268,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     if (!g || size != 74727424u) { Log("REFUSED: game.dll is not build " BUILD "'s"); return; }
     game = g;
     g_removeOk = hf->code_matches(game + 0x9DDA5F, "48 8b 05 a2 88 94 02 8b 16 48 8b 0d 31 e5 a8 02 4c 8b 40 08 41 ff 50 60");
-    Log("ready: call in an MD-6 Anti-Personnel Minefield; in a mission F7 switches off every other armed mine of the newest field%s",
+    Log("ready: call in an MD-6 Anti-Personnel Minefield; in a mission F7 switches off every other armed mine of the newest field, F6 grows up to 6 of its blown mines back%s",
         g_removeOk ? "" : " (the unit removal is not the reviewed code: their units stay)");
 }
 
@@ -213,7 +276,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
     hf = api;
     self = mod;
-    if (!api || api->version < 11 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
+    if (!api || api->version < 16 || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
     Log("Minefield Probe " VERSION ": research for the Veterancy System's MD-6 (its kills, and switching off the game's own mines)");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     int ok = api->subscribe(mod, HF_ON_STAT, OnStat, NULL, 0) && api->subscribe(mod, HF_ON_EXPLOSION, OnExplosion, NULL, 0) &&
