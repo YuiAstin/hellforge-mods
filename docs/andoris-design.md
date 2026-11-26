@@ -14,6 +14,9 @@ Decided (Yui, 2026-11-26):
   assets); the Escort Probe (branch `escort-probe`) tests ours.
 - **Yui models and animates the stick bugs himself**, as a first model. Its block-out is
   `tools/blender/andoris_stickbug.py` (below).
+- **Her stick bugs walk**, as they do in GFL2 (the source's "can't move" is the grid rule, not how they look).
+- **Her rifle stays Physical.** Only what the kit says is Electric is Electric: Simplified Decision's shot, the stick
+  bugs' bolts and the chain of Negative Charge.
 - As every GFL2 kit: three skills on keys, the T-Doll package (stamina run to 0 sets off a Hellbomb on her; more health
   and stamina), solo or host. The Confectance Index isn't ported (Leva's rule): what GFL2 pays in Confectance, a
   cooldown pays here.
@@ -46,7 +49,7 @@ Z, X, C.
   2 s without being hit. Her stick bugs stack it the same way.
 - **Taking damage heals:** 5% of her health back after a hit, at most once a second (a cap, so a flamethrower doesn't
   turn it into immunity).
-- **Striking a Negative-Charged enemy** with her weapon heals her 20%, at most once every 3 s.
+- **Striking a Negative-Charged enemy** with any hit of hers heals her 20%, at most once every 3 s.
 - **Shared damage** (co-op): 45% of the damage a Positive-Charged Helldiver takes comes off them and onto her. Later:
   only in co-op, and her own copy of the hit runs through her own reductions.
 
@@ -124,7 +127,4 @@ legs unfolding).
 ## Open
 
 - The numbers: all first defaults, for play tests.
-- Whether her stick bugs walk (SEAF body) or stand where placed, as GFL2's do: the probe decides what's possible,
-  Yui decides which.
 - Shared damage: co-op only; left for later.
-- Whether her plain rifle fire should count as Electric (it doesn't in GFL2; Test Fire Practice is Physical).
