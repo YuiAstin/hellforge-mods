@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.escort-probe",
   "name": "Escort Probe (research)",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Research only, for Andoris's bodyguards: can a mod spawn the game's SEAF trooper beside you, keep it with you, and does it fight and take hits? In a mission: Insert a trooper beside you (2 at most, a third replaces the oldest), Home following on/off, Delete takes them away. Logs their distance, health and the hits they take. Solo or host. Turn off when done.",
   "gameplay": false,
   "code": {

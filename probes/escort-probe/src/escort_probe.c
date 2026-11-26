@@ -33,7 +33,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
@@ -151,21 +151,29 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     if (shown++ < 40) Log("  spawned near our call: entity %u, resource %016llx%s", s->entity, (unsigned long long)s->resource, s->resource == SEAF ? " (a trooper)" : "");
 }
 
-/* ---- 0.2.0: what an order changes ---------------------------------------------------------------------------------- */
-#define BEH 0x1F8
-#define SQ 0x2510
-static uint32_t g_watch, g_squad;
+/* ---- 0.2.x: what an order changes ---------------------------------------------------------------------------------- */
+/* 0.2.0 watched the behaviour and squad records: a lone trooper perceives through itself, has no squad, and "follow me"
+ * left no trace there. 0.2.1 watches the game's friendly NPCs ([game+0x3326588]: its own 0x4A0 bytes, then the map at
+ * +0x4B8 and two records a unit, 0x28 bytes at +0x4D8 and 0x20 at +0x4E0) and the commanders ([game+0x33265D8]: the map
+ * at +0x20, records of 0x70 bytes at +0x40 and 0xC0 at +0x48), the escort's and your Helldiver's. (Their add helpers
+ * 0x545730 and 0x54A530; growth functions 0x7B9310, 0x865A60 name FriendlyNpcComponent and CommanderComponent.) */
+enum { R_BEH, R_NPCHEAD, R_NPC28, R_NPC20, R_CMD70, R_CMDC0, R_ME70, R_MEC0, R_N };
+static const char* const kRegion[R_N] = {"behaviour", "friendly-npc manager", "escort npc+0x4D8", "escort npc+0x4E0", "escort commander+0x40",
+                                         "escort commander+0x48", "YOUR commander+0x40", "YOUR commander+0x48"};
+static const uint32_t kSize[R_N] = {0x1F8, 0x4A0, 0x28, 0x20, 0x70, 0xC0, 0x70, 0xC0};
+#define MAXR 0x4A0
+static uint32_t g_watch;
 static double g_watchSince;
-static uint8_t g_beh[2][BEH], g_sq[2][SQ], g_noiseB[BEH / 4], g_noiseS[SQ / 4];
+static uint8_t g_snap[2][R_N][MAXR], g_noise[R_N][MAXR / 4];
 static int g_haveSnap, g_cur, g_baselineSaid;
 static unsigned g_diffLines;
 
-static uintptr_t SquadRecord(uint32_t squad)
+static uintptr_t InManager(uintptr_t cell, uint32_t mapOff, uint32_t recOff, uint32_t stride, uint32_t e)
 {
-    uintptr_t m = Pointer(game + 0x33265A0), recs;
-    uint32_t i, count;
-    if (!m || !squad || !Lookup(m + 0x20, squad, 1048576, &i) || !ReadAt(m + 0xC, &count, 4) || i >= 4096 || !(recs = Pointer(m + 0x40))) return 0;
-    return recs + 0x2510ull * i;
+    uintptr_t m = Pointer(game + cell), recs;
+    uint32_t i;
+    if (!m || !e || !Lookup(m + mapOff, e, 1048576, &i) || i >= 65536 || !(recs = Pointer(m + recOff))) return 0;
+    return recs + (uintptr_t)stride * i;
 }
 static uintptr_t BehaviourOf(uint32_t e)
 {
@@ -173,6 +181,22 @@ static uintptr_t BehaviourOf(uint32_t e)
     uint32_t i, count;
     if (!m || !Lookup(m + 0x40, e, 1048576, &i) || !ReadAt(m + 0x20, &count, 4) || i >= count || i >= 16384 || !(recs = Pointer(m + 0x60))) return 0;
     return recs + 0x1F8ull * i;
+}
+static uintptr_t Region(int r)
+{
+    uint32_t me = atomic_load(&g_avatar);
+    switch (r)
+    {
+    case R_BEH: return BehaviourOf(g_watch);
+    case R_NPCHEAD: return Pointer(game + 0x3326588);
+    case R_NPC28: return InManager(0x3326588, 0x4B8, 0x4D8, 0x28, g_watch);
+    case R_NPC20: return InManager(0x3326588, 0x4B8, 0x4E0, 0x20, g_watch);
+    case R_CMD70: return InManager(0x33265D8, 0x20, 0x40, 0x70, g_watch);
+    case R_CMDC0: return InManager(0x33265D8, 0x20, 0x48, 0xC0, g_watch);
+    case R_ME70: return InManager(0x33265D8, 0x20, 0x40, 0x70, me);
+    case R_MEC0: return InManager(0x33265D8, 0x20, 0x48, 0xC0, me);
+    }
+    return 0;
 }
 static const char* Whose(uint32_t v)
 {
@@ -183,31 +207,42 @@ static const char* Whose(uint32_t v)
     if (g_avatarNet && v == g_avatarNet) return "  <- your Helldiver's network id";
     if (me && Descriptor(me, d) && v == Word(d + 12)) return "  <- your Helldiver's unit";
     if (v == g_watch) return "  <- the escort itself";
-    if (v == g_squad) return "  <- its squad";
     return "";
+}
+/* a region's words that hold an id of yours or the escort's, at the start */
+static void Ids(int r, const uint8_t* b)
+{
+    char line[600];
+    int n = 0, any = 0;
+    for (uint32_t o = 0; o + 4 <= kSize[r]; o += 4)
+    {
+        const char* w = Whose(Word(b + o));
+        if (*w && n < 520) { n += snprintf(line + n, sizeof line - n, " +0x%x:%s", o, w + 6); any = 1; }
+    }
+    if (any) Log("    %s holds:%s", kRegion[r], line);
 }
 static void Watch(uint32_t e)
 {
-    g_watch = e; g_squad = 0; g_haveSnap = 0; g_baselineSaid = 0; g_watchSince = g_now;
-    memset(g_noiseB, 0, sizeof g_noiseB); memset(g_noiseS, 0, sizeof g_noiseS);
-    uintptr_t br = BehaviourOf(e);
-    if (br) ReadAt(br + 0x68, &g_squad, 4);
-    uint8_t d[24];
-    Log("watching escort %u: behaviour record %s, squad entity %u (%s), squad record %s", e, br ? "found" : "NOT found", g_squad,
-        g_squad && Descriptor(g_squad, d) ? "readable" : "unreadable", SquadRecord(g_squad) ? "found" : "NOT found");
+    g_watch = e; g_haveSnap = 0; g_baselineSaid = 0; g_watchSince = g_now;
+    memset(g_noise, 0, sizeof g_noise);
+    char found[300];
+    int n = 0;
+    for (int r = 0; r < R_N; r++) n += snprintf(found + n, sizeof found - n, "%s%s %s", r ? "," : "", kRegion[r], Region(r) ? "found" : "NOT found");
+    Log("watching escort %u (you: entity %u, network %u): %s", e, atomic_load(&g_avatar), g_avatarNet, found);
 }
-static void Diff(const char* what, const uint8_t* a, const uint8_t* b, size_t n, uint8_t* noise, int baseline)
+static void Diff(int r, const uint8_t* a, const uint8_t* b, int baseline)
 {
-    for (size_t o = 0; o + 4 <= n; o += 4)
+    for (uint32_t o = 0; o + 4 <= kSize[r]; o += 4)
     {
         uint32_t x = Word(a + o), y = Word(b + o);
+        uint8_t* noise = &g_noise[r][o / 4];
         if (x == y) continue;
-        if (baseline) { if (noise[o / 4] < 255) noise[o / 4]++; continue; }
-        if (noise[o / 4]) continue;
+        if (baseline) { if (*noise < 255) (*noise)++; continue; }
+        if (*noise && !*Whose(y) && !*Whose(x)) continue;   /* noise, unless an id comes or goes */
         float fx, fy;
         memcpy(&fx, &x, 4); memcpy(&fy, &y, 4);
-        if (g_diffLines++ < 400)
-            Log("  %s +0x%04zx: %08x -> %08x (u %u -> %u, f %g -> %g)%s", what, o, x, y, x, y, (double)fx, (double)fy, Whose(y));
+        if (g_diffLines++ < 600)
+            Log("  %s +0x%04x: %08x -> %08x (u %u -> %u, f %g -> %g)%s%s", kRegion[r], o, x, y, x, y, (double)fx, (double)fy, Whose(y), *Whose(x) && !*Whose(y) ? "  (an id went)" : "");
     }
 }
 static void WatchFrame(void)
@@ -215,20 +250,14 @@ static void WatchFrame(void)
     static double next;
     if (!g_watch || g_now < next) return;
     next = g_now + 0.25;
-    uintptr_t br = BehaviourOf(g_watch), sr;
-    uint32_t sq = 0;
-    if (!br) { Log("escort %u: its behaviour record is gone (dead or taken away): watch ended", g_watch); g_watch = 0; return; }
-    ReadAt(br + 0x68, &sq, 4);
-    if (sq != g_squad) { Log("  escort %u now perceives through %u (was %u)%s", g_watch, sq, g_squad, Whose(sq)); g_squad = sq; g_haveSnap = 0; }
-    int cur = g_cur, prev = !g_cur;
-    if (!ReadAt(br, g_beh[cur], BEH)) return;
-    sr = SquadRecord(g_squad);
-    if (!sr || !ReadAt(sr, g_sq[cur], SQ)) memset(g_sq[cur], 0, SQ);
-    int baseline = g_now - g_watchSince < 4.0;
-    if (g_haveSnap)
+    if (!BehaviourOf(g_watch)) { Log("escort %u: its behaviour record is gone (dead or taken away): watch ended", g_watch); g_watch = 0; return; }
+    int cur = g_cur, prev = !g_cur, baseline = g_now - g_watchSince < 4.0;
+    for (int r = 0; r < R_N; r++)
     {
-        Diff("behaviour", g_beh[prev], g_beh[cur], BEH, g_noiseB, baseline);
-        Diff("squad", g_sq[prev], g_sq[cur], SQ, g_noiseS, baseline);
+        uintptr_t at = Region(r);
+        if (!at || !ReadAt(at, g_snap[cur][r], kSize[r])) memset(g_snap[cur][r], 0, kSize[r]);
+        if (!g_haveSnap) Ids(r, g_snap[cur][r]);
+        else Diff(r, g_snap[prev][r], g_snap[cur][r], baseline);
     }
     if (!baseline && !g_baselineSaid) { g_baselineSaid = 1; Log("baseline done for escort %u: from now on, changes only (give your orders)", g_watch); }
     g_haveSnap = 1;
