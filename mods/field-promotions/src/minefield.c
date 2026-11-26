@@ -54,6 +54,7 @@ static double g_now;
 static int s_mdL2 = 30, s_mdL3 = 150, s_mdRegrow = 1, s_mdLaunch = 1;
 static float s_mdRegrowSeconds = 10, s_mdRegrowWindow = 180, s_mdTrigger = 2.5f, s_mdFuse = 0.4f, s_mdArm = 2;
 static float s_mdLaunchRange = 10, s_mdLaunchSpeed = 35, s_mdLaunchFree = 0.3f, s_mdLaunchTurn = 540, s_mdLaunchCatch = 2.5f;
+static float s_mdLaunchGap = 0.5f, s_mdLaunchGapAll = 0.2f;
 /* inigen:end */
 
 int md_setting(const char* key, double v)
@@ -73,6 +74,8 @@ int md_setting(const char* key, double v)
     else if (!strcmp(key, "md_launch_free")) s_mdLaunchFree = (float)CL(v, 0, 3);
     else if (!strcmp(key, "md_launch_turn")) s_mdLaunchTurn = (float)CL(v, 30, 1440);
     else if (!strcmp(key, "md_launch_catch")) s_mdLaunchCatch = (float)CL(v, 0, 10);
+    else if (!strcmp(key, "md_launch_gap")) s_mdLaunchGap = (float)CL(v, 0, 10);
+    else if (!strcmp(key, "md_launch_gap_all")) s_mdLaunchGapAll = (float)CL(v, 0, 10);
     else return 0;
     return 1;
 #undef CL
@@ -90,9 +93,13 @@ void md_write_defaults(FILE* f)
                "; Level 3: 1 an enemy within md_launch_range m makes a mine launch a shot straight up (md_launch_free s), which\n"
                "; then turns md_launch_turn degrees a second onto that enemy at md_launch_speed m/s and lands the mine's blast;\n"
                "; within md_launch_catch m of any enemy it turns straight into it. 0: level 3 mines go off as level 2's.\n"
-               "md_launch = %d\nmd_launch_range = %g\nmd_launch_speed = %g\nmd_launch_free = %g\nmd_launch_turn = %g\nmd_launch_catch = %g\n",
+               "md_launch = %d\nmd_launch_range = %g\nmd_launch_speed = %g\nmd_launch_free = %g\nmd_launch_turn = %g\nmd_launch_catch = %g\n"
+               "; At most one launch every md_launch_gap s from each field, and every md_launch_gap_all s from all of them together\n"
+               "; (a field that lands in a horde fires through it instead of all at once: many shots at once lag the game).\n"
+               "md_launch_gap = %g\nmd_launch_gap_all = %g\n",
         s_mdL2, s_mdL3, (double)s_mdTrigger, (double)s_mdFuse, s_mdRegrow, (double)s_mdRegrowSeconds, (double)s_mdRegrowWindow, (double)s_mdArm, s_mdLaunch,
-        (double)s_mdLaunchRange, (double)s_mdLaunchSpeed, (double)s_mdLaunchFree, (double)s_mdLaunchTurn, (double)s_mdLaunchCatch);
+        (double)s_mdLaunchRange, (double)s_mdLaunchSpeed, (double)s_mdLaunchFree, (double)s_mdLaunchTurn, (double)s_mdLaunchCatch, (double)s_mdLaunchGap,
+        (double)s_mdLaunchGapAll);
 }
 /* inigen:end */
 
@@ -155,8 +162,9 @@ static void ModelHide(uint32_t handle)
 
 /* ---- the fields the mod runs ------------------------------------------------------------------------------------- */
 typedef struct Mine { int on; float pos[3]; uint32_t unit; double boomAt, blownAt, armAt, launchedAt; } Mine;
-typedef struct Field { int on; float centre[3]; double born; int n; Mine mine[MINES]; } Field;
+typedef struct Field { int on; float centre[3]; double born, lastLaunch; int n; Mine mine[MINES]; } Field;
 static Field g_field[FIELDS];
+static double g_lastLaunchAll;
 typedef struct Beacon { float pos[3]; double at; } Beacon;
 static Beacon g_beacon[4];
 static unsigned g_taken, g_blasts, g_launches, g_regrown, g_ownKills, g_corpses, g_noLook, g_launchLog;
@@ -474,7 +482,10 @@ static void MinesFrame(void)
             if (g_now < m->armAt) continue;
             if (!m->boomAt)
             {
-                uint32_t e = level >= 3 && s_mdLaunch && g_launchReady ? Nearest(m->pos, s_mdLaunchRange, p) : 0;
+                /* 0.21.6: one launch every md_launch_gap s a field, md_launch_gap_all s for all (0.21.5: 40 of a field's 44
+                 * mines fired within 9 s of it landing in a horde, 15 in its first second) */
+                int ready = level >= 3 && s_mdLaunch && g_launchReady && g_now - f->lastLaunch >= s_mdLaunchGap && g_now - g_lastLaunchAll >= s_mdLaunchGapAll;
+                uint32_t e = ready ? Nearest(m->pos, s_mdLaunchRange, p) : 0;
                 if (e && Launch_(m->pos, e))
                 {
                     /* every launch logged (40 a mission): which mine, whether its look was there, how long since its last */
@@ -484,6 +495,7 @@ static void MinesFrame(void)
                         g_hf->log(g_mod, "MD-6 launch %u: field %d mine %d at %.1f %.1f %.1f (look %s)%s%.1f s since its last", g_launches, fi, k, (double)m->pos[0], (double)m->pos[1],
                             (double)m->pos[2], seen ? "shown" : "NOT SHOWN", m->launchedAt > 0 ? ", " : ", first; ", m->launchedAt > 0 ? g_now - m->launchedAt : 0.0);
                     m->launchedAt = g_now;
+                    f->lastLaunch = g_lastLaunchAll = g_now;
                     if (m->unit) ModelHide(m->unit);
                     m->unit = 0; m->on = 0; m->blownAt = g_now;
                     continue;
@@ -576,6 +588,7 @@ void md_reset(void)
         g_taken, g_blasts, g_launches, g_shotsSeen, g_regrown, g_ownKills, g_corpses);
     for (int i = 0; i < FIELDS; i++) if (g_field[i].on && fp_in_mission()) for (int k = 0; k < g_field[i].n; k++) if (g_field[i].mine[k].unit) ModelHide(g_field[i].mine[k].unit);
     memset(g_field, 0, sizeof g_field);
+    g_lastLaunchAll = 0;
     memset(g_beacon, 0, sizeof g_beacon);
     memset(g_boom, 0, sizeof g_boom);
     g_nshot = g_npend = 0;
