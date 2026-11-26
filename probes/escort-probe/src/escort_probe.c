@@ -33,7 +33,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.2"
+#define VERSION "0.3.0"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
@@ -297,6 +297,14 @@ static void Tick(HfMod* mod, float dt, void* user)
     SpawnFrame();
     FollowFrame();
     WatchFrame();
+}
+/* 0.3.0: the Lua half (data/, built from hud-src/addon.lua) logs through here: its lines go into this log */
+HF_MOD_EXPORT int escort_lua_log(unsigned version, const char* text)
+{
+    static unsigned lines;
+    if (version != 1 || !text) return 0;
+    if (lines++ < 4000) Log("[lua] %.480s", text);
+    return 1;
 }
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {

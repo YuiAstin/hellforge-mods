@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "name": "Escort Probe Lua",
+  "resource": "mods/yui/escort_probe",
+  "guid": "565a5c74-b43d-5baf-bec8-7afda18e7439",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.30.0",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  },
+  "sdk": "../../dl/HD2Runtime/sdk",
+  "ide_library": "../../dl/HD2Runtime/sdk/stubs"
+}
