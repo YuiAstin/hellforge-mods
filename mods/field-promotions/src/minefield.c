@@ -163,11 +163,21 @@ typedef struct Boom { float pos[3]; double at; } Boom;
 static Boom g_boom[32];
 static unsigned g_boomNext;
 
+/* an enemy: on a side (the game's faction masks), and not yours. 0.21.2's mines also took units with no side, and shot at
+ * a black-box objective: mission objects have a behaviour too, but no faction. Unreadable masks (another build): any. */
+static unsigned g_sideless;
 static int Hostile(uint32_t e, uint32_t mine)
 {
-    uint32_t me = fp_avatar(), a = me ? fp_side(me) : 0, b = fp_side(e);
     (void)mine;
-    return !(a && b && (a & b));
+    if (!fp_side_ok()) return 1;
+    uint32_t me = fp_avatar(), a = me ? fp_side(me) : 0, b = fp_side(e);
+    if (!b)
+    {
+        if (g_sideless++ < 8) g_hf->log(g_mod, "MD-6 minefield: entity %u (resource %016llX) has no side: not an enemy (a mission object)", e,
+            (unsigned long long)gas_entity_resource(e));
+        return 0;
+    }
+    return !(a && (a & b));
 }
 /* the enemies about, read once every 0.1 s (a field's 48 mines each looking through the enemy list every update would
  * read the game's records thousands of times a frame): the hostile ones within 80 m of a field of the mod's or a shot */
@@ -387,12 +397,45 @@ static int Launch_(const float at[3], uint32_t target)
     if (!r) { static unsigned told; if (told++ < 3) g_hf->log(g_mod, "MD-6 minefield: a launch was refused (%s): the mine goes off where it is", g_hf->last_log ? g_hf->last_log(g_mod) : ""); return 0; }
     if (r == HF_ACT_WAITING) return 0;
     g_pending[g_npend++] = (Pending){target, g_now};
+    if (g_launches < 6) g_hf->log(g_mod, "MD-6 minefield: a mine launches at entity %u (resource %016llX, side %08x)", target, (unsigned long long)gas_entity_resource(target),
+        fp_side(target));
     { static unsigned k; g_aimed[k++ % 16].e = target; g_aimed[(k - 1) % 16].at = g_now; }
     g_launches++;
     return 1;
 }
 
 /* ---- the mines' frame ----------------------------------------------------------------------------------------------- */
+/* a mine whose look is gone (the game took its unit away: a blast next to it, or culling) is spent, as if it had gone
+ * off, so it never fires unseen (0.21.2 launched from mines whose model had gone) */
+static unsigned g_unseen;
+static int g_modelCheck = -1;   /* -1 not tried, 1 the game finds the mines' units, 0 it found none of a new field's (off) */
+static void CheckModels(void)
+{
+    HfFn_UnitFromHandle unitOf = hf_fn_UnitFromHandle(g_mod);
+    if (!unitOf || !g_modelCheck) return;
+    if (g_modelCheck < 0)
+    {
+        int found = 0, asked = 0;
+        for (int fi = 0; fi < FIELDS; fi++)
+            for (int k = 0; g_field[fi].on && k < g_field[fi].n; k++)
+                if (g_field[fi].mine[k].on && g_field[fi].mine[k].unit) { asked++; found += unitOf(g_field[fi].mine[k].unit) != NULL; }
+        if (!asked) return;
+        g_modelCheck = found > 0;
+        g_hf->log(g_mod, "MD-6 minefield: the game finds %d of %d mines' units: %s", found, asked, found ? "a mine whose look goes is spent" : "not checked (none found)");
+        if (!g_modelCheck) return;
+    }
+    for (int fi = 0; fi < FIELDS; fi++)
+        for (int k = 0; g_field[fi].on && k < g_field[fi].n; k++)
+        {
+            Mine* m = &g_field[fi].mine[k];
+            if (!m->on || m->boomAt) continue;
+            if (m->unit && unitOf(m->unit)) continue;
+            if (m->unit && g_models) g_models--;
+            m->unit = 0; m->on = 0; m->blownAt = g_now;
+            if (g_unseen++ < 6) g_hf->log(g_mod, "MD-6 minefield: a mine's look is gone at %.0f %.0f %.0f: it is spent (grows back as a blown one)", (double)m->pos[0],
+                (double)m->pos[1], (double)m->pos[2]);
+        }
+}
 static void MinesFrame(void)
 {
     int level = Level();
@@ -505,7 +548,7 @@ void md_tick(double now, float dt)
     g_now = now;
     if (!fp_in_mission() || Level() < 2 || !Ok()) return;
     static double next;
-    if (now >= next) { next = now + 0.25; WatchFields(); }
+    if (now >= next) { next = now + 0.25; WatchFields(); CheckModels(); }
     Snapshot(g_nshot > 0);
     MinesFrame();
     if (g_launchType) ShotsFrame(dt);   /* keeps the pool's count up to date, so a new shot is found the update it leaves */
