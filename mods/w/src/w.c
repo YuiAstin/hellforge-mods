@@ -865,8 +865,27 @@ static void D12Detonate(void)
     Log("D12: %d marks set off; the cooldown %.0f s from now", n, (double)s_d12Cooldown);
 }
 static void MineBlast(const float at[3], uint32_t kind);
+/* 0.9.1: what a mark's blast did to what it was on: its health just before, and 1.5 s after (the spawner question) */
+static struct { uint32_t entity; int32_t before; double at; } g_d12After[8];
+static int HealthNow(uint32_t e)
+{
+    uintptr_t r = HealthRec(e);
+    uint8_t b[416];
+    return r && ReadAt(r, b, sizeof b) ? (int32_t)Word(b + 20) : -1;
+}
+static void D12AfterFrame(void)
+{
+    for (int i = 0; i < 8; i++)
+    {
+        if (!g_d12After[i].entity || g_now < g_d12After[i].at) continue;
+        Log("D12: 1.5 s after its blast, entity %u's health %d (was %d)%s", g_d12After[i].entity, HealthNow(g_d12After[i].entity), g_d12After[i].before,
+            HealthNow(g_d12After[i].entity) < 0 ? ": gone or no health record" : "");
+        g_d12After[i].entity = 0;
+    }
+}
 static void MarkFrame(void)
 {
+    D12AfterFrame();
     for (int i = 0; i < MARKS; i++)
     {
         MarkT* m = &g_mark[i];
@@ -875,11 +894,12 @@ static void MarkFrame(void)
         if (!m->boomAt) { if (g_now - m->born > s_d12Life) m->on = 0; continue; }
         if (g_now < m->boomAt) continue;
         float at[3] = {m->pos[0], m->pos[1], m->pos[2] + (m->foe ? 0.8f : 0.5f)};
-        if (!m->foe)   /* a structure: at half its height (a spawner stands tall over its root) */
-        {
+        {   /* anything tall at half its height: a spawner stands tall over its root (and the kit counts one with health an
+             * enemy: 0.9.1's first build put those at 0.8 m) */
             uint8_t d[24];
             float top = Descriptor(m->entity, d) && Quad(d) == m->res ? UnitTop(Word(d + 12), m->pos) : 0;
-            if (top * 0.5f > 0.5f) at[2] = m->pos[2] + top * 0.5f;
+            if (top * 0.5f > at[2] - m->pos[2]) at[2] = m->pos[2] + top * 0.5f;
+            if (g_marksBlown < 30 && top > 0) Log("D12: its height %.1f m: the blast %.1f m over its root", (double)top, (double)(at[2] - m->pos[2]));
         }
         int ok = 0, kind = g_d12UseFallback ? s_d12Fallback : s_d12Explosion, r = -1;
         if (!g_d12UseFallback && hf->spawn_explosion)
@@ -899,6 +919,9 @@ static void MarkFrame(void)
             r = hf->spawn_explosion(self, (uint32_t)s_d12Fallback, at);
             if (r == HF_ACT_WAITING && g_now < m->boomAt + 5) continue;
         }
+        if (g_marksBlown < 30)
+            for (int i = 0; i < 8; i++)
+                if (!g_d12After[i].entity) { g_d12After[i].entity = m->entity; g_d12After[i].before = HealthNow(m->entity); g_d12After[i].at = g_now + 1.5; break; }
         {
             unsigned k = atomic_fetch_add(&g_d12BlastNext, 1) % 8;
             memcpy(g_d12BlastPos[k], at, sizeof g_d12BlastPos[k]);
@@ -1780,7 +1803,7 @@ static void BlastDispatch(uintptr_t a, void* out, const void* hit)
             int32_t before = demo;
             demo = (int32_t)s_d12Demolition;
             memcpy((uint8_t*)out + 0x08, &demo, 4);
-            if (atomic_fetch_add(&g_d12Demolished, 1) < 4) Log("D12: a mark's blast's demolition force %d -> %d", before, demo);
+            if (atomic_fetch_add(&g_d12Demolished, 1) < 60) Log("D12: a mark's blast's demolition force %d -> %d (its origin %.1f %.1f %.1f)", before, demo, (double)o[0], (double)o[1], (double)o[2]);
         }
         return;
     }
