@@ -105,13 +105,21 @@ KB_FN int MineHit(const HfDamageEvent* d)
         g_avatarNet = d->owner;
         Log("her hits: owned by network %u (dealer %u), learned from the game's hit code", d->owner, d->dealer);
     }
+    /* owned by her and dealt by a weapon she holds or carries: her rifle's hits name the rifle as their dealer, and a kit
+     * without the hit hook never counted them (W 0.5.3: "dealer 571, owner 567 (hers: network 567): not hers") */
+    int weapon = 0;
+    if (!match && !hooked && NetOk(g_avatarNet) && d->owner == g_avatarNet && NetOk(d->dealer) && hf->entity_of_network)
+    {
+        uint32_t dealer = hf->entity_of_network(self, d->dealer);
+        weapon = dealer && Mine(dealer);
+    }
     if (d->creditor && g_hitNotes < 6 && (d->kind == 0 || d->kind == 1 || d->kind == 3))
     {
         g_hitNotes++;
         Log("credited hit: kind %u, dealer %u, owner %u (hers: network %u%s): %s", d->kind, d->dealer, d->owner, g_avatarNet,
-            hooked ? ", the hook saw it" : "", match || hooked ? "hers" : "not hers");
+            hooked ? ", the hook saw it" : weapon ? ", her weapon dealt it" : "", match || hooked || weapon ? "hers" : "not hers");
     }
-    return match || hooked;
+    return match || hooked || weapon;
 }
 /* Every hit she deals: its target and where it struck (hit +0x20 target, +0x34 point, +0x80 dealer, +0x100 owner) */
 KB_FN void Observe(const void* hit)
