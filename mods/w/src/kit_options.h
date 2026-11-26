@@ -70,6 +70,8 @@ static const OpRow kOpRows[] = {
      "Metres from a mark's blast within which enemies are frozen.", NULL, 1, OP_LIVE},
     {"d12_explosion", "D12", "Blast Type", OP_FIELD, 0, 2000, 1,
      "The game's explosion type a mark sets off (80: the TED-63 Dynamite's).", NULL, 1, OP_LIVE},
+    {"d12_fallback", "D12", "Fallback Blast", OP_FIELD, 0, 2000, 1,
+     "The blast used when that one is refused or not ready (343: the Orbital Precision Strike's).", NULL, 1, OP_LIVE},
     {"splash_explosion", "Artilleryman", "Burst Type", OP_FIELD, 0, 2000, 1,
      "The game's explosion type her shots set off (257: the G-6 Frag's; 155: the PLAS-1 Scorcher's).", NULL, 1, OP_LIVE},
     {"splash_every", "Artilleryman", "Burst Every", OP_SLIDER, 0.05f, 2, 0.05f,
