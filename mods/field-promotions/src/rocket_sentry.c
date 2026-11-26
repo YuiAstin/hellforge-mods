@@ -408,7 +408,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     const HfSpawnEvent* e = (const HfSpawnEvent*)info;
     if (e->resource != ROCKET)
     {
-        if (s_rsLastStand && e->resource && FoeKind(e->resource)) AddFoe(e->entity, e->resource);
+        if (e->resource && FoeKind(e->resource)) AddFoe(e->entity, e->resource);   /* every enemy: the minefield and the Hot Dog read them too */
         return;
     }
     if (!fp_in_mission()) return;
@@ -476,6 +476,24 @@ void rs_tick(double now)
     }
     if (g_nshots) RunShots(now);
 }
+
+/* ---- the enemies, for the other gear (minefield.c, hot_dog.c) ------------------------------------------------------- */
+int fp_foe_count(void) { return FOES; }
+uint32_t fp_foe(int i) { return i >= 0 && i < FOES ? g_foe[i] : 0; }
+int fp_foe_pos(int i, float p[3]) { return i >= 0 && i < FOES && g_foe[i] && ReadsOk() && FoePos(i, p); }
+int fp_entity_pos(uint32_t entity, float p[3])
+{
+    uint8_t d[24];
+    return entity && ReadsOk() && Descriptor(entity, d) && UnitRoot(Word(d + 12), p);
+}
+uint32_t fp_entity_unit(uint32_t entity)
+{
+    uint8_t d[24];
+    return entity && ReadsOk() && Descriptor(entity, d) ? Word(d + 12) : 0;
+}
+int fp_side_ok(void) { return FactionOk(); }
+uint32_t fp_side(uint32_t entity) { return FactionOk() ? Side(entity) : 0; }
+void fp_drop_foe(uint32_t entity) { for (int i = 0; i < FOES; i++) if (g_foe[i] == entity) g_foe[i] = 0; }
 
 /* ---- levels ------------------------------------------------------------------------------------------------------- */
 static void CheckLevel(void)

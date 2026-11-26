@@ -111,3 +111,33 @@ int fp_mg_shield_hits(void);
 float fp_mg_shield_recharge(void);
 int fp_mg_shield_min_hit(void);
 float fp_mg_lifetime_mult(void);
+
+/* rocket_sentry.c: the enemies it knows (spawned with a behaviour, no turret or Helldiver; dropped on death), for the
+ * other gear. Positions are their units' roots (game build 25480438). */
+int fp_foe_count(void);
+uint32_t fp_foe(int i);
+int fp_foe_pos(int i, float p[3]);
+int fp_entity_pos(uint32_t entity, float p[3]);
+uint32_t fp_entity_unit(uint32_t entity);
+int fp_side_ok(void);
+uint32_t fp_side(uint32_t entity);   /* its faction mask (0: none or not readable) */
+void fp_drop_foe(uint32_t entity);
+
+/* minefield.c: the MD-6 Anti-Personnel Minefield */
+int md_init(const HfApi* hf, HfMod* mod);
+void md_kills(uint64_t resource, int added);
+void md_reset(void);
+void md_tick(double now, float dt);
+int md_level(void);
+int md_setting(const char* key, double v);
+void md_write_defaults(FILE* f);
+
+/* hot_dog.c: the AX/FLAM-75 Hot Dog */
+int hd_init(const HfApi* hf, HfMod* mod);
+void hd_kills(uint64_t resource, int added);
+void hd_reset(void);
+void hd_tick(double now, float dt);
+int hd_level(void);
+int hd_setting(const char* key, double v);
+void hd_write_defaults(FILE* f);
+uint32_t fp_avatar(void);            /* this machine's player's Helldiver (0: none) */

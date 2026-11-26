@@ -33,7 +33,7 @@
 #include "hellforge_content.h"
 #include "field_promotions.h"
 
-#define VERSION "0.20.0"
+#define VERSION "0.21.0"
 
 #define MORTAR_SENTRY HF_ENTITY_AM12_MORTAR_SENTRY
 #define MORTAR_SHELL HF_PROJECTILE_AM12_MORTAR_SENTRY
@@ -180,6 +180,8 @@ void fp_write_defaults(FILE* f)
     ls_write_defaults(f);
     mx_write_defaults(f);
     rs_write_defaults(f);
+    md_write_defaults(f);
+    hd_write_defaults(f);
     fprintf(f, "\n; 1: a banner on screen for each level earned in a mission; 0: off. Also on the MODS tab (Mod Options Menu).\n"
                "hud_toasts = %d\n; Seconds a banner stays on screen (the Maxigun's: 2 more, for its call-in box). Also on the MODS tab.\n"
                "hud_toast_seconds = %g\n"
@@ -240,6 +242,8 @@ static void LoadSettings(void)
         else if (!strncmp(line, "ls_", 3)) ls_setting(line, v);
         else if (!strncmp(line, "mx_", 3)) mx_setting(line, v);
         else if (!strncmp(line, "rs_", 3)) rs_setting(line, v);
+        else if (!strncmp(line, "md_", 3)) md_setting(line, v);
+        else if (!strncmp(line, "hd_", 3)) hd_setting(line, v);
         else if (!strcmp(line, "mg_level2_kills")) g_mgL2 = v < 0 ? 0 : (int)v;
         else if (!strcmp(line, "mg_level3_kills")) g_mgL3 = v < 0 ? 0 : (int)v;
         else if (!strcmp(line, "mg_damage_taken")) g_mgTaken = (float)(v < 0 ? 0 : v > 1 ? 1 : v);
@@ -299,6 +303,8 @@ HF_MOD_EXPORT FpHud* fp_hud_state(void)
     g_hud.gear[n++] = (FpGear){HF_STRATAGEM_ALAS98_LASER_SENTRY, (uint32_t)ls_level()};
     g_hud.gear[n++] = (FpGear){HF_STRATAGEM_M1000_MAXIGUN, (uint32_t)mx_level()};
     g_hud.gear[n++] = (FpGear){HF_STRATAGEM_AMLS4X_ROCKET_SENTRY, (uint32_t)rs_level()};
+    g_hud.gear[n++] = (FpGear){HF_STRATAGEM_MD6_ANTIPERSONNEL_MINEFIELD, (uint32_t)md_level()};
+    g_hud.gear[n++] = (FpGear){HF_STRATAGEM_AXFLAM75_HOT_DOG, (uint32_t)hd_level()};
     n += gas_hud_gear(g_hud.gear + n, 16 - n);
     g_hud.gear_count = (uint32_t)n;
     return &g_hud;
@@ -485,6 +491,8 @@ static void ResetMission(const char* why)
     ls_reset();
     mx_reset();
     rs_reset();
+    md_reset();
+    hd_reset();
     g_hf->log(g_mod, "%s: Mortar Sentry back to level %d", why, g_level);
 }
 
@@ -615,7 +623,7 @@ static void OnStat(HfMod* mod, const HfEventInfo* info, void* user)
                 : e->stat == HF_STAT_HITS ? "hits" : "damage", s->added, (unsigned long long)s->resource,
                 s->resource == MORTAR_SENTRY ? " (Mortar Sentry)" : "");
         }
-        if (e->stat == HF_STAT_KILLS && g_inMission) { gas_kills(s->resource, s->added); gat_kills(s->resource, s->added); mg_kills(s->resource, s->added); ls_kills(s->resource, s->added); mx_kills(s->resource, s->added); rs_kills(s->resource, s->added); }
+        if (e->stat == HF_STAT_KILLS && g_inMission) { gas_kills(s->resource, s->added); gat_kills(s->resource, s->added); mg_kills(s->resource, s->added); ls_kills(s->resource, s->added); mx_kills(s->resource, s->added); rs_kills(s->resource, s->added); md_kills(s->resource, s->added); hd_kills(s->resource, s->added); }
         if (e->stat == HF_STAT_SHOTS && g_inMission) { mx_shots(s->resource, s->added); rs_shots(s->resource, s->added); }
         if (s->resource != MORTAR_SENTRY) continue;
         if (e->stat == HF_STAT_KILLS && g_inMission)
@@ -683,6 +691,8 @@ static void Tick(HfMod* mod, float dt, void* user)
     ls_tick(g_clock);
     mx_tick(g_clock);
     rs_tick(g_clock);
+    md_tick(g_clock, dt);
+    hd_tick(g_clock, dt);
 }
 
 /* Diagnostics: the sentry's burst size and its three fire rate slots, the candidates for "shots per salvo" and "time
@@ -734,7 +744,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* hf, HfMod* mod)
     int ok = hf->subscribe(mod, HF_ON_STAT, OnStat, NULL, 0) & hf->subscribe(mod, HF_ON_EXPLOSION, OnExplosion, NULL, 0) &
              hf->subscribe(mod, HF_ON_STRATAGEM, OnSentryBeacon, NULL, 0) &
              hf->subscribe(mod, HF_ON_MISSION_START, OnMission, NULL, 0) & hf->subscribe(mod, HF_ON_MISSION_END, OnMission, NULL, 0);
-    ok = ok && gas_init(hf, mod, g_gasElement, g_orbitalGas, g_eagleGas) && gat_init(hf, mod) && mg_init(hf, mod) && ls_init(hf, mod) && mx_init(hf, mod) && rs_init(hf, mod);
+    ok = ok && gas_init(hf, mod, g_gasElement, g_orbitalGas, g_eagleGas) && gat_init(hf, mod) && mg_init(hf, mod) && ls_init(hf, mod) && mx_init(hf, mod) && rs_init(hf, mod) && md_init(hf, mod) && hd_init(hf, mod);
     if (!ok || !hf->on_game_thread(mod, Tick, NULL)) { hf->log(mod, "Veterancy System: events or the game thread unavailable"); return 1; }
     g_inMission = hf->game_state(mod) == HF_STATE_MISSION;
     hf->log(mod, "Veterancy System %s: Mortar Sentry level 2 at %d kills, level 3 at %d%s; EMS opener %s (x%.1f speed), 4th shell %s",

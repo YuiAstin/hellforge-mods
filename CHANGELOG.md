@@ -1,11 +1,17 @@
 # Changelog
 
-## 2026-11-25: Veterancy System 0.20.0 (test build)
+## 2026-11-26: Veterancy System 0.21.0 (test build)
+
+Needs HellForge 0.5.
+
+### Added
+- **MD-6 Anti-Personnel Minefield** ranks up (Veteran 30 kills, Elite 150). Veteran: a mine that goes off grows back on its spot 10 s later, for 3 minutes after the field lands. Elite: an enemy within 10 m makes a mine launch a shot straight up that turns onto it and lands the mine's own blast. From Veteran your fields are run by the mod: same spots, same look, same blast.
+- **AX/FLAM-75 Hot Dog** ranks up (Veteran 30 kills, Elite 150). Veteran: napalm, its fire doing double damage and always setting enemies alight, and fire does nothing to you while it's out. Elite: every enemy it sets burning builds a stack a second (your shots on it add one, at most every 0.5 s); at 10 the dog fires a plasma bolt at it for 1,000 damage at AP 6, and the count resets, as it does when the enemy stops burning.
 
 ### Fixed
-- **Rocket Sentry Last Stand works on HellForge 0.5.** HellForge 0.5 makes room for 4,096 entities and moves the game's entity records, so Last Stand found no enemies there and nothing dropped. It now finds them through the game's own lookup when the records have moved, as the character kits do. HellForge 0.4 is unchanged.
+- **Rocket Sentry Last Stand works on HellForge 0.5**, which moves the game's entity records: it now finds enemies through the game's own lookup.
 
-Not played on 0.5 yet: stays on this branch until tested.
+Not played yet: stays on its branch until tested.
 
 ## 2026-11-11: Veterancy System 0.19.1
 
