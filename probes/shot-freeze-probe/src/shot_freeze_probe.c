@@ -39,7 +39,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.3"
+#define VERSION "0.3.0"
 #include "kitbase/kb_core.h"
 
 static double g_now;
@@ -561,6 +561,41 @@ static void OnSpawn(HfMod* mod, const HfSpawnEvent* e, void* user)
         m && ThrowableOf(m, e->entity, &a, &r, NULL) ? " (a throwable)" : "");
 }
 
+/* ==== damage while time is stopped =========================================================================== */
+/* Fire, gas and arcs have nothing in flight to hold (a player flamer's flame is a particle effect whose hits arrive as
+ * damage; an arc hits its whole chain in one frame; clouds and burning ground are areas). So while time is stopped their
+ * damage is withheld: every hit that is damage over time (kind 2: burning, gas, bleeding) or carries an element (fire,
+ * gas, electricity; element 0 is plain bullets and blasts) is cancelled and counted by kind and element, which also
+ * tells which element each of them is. */
+typedef struct Withheld { uint32_t kind, element, hits; int64_t amount; } Withheld;
+static Withheld g_wh[32];
+static int g_nwh;
+static void OnDamagePre(HfMod* mod, HfDamagePreEvent* e, void* user)
+{
+    const HfDamageEvent* d = &e->damage;
+    if (!g_frozen || e->cancel || !(d->kind == 2 || d->element != 0)) return;
+    e->cancel = 1;
+    int k = 0;
+    while (k < g_nwh && !(g_wh[k].kind == d->kind && g_wh[k].element == d->element)) k++;
+    if (k == g_nwh)
+    {
+        if (g_nwh >= 32) return;
+        g_nwh++;
+        memset(&g_wh[k], 0, sizeof g_wh[k]);
+        g_wh[k].kind = d->kind; g_wh[k].element = d->element;
+        Log("  withheld while frozen %.2f s in: first damage of kind %u, element %u (%d on entity %08X at %.1f %.1f %.1f)", g_now - g_frozenAt, d->kind, d->element, d->amount,
+            d->target, (double)d->position[0], (double)d->position[1], (double)d->position[2]);
+    }
+    g_wh[k].hits++;
+    if (d->amount > 0) g_wh[k].amount += d->amount;
+}
+static void WithheldReport(void)
+{
+    for (int k = 0; k < g_nwh; k++)
+        Log("  damage withheld: kind %u, element %u: %u hits, %lld in all", g_wh[k].kind, g_wh[k].element, g_wh[k].hits, (long long)g_wh[k].amount);
+    g_nwh = 0;
+}
+
 /* ==== stop and start ========================================================================================= */
 static void Stop(uintptr_t pool)
 {
@@ -586,6 +621,7 @@ static void Start(uintptr_t pool)
     ReleaseMissiles();
     ReleaseMovers();
     Log("  explosives: %d held; their countdowns run from where they were", g_nfuse);
+    WithheldReport();
     g_afterAt = g_now + 0.3;
 }
 static void Report(void)
@@ -609,7 +645,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     uintptr_t pool = Pool();
     if (!pool)
     {
-        if (g_frozen) { Log("the mission ended while frozen: everything held is forgotten"); g_frozen = 0; }
+        if (g_frozen) { Log("the mission ended while frozen: everything held is forgotten"); g_frozen = 0; g_nwh = 0; }
         g_nshot = g_nthr = g_nfuse = g_nmis = g_nmov = 0; g_afterAt = 0;
         return;
     }
@@ -682,9 +718,10 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     hf = api;
     self = mod;
     if (!api || api->version < 16 || api->size < offsetof(HfApi, global) + sizeof api->global || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
-    Log("Shot Freeze Probe " VERSION ": research towards a time stop (shots, rockets, grenades, missiles and fuses held and let go)");
+    Log("Shot Freeze Probe " VERSION ": research towards a time stop (shots, rockets, grenades, missiles and fuses held and let go; fire, gas and arc damage withheld)");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     if (!api->subscribe(mod, HF_ON_SPAWN, (HfListener)OnSpawn, NULL, 0)) Log("spawn events are unavailable");
+    if (!api->subscribe(mod, HF_ON_DAMAGE_PRE, (HfListener)OnDamagePre, NULL, 0)) Log("damage events are unavailable: fire, gas and arcs are not withheld");
     if (!api->subscribe(mod, HF_ON_MISSION_START, (HfListener)MissionStart, NULL, 0) || !api->on_game_thread(mod, Tick, NULL)) Log("events or the game thread are unavailable");
     return 0;
 }
