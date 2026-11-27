@@ -187,6 +187,10 @@ static void Gun(void)
         if (has && progression)
         {
             g_owned = has(progression, HF_ITEM_M1000_MAXIGUN) ? 1 : 0;
+            /* 0.1.4: the same question for items every profile has, to tell a real "not owned" from a check that reads the
+             * wrong thing (played: "not owned"; the code's field offsets are not the dump's) */
+            Log("HasCatalogueItem, for comparison: AR-23 Liberator %d, MG-43 Machine Gun %d, M-105 Stalwart %d (1 owned; the first should be 1)",
+                has(progression, HF_ITEM_AR23_LIBERATOR) ? 1 : 0, has(progression, HF_ITEM_MG43_MACHINE_GUN) ? 1 : 0, has(progression, HF_ITEM_M105_STALWART) ? 1 : 0);
             Log("the M-1000 Maxigun: %s (asked %u time(s)%s)", g_owned ? "owned: her gun is its copy" : "not owned: her gun is the MG-43's copy", tries,
                 own ? "; through the kit's own pin" : "");
         }

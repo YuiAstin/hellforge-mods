@@ -22,7 +22,6 @@
  *   WieldDrop(e, item, off)  the inventory's drop, and the record's entry at +off cleared if it still names the item
  *   WieldAsk(sel, why)       her switch request for a selection (1-3)
  *   SpawnNear(res, what)     an entity spawned at her feet (0: none); SpawnAt(res, at, what) at a point
- *   EntityPos(e, out)        an entity's position (its unit's root node)
  *   LoadoutPackage(res, *p)  an entity's LoadoutPackage (loaded with load_package; 0 none)
  *   MagRounds(w), MagCapacity(w), MagAdd(w, n), FillUp(w)   a weapon's magazine (-1: none); FillUp: magazine and spares
  *   DepositAmount(bp), DepositSet(bp, n)                    a backpack's ammunition now (-1: none) */
@@ -96,12 +95,6 @@ KB_FN void WieldDrop(uint32_t me, uint32_t item, uint32_t entryOffset)
     if (!im || !g_wieldDrop || !item) return;
     if (rec && ReadAt(rec + entryOffset, &now, 4) && now == item) g_wieldDrop(im, me, item, 0, 0, 1);
     if (rec && ReadAt(rec + entryOffset, &now, 4) && now == item) { now = 0; hf->write(rec + entryOffset, &now, 4); }
-}
-/* an entity's position (its unit's root node; 0: none) */
-KB_FN int EntityPos(uint32_t e, float out[3])
-{
-    uint8_t d[24];
-    return e && Descriptor(e, d) && UnitNode(Word(d + 12), 0, out);
 }
 /* an entity spawned at a point (its pose there, upright), 1 m up as SpawnNear's */
 KB_FN uint32_t SpawnAt(uint64_t res, const float at[3], const char* what)
