@@ -1,17 +1,17 @@
 # Changelog
 
-## 2026-11-27: Veterancy System 0.21.9 (test build)
+## 2026-11-27: Veterancy System 0.20.0
 
 Needs HellForge 0.5.
 
 ### Added
-- **MD-6 Anti-Personnel Minefield** ranks up (Veteran 30 kills, Elite 150). Veteran: a mine that goes off grows back on its spot 10 s later, for 3 minutes after the field lands. Elite: an enemy within 10 m makes a mine launch a shot straight up that turns onto it and lands the mine's own blast, one launch every 0.5 s from each field (and every 0.2 s from all of them), so a field that lands in a horde fires through it instead of all at once. From Veteran your fields are run by the mod: same spots, same look, same blast.
-- **AX/FLAM-75 Hot Dog** ranks up (Veteran 30 kills, Elite 150). Veteran: napalm, its fire doing double damage and always setting enemies alight, and fire does nothing to you while it's out. Elite: every enemy it sets burning builds a stack a second (your shots on it add one, at most every 0.5 s); at 10 the dog fires a plasma bolt at it for 1,000 damage at AP 6, and the count resets, as it does when the enemy stops burning.
+- **MD-6 Anti-Personnel Minefield** ranks up (Veteran 30 kills, Elite 150). From Veteran your fields are run by the mod as they land: same spots, same look, same blast.
+  - Veteran: a mine that goes off grows back on its spot 10 s later (armed 2 s after it shows), for 3 minutes after the field lands.
+  - Elite: an enemy within 10 m makes a mine launch a shot straight up that turns onto it and lands the mine's own blast. One launch every 0.5 s from each field (every 0.2 s from all of them), so a field that lands in a horde fires through it instead of all at once.
+  - The mines leave mission objects (things with no faction, such as a black box) and dead bodies alone.
 
 ### Fixed
 - **Rocket Sentry Last Stand works on HellForge 0.5**, which moves the game's entity records: it now finds enemies through the game's own lookup.
-
-Not played yet: stays on its branch until tested.
 
 ## 2026-11-11: Veterancy System 0.19.1
 

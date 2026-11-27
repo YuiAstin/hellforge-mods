@@ -554,7 +554,7 @@ int fp_living(uint32_t e)
     return !life || !DeadLife(life);
 }
 
-/* ---- the enemies, for the other gear (minefield.c, hot_dog.c) ------------------------------------------------------- */
+/* ---- the enemies, for the other gear (minefield.c) ------------------------------------------------------- */
 int fp_foe_count(void) { return FOES; }
 uint32_t fp_foe(int i) { return i >= 0 && i < FOES ? g_foe[i] : 0; }
 int fp_foe_pos(int i, float p[3]) { return i >= 0 && i < FOES && g_foe[i] && ReadsOk() && FoePos(i, p); }

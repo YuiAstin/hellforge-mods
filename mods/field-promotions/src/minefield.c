@@ -176,6 +176,10 @@ static unsigned g_boomNext;
 /* an enemy: on a side (the game's faction masks), and not yours. 0.21.2's mines also took units with no side, and shot at
  * a black-box objective: mission objects have a behaviour too, but no faction. Unreadable masks (another build): any. */
 static unsigned g_sideless;
+/* this machine's player's Helldiver, from the weapon events (its side tells the mines' enemies) */
+static uint32_t g_avatar;
+uint32_t fp_avatar(void) { return g_avatar; }
+static void OnWeapon(HfMod* mod, const HfEventInfo* info, void* user) { g_avatar = ((const HfWeaponEvent*)info)->avatar; }
 static int Hostile(uint32_t e, uint32_t mine)
 {
     (void)mine;
@@ -619,7 +623,8 @@ int md_init(const HfApi* hf, HfMod* mod)
         if (!g_launchType) hf->log(mod, "MD-6 minefield: the launch shot was refused (%s): level 3 mines go off as level 2's", hf->last_log ? hf->last_log(mod) : "");
         else hf->on(mod, HF_EVENT_PROJECTILES_READY, ProjectilesReady, NULL);
     }
-    int ok = hf->subscribe(mod, HF_ON_STRATAGEM, OnStratagem, NULL, 0) & hf->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0);
+    int ok = hf->subscribe(mod, HF_ON_STRATAGEM, OnStratagem, NULL, 0) & hf->subscribe(mod, HF_ON_KILL, OnKill, NULL, 0) &
+             hf->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0);
     hf->log(mod, "MD-6 Anti-Personnel Minefield: level 2 at %d kills, level 3 at %d; regrowth %s (%.0f s, for %.0f s), launcher mines %s (%.0f m, %.0f m/s)", s_mdL2, s_mdL3,
         s_mdRegrow ? "on" : "off", (double)s_mdRegrowSeconds, (double)s_mdRegrowWindow, s_mdLaunch ? "on" : "off", (double)s_mdLaunchRange, (double)s_mdLaunchSpeed);
     return ok;

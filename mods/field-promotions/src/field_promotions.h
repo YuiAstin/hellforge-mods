@@ -133,12 +133,5 @@ int md_level(void);
 int md_setting(const char* key, double v);
 void md_write_defaults(FILE* f);
 
-/* hot_dog.c: the AX/FLAM-75 Hot Dog */
-int hd_init(const HfApi* hf, HfMod* mod);
-void hd_kills(uint64_t resource, int added);
-void hd_reset(void);
-void hd_tick(double now, float dt);
-int hd_level(void);
-int hd_setting(const char* key, double v);
-void hd_write_defaults(FILE* f);
+/* minefield.c */
 uint32_t fp_avatar(void);            /* this machine's player's Helldiver (0: none) */
