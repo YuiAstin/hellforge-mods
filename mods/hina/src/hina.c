@@ -304,8 +304,32 @@ static void Link(void)
     Log("her gun's backpack (entity %016llx): the gun's record names it in %d place(s); it feeds her gun %s; %d rounds %s / %s", (unsigned long long)g_bpRes,
         named, fed ? "(set)" : "(it named no Maxigun: left)", s_gunRounds, a ? "capacity set" : "capacity REFUSED", b ? "at call-in" : "call-in REFUSED");
 }
+/* 0.1.4: which rounds of the machine guns' magazines are tracers (their pattern: the projectile type of each round), for
+ * Ishbosheth's rounds to take a tracer's look (Yui: tracers, with her gun's damage) */
+static void TracerScan(void)
+{
+    static const struct { uint64_t res; const char* name; } kGuns[] = {
+        {0x11c27d3babb38956ull, "MG-43"}, {0x43a58cb89cfa197cull, "M-1000 Maxigun"}, {HF_ENTITY_MAXIGUN_BACKPACK, "Maxigun Backpack"}};
+    for (unsigned g = 0; g < sizeof kGuns / sizeof kGuns[0]; g++)
+    {
+        char line[400];
+        int n = 0, any = 0;
+        for (int k = 0; k < 32; k++)
+        {
+            HfField f = HF_FIELD_AT(WeaponMagazine, pattern, k);
+            HfLiveValue cur;
+            memset(&cur, 0, sizeof cur);
+            if (!hf->get_live(self, kGuns[g].res, &f, &cur)) break;
+            any = 1;
+            n += snprintf(line + n, sizeof line - n, " %u", (unsigned)cur.now.number);
+            if (n >= (int)sizeof line - 8) break;
+        }
+        Log("tracers: the %s's magazine pattern:%s", kGuns[g].name, any ? line : " (none read)");
+    }
+}
 static void EntitiesReady(HfMod* mod, HfEvent event, void* user)
 {
+    TracerScan();
     for (int i = 0; i < 2; i++) GunRecords(i);
     Link();
     g_entsReady = 1;
