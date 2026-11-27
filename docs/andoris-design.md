@@ -66,7 +66,9 @@ It is also the trigger for her stick bugs (Momentum Support, below).
 A stick bug: one more of her companions, placed where she aims (6 m at most) or beside her, then walking with her.
 3 at most; a 4th takes the oldest away.
 
-- **Takes hits:** 50% of her health, her Dullness, her damage reduction. Enemies are drawn to it.
+- **Takes hits:** 600 health and armour 4, a sentry's (Yui: GFL2's "half her health" is a turn-based number, about
+  62 here; and they are made of metal), plus her Dullness and her damage reduction. Enemies are drawn to it. Its own
+  copy of the SEAF trooper (add_entity) carries the numbers, so the game's troopers keep theirs (kit base principle 6).
 - **A weak gun of its own** (it soaks; it doesn't carry fights).
 - **Momentum Support:** when her Simplified Decision lands, every stick bug within 25 m of that enemy strikes it with
   an Electric bolt (an arc from its muzzle, 100% of her shot's damage) and puts **Negative Charge** on it for 10 s.
