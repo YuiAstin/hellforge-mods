@@ -31,7 +31,8 @@ The character kits and Veterancy System have HUDs drawn with HD2Runtime (Bingus 
 ```
 python tools/deploy.py leva          # copy into ../HellForge/mods (game closed); your own leva.ini is kept
 python tools/inigen.py leva          # regenerate mods/leva/leva.ini (the defaults) after changing settings in the source
-python tools/package.py leva         # ../Releases/leva-<version>.zip, ready for HellForge's ADD MODS
+python tools/precheck.py leva        # before a release: manifest, icons, options page, HUD, skill icons, .ini, build
+python tools/package.py leva         # ../Releases/leva-<version>.zip, ready for HellForge's ADD MODS (runs precheck first)
 python tools/release_art.py Vector portrait.png s1.png s2.png s3.png   # page images for a release (docs/release-format.md)
 ```
 
