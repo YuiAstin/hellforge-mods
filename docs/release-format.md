@@ -10,6 +10,10 @@ How a kit goes out, as Vector 0.2.2 did (2026-11-21). The mechanics of packing a
   since the last public version (a first release: what the kit is).
 - The version is the one played. The zip comes from a clean export of `main`.
 - `THIRD_PARTY_NOTICES.md` and the manifest's description match what the kit now does.
+- `python tools/precheck.py <mod>` passes (tools/package.py runs it and refuses a FAIL): the manifest and its version,
+  the icon, the options page, the HUD built and current, real skill icons, the HUD reading the DLL's state right, the
+  .ini, no F5 or F8, nothing that must not ship, and a clean build. After a play test, `--session <its log folder>`
+  also reads the mod's log for refusals and the session for a crash.
 
 ## Names
 
