@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-27: Veterancy System 0.20.0 (for HellForge 0.5)
+
+- Needs HellForge 0.5 (it does not load on 0.4).
+- The MD-6 Anti-Personnel Minefield ranks up (Veteran 30 kills, Elite 150). From Veteran, a minefield you call in is run by the mod as it lands: the same mines in the same spots, with the same look and blast.
+- Veteran: a mine that goes off grows back on its spot 10 s later (armed 2 s after it shows), for 3 minutes after the field lands.
+- Elite: launcher mines. An enemy within 10 m makes a mine launch a shot straight up that turns onto it and lands the mine's own blast. A field fires one mine every 0.5 s (all fields together one every 0.2 s), so a field that lands in a horde works through it instead of emptying at once.
+- The mines leave mission objects (things with no faction, such as a black box), dead bodies, SEAF and other allies alone.
+- Fixed: the Rocket Sentry's Last Stand found no enemies on HellForge 0.5, which moves the game's entity records; it now finds them through the game's own lookup.
+
 ## 2026-11-27: W 0.9.1
 
 - D12 now destroys Illuminate spawners. A mark's blast reaches 8 m, carries a demolition force of 60 (a spawner needs 50), and on a tall target goes off at half its height instead of at its base.

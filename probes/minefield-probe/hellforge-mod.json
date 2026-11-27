@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.minefield-probe",
+  "name": "Minefield Probe (research)",
+  "version": "0.2.0",
+  "description": "Research only, for the Veterancy System's MD-6 Anti-Personnel Minefield. Logs whether the game credits the minefield's kills to it, and every MD-6 mine blast. In a mission, F7 switches off every other armed mine of your newest minefield (their units removed) to see whether the game's own mines can be taken away; the log says if a switched-off one still blew. F6 grows up to 6 blown mines of that field back in the game's own field, to see whether they go off again. Solo or host. Turn off when done.",
+  "gameplay": false,
+  "code": {
+    "dll": "minefield_probe.dll",
+    "sdk": 16
+  }
+}
