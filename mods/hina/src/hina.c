@@ -174,7 +174,12 @@ static void Gun(void)
             if (ReadAt(game + 0x136FB40, live, sizeof live))
             {
                 differs = 0;
-                for (int k = 0; k < 36 && !differs; k++) if (live[k] != kHas[k]) differs = k + 1;
+                /* the two field offsets (bytes 16-19: the account's item count, 30-33: its items) may differ from the dump's
+                 * (played: +0x1CF0 live where the dump has +0x1CE0): the code's shape is what is compared */
+                for (int k = 0; k < 36 && !differs; k++)
+                    if (!(k >= 16 && k <= 19) && !(k >= 30 && k <= 33) && live[k] != kHas[k]) differs = k + 1;
+                if (!differs && tries == 1)
+                    Log("HasCatalogueItem: its code has the dump's shape (its fields at +0x%02x%02x and +0x%02x%02x%02x)", live[17], live[16], live[32], live[31], live[30]);
                 if (!differs) { has = (HfFn_HasCatalogueItem)(game + 0x136FB40); own = 1; }
                 else if (tries == 1 || tries == 30) Log("HasCatalogueItem: the code differs from the dump's at byte %d (%02x, the dump %02x)", differs - 1, live[differs - 1], kHas[differs - 1]);
             }
@@ -451,7 +456,8 @@ enum { K_IDLE, K_PACKAGE, K_WAITGL, K_PUTAWAY, K_TAKE, K_ASK, K_HELD, K_LETGO, K
 static int g_k;
 static atomic_uint g_gl;                  /* her gun (0: none) */
 static double g_kAt, g_madeAt, g_readyAt, g_awaySince, g_droppedSince;
-static double g_emptySince, g_roundsLogAt;   /* 0.1.4: her rounds at 0 for a second before the gun goes (a reload reads 0) */
+static double g_emptySince, g_roundsLogAt;
+static uint32_t g_picked;                 /* 0.1.4: the weapon she picked up with the gun out (it ends the gun; she keeps it) */   /* 0.1.4: her rounds at 0 for a second before the gun goes (a reload reads 0) */
 static uint32_t g_kSel, g_kOld, g_kNew, g_swapOld;   /* her selection at the start; the support weapon she had; its replacement; the gun a swap replaces */
 static uint64_t g_kOldRes;
 static atomic_uint g_bp;                  /* her gun's backpack (the Maxigun's copy only; 0: none) */
@@ -683,7 +689,10 @@ static void GunFrame(void)
         else if (!g_droppedSince) g_droppedSince = g_now;
         else if (g_now - g_droppedSince > 0.3)
         {
-            Log("Destroyer of Denouement %u over (she dropped it): %d rounds left", g_uses, GunRounds(gl));
+            /* 0.1.4: a weapon picked up in its place (played: the pickup dropped her gun, and her old support weapon then
+             * took the picked one's slot): she keeps the picked one, in hand, and her old one is not given back */
+            g_picked = support && support != gl ? support : 0;
+            Log("Destroyer of Denouement %u over (%s): %d rounds left", g_uses, g_picked ? "she picked up another weapon" : "she dropped it", GunRounds(gl));
             WieldDrop(me, atomic_load(&g_bp), 0xC);
             g_readyAt = g_now + s_gunCooldown;
             g_k = K_REMOVE; g_kAt = g_now;
@@ -718,7 +727,16 @@ static void GunFrame(void)
             if (bp && ResOf(bp) == g_bpRes && remove && em) remove(em, bp);
             atomic_store(&g_bp, 0);
         }
-        g_kNew = g_kOldRes ? SpawnNear(g_kOldRes, "a new support weapon of her kind") : 0;
+        g_kNew = g_kOldRes && !g_picked ? SpawnNear(g_kOldRes, "a new support weapon of her kind") : 0;
+        if (g_picked)
+        {
+            uint32_t sel = 0;
+            uintptr_t r = InventoryRecord(me);
+            if (r) ReadAt(r + 0x1C, &sel, 4);
+            if (sel != 3) WieldAsk(3, "the weapon she picked up in hand");
+            Log("Destroyer of Denouement %u: she keeps the weapon she picked up (%u)", g_uses, g_picked);
+            g_picked = 0;
+        }
         g_bpNew = g_bpOldRes ? SpawnNear(g_bpOldRes, "a new backpack of her kind") : 0;
         if (g_kNew || g_bpNew) { g_k = K_WAITS; g_kAt = g_now + 0.75; }
         else { FillUp(g_weapon[g_kSel]); g_k = K_IDLE; }
