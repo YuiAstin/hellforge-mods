@@ -3,10 +3,13 @@
  "advanced": [
   ["gun_grace", "Destroyer of Denouement", "Switch Grace", "Seconds on her primary or secondary before her gun goes (a stratagem or a grenade never counts).", {"step": 0.1}],
   ["ish_targets", "Ishbosheth", "Most Enemies", "The most enemies in the fan that take its round (the nearest first)."],
-  ["ish_spray", "Ishbosheth", "Sweep Rounds", "Rounds of her gun that sweep across the fan as it goes off."],
+  ["ish_duration", "Ishbosheth", "Barrage Seconds", "How long its barrage lasts (Blue Archive: about 10 s; a restart applies it).", {"step": 0.5}],
+  ["ish_every", "Ishbosheth", "Tracer Interval", "Seconds between the tracers that swing across the fan.", {"step": 0.01}],
+  ["ish_tick", "Ishbosheth", "Hit Interval", "Seconds between the tracers aimed at the enemies in the fan (a restart applies it).", {"step": 0.05}],
+  ["ish_speed", "Ishbosheth", "Tracer Speed", "Metres a second of its tracers (slower: their trails are seen; 0: the round's own).", {"step": 10}],
   ["reload_free", "Passives", "Instant Reload", "A magazine she empties reloads at once, without a spare (not her own gun: its rounds are its supply)."],
   ["oao_head", "Passives", "Out-and-Out Height", "Metres: her head lower than this over her feet counts as crouched or prone.", {"step": 0.05}]
  ],
- "when": {"gun_ap": "restart", "ish_mult": "restart"},
+ "when": {"gun_ap": "restart", "ish_mult": "restart", "ish_duration": "restart", "ish_tick": "restart", "ish_speed": "restart"},
  "hidden": ["options_key"]
 }
