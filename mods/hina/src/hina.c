@@ -19,8 +19,8 @@
  *     +ll_ergonomics ergonomics and no recoil (ll_recoil 1) for the rest of that gun's time out: a new one of it,
  *     built with them, full, takes its place (weapon handling is read when a weapon is built).
  *   Ishbosheth (key_s3, default C; her EX, Denouement: Ishbosheth): readied by the key, set off by her next trigger
- *     pull (any gun): a barrage of ish_duration s (Blue Archive's EX, about 10 s): tracers swing across a fan of ish_cone
- *     degrees each side of her aim, one every ish_every s, and every ish_tick s the enemies in it out to ish_range m take
+ *     pull (any gun): a barrage of ish_duration s (Blue Archive's EX, about 10 s): every ish_every s a volley across a
+ *     fan of ish_cone degrees each side of her aim, ish_per_section tracers in each of its three sections, and every ish_tick s the enemies in it out to ish_range m take
  *     a tracer each, ish_mult times her gun's round over the whole barrage (Blue Archive: 636%). Its tracers are copies
  *     of the APW-1's round (Koleda's Full Speed tracers) dealing her gun's damage, slowed to ish_speed m/s. Cooldown
  *     ish_cooldown from its end.
@@ -77,7 +77,8 @@ static float s_llCooldown = 20, s_llErgonomics = 80;
 static int s_llRecoil = 1;
 static float s_ishCooldown = 30, s_ishMult = 6.36f, s_ishCone = 30, s_ishRange = 40;
 static int s_ishTargets = 12;
-static float s_ishDuration = 10, s_ishEvery = 0.05f, s_ishTick = 0.5f, s_ishSpeed = 200;   /* 0.1.4: the barrage */
+static int s_ishPerSection = 2;
+static float s_ishDuration = 10, s_ishEvery = 0.1f, s_ishTick = 0.5f, s_ishSpeed = 200;   /* 0.1.4: the barrage */
 static int s_reloadFree = 1;
 static float s_reloadBuff = 0.21f, s_reloadSeconds = 16, s_judgmentRate = 0.14f, s_oaoBonus = 0.027f, s_oaoHead = 1.2f;
 static int s_optionsKey = 0x78;        /* options_key: the virtual key that opens the options screen (120: F9; 0: none) */
@@ -88,7 +89,7 @@ static const KbSetting kSettings[] = {
     KB_F("shield_max", s_shieldMax, 0, 100000), KB_F("shield_every", s_shieldEvery, 1, 3600), KB_F("shield_decay", s_shieldDecay, 0, 100000),
     KB_F("ll_cooldown", s_llCooldown, 0, 600), KB_F("ll_ergonomics", s_llErgonomics, 0, 200), KB_I("ll_recoil", s_llRecoil, 0, 1),
     KB_F("ish_cooldown", s_ishCooldown, 0, 600), KB_F("ish_mult", s_ishMult, 0.1, 50), KB_F("ish_cone", s_ishCone, 1, 90), KB_F("ish_range", s_ishRange, 5, 300),
-    KB_I("ish_targets", s_ishTargets, 1, 32), KB_F("ish_duration", s_ishDuration, 1, 60), KB_F("ish_every", s_ishEvery, 0.02, 2),
+    KB_I("ish_targets", s_ishTargets, 1, 32), KB_F("ish_duration", s_ishDuration, 1, 60), KB_F("ish_every", s_ishEvery, 0.02, 2), KB_I("ish_per_section", s_ishPerSection, 1, 8),
     KB_F("ish_tick", s_ishTick, 0.1, 10), KB_F("ish_speed", s_ishSpeed, 0, 3000),
     KB_I("reload_free", s_reloadFree, 0, 1), KB_F("reload_buff", s_reloadBuff, 0, 5), KB_F("reload_seconds", s_reloadSeconds, 0, 120),
     KB_F("judgment_rate", s_judgmentRate, 0, 3), KB_F("oao_bonus", s_oaoBonus, 0, 5), KB_F("oao_head", s_oaoHead, 0.2, 2),
@@ -110,11 +111,12 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "shield_max = %g\nshield_every = %g\nshield_decay = %g\n"
                "; Lock & Load: cooldown; the gun in her hands refilled; her own gun also +ll_ergonomics and no recoil (ll_recoil 1).\n"
                "ll_cooldown = %g\nll_ergonomics = %g\nll_recoil = %d\n"
-               "; Ishbosheth: cooldown (from its end); readied by its key, set off by her next shot: for ish_duration s, tracers\n"
-               "; swing across ish_cone degrees each side of her aim, one every ish_every s at ish_speed m/s (0: the round's own),\n"
+               "; Ishbosheth: cooldown (from its end); readied by its key, set off by her next shot: for ish_duration s, every\n"
+               "; ish_every s a volley across ish_cone degrees each side of her aim, ish_per_section tracers in each of its three\n"
+               "; sections (two outer, one inner), at ish_speed m/s (0: the round's own; at most 80 tracers a second in all),\n"
                "; and every ish_tick s the ish_targets nearest enemies there out to ish_range m take a tracer each: ish_mult times\n"
                "; her gun's damage over the whole barrage (ish_mult, ish_duration and ish_tick take effect at the next start).\n"
-               "ish_cooldown = %g\nish_mult = %g\nish_cone = %g\nish_range = %g\nish_targets = %d\nish_duration = %g\nish_every = %g\nish_tick = %g\nish_speed = %g\n"
+               "ish_cooldown = %g\nish_mult = %g\nish_cone = %g\nish_range = %g\nish_targets = %d\nish_duration = %g\nish_every = %g\nish_per_section = %d\nish_tick = %g\nish_speed = %g\n"
                "; Passives. Lock & Load: an emptied magazine reloads at once (reload_free 1; not her own gun) and her shots deal\n"
                "; reload_buff more for reload_seconds s. Prefect Team Member Judgment: her own gun fires judgment_rate faster.\n"
                "; Out-and-Out: her shots deal oao_bonus more while her head is lower than oao_head m over her feet (crouched, prone).\n"
@@ -122,7 +124,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; The options screen's key (120: F9; 0: none).\noptions_key = %d\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_gunBase, s_gunRounds, (double)s_gunRpm, s_gunAp, (double)s_gunCooldown,
             (double)s_gunGrace, (double)s_shieldMax, (double)s_shieldEvery, (double)s_shieldDecay, (double)s_llCooldown, (double)s_llErgonomics,
-            s_llRecoil, (double)s_ishCooldown, (double)s_ishMult, (double)s_ishCone, (double)s_ishRange, s_ishTargets, (double)s_ishDuration, (double)s_ishEvery, (double)s_ishTick,
+            s_llRecoil, (double)s_ishCooldown, (double)s_ishMult, (double)s_ishCone, (double)s_ishRange, s_ishTargets, (double)s_ishDuration, (double)s_ishEvery, s_ishPerSection, (double)s_ishTick,
             (double)s_ishSpeed, s_reloadFree,
             (double)s_reloadBuff, (double)s_reloadSeconds, (double)s_judgmentRate, (double)s_oaoBonus, (double)s_oaoHead, s_optionsKey);
 }
@@ -948,8 +950,8 @@ static void IshFire(void)
     g_ishUntil = g_now + s_ishDuration;
     g_ishNextTracer = g_ishNextTick = g_now;
     g_casts[2]++;
-    Log("Ishbosheth: on for %.0f s (a tracer every %.2f s across %.0f degrees each side; every %.2f s the %d nearest enemies within %.0f m take a share of %.2f times "
-        "her gun's round; tracers at %.0f m/s)", (double)s_ishDuration, (double)s_ishEvery, (double)s_ishCone, (double)s_ishTick, s_ishTargets,
+    Log("Ishbosheth: on for %.0f s (a volley of 3 x %d tracers every %.2f s across %.0f degrees each side; every %.2f s the %d nearest enemies within %.0f m take a share of %.2f times "
+        "her gun's round; tracers at %.0f m/s)", (double)s_ishDuration, s_ishPerSection, (double)s_ishEvery, (double)s_ishCone, (double)s_ishTick, s_ishTargets,
         (double)s_ishRange, (double)s_ishMult, (double)s_ishSpeed);
 }
 static void IshBarrage(void)
@@ -969,12 +971,24 @@ static void IshBarrage(void)
     int guard = 0;
     while (spray && s_ishEvery > 0 && g_now >= g_ishNextTracer && guard++ < 4)
     {
-        /* swinging across the fan and back, 1.5 s a pass, a little above and below her aim */
-        double ph = (g_ishNextTracer - g_ishStart) / 1.5;
-        float a = (float)sin(ph * 3.14159265) * s_ishCone * 0.0174533f, ca = cosf(a), sa = sinf(a);
-        float lift = 0.04f * (float)sin(ph * 7.1);
-        float d[3] = {fwd[0] * ca - fwd[1] * sa, fwd[0] * sa + fwd[1] * ca, fwd[2] + lift};
-        g_ishSprayed += (unsigned)Shoot(spray, head, d);
+        /* 0.1.4: a volley each time (Yui: the fan's shape, not one beam swinging): the fan in three sections, the two
+         * outer and the inner one, ish_per_section tracers in each at a random angle inside it, a little above and below
+         * her aim. At most 80 tracers a second in all (Koleda: thousands of spawned rounds crashed the game) */
+        static double budget = 80, budgetAt;
+        budget += (g_now - budgetAt) * 80;
+        budgetAt = g_now;
+        if (budget > 80) budget = 80;
+        float cone = s_ishCone * 0.0174533f, third = cone * 2 / 3;
+        for (int sec = 0; sec < 3; sec++)
+            for (int b = 0; b < s_ishPerSection && budget >= 1; b++)
+            {
+                float lo = -cone + third * (float)sec;
+                float a = lo + third * ((float)rand() / (float)RAND_MAX), ca = cosf(a), sa = sinf(a);
+                float lift = 0.05f * (((float)rand() / (float)RAND_MAX) * 2 - 1);
+                float d[3] = {fwd[0] * ca - fwd[1] * sa, fwd[0] * sa + fwd[1] * ca, fwd[2] + lift};
+                g_ishSprayed += (unsigned)Shoot(spray, head, d);
+                budget -= 1;
+            }
         g_ishNextTracer += s_ishEvery;
     }
     if (g_now >= g_ishNextTracer) g_ishNextTracer = g_now + s_ishEvery;   /* (a long frame: not a burst to catch up) */
@@ -1242,7 +1256,7 @@ static const KbOption kOptions[] = {
     {"shield_max", &s_shieldMax, NULL}, {"shield_every", &s_shieldEvery, NULL}, {"shield_decay", &s_shieldDecay, NULL},
     {"ll_cooldown", &s_llCooldown, NULL}, {"ll_ergonomics", &s_llErgonomics, NULL}, {"ll_recoil", NULL, &s_llRecoil},
     {"ish_cooldown", &s_ishCooldown, NULL}, {"ish_mult", &s_ishMult, NULL}, {"ish_cone", &s_ishCone, NULL}, {"ish_range", &s_ishRange, NULL},
-    {"ish_targets", NULL, &s_ishTargets}, {"ish_duration", &s_ishDuration, NULL}, {"ish_every", &s_ishEvery, NULL},
+    {"ish_targets", NULL, &s_ishTargets}, {"ish_duration", &s_ishDuration, NULL}, {"ish_every", &s_ishEvery, NULL}, {"ish_per_section", NULL, &s_ishPerSection},
     {"ish_tick", &s_ishTick, NULL}, {"ish_speed", &s_ishSpeed, NULL},
     {"reload_free", NULL, &s_reloadFree}, {"reload_buff", &s_reloadBuff, NULL}, {"reload_seconds", &s_reloadSeconds, NULL},
     {"judgment_rate", &s_judgmentRate, NULL}, {"oao_bonus", &s_oaoBonus, NULL}, {"oao_head", &s_oaoHead, NULL},
