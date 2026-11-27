@@ -205,6 +205,52 @@ static BoltWait g_wait[16];
 static int g_nwait;
 static uintptr_t g_pool;
 static uint32_t g_counter;
+/* the dog's muzzle, from its skeleton: of its unit's scene-graph nodes (the registry at helldivers2.exe+0x1A100F0, as the
+ * Koleda kit reads them: object +0x70 count, +0x88 64-byte world matrices, rows right / forward / up / position), the
+ * one farthest along its forward axis within 1.5 m of its root and above it: the nozzle at its front. Its index is
+ * logged the first times, so it can be pinned once seen. */
+static uintptr_t g_exe;
+static uintptr_t RegistryObject(uint32_t unit)
+{
+    uintptr_t registry = Pointer(g_exe + 0x1A100F0), generations, objects, object;
+    uint32_t count, id, slot = unit & 0x3FFFFF;
+    uint8_t generation;
+    if (!g_exe || !registry || !ReadAt(registry + 0x98, &count, 4) || count > 0x400000 || slot >= count || !(generations = Pointer(registry + 0xA0)) ||
+        !ReadAt(generations + slot, &generation, 1) || generation != (uint8_t)(unit >> 22) || !(objects = Pointer(registry + 0x88)) ||
+        !(object = Pointer(objects + 8u * slot)) || !ReadAt(object + 8, &id, 4) || id != unit)
+        return 0;
+    return object;
+}
+static int Muzzle(uint32_t entity, float out[3])
+{
+    uint32_t unit = fp_entity_unit(entity), count = 0;
+    uintptr_t object = unit ? RegistryObject(unit) : 0, nodes;
+    static float m[128 * 16];
+    if (!object || !ReadAt(object + 0x70, &count, 4) || !count || count > 4096 || !(nodes = Pointer(object + 0x88))) return 0;
+    if (count > 128) count = 128;
+    if (!ReadAt(nodes, m, (size_t)count * 64)) return 0;
+    const float* root = m;   /* node 0: its root */
+    float fw[3] = {root[4], root[5], root[6]}, up[3] = {root[8], root[9], root[10]};
+    float fl = sqrtf(fw[0] * fw[0] + fw[1] * fw[1] + fw[2] * fw[2]);
+    if (!isfinite(fl) || fl < 0.1f) return 0;
+    int best = -1;
+    float bestAlong = -1e9f;
+    for (uint32_t i = 1; i < count; i++)
+    {
+        const float* t = m + 16 * i + 12;
+        float d[3] = {t[0] - root[12], t[1] - root[13], t[2] - root[14]};
+        if (!isfinite(d[0]) || !isfinite(d[1]) || !isfinite(d[2]) || d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > 1.5f * 1.5f) continue;
+        float along = (d[0] * fw[0] + d[1] * fw[1] + d[2] * fw[2]) / fl, high = d[0] * up[0] + d[1] * up[1] + d[2] * up[2];
+        if (high < 0.05f) continue;
+        if (along > bestAlong) { bestAlong = along; best = (int)i; }
+    }
+    if (best < 0) return 0;
+    memcpy(out, m + 16 * best + 12, 12);
+    static unsigned told;
+    if (told++ < 4) g_hf->log(g_mod, "Hot Dog: its muzzle: node %d of %u (%.2f m ahead of its root, %.2f m up)", best, count, (double)bestAlong,
+        (double)((out[0] - root[12]) * up[0] + (out[1] - root[13]) * up[1] + (out[2] - root[14]) * up[2]));
+    return 1;
+}
 static int Aim(uint32_t e, float p[3]) { if (!fp_entity_pos(e, p)) return 0; p[2] += 0.8f; return 1; }
 static int Fire(uint32_t target, const float from[3], const float dir[3], int retry)
 {
@@ -229,19 +275,20 @@ static int Bolt_(uint32_t target)
      * you, which was the backpack's (0x3015626AA69F8D4D): its position stays where it was picked up, 14 m off */
     float me[3] = {0, 0, 0}, best = 0;
     int haveMe = g_avatar && fp_entity_pos(g_avatar, me);
-    uint32_t src = g_dogBody && fp_entity_pos(g_dogBody, from) ? g_dogBody : 0;
+    int muzzle = g_dogBody && Muzzle(g_dogBody, from);
+    uint32_t src = muzzle || (g_dogBody && fp_entity_pos(g_dogBody, from)) ? g_dogBody : 0;
     if (src)
     {
-        from[2] += 0.6f;
+        if (!muzzle) from[2] += 0.6f;
         if (haveMe) best = (from[0] - me[0]) * (from[0] - me[0]) + (from[1] - me[1]) * (from[1] - me[1]) + (from[2] - me[2]) * (from[2] - me[2]);
     }
     else if (haveMe) { memcpy(from, me, 12); from[2] += 1.6f; }
     else return 0;
     static unsigned told;
-    if (told++ < 6) g_hf->log(g_mod, "Hot Dog: the bolt leaves %s, %.1f m from you", src ? "the dog" : "you (the dog's position was not read)", haveMe && best > 0 ? (double)sqrtf(best) : 0.0);
+    if (told++ < 6) g_hf->log(g_mod, "Hot Dog: the bolt leaves %s, %.1f m from you", src ? (muzzle ? "the dog's muzzle" : "the dog (its skeleton was not read)") : "you (the dog's position was not read)", haveMe && best > 0 ? (double)sqrtf(best) : 0.0);
     float dir[3] = {to[0] - from[0], to[1] - from[1], to[2] - from[2]}, n = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
     if (n < 0.1f) return 0;
-    for (int k = 0; k < 3; k++) { dir[k] /= n; from[k] += dir[k] * 0.8f; }
+    for (int k = 0; k < 3; k++) { dir[k] /= n; if (!muzzle) from[k] += dir[k] * 0.8f; }
     if (!Fire(target, from, dir, 0)) return 0;
     g_bolts++;
     if (g_bolts <= 10) g_hf->log(g_mod, "Hot Dog: %d stacks on enemy %u: a plasma bolt at it from %.0f m", s_hdStacks, target, (double)n);
@@ -420,7 +467,7 @@ int hd_init(const HfApi* hf, HfMod* mod)
     const char* build = hf->build_id ? hf->build_id() : NULL;
     size_t size = 0;
     uintptr_t game = hf->module_base("game.dll", &size);
-    if (build && !strcmp(build, "25480438") && game && size == 74727424u) g_game = game;
+    if (build && !strcmp(build, "25480438") && game && size == 74727424u) { g_game = game; g_exe = hf->module_base("helldivers2.exe", NULL); }
     else hf->log(mod, "Hot Dog: the game's projectile pool is read for build 25480438 only: a plasma bolt that misses is not fired again");
     HfDamage dmg = {sizeof dmg};
     dmg.base = HF_DAMAGE_PLAS1_SCORCHER_AND_1_OTHER;
