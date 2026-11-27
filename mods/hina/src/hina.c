@@ -115,7 +115,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; ish_every s a volley across ish_cone degrees each side of her aim, ish_per_section tracers in each of its three\n"
                "; sections (two outer, one inner), at ish_speed m/s (0: the round's own; at most 80 tracers a second in all),\n"
                "; and every ish_tick s the ish_targets nearest enemies there out to ish_range m take a tracer each: ish_mult times\n"
-               "; her gun's damage over the whole barrage (ish_mult, ish_duration and ish_tick take effect at the next start).\n"
+               "; her gun's damage over the whole barrage. It fires only while she holds the trigger. (ish_mult, ish_duration and\n"
+               "; ish_tick take effect at the next start.)\n"
                "ish_cooldown = %g\nish_mult = %g\nish_cone = %g\nish_range = %g\nish_targets = %d\nish_duration = %g\nish_every = %g\nish_per_section = %d\nish_tick = %g\nish_speed = %g\n"
                "; Passives. Lock & Load: an emptied magazine reloads at once (reload_free 1; not her own gun) and her shots deal\n"
                "; reload_buff more for reload_seconds s. Prefect Team Member Judgment: her own gun fires judgment_rate faster.\n"
@@ -905,7 +906,7 @@ static void Ishbosheth(void)
 /* 0.1.4: a barrage of ish_duration s (Yui: Blue Archive's EX lasts about 10 s, its tracers coming out the whole time):
  * from her feet + 1.4 m along her aim as it is each moment, a tracer every ish_every s swinging across the fan, and every
  * ish_tick s the ish_targets nearest enemies in the fan take a tracer each dealing a share of ish_mult (ish_mult in all
- * over the barrage). Tracers: copies of the APW-1's round (its bright trail) dealing her gun's damage copies, slowed to
+ * over the barrage, if she fires the whole time: it fires only while she holds the trigger). Tracers: copies of the APW-1's round (its bright trail) dealing her gun's damage copies, slowed to
  * ish_speed m/s so the trail is seen (Koleda's round_speed). Cooldown from its end. */
 static int IshOrigin(float head[3], float fwd[3])
 {
@@ -965,6 +966,11 @@ static void IshBarrage(void)
         return;
     }
     float head[3], fwd[3];
+    /* 0.1.4: it fires only while she does (Yui): the trigger held with a gun in her hands; the barrage's time runs on
+     * either way */
+    uint32_t sel = 0;
+    int shooting = Focused() && (GetAsyncKeyState(VK_LBUTTON) & 0x8000) && Held(&sel) && sel >= 1 && sel <= 3;
+    if (!shooting) { g_ishNextTracer = g_now; return; }
     if (!IshOrigin(head, fwd)) return;
     uint32_t round = g_tracer[g_use][0] ? g_tracer[g_use][0] : g_ishRound[0];
     uint32_t spray = g_tracer[g_use][1] ? g_tracer[g_use][1] : g_round[0];
