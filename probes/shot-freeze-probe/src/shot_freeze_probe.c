@@ -39,7 +39,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 #include "kitbase/kb_core.h"
 
 static double g_now;
@@ -190,14 +190,14 @@ static int ActorApi(void)
 }
 
 /* ==== grenades and knives: Throwables ======================================================================== */
-typedef struct Thrown { uint32_t entity, actor; uint64_t resource; float pos[3], lin[3], ang[3], drift, releasedAt[3]; double seen; int held, gone; } Thrown;
+typedef struct Thrown { uint32_t entity, actor; uint64_t resource; float pos[3], lin[3], ang[3], timer, drift, releasedAt[3]; double seen; int held, gone; } Thrown;
 #define THROWN 64
 static Thrown g_thr[THROWN];
 static int g_nthr, g_thrOk;
 
 static uintptr_t Throwables(void) { return Pointer(game + 0x33264C0); }
 /* The throwable with this entity: its actor and resource (index found again each time: the manager compacts) */
-static int ThrowableOf(uintptr_t m, uint32_t entity, uint32_t* actor, uint64_t* resource)
+static int ThrowableOf(uintptr_t m, uint32_t entity, uint32_t* actor, uint64_t* resource, uintptr_t* at)
 {
     uint32_t n = 0;
     uintptr_t heads = Pointer(m + 0x48), inst = Pointer(m + 0x50), h;
@@ -206,6 +206,7 @@ static int ThrowableOf(uintptr_t m, uint32_t entity, uint32_t* actor, uint64_t* 
     {
         uint32_t e;
         if (!(h = Pointer(heads + 8u * i)) || !ReadAt(h + 8, &e, 4) || e != entity) continue;
+        if (at) *at = inst + 0x78u * i;
         return ReadAt(inst + 0x78u * i, actor, 4) && ReadAt(h, resource, 8);
     }
     return 0;
@@ -242,13 +243,15 @@ static int FreezeThrown(double minAge)
         }
         if (t->held || t->gone || g_now - t->seen < minAge) continue;
         t->actor = actor;
+        ReadAt(inst + 0x78u * i + 4, &t->timer, 4);
+        PutAt(inst + 0x78u * i + 4, &t->timer, 4);
         a_getPos(actor, t->pos);
         a_getVel(actor, t->lin, t->ang);
         t->held = 1;
         HoldThrown(t);
         got++;
-        Log("  throwable %08X (resource %016llX, actor %08X): at %.1f %.1f %.1f, speed %.1f m/s, spin %.1f rad/s: frozen", e, (unsigned long long)res, actor,
-            (double)t->pos[0], (double)t->pos[1], (double)t->pos[2], (double)Len(t->lin), (double)Len(t->ang));
+        Log("  throwable %08X (resource %016llX, actor %08X): at %.1f %.1f %.1f, speed %.1f m/s, spin %.1f rad/s, timer %.2f s: frozen", e, (unsigned long long)res, actor,
+            (double)t->pos[0], (double)t->pos[1], (double)t->pos[2], (double)Len(t->lin), (double)Len(t->ang), (double)t->timer);
     }
     return got;
 }
@@ -260,8 +263,9 @@ static void HoldAllThrown(void)
         Thrown* t = &g_thr[i];
         uint32_t actor;
         uint64_t res;
+        uintptr_t at = 0;
         if (!t->held || t->gone) continue;
-        if (!m || !ThrowableOf(m, t->entity, &actor, &res) || actor == UINT32_MAX)
+        if (!m || !ThrowableOf(m, t->entity, &actor, &res, &at) || actor == UINT32_MAX)
         {
             t->gone = 1;
             Log("  throwable %08X GONE while frozen, %.2f s in (went off or was removed)", t->entity, g_now - g_frozenAt);
@@ -272,6 +276,7 @@ static void HoldAllThrown(void)
         float d = Dist(p, t->pos);
         if (d > t->drift) t->drift = d;
         t->actor = actor;
+        PutAt(at + 4, &t->timer, 4);   /* its own countdown (0x6C40F5: a seeker's time to start seeking) */
         HoldThrown(t);
     }
 }
@@ -300,7 +305,7 @@ static void AfterThrown(void)
         uint32_t actor;
         uint64_t res;
         if (!t->held || t->gone) continue;
-        if (!m || !ThrowableOf(m, t->entity, &actor, &res) || actor == UINT32_MAX) { Log("  throwable %08X: gone 0.3 s after the release", t->entity); continue; }
+        if (!m || !ThrowableOf(m, t->entity, &actor, &res, NULL) || actor == UINT32_MAX) { Log("  throwable %08X: gone 0.3 s after the release", t->entity); continue; }
         float p[3], v[3], w[3];
         a_getPos(actor, p);
         a_getVel(actor, v, w);
@@ -316,6 +321,7 @@ static Fuse g_fuse[FUSES];
 static int g_nfuse, g_fuseOk;
 
 static uintptr_t Explosives(void) { return Pointer(game + 0x3326728); }
+static int HeldMissile(uint32_t e);
 static Fuse* FindFuse(uint32_t e) { for (int i = 0; i < g_nfuse; i++) if (g_fuse[i].entity == e) return &g_fuse[i]; return NULL; }
 /* Holds every explosive's countdowns; one seen for the first time is taken as it is then */
 static int HoldFuses(int logNew)
@@ -335,6 +341,9 @@ static int HoldFuses(int logNew)
         Fuse* f = FindFuse(e);
         if (!f)
         {
+            Thrown* t = FindThrown(e);
+            /* only a lit fuse, or the explosive of something frozen: mines and the like already on the map are left alone */
+            if (!rec[0xC] && !(t && t->held) && !HeldMissile(e)) continue;
             if (g_nfuse >= FUSES) continue;
             f = &g_fuse[g_nfuse++];
             memset(f, 0, sizeof *f);
@@ -366,6 +375,7 @@ static int g_nmis, g_misOk;
 
 static uintptr_t Missiles(void) { return Pointer(game + 0x3326DF0); }
 static Missile* FindMissile(uint32_t e) { for (int i = 0; i < g_nmis; i++) if (g_mis[i].entity == e) return &g_mis[i]; return NULL; }
+static int HeldMissile(uint32_t e) { Missile* s = FindMissile(e); return s && s->held; }
 static int MissileIndex(uintptr_t m, uint32_t entity, uint32_t* index)
 {
     uint32_t n = 0;
@@ -454,10 +464,23 @@ static void AfterMissiles(void)
     g_nmis = 0;
 }
 
+/* ==== what appears while time is stopped ================================================================== */
+static unsigned g_spawnsLogged;
+static void OnSpawn(HfMod* mod, const HfSpawnEvent* e, void* user)
+{
+    if (!g_frozen || !e->authority || g_spawnsLogged >= 30) return;
+    g_spawnsLogged++;
+    uint32_t a;
+    uint64_t r;
+    uintptr_t m = Throwables();
+    Log("  spawned while frozen %.2f s in: entity %08X, resource %016llX%s", g_now - g_frozenAt, e->entity, (unsigned long long)e->resource,
+        m && ThrowableOf(m, e->entity, &a, &r, NULL) ? " (a throwable)" : "");
+}
+
 /* ==== stop and start ========================================================================================= */
 static void Stop(uintptr_t pool)
 {
-    g_frozen = 1; g_frozenAt = g_now; g_reportAt = g_now + 1; g_afterAt = 0;
+    g_frozen = 1; g_frozenAt = g_now; g_reportAt = g_now + 1; g_afterAt = 0; g_spawnsLogged = 0;
     g_nshot = g_nthr = g_nfuse = g_nmis = 0;
     if (g_thrOk && !a_setVel && !ActorApi()) { g_thrOk = 0; Log("the engine's actor table is not readable: grenades stay off"); }
     Log("Ctrl+F11: time stopped");
@@ -550,7 +573,8 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     g_thrOk = hf->code_matches(g + 0x6C3B90, "4c 8b 5b 60") && hf->code_matches(g + 0x6C3B97, "48 8b 43 48") &&
               hf->code_matches(g + 0x6C3C77, "ff 90 a8 00 00 00") && hf->code_matches(g + 0x6C4803, "ff 50 60") &&
               hf->code_matches(g + 0x6C4819, "ff 90 a0 00 00 00") && hf->code_matches(g + 0x5A0C7E, "ff 50 50") &&
-              hf->code_matches(g + 0x6C3BD5, "47 38 24 1e");
+              hf->code_matches(g + 0x6C3BD5, "47 38 24 1e") &&
+              hf->code_matches(g + 0x6C40F5, "f3 41 0f 5c c3 f3 41 0f 11 45 04");
     g_misOk = hf->code_matches(g + 0x64286C, "f3 0f 58 44 9f 08") && hf->code_matches(g + 0x642878, "80 7c 06 35 00") &&
               hf->code_matches(g + 0x6429B9, "80 7c 1e 35 00") && hf->code_matches(g + 0x645B80, "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 18");
     if (g_misOk) m_setEngine = (SetEngine)(g + 0x645B80);
@@ -571,6 +595,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 16 || api->size < offsetof(HfApi, global) + sizeof api->global || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
     Log("Shot Freeze Probe " VERSION ": research towards a time stop (shots, rockets, grenades, missiles and fuses held and let go)");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
+    if (!api->subscribe(mod, HF_ON_SPAWN, (HfListener)OnSpawn, NULL, 0)) Log("spawn events are unavailable");
     if (!api->subscribe(mod, HF_ON_MISSION_START, (HfListener)MissionStart, NULL, 0) || !api->on_game_thread(mod, Tick, NULL)) Log("events or the game thread are unavailable");
     return 0;
 }
