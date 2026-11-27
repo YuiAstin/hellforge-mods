@@ -452,14 +452,13 @@ static void StanceFrame(void)
 static uint64_t g_package[2];             /* the gun's base's loadout package (~0: none) */
 static int g_pkg[2];
 
-enum { K_IDLE, K_PACKAGE, K_WAITGL, K_PUTAWAY, K_TAKE, K_ASK, K_HELD, K_LETGO, K_REMOVE, K_WAITS };
+enum { K_IDLE, K_PACKAGE, K_WAITGL, K_PUTAWAY, K_TAKE, K_ASK, K_HELD, K_LETGO, K_REMOVE, K_WAITS, K_DROPOLD, K_RETAKE };
 static int g_k;
 static atomic_uint g_gl;                  /* her gun (0: none) */
 static double g_kAt, g_madeAt, g_readyAt, g_awaySince, g_droppedSince;
-static double g_emptySince, g_roundsLogAt;
+static double g_emptySince, g_roundsLogAt;   /* 0.1.4: her rounds at 0 for a second before the gun goes (a reload reads 0) */
 static uint32_t g_picked;                 /* 0.1.4: the weapon she picked up with the gun out (it ends the gun; she keeps it) */
-static int g_dropped;                     /* 0.1.4: her gun dropped (or left for a pickup): her old support weapon where it lay */
-static float g_dropAt[3];   /* 0.1.4: her rounds at 0 for a second before the gun goes (a reload reads 0) */
+static int g_dropped;                     /* 0.1.4: her gun dropped (or left for a pickup): her old support weapon dropped too */
 static uint32_t g_kSel, g_kOld, g_kNew, g_swapOld;   /* her selection at the start; the support weapon she had; its replacement; the gun a swap replaces */
 static uint64_t g_kOldRes;
 static atomic_uint g_bp;                  /* her gun's backpack (the Maxigun's copy only; 0: none) */
@@ -691,12 +690,10 @@ static void GunFrame(void)
         else if (!g_droppedSince) g_droppedSince = g_now;
         else if (g_now - g_droppedSince > 0.3)
         {
-            /* 0.1.4: a weapon picked up in its place (played: the pickup dropped her gun, and her old support weapon then
-             * took the picked one's slot): she keeps the picked one, in hand, and her old one is not given back */
+            /* 0.1.4 (Yui): her old support weapon takes the dropped gun's place on the ground, as if she dropped it; a
+             * weapon picked up in its place stays hers, in hand (played: her old one took the picked one's slot) */
             g_picked = support && support != gl ? support : 0;
-            /* 0.1.4 (Yui): her old support weapon takes the dropped gun's place on the ground, as if she dropped it */
-            g_dropped = EntityPos(gl, g_dropAt);
-            if (!g_dropped) PlayerPose(g_dropAt, NULL), g_dropped = 1;
+            g_dropped = 1;
             Log("Destroyer of Denouement %u over (%s): %d rounds left", g_uses, g_picked ? "she picked up another weapon" : "she dropped it", GunRounds(gl));
             WieldDrop(me, atomic_load(&g_bp), 0xC);
             g_readyAt = g_now + s_gunCooldown;
@@ -732,17 +729,7 @@ static void GunFrame(void)
             if (bp && ResOf(bp) == g_bpRes && remove && em) remove(em, bp);
             atomic_store(&g_bp, 0);
         }
-        g_kNew = !g_kOldRes ? 0 : g_dropped ? SpawnAt(g_kOldRes, g_dropAt, "her old support weapon where her gun lay")
-                                             : SpawnNear(g_kOldRes, "a new support weapon of her kind");
-        if (g_picked)
-        {
-            uint32_t sel = 0;
-            uintptr_t r = InventoryRecord(me);
-            if (r) ReadAt(r + 0x1C, &sel, 4);
-            if (sel != 3) WieldAsk(3, "the weapon she picked up in hand");
-            Log("Destroyer of Denouement %u: she keeps the weapon she picked up (%u); her old one goes where her gun lay", g_uses, g_picked);
-            g_picked = 0;
-        }
+        g_kNew = g_kOldRes ? SpawnNear(g_kOldRes, "a new support weapon of her kind") : 0;
         g_bpNew = g_bpOldRes ? SpawnNear(g_bpOldRes, "a new backpack of her kind") : 0;
         if (g_kNew || g_bpNew) { g_k = K_WAITS; g_kAt = g_now + 0.75; }
         else { FillUp(g_weapon[g_kSel]); g_k = K_IDLE; }
@@ -756,13 +743,17 @@ static void GunFrame(void)
             g_bpNew = 0;
         }
         if (!g_kNew) { FillUp(g_weapon[g_kSel]); g_k = K_IDLE; g_dropped = 0; break; }
+        /* 0.1.4: dropped (or left for a pickup): her old support weapon to the ground, through the game's own take and
+         * drop (played: one spawned on the ground could not be picked up; the drop makes it a pickup), at her feet where
+         * the gun fell; a weapon she picked up meanwhile is dropped by that take and taken back after */
         if (g_dropped)
         {
             g_dropped = 0;
+            if (ResOf(g_kNew) != g_kOldRes) { Log("Destroyer of Denouement %u: the new support weapon does not read as hers: left", g_uses); g_k = K_IDLE; break; }
             FillUp(g_kNew);
-            Log("Destroyer of Denouement %u: her old support weapon %u on the ground where her gun lay (%.1f %.1f %.1f)", g_uses, g_kNew, (double)g_dropAt[0],
-                (double)g_dropAt[1], (double)g_dropAt[2]);
-            g_k = K_IDLE;
+            WieldTake(me, g_kNew, KB_SLOT_SUPPORT);
+            g_k = K_DROPOLD;
+            g_kAt = g_now + 0.3;
             break;
         }
         if (ResOf(g_kNew) == g_kOldRes)
@@ -774,6 +765,21 @@ static void GunFrame(void)
             Log("Destroyer of Denouement %u: her new support weapon %u taken", g_uses, g_kNew);
         }
         else Log("Destroyer of Denouement %u: the new support weapon does not read as hers: left", g_uses);
+        g_k = K_IDLE;
+        break;
+    case K_DROPOLD:
+        if (g_now < g_kAt) break;
+        WieldDrop(me, g_kNew, 0x8);
+        Log("Destroyer of Denouement %u: her old support weapon %u dropped where her gun fell", g_uses, g_kNew);
+        if (g_picked) { g_k = K_RETAKE; g_kAt = g_now + 0.3; }
+        else g_k = K_IDLE;
+        break;
+    case K_RETAKE:
+        if (g_now < g_kAt) break;
+        WieldTake(me, g_picked, KB_SLOT_SUPPORT);
+        WieldAsk(3, "the weapon she picked up in hand");
+        Log("Destroyer of Denouement %u: she keeps the weapon she picked up (%u)", g_uses, g_picked);
+        g_picked = 0;
         g_k = K_IDLE;
         break;
     default: g_k = K_IDLE;
@@ -1013,10 +1019,18 @@ static void IshBarrage(void)
         return;
     }
     float head[3], fwd[3];
-    /* 0.1.4: it fires only while she does (Yui): the trigger held with a gun in her hands; the barrage's time runs on
-     * either way */
-    uint32_t sel = 0;
-    int shooting = Focused() && (GetAsyncKeyState(VK_LBUTTON) & 0x8000) && Held(&sel) && sel >= 1 && sel <= 3;
+    /* 0.1.4: it fires only while she does (Yui); the barrage's time runs on either way */
+    /* (played: tied to the trigger it fired with no shot; now to her gun actually firing: the gun in her hands losing
+     * rounds in the last quarter second; the trigger only for a gun whose rounds can't be read) */
+    static uint32_t lastW;
+    static int lastR = -1;
+    static double lastShot = -1;
+    uint32_t sel = 0, w = Held(&sel), gl = atomic_load(&g_gl);
+    int r = !w || sel < 1 || sel > 3 ? -1 : (gl && w == gl ? GunRounds(gl) : MagRounds(w));
+    if (w && w == lastW && r >= 0 && lastR >= 0 && r < lastR) lastShot = g_now;
+    lastW = w;
+    lastR = r;
+    int shooting = (lastShot >= 0 && g_now - lastShot < 0.25) || (w && sel >= 1 && sel <= 3 && r < 0 && Focused() && (GetAsyncKeyState(VK_LBUTTON) & 0x8000));
     if (!shooting) { g_ishNextTracer = g_now; return; }
     if (!IshOrigin(head, fwd)) return;
     uint32_t round = g_tracer[g_use][0] ? g_tracer[g_use][0] : g_ishRound[0];
