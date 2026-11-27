@@ -44,7 +44,7 @@
 
 static double g_now;
 static int g_frozen;
-static double g_frozenAt, g_releasedAt, g_reportAt, g_afterAt;
+static double g_frozenAt, g_reportAt, g_afterAt;
 static uintptr_t g_exeEnd;
 
 static void PutAt(uintptr_t a, const void* v, size_t n) { hf->write(a, v, n); }
