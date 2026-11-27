@@ -140,6 +140,13 @@ static void Gun(void)
     {
         HfFn_HasCatalogueItem has = hf_fn_HasCatalogueItem(self);
         void* progression = hf_global_Progression(self);
+        /* 0.1.4: played, HellForge refused the function ("not the reviewed one"); the kit pins it itself, against the
+         * game build's code as read from the dump (a loop over the account's items, no writes) */
+        if (!has && game && hf->code_matches(game + 0x136FB40, "40 53 48 83 ec 20 48 8b d9 85 d2 74 26 44 8b 81 e0 1c 00 00 33 c0 45 85 c0 74 18 4c 8d 89 e4 9c 0b 00"))
+        {
+            has = (HfFn_HasCatalogueItem)(game + 0x136FB40);
+            Log("HasCatalogueItem: the kit's own pin (game.dll+0x136FB40) matches: used");
+        }
         g_owned = has && progression ? (has(progression, HF_ITEM_M1000_MAXIGUN) ? 1 : 0) : 0;
         Log("the M-1000 Maxigun: %s", has && progression ? (g_owned ? "owned: her gun is its copy" : "not owned: her gun is the MG-43's copy")
                                                           : "its ownership can't be read: her gun is the MG-43's copy");
@@ -203,7 +210,13 @@ static void GunRecords(int i)
                 if (ReadAt(r + o, w, 8) && (w[0] == kBaseRound[i] || w[0] == g_round[i]) && w[1] == wantBits) { at = o; break; }
             if (at >= 0 && w[0] == g_round[i]) proj = 2;   /* (written before: the options screen's change) */
             else if (at >= 0&& !hf->write(r + at, &g_round[i], 4)) { proj = 2; Log("her gun (%s's copy): its round %u written into its own record (+0x%X)", kBaseName[i], g_round[i], at); }
-            else Log("her gun (%s's copy): its round could not be written (record %s, the base round %s)", kBaseName[i], r ? "found" : "not found", at >= 0 ? "found, the write refused" : "not found before fire_rate");
+            else
+            {
+                uint32_t h[4] = {0};
+                if (r) ReadAt(r, h, sizeof h);
+                Log("her gun (%s's copy): its round could not be written (record %s, the base round %s; its first words %08x %08x %08x %08x, wanted %u then %08x)",
+                    kBaseName[i], r ? "found" : "not found", at >= 0 ? "found, the write refused" : "not found before fire_rate", h[0], h[1], h[2], h[3], kBaseRound[i], wantBits);
+            }
         }
     }
     HfField cap = HF_FIELD(WeaponMagazine, capacity);
@@ -410,12 +423,40 @@ static int GunPackage(void)
 }
 static int Pack(void) { return g_use == 0 && g_bpRes; }   /* her gun comes with its backpack */
 /* her gun's rounds: the backpack's for the Maxigun's copy, the magazine's for the MG-43's */
-static int GunRounds(uint32_t gl) { return Pack() ? DepositAmount(atomic_load(&g_bp)) : MagRounds(gl); }
+/* 0.1.4: the MG-43 copy's rounds are the kit's own count (played: its magazine never held more than 2047, the
+ * magazine's network field, though 6000 were added). The magazine is kept topped up from the count (under 1024 it gets
+ * up to 2047 more); what it loses a frame is spent (a drop of over 64 at once is a reload, not shots). The Maxigun's copy
+ * reads its backpack (the editor widens deposit_value to 20 bits). */
+#define MAG_NET_MAX 2047
+static int g_pool = -1, g_lastMag = -1;
+static int GunRounds(uint32_t gl) { return Pack() ? DepositAmount(atomic_load(&g_bp)) : g_pool >= 0 ? g_pool : MagRounds(gl); }
+static void PoolTop(uint32_t gl)
+{
+    int m = MagRounds(gl);
+    if (m < 0) return;
+    if (m < MAG_NET_MAX / 2 && g_pool > m)
+    {
+        int want = g_pool < MAG_NET_MAX ? g_pool : MAG_NET_MAX;
+        if (want > m) MagAdd(gl, want - m);
+        m = MagRounds(gl);
+    }
+    g_lastMag = m;
+}
+static void PoolFrame(uint32_t gl)
+{
+    if (Pack() || g_pool < 0) return;
+    int m = MagRounds(gl);
+    if (m < 0) return;
+    if (g_lastMag >= 0 && m < g_lastMag && g_lastMag - m <= 64) { g_pool -= g_lastMag - m; if (g_pool < 0) g_pool = 0; }
+    g_lastMag = m;
+    PoolTop(gl);
+}
 static void GunFill(uint32_t gl)
 {
     if (Pack()) { DepositSet(atomic_load(&g_bp), s_gunRounds); return; }
-    int have = MagRounds(gl);
-    if (have >= 0 && have < s_gunRounds) MagAdd(gl, s_gunRounds - have);
+    g_pool = s_gunRounds;
+    g_lastMag = -1;
+    PoolTop(gl);
 }
 static void GunStart(void)
 {
@@ -560,6 +601,7 @@ static void GunFrame(void)
     {
         uint32_t sel = 0, support = 0;
         if (ResOf(gl) != res) { GunAbort("her gun is gone"); break; }
+        PoolFrame(gl);
         {
             int left = GunRounds(gl);
             /* 0.1.4: played, the first gun went 9 s in ("its rounds are spent"): a magazine reads 0 while it reloads, so
@@ -805,8 +847,12 @@ static void Ishbosheth(void)
 }
 static void IshFire(void)
 {
-    float cam[3], fwd[3], head[3], q[3];
-    if (!View(cam, fwd) || !HerHead(head)) return;
+    float cam[3], fwd[3], head[3], q[3], feet[3], headNode[3] = {0};
+    /* 0.1.4: from her feet + 1.4 m (played: 53 enemies placed, none within 40 m of her head node: that node is not
+     * reliable, Out-and-Out read it 0.9 m under her feet once) */
+    if (!View(cam, fwd) || !PlayerPose(feet, NULL)) return;
+    int headOk = HerHead(headNode);
+    head[0] = feet[0]; head[1] = feet[1]; head[2] = feet[2] + 1.4f;
     /* 0.1.4: always the Maxigun's copies (played: HellForge's catalogue doesn't know the MG-43 round's package, so the
      * spawns of its copy were refused); their package is the Maxigun Backpack's, asked for from the mission's start */
     if (IshPackage() == HF_PACKAGE_LOADING) return;
@@ -816,7 +862,8 @@ static void IshFire(void)
     float cosMax = cosf(s_ishCone * 0.0174533f);
     struct { uint32_t e; float d2, q[3]; } t[32];
     int n = 0, cap = s_ishTargets > 32 ? 32 : s_ishTargets;
-    unsigned listed = 0, placed = 0, inRange = 0, inFan = 0;   /* 0.1.4: played, "0 of 0": where they drop out */
+    unsigned listed = 0, placed = 0, inRange = 0, inFan = 0;
+    float nearest = 1e30f, nearQ[3] = {0};   /* 0.1.4: played, "0 of 0": where they drop out */
     for (int k = 0; k < FOES; k++)
     {
         uint32_t e = g_foe[k];
@@ -825,7 +872,9 @@ static void IshFire(void)
         listed++;
         if (!TargetPos(e, g_foeRes[k], q)) continue;
         placed++;
-        if ((d2 = Dist2(q, head)) > s_ishRange * s_ishRange || d2 < 1) continue;
+        d2 = Dist2(q, head);
+        if (d2 < nearest) { nearest = d2; memcpy(nearQ, q, 12); }
+        if (d2 > s_ishRange * s_ishRange || d2 < 1) continue;
         inRange++;
         float dx = q[0] - head[0], dy = q[1] - head[1], h = sqrtf(dx * dx + dy * dy);
         if (h < 0.1f || (dx * fwd[0] + dy * fwd[1]) / (h * flat) < cosMax) continue;
@@ -858,6 +907,9 @@ static void IshFire(void)
     Log("Ishbosheth: %d of %d enemies in the fan (%.0f degrees each side, %.0f m) take a round of %.2f times her gun's; %d sweep rounds", hit, n,
         (double)s_ishCone, (double)s_ishRange, (double)s_ishMult, sprayed);
     Log("Ishbosheth: enemies listed %u, placed %u, in range %u, in the fan %u, alive %d; rounds %u / %u", listed, placed, inRange, inFan, n, round, spray);
+    Log("Ishbosheth: from %.1f %.1f %.1f (her head node %s %.1f %.1f %.1f), aim %.2f %.2f %.2f; the nearest enemy %.1f m, at %.1f %.1f %.1f", (double)head[0],
+        (double)head[1], (double)head[2], headOk ? "" : "unread", (double)headNode[0], (double)headNode[1], (double)headNode[2], (double)fwd[0], (double)fwd[1],
+        (double)fwd[2], nearest < 1e29f ? (double)sqrtf(nearest) : -1.0, (double)nearQ[0], (double)nearQ[1], (double)nearQ[2]);
 }
 /* readied: her next shot (the gun in her hands loses a round) sets it off; the left button too, for a gun without a
  * magazine to read */
