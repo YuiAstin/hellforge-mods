@@ -50,7 +50,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.1.1"
+#define VERSION "0.1.2"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -177,7 +177,19 @@ static void GunRecords(int i)
         rate += hf->set_live(self, res, &f, &v, 0) != 0;
     }
     int proj = 0;
-    if (g_round[i]) { HfField pf = HF_FIELD(ProjectileWeapon, projectile); HfValue pv = HF_U32(g_round[i]); proj = hf->set_live(self, res, &pf, &pv, 0) != 0; }
+    if (g_round[i])
+    {
+        HfField pf = HF_FIELD(ProjectileWeapon, projectile);
+        HfValue pv = HF_U32(g_round[i]);
+        proj = hf->set_live(self, res, &pf, &pv, 0) != 0;
+        /* 0.1.2: refused for the MG-43's copy (played: "projectile 370 is not one HellForge's catalogue knows the packages
+         * of"), so it fired the game's own round. Her round is a copy of the gun's own, with its look: the gun's package,
+         * which the kit loads before the gun is made and at the mission's start, holds everything it needs. Written into
+         * her gun's own record (own_all: it is no other entity's) */
+        uint32_t stride = 0, now = 0;
+        uintptr_t r = proj ? 0 : hf->component_record("ProjectileWeaponComponentData", res, &stride);
+        if (r && ReadAt(r, &now, 4) && now == kBaseRound[i] && !hf->write(r, &g_round[i], 4)) { proj = 2; Log("her gun (%s's copy): its round %u written into its own record", kBaseName[i], g_round[i]); }
+    }
     HfField cap = HF_FIELD(WeaponMagazine, capacity);
     HfValue vc = HF_U32(s_gunRounds);
     mag = hf->set_live(self, res, &cap, &vc, 0) != 0;
@@ -195,7 +207,7 @@ static void GunRecords(int i)
     memset(&cf, 0, sizeof cf);
     if (g_round[i] && hf->get_live(self, res, &fp, &cf) && (uint32_t)cf.now.number == kBaseRound[i]) { HfValue v = HF_U32(g_round[i]); hf->set_live(self, res, &fp, &v, 0); }
     Log("her gun (%s's copy, entity %016llx): fire rate %.0f in %d of 3 slots, %d rounds %s, its round %u %s (and in %d pattern slots)", kBaseName[i],
-        (unsigned long long)res, (double)rpm, rate, s_gunRounds, mag ? "set" : "REFUSED", g_round[i], proj ? "set" : "REFUSED", pat);
+        (unsigned long long)res, (double)rpm, rate, s_gunRounds, mag ? "set" : "REFUSED", g_round[i], proj == 2 ? "written" : proj ? "set" : "REFUSED", pat);
 }
 /* Lock & Load's handling on her gun's records (on: +ll_ergonomics, no recoil; off: back to its own) */
 static void Handling(int on)
@@ -445,6 +457,25 @@ static double g_bpOffSince;
 static int g_swap;                        /* Lock & Load is putting a new gun (with its handling) in place of this one */
 static unsigned g_uses, g_swaps;
 static uint64_t GunRes(void) { return g_gunRes[g_use]; }
+/* the gun's package (its base's loadout package: her gun's model and her rounds' look): HF_PACKAGE_RESIDENT, LOADING,
+ * or 0 when there is none to load (then the gun and its rounds go ahead and the game's own copy decides) */
+static int GunPackage(void)
+{
+    if (!g_package[g_use])
+    {
+        uint32_t stride = 0;
+        uintptr_t r = hf->component_record("LoadoutPackageComponentData", kBaseEntity[g_use], &stride);
+        if (!r || !ReadAt(r + 8, &g_package[g_use], 8) || !g_package[g_use]) g_package[g_use] = ~0ull;
+    }
+    if (g_package[g_use] == ~0ull) return 0;
+    if (g_pkg[g_use] != HF_PACKAGE_RESIDENT)
+    {
+        g_pkg[g_use] = hf->load_package(self, g_package[g_use]);
+        if (!g_pkg[g_use]) { Log("the %s's package %016llx could not be held: her gun and rounds may not show", kBaseName[g_use], (unsigned long long)g_package[g_use]); g_package[g_use] = ~0ull; }
+        else if (g_pkg[g_use] == HF_PACKAGE_RESIDENT) Log("the %s's package %016llx is loaded", kBaseName[g_use], (unsigned long long)g_package[g_use]);
+    }
+    return g_pkg[g_use];
+}
 static int Pack(void) { return g_use == 0 && g_bpRes; }   /* her gun comes with its backpack */
 /* her gun's rounds: the backpack's for the Maxigun's copy, the magazine's for the MG-43's */
 static int GunRounds(uint32_t gl) { return Pack() ? DepositAmount(atomic_load(&g_bp)) : Rounds(gl); }
@@ -531,18 +562,7 @@ static void GunFrame(void)
     switch (g_k)
     {
     case K_PACKAGE:
-        if (!g_package[g_use])
-        {
-            uint32_t stride = 0;
-            uintptr_t r = hf->component_record("LoadoutPackageComponentData", kBaseEntity[g_use], &stride);
-            if (!r || !ReadAt(r + 8, &g_package[g_use], 8) || !g_package[g_use]) g_package[g_use] = ~0ull;
-        }
-        if (g_package[g_use] != ~0ull && g_pkg[g_use] != HF_PACKAGE_RESIDENT)
-        {
-            g_pkg[g_use] = hf->load_package(self, g_package[g_use]);
-            if (g_pkg[g_use] == HF_PACKAGE_LOADING) { if (g_now > g_kAt) GunAbort("its package did not load"); break; }
-            if (!g_pkg[g_use]) g_package[g_use] = ~0ull;
-        }
+        if (GunPackage() == HF_PACKAGE_LOADING) { if (g_now > g_kAt) GunAbort("its package did not load"); break; }
         if (Pack() && !g_swap)
         {
             static uint64_t bpPkg;
@@ -788,6 +808,7 @@ static void IshFire(void)
 {
     float cam[3], fwd[3], head[3], q[3];
     if (!View(cam, fwd) || !HerHead(head)) return;
+    if (GunPackage() == HF_PACKAGE_LOADING) return;   /* (asked for at the mission's start: only a moment's wait) */
     uint32_t round = g_ishRound[g_use] ? g_ishRound[g_use] : g_round[g_use], spray = g_round[g_use];
     float flat = sqrtf(fwd[0] * fwd[0] + fwd[1] * fwd[1]);
     if (!(flat > 0.05f) || !round) return;
@@ -1047,6 +1068,11 @@ static void Tick(HfMod* mod, float dt, void* user)
         prev[i] = down;
     }
     if (!NetOk(g_avatarNet)) LearnNet();
+    /* her gun's package, asked for from the mission's start (Ishbosheth's rounds need it before any gun is out) */
+    {
+        static double pkgAt;
+        if (g_k == K_IDLE && g_now >= pkgAt) { pkgAt = g_now + 1; Gun(); GunPackage(); }
+    }
     GunFrame();
     if (g_alive)
     {

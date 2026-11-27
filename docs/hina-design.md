@@ -2,7 +2,7 @@
 
 Sorasaki Hina of Blue Archive (Gehenna Academy, head of the Prefect Team; her MG, Destroyer of Denouement). Her
 identity here (Yui, 2026-11-27): put as many rounds down range as possible, as efficiently as possible. Built as
-`mods/hina` 0.1.1 on branch `hina-kit`; not played yet.
+`mods/hina` 0.1.2 on branch `hina-kit`; not played yet (its first start, 2026-11-27, logged below).
 
 ## Her kit in Blue Archive
 
@@ -99,6 +99,19 @@ rounds or damage types is changed.
   it, not built: her round's own row could fire two projectiles a shot (ProjectileSettings `pellet_count`).
 - **The Maxigun check:** its loadout id is its catalogue item (as the MG-43's is), and the check (0x136FB40) reads the
   player's holdings of it.
+
+## From its first start (2026-11-27, logs only: the game crashed on the ship before a mission)
+
+- All three copies registered (both guns, the backpack). **They are in the armory too:** HellForge gives a weapon or
+  backpack entity copy a loadout record of its own, so `arsenal.tsv` lists them and a player can pick them in a
+  loadout (the Maxigun's only for its owners). The SDK has no switch to keep an entity copy out.
+- The Maxigun's copy took her round; **the MG-43's refused it** ("not one HellForge's catalogue knows the packages
+  of"), so it fired the game's own round (AP 3). 0.1.2 writes the round into the gun's own record, and asks for the
+  gun's package from the mission's start (her rounds' look, and Ishbosheth's rounds before any gun is out).
+- The Maxigun's linked-ammo record (56 bytes) names no backpack, and the backpack's feed field names no weapon: the game
+  pairs them by kind, so her backpack copy should feed her gun as it is. Its 6000 rounds were set.
+- Maxi Mag Probe: try A refused (no network type for that set of parts); try B registered, with a magazine of its own
+  (6000 set) firing the Maxigun's round at 1500 rpm.
 
 ## Open (to check in play)
 
