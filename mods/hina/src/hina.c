@@ -127,6 +127,8 @@ static const uint32_t kBaseRound[2] = {HF_PROJECTILE_M1000_MAXIGUN, HF_PROJECTIL
 static const uint32_t kBaseDamage[2] = {HF_DAMAGE_M1000_MAXIGUN, HF_DAMAGE_EXO45_PATRIOT_EXOSUIT_RIGHT_GUN_AND_1_OTHER};
 static const char* const kBaseName[2] = {"M-1000 Maxigun", "MG-43 Machine Gun"};
 static uint32_t g_round[2], g_damage[2], g_ishRound[2], g_ishDamage[2];
+#define TRACER_ROUND 226u                /* the APW-1 Anti-Materiel Rifle's round: a bright trail (Koleda's tracers) */
+static uint32_t g_tracer[2][2];         /* Ishbosheth's tracers by gun copy: [0] on targets (x ish_mult), [1] the sweep */
 static uint64_t g_gunRes[2];
 static uint64_t g_bpRes;               /* her gun's backpack: a copy of the Maxigun Backpack, linked to the Maxigun's copy */
 static int g_rowsReady, g_entsReady;
@@ -304,32 +306,8 @@ static void Link(void)
     Log("her gun's backpack (entity %016llx): the gun's record names it in %d place(s); it feeds her gun %s; %d rounds %s / %s", (unsigned long long)g_bpRes,
         named, fed ? "(set)" : "(it named no Maxigun: left)", s_gunRounds, a ? "capacity set" : "capacity REFUSED", b ? "at call-in" : "call-in REFUSED");
 }
-/* 0.1.4: which rounds of the machine guns' magazines are tracers (their pattern: the projectile type of each round), for
- * Ishbosheth's rounds to take a tracer's look (Yui: tracers, with her gun's damage) */
-static void TracerScan(void)
-{
-    static const struct { uint64_t res; const char* name; } kGuns[] = {
-        {0x11c27d3babb38956ull, "MG-43"}, {0x43a58cb89cfa197cull, "M-1000 Maxigun"}, {HF_ENTITY_MAXIGUN_BACKPACK, "Maxigun Backpack"}};
-    for (unsigned g = 0; g < sizeof kGuns / sizeof kGuns[0]; g++)
-    {
-        char line[400];
-        int n = 0, any = 0;
-        for (int k = 0; k < 32; k++)
-        {
-            HfField f = HF_FIELD_AT(WeaponMagazine, pattern, k);
-            HfLiveValue cur;
-            memset(&cur, 0, sizeof cur);
-            if (!hf->get_live(self, kGuns[g].res, &f, &cur)) break;
-            any = 1;
-            n += snprintf(line + n, sizeof line - n, " %u", (unsigned)cur.now.number);
-            if (n >= (int)sizeof line - 8) break;
-        }
-        Log("tracers: the %s's magazine pattern:%s", kGuns[g].name, any ? line : " (none read)");
-    }
-}
 static void EntitiesReady(HfMod* mod, HfEvent event, void* user)
 {
-    TracerScan();
     for (int i = 0; i < 2; i++) GunRecords(i);
     Link();
     g_entsReady = 1;
@@ -851,13 +829,14 @@ static int IshPackage(void)
 {
     static uint64_t pkg;
     static int state;
-    if (!pkg && !LoadoutPackage(HF_ENTITY_MAXIGUN_BACKPACK, &pkg)) pkg = ~0ull;
+    uint64_t holder = g_tracer[g_use][0] || g_tracer[g_use][1] ? HF_ENTITY_APW1_ANTIMATERIEL_RIFLE : HF_ENTITY_MAXIGUN_BACKPACK;   /* the tracers' round, else the Maxigun's */
+    if (!pkg && !LoadoutPackage(holder, &pkg)) pkg = ~0ull;
     if (pkg == ~0ull) return 0;
     if (state != HF_PACKAGE_RESIDENT)
     {
         state = hf->load_package(self, pkg);
-        if (!state) { Log("Ishbosheth: the Maxigun Backpack's package %016llx could not be held", (unsigned long long)pkg); pkg = ~0ull; }
-        else if (state == HF_PACKAGE_RESIDENT) Log("Ishbosheth: the Maxigun Backpack's package %016llx is loaded (its rounds)", (unsigned long long)pkg);
+        if (!state) { Log("Ishbosheth: its rounds' package %016llx could not be held", (unsigned long long)pkg); pkg = ~0ull; }
+        else if (state == HF_PACKAGE_RESIDENT) Log("Ishbosheth: its rounds' package %016llx is loaded", (unsigned long long)pkg);
     }
     return state;
 }
@@ -877,10 +856,11 @@ static void IshFire(void)
     if (!View(cam, fwd) || !PlayerPose(feet, NULL)) return;
     int headOk = HerHead(headNode);
     head[0] = feet[0]; head[1] = feet[1]; head[2] = feet[2] + 1.4f;
-    /* 0.1.4: always the Maxigun's copies (played: HellForge's catalogue doesn't know the MG-43 round's package, so the
-     * spawns of its copy were refused); their package is the Maxigun Backpack's, asked for from the mission's start */
+    /* 0.1.4: tracers, copies of the APW-1's round dealing her gun's damage (played: the MG-43 round's copy can't be
+     * spawned, and the sweep wasn't seen); their package is the APW-1's, asked for from the mission's start */
     if (IshPackage() == HF_PACKAGE_LOADING) return;
-    uint32_t round = g_ishRound[0] ? g_ishRound[0] : g_round[0], spray = g_round[0];
+    uint32_t round = g_tracer[g_use][0] ? g_tracer[g_use][0] : g_ishRound[0] ? g_ishRound[0] : g_round[0];
+    uint32_t spray = g_tracer[g_use][1] ? g_tracer[g_use][1] : g_round[0];
     float flat = sqrtf(fwd[0] * fwd[0] + fwd[1] * fwd[1]);
     if (!(flat > 0.05f) || !round) return;
     float cosMax = cosf(s_ishCone * 0.0174533f);
@@ -1259,6 +1239,22 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
             p.name = qn[i];
             p.damage = g_ishDamage[i];
             g_ishRound[i] = api->add_projectile(mod, &p);
+        }
+        /* 0.1.4: Ishbosheth's rounds as tracers (Yui; Koleda's Full Speed tracers): copies of the APW-1's round (226,
+         * its bright trail; its package the APW-1's, loaded from the mission's start) dealing her gun's damage copies */
+        {
+            static const char* const tn[2][2] = {{"yui/hina/ishbosheth_tracer_maxigun", "yui/hina/sweep_tracer_maxigun"},
+                                                 {"yui/hina/ishbosheth_tracer_mg43", "yui/hina/sweep_tracer_mg43"}};
+            uint32_t dmgs[2] = {g_ishDamage[i], g_damage[i]};
+            for (int t = 0; t < 2; t++)
+            {
+                if (!dmgs[t]) continue;
+                HfProjectile p = {sizeof p};
+                p.base = TRACER_ROUND;
+                p.name = tn[i][t];
+                p.damage = dmgs[t];
+                g_tracer[i][t] = api->add_projectile(mod, &p);
+            }
         }
         /* an entity copy (add_entity), not an arsenal weapon: no armory entry, nothing in anyone's loadout (an arsenal
          * weapon needs a model of its own in the mod's data); every record its own (own_all) */
