@@ -39,7 +39,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.2"
+#define VERSION "0.2.3"
 #include "kitbase/kb_core.h"
 
 static double g_now;
@@ -215,6 +215,10 @@ static void MoverAdd(uint32_t e, uint32_t unit, const char* what)
     {
         ReadAt(rec + 0x84u * i + 0x3C, &parent, 4);
         v->motion = 1; v->rides = parent != UINT32_MAX;
+        /* 0.2.2 held the record's own position, which runs ahead of the unit (4.2 m on a G-60): the unit then jumped
+           there. Held where the unit is instead. */
+        if (Len(v->unitAt) > 0) { Log("    (its motion position %.1f %.1f %.1f is %.2f m from the unit: held at the unit)", (double)v->pos[0], (double)v->pos[1], (double)v->pos[2],
+            (double)Dist(v->pos, v->unitAt)); memcpy(v->pos, v->unitAt, 12); }
     }
     Log("    %s %08X: unit at %.1f %.1f %.1f; motion record %s", what, e, (double)v->unitAt[0], (double)v->unitAt[1], (double)v->unitAt[2],
         !v->motion ? "none" : v->rides ? "yes, riding a parent (velocity held only)" : "yes (velocity and position held)");

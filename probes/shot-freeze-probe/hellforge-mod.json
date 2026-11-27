@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.shot-freeze-probe",
   "name": "Shot Freeze Probe (research)",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Research only, towards a true time stop: can what is in flight be held where it is and let go as it was? Ctrl+F11 stops time: shots and rockets, thrown grenades and knives, seeking missiles (Spear, P-33, W.A.S.P.) and every explosive's fuse are held until pressed again, and the log says what each did. Nothing happens on its own. Solo or host. Turn off when done.",
   "gameplay": false,
   "code": {
