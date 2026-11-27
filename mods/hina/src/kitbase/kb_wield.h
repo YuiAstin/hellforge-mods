@@ -131,12 +131,14 @@ KB_FN int MagRounds(uint32_t weapon)
     void* wm = hf_global_WeaponManager(self);
     return rounds && wm && weapon ? rounds(wm, weapon) : -1;
 }
+/* the live capacity (attachments included); -1 when it has none. 0x743410 is a lookup in the magazine map, 0 for a
+ * weapon not in it (read from the dump): no record check needed (component_record refuses a vanilla weapon's shared
+ * record, so the check made every arsenal weapon read -1; Hina, played) */
 KB_FN int MagCapacity(uint32_t weapon)
 {
     HfFn_MagazineCapacity capacity = hf_fn_MagazineCapacity(self);
-    uint32_t stride = 0;
-    uint64_t res = ResOf(weapon);
-    return capacity && res && hf->component_record("WeaponMagazineComponentData", res, &stride) ? capacity(NULL, weapon) : -1;
+    int32_t c = capacity && weapon && ResOf(weapon) ? capacity(NULL, weapon) : 0;
+    return c > 0 ? c : -1;
 }
 /* rounds added past the capacity hold (W: 40 in a 10-round GL-21); the count is 32-bit (0x76E080), only the copy sent to
  * other players is 11-bit (2047) */

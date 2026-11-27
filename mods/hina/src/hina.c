@@ -828,8 +828,16 @@ static void LockAndLoad(void)
         Log("Lock & Load: her gun %u refilled (%d -> %d rounds)", w, before, GunRounds(gl));
         return;
     }
-    /* 0.1.4: any other gun is replaced by a fresh one of its kind, full (W's way; played, the refill only filled the
-     * spares of her primary: its magazine size can't be read) */
+    /* 0.1.4: any other gun filled where it is (its attachments kept), now that its magazine size reads (played: the
+     * refill only filled the spares, the size read -1); a gun whose size still can't be read is replaced by a fresh one
+     * of its kind (W's way: full, but with its default attachments) */
+    int before = MagRounds(w), cap = MagCapacity(w);
+    if (cap > 0)
+    {
+        FillUp(w);
+        Log("Lock & Load: her gun %u refilled (%d -> %d rounds, capacity %d; spares too)", w, before, MagRounds(w), cap);
+        return;
+    }
     LlFresh(w);
 }
 
