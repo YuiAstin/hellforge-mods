@@ -147,20 +147,39 @@ static int g_tuned;                    /* Lock & Load's handling is in her gun's
 
 static void Gun(void)
 {
-    if (g_owned < 0)
+    /* 0.1.4: asked again each second until it answers (played: at the mission's start HellForge said "not the reviewed
+     * one (or not decoded yet)" and the kit's own pin did not match either: the game's code there may not be decoded
+     * yet, so the answer is not settled at the first try) */
+    static double nextAsk;
+    static unsigned tries;
+    if (g_owned < 0 && g_now >= nextAsk)
     {
+        nextAsk = g_now + 1;
+        tries++;
         HfFn_HasCatalogueItem has = hf_fn_HasCatalogueItem(self);
         void* progression = hf_global_Progression(self);
-        /* 0.1.4: played, HellForge refused the function ("not the reviewed one"); the kit pins it itself, against the
-         * game build's code as read from the dump (a loop over the account's items, no writes) */
+        int own = 0;
+        /* the kit's own pin, against the game build's code as read from the dump (a loop over the account's items) */
         if (!has && game && hf->code_matches(game + 0x136FB40, "40 53 48 83 ec 20 48 8b d9 85 d2 74 26 44 8b 81 e0 1c 00 00 33 c0 45 85 c0 74 18 4c 8d 89 e4 9c 0b 00"))
         {
             has = (HfFn_HasCatalogueItem)(game + 0x136FB40);
-            Log("HasCatalogueItem: the kit's own pin (game.dll+0x136FB40) matches: used");
+            own = 1;
         }
-        g_owned = has && progression ? (has(progression, HF_ITEM_M1000_MAXIGUN) ? 1 : 0) : 0;
-        Log("the M-1000 Maxigun: %s", has && progression ? (g_owned ? "owned: her gun is its copy" : "not owned: her gun is the MG-43's copy")
-                                                          : "its ownership can't be read: her gun is the MG-43's copy");
+        if (has && progression)
+        {
+            g_owned = has(progression, HF_ITEM_M1000_MAXIGUN) ? 1 : 0;
+            Log("the M-1000 Maxigun: %s (asked %u time(s)%s)", g_owned ? "owned: her gun is its copy" : "not owned: her gun is the MG-43's copy", tries,
+                own ? "; through the kit's own pin" : "");
+        }
+        else if (tries == 1 || tries == 30)
+        {
+            uint8_t b[16] = {0};
+            if (game) ReadAt(game + 0x136FB40, b, sizeof b);
+            Log("the M-1000 Maxigun: its ownership can't be read yet (HellForge's function %s, the progression %s; the code there now: "
+                "%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x): the MG-43's copy until it can (asked each second)",
+                hf_fn_HasCatalogueItem(self) ? "given" : "refused", progression ? "found" : "not found", b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9],
+                b[10], b[11], b[12], b[13], b[14], b[15]);
+        }
     }
     g_use = s_gunBase == 0 && g_owned == 1 && g_gunRes[0] ? 0 : 1;
 }
