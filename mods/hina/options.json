@@ -1,0 +1,12 @@
+{
+ "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
+ "advanced": [
+  ["gun_grace", "Destroyer of Denouement", "Switch Grace", "Seconds on her primary or secondary before her gun goes (a stratagem or a grenade never counts).", {"step": 0.1}],
+  ["ish_targets", "Ishbosheth", "Most Enemies", "The most enemies in the fan that take its round (the nearest first)."],
+  ["ish_spray", "Ishbosheth", "Sweep Rounds", "Rounds of her gun that sweep across the fan as it goes off."],
+  ["reload_free", "Passives", "Instant Reload", "A magazine she empties reloads at once, without a spare (not her own gun: its rounds are its supply)."],
+  ["oao_head", "Passives", "Out-and-Out Height", "Metres: her head lower than this over her feet counts as crouched or prone.", {"step": 0.05}]
+ ],
+ "when": {"gun_ap": "restart", "ish_mult": "restart"},
+ "hidden": ["options_key"]
+}

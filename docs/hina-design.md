@@ -1,0 +1,86 @@
+# Hina: the Gehenna Prefect's machine gun (design)
+
+Sorasaki Hina of Blue Archive (Gehenna Academy, head of the Prefect Team; her MG, Destroyer of Denouement). Her
+identity here (Yui, 2026-11-27): put as many rounds down range as possible, as efficiently as possible. Built as
+`mods/hina` 0.1.0 on branch `hina-kit`; not played yet.
+
+## Her kit in Blue Archive
+
+| Skill | In Blue Archive |
+|---|---|
+| EX: Denouement: Ishbosheth (cost 6) | A fan-shaped area: 636% of her attack to every enemy in it |
+| Normal: Lock & Load | When her ammunition runs out she reloads at once and gains 21% attack for 16 s |
+| Passive: Prefect Team Member Judgment | +14% attack speed |
+| Sub: Out-and-Out | +2.7% damage to enemies not in cover |
+
+Blue Archive has one active skill (the EX); the rest are passives. Yui kept the three passives as passives and gave her
+two actives of her own (Z, X), with the EX on C.
+
+## In Helldivers
+
+All numbers are settings (her page on the options screen, F9, and `hina.ini`).
+
+### Z: Destroyer of Denouement
+
+- Her gun in her hands, the way W's King of Hearts gives the GL-21 (the Wield Probe's swap): a copy of the **M-1000
+  Maxigun**, or of the **MG-43 Machine Gun** for a profile without the Maxigun's warbond (Voymastina's premium
+  fallback; the game's own catalogue says whether this profile owns the Maxigun). `gun_base` 1: always the MG-43.
+- **6000 rounds, 6000 rounds a minute, armour penetration 5** (the Veterancy System's Gatling upgrade numbers).
+- Her gun, its round and its damage are copies of her own (kit base principle 6): an entity copy of the gun (no armory
+  entry, nothing in anyone's loadout), a copy of its round dealing a copy of its damage type with armour penetration 5.
+- **It goes like W's launcher:** she switches to her primary or secondary (0.5 s), drops it, spends its rounds, or
+  presses Z again. A stratagem or a grenade in her hands is not a switch (Yui). Her own weapon comes back; a support
+  weapon she carried is replaced by a new one of its kind, refilled.
+- **Cooldown 30 s from when the gun is gone** (W's).
+- **Her shield while she holds it:** 3000 (Alva's shield pool, `kb_allies.h`), refilled to 3000 every 5 minutes, never
+  above 3000. Once the gun is gone the shield **drains** (100 a second) until the next refill, so switching off doesn't
+  punish her at once (Yui). A new life brings a full shield with her next gun.
+
+### X: Lock & Load
+
+- The gun in her hands refilled in full (magazine and spares), whatever gun it is.
+- On her own gun also **+80 ergonomics and no recoil**: weapon handling is read when a weapon is built, so a new gun
+  with them, full, takes the place of the one in her hands (a short put-away and draw), and keeps them until it goes.
+- Cooldown 20 s.
+
+### C: Ishbosheth (her EX)
+
+- Readied by the key; **her next trigger pull** (any gun) sets it off.
+- Every enemy within 30 degrees of her aim (each side) out to 40 m (the 12 nearest) takes a round dealing **6.36 times**
+  her gun's round (636%); 16 rounds of her gun sweep the fan. Koleda's Full Speed cone, from her trigger.
+- Cooldown 30 s from when it goes off.
+
+### Passives
+
+- **Lock & Load:** a magazine she empties reloads at once (no spare used; not her own gun, whose rounds are its whole
+  supply), and her shots deal 21% more for 16 s.
+- **Prefect Team Member Judgment:** her own gun fires 14% faster (on top of its 6000).
+- **Out-and-Out:** her shots deal 2.7% more while she is crouched or prone (her head lower than 1.2 m over her feet; the
+  game has no "in cover" to read).
+
+The damage bonuses are on her own hits (the damage event), as every kit's buffs; nothing of the game's own weapons,
+rounds or damage types is changed.
+
+## What it reuses
+
+| Part | From |
+|---|---|
+| The gun in her hands, her weapon back | W's King of Hearts (the Wield Probe) |
+| The shield pool | Alva (`kitbase/kb_allies.h`) |
+| The fan of fire | Koleda's Full Speed cone |
+| The premium fallback | Voymastina |
+| Her copies' numbers | the Veterancy System's Gatling (AP and fire rate edits on rows of its own) |
+| Options screen, HUD, keys, roster | every kit |
+
+## Research
+
+- **Held Probe** (branch `held-probe`, `probes/held-probe`): what her inventory selection reads while she calls a
+  stratagem, throws a grenade, switches weapons and drops her support weapon. The kit takes only a primary or secondary
+  selection as a switch; the probe's log says whether a stratagem or a grenade reads as one of those.
+
+## Open (to check in play)
+
+- Whether the Maxigun's copy fires without its backpack (it carries its ammunition there in the game).
+- Whether 6000 rounds fit a weapon's magazine count (a turret's is an 11-bit network field, 2047 at most).
+- Whether 6000 rounds a minute holds (the game may cap a weapon's rate).
+- Whether the catalogue check names the Maxigun right (an owner given the MG-43 means it doesn't).
