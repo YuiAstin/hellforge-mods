@@ -26,7 +26,15 @@
  * gets main health 600 (+0x00), main armour 4 (+0x118), and every damage zone (38 at most, 0x228 bytes from +0x208, its
  * name's hash at +0x60) armour 4 (+0xD8) and its health x4 (+0xE8), so no part of it falls to one shot. Following
  * re-sends every 0.5 s (a stick bug more than 5 m away), to a point 1.5 m beside you, half a metre along the way you're
- * moving: they trailed 10 to 40 m behind a sprinting Helldiver sent behind her once a second. */
+ * moving: they trailed 10 to 40 m behind a sprinting Helldiver sent behind her once a second.
+ *
+ * 0.5.0, a trooper as a hand to drop a weapon (Yui, for Hina: a weapon spawned on the ground can't be picked up, the
+ * game's drop makes a pickup; can a SEAF trooper take one and drop it, leaving your own slots alone?). Shift+Insert:
+ * a plain SEAF trooper 2 m in front of you; 1 s later the log says whether it has an inventory record (the inventory's
+ * lookup, as a Helldiver's: 48 bytes, +0x08 support, +0x1C selection) and what is in it; if it has one, a fresh MG-43 is
+ * spawned at its feet, taken into its support slot (game.dll+0x9AE030), dropped (0x9A8840) and the trooper taken away.
+ * Then try to pick the MG-43 up. Without a record nothing is called on it (the take on an entity with no record is
+ * untested) and the trooper goes. */
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -41,7 +49,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.4.0"
+#define VERSION "0.5.0"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
@@ -298,6 +306,99 @@ static void WatchFrame(void)
     g_cur = prev;
 }
 
+/* ---- 0.5.0: a trooper's hand (the inventory's take and drop, as the kit base's kb_wield.h; names of its own here: this
+ * probe's kit base has kb_world.h, whose ResOf and EntityPos kb_wield.h would clash with) ------------------------------ */
+#define MG43_ENTITY UINT64_C(0x11C27D3BABB38956)
+typedef void (*HandTakeFn)(void* inventory, uint32_t entity, uint32_t item, uint32_t slot, uint8_t flag);
+typedef void (*HandDropFn)(void* inventory, uint32_t entity, uint32_t item, uint8_t flag, uint64_t zero, uint8_t one);
+static HandTakeFn g_handTake;
+static HandDropFn g_handDrop;
+enum { H_IDLE, H_PKG, H_LOOK, H_TAKE, H_DROP, H_GONE };
+static int g_hand;
+static double g_handAt;
+static uint32_t g_handSeaf, g_handGun;
+static void HandPins(void)
+{
+    if (hf->code_matches(game + 0x9AE030, "40 53 55 41 55 48 83 ec 40 48 89 7c 24 68 41 8b e8 4c 89 64 24 70 8b da")) g_handTake = (HandTakeFn)(game + 0x9AE030);
+    if (hf->code_matches(game + 0x9A8840, "40 53 56 41 56 48 81 ec a0 00 00 00 48 8b 05 bd 37 c9 01 48 33 c4 48 89")) g_handDrop = (HandDropFn)(game + 0x9A8840);
+    Log("Shift+Insert: the inventory's take %s, its drop %s", g_handTake ? "pinned" : "NOT the reviewed code", g_handDrop ? "pinned" : "NOT the reviewed code");
+}
+static uintptr_t HandRecord(uint32_t e)
+{
+    uintptr_t m = (uintptr_t)hf_global_InventoryManager(self), records;
+    uint32_t i;
+    if (!m || !Lookup(m + 0x28, e, 1048576, &i) || i >= 65536 || !(records = Pointer(m + 0x50))) return 0;
+    return records + 0x30ull * i;
+}
+static void HandShow(const char* when, uint32_t e)
+{
+    uintptr_t r = HandRecord(e);
+    uint32_t w[12] = {0};
+    if (!r) { Log("Shift+Insert %s: entity %u has NO inventory record", when, e); return; }
+    ReadAt(r, w, sizeof w);
+    Log("Shift+Insert %s: entity %u's inventory record: primary %u, secondary %u, support %u, backpack %u, held %u, selection %u", when, e, w[0], w[1], w[2], w[3], w[4], w[7]);
+}
+static void HandFrame(void)
+{
+    void* im = hf_global_InventoryManager(self);
+    if (g_hand == H_IDLE || g_now < g_handAt) return;
+    switch (g_hand)
+    {
+    case H_PKG:
+    {
+        int a = KbLoadFor(SEAF), b = KbLoadFor(MG43_ENTITY);
+        if (a != HF_PACKAGE_RESIDENT || b != HF_PACKAGE_RESIDENT)
+        {
+            if (!a || !b || g_now - g_wantSince > 8) { Log("Shift+Insert: the trooper's or the MG-43's package did not load (%d, %d)", a, b); g_hand = H_IDLE; }
+            break;
+        }
+        float me[3], aim[3], at[3];
+        if (!PlayerPose(me, aim)) { g_hand = H_IDLE; break; }
+        at[0] = me[0] + aim[0] * 2; at[1] = me[1] + aim[1] * 2; at[2] = me[2] + 0.5f;
+        g_handSeaf = KbSpawnEntity(SEAF, at, "a SEAF trooper (a hand)");
+        Log("Shift+Insert: trooper %u spawned 2 m in front of you", g_handSeaf);
+        g_hand = g_handSeaf ? H_LOOK : H_IDLE;
+        g_handAt = g_now + 1.0;
+        break;
+    }
+    case H_LOOK:
+        HandShow("1 s after its spawn", g_handSeaf);
+        if (!HandRecord(g_handSeaf) || !g_handTake || !g_handDrop || !im)
+        {
+            Log("Shift+Insert: no take and drop on it: the trooper goes (%s)", KbRemoveEntity(g_handSeaf, SEAF) ? "taken away" : "could not be taken away");
+            g_hand = H_IDLE;
+            break;
+        }
+        g_handGun = KbSpawnNear(MG43_ENTITY, "a fresh MG-43 for the trooper");
+        Log("Shift+Insert: MG-43 %u spawned", g_handGun);
+        g_hand = g_handGun ? H_TAKE : H_GONE;
+        g_handAt = g_now + 0.75;
+        break;
+    case H_TAKE:
+        g_handTake(im, g_handSeaf, g_handGun, 3, 0);
+        HandShow("after the take (support slot)", g_handSeaf);
+        g_hand = H_DROP;
+        g_handAt = g_now + 0.4;
+        break;
+    case H_DROP:
+    {
+        uintptr_t r = HandRecord(g_handSeaf);
+        uint32_t now = 0;
+        if (r) ReadAt(r + 8, &now, 4);
+        if (now == g_handGun) { g_handDrop(im, g_handSeaf, g_handGun, 0, 0, 1); Log("Shift+Insert: the trooper dropped MG-43 %u", g_handGun); }
+        else Log("Shift+Insert: the MG-43 is not in the trooper's support slot (%u there): not dropped", now);
+        HandShow("after the drop", g_handSeaf);
+        g_hand = H_GONE;
+        g_handAt = g_now + 0.6;
+        break;
+    }
+    case H_GONE:
+        Log("Shift+Insert: the trooper goes (%s). Now try to pick MG-43 %u up", KbRemoveEntity(g_handSeaf, SEAF) ? "taken away" : "could not be taken away", g_handGun);
+        g_hand = H_IDLE;
+        break;
+    }
+}
+
 static void Tick(HfMod* mod, float dt, void* user)
 {
     static int prev[3];
@@ -309,14 +410,21 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (!g_inMission)
     {
         for (int i = 0; i < ESCORTS; i++) if (g_esc[i].entity) { Log("mission over: escort %u forgotten", g_esc[i].entity); memset(&g_esc[i], 0, sizeof g_esc[i]); }
+        g_hand = H_IDLE;
         return;
     }
     int f = Focused(), k[3] = {f && (GetAsyncKeyState(VK_INSERT) & 0x8000), f && (GetAsyncKeyState(VK_HOME) & 0x8000), f && (GetAsyncKeyState(VK_DELETE) & 0x8000)};
-    if (k[0] && !prev[0] && !g_want) { g_want = 1; g_wantSince = g_now; Log("Insert: asking for the trooper's package (%016llx; 0: it names none, spawned as is)", (unsigned long long)KbPackageOf(BugRes())); }
+    int shift = f && (GetAsyncKeyState(VK_SHIFT) & 0x8000);
+    if (k[0] && !prev[0] && shift)
+    {
+        if (g_hand == H_IDLE) { g_hand = H_PKG; g_handAt = 0; g_wantSince = g_now; Log("Shift+Insert: a trooper as a hand (the packages first)"); }
+    }
+    else if (k[0] && !prev[0] && !g_want) { g_want = 1; g_wantSince = g_now; Log("Insert: asking for the trooper's package (%016llx; 0: it names none, spawned as is)", (unsigned long long)KbPackageOf(BugRes())); }
     if (k[1] && !prev[1]) { g_follow = !g_follow; Log("Home: following %s", g_follow ? "ON" : "OFF"); }
     if (k[2] && !prev[2]) for (int i = 0; i < ESCORTS; i++) Remove(&g_esc[i], "Delete");
     memcpy(prev, k, sizeof prev);
     SpawnFrame();
+    HandFrame();
     FollowFrame();
     WatchFrame();
 }
@@ -365,7 +473,8 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     game = g;
     exe = x;
     KbWorldInstall();
-    Log("ready: in a mission, Insert a SEAF trooper beside you (2 at most), Home following on/off, Delete takes them away");
+    HandPins();
+    Log("ready: in a mission, Insert a SEAF trooper beside you (2 at most), Home following on/off, Delete takes them away; Shift+Insert a trooper that takes and drops an MG-43");
 }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
