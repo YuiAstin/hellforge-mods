@@ -162,11 +162,22 @@ static void Gun(void)
         HfFn_HasCatalogueItem has = hf_fn_HasCatalogueItem(self);
         void* progression = hf_global_Progression(self);
         int own = 0;
-        /* the kit's own pin, against the game build's code as read from the dump (a loop over the account's items) */
-        if (!has && game && hf->code_matches(game + 0x136FB40, "40 53 48 83 ec 20 48 8b d9 85 d2 74 26 44 8b 81 e0 1c 00 00 33 c0 45 85 c0 74 18 4c 8d 89 e4 9c 0b 00"))
+        /* the kit's own pin, against the game build's code as read from the dump (a loop over the account's items). Read
+         * and compared by the kit (played: the code there read the same, yet code_matches said no; HellForge's own
+         * check refuses it the same way: its pin is not this build's) */
+        static const uint8_t kHas[36] = {0x40, 0x53, 0x48, 0x83, 0xec, 0x20, 0x48, 0x8b, 0xd9, 0x85, 0xd2, 0x74, 0x26, 0x44, 0x8b, 0x81, 0xe0, 0x1c,
+                                         0x00, 0x00, 0x33, 0xc0, 0x45, 0x85, 0xc0, 0x74, 0x18, 0x4c, 0x8d, 0x89, 0xe4, 0x9c, 0x0b, 0x00, 0x41, 0x39};
+        int differs = -1;
+        if (!has && game)
         {
-            has = (HfFn_HasCatalogueItem)(game + 0x136FB40);
-            own = 1;
+            uint8_t live[36];
+            if (ReadAt(game + 0x136FB40, live, sizeof live))
+            {
+                differs = 0;
+                for (int k = 0; k < 36 && !differs; k++) if (live[k] != kHas[k]) differs = k + 1;
+                if (!differs) { has = (HfFn_HasCatalogueItem)(game + 0x136FB40); own = 1; }
+                else if (tries == 1 || tries == 30) Log("HasCatalogueItem: the code differs from the dump's at byte %d (%02x, the dump %02x)", differs - 1, live[differs - 1], kHas[differs - 1]);
+            }
         }
         if (has && progression)
         {
@@ -867,7 +878,7 @@ static void LockAndLoad(void)
 static int g_ishArmed;
 static double g_ishUntil, g_ishNextTracer, g_ishNextTick, g_ishStart;
 static int g_ishOn;
-static unsigned g_ishTicks;
+static unsigned g_ishTicks, g_ishHits0, g_ishSprayed0, g_ishTicks0;   /* (the counts at this barrage's start: the log's per barrage) */
 static uint32_t g_ishHeld;
 static int g_ishRounds = -1;
 static unsigned g_ishHits, g_ishSprayed;
@@ -948,6 +959,7 @@ static void IshFire(void)
     g_ishArmed = 0;
     g_ishOn = 1;
     g_ishStart = g_now;
+    g_ishHits0 = g_ishHits; g_ishSprayed0 = g_ishSprayed; g_ishTicks0 = g_ishTicks;
     g_ishUntil = g_now + s_ishDuration;
     g_ishNextTracer = g_ishNextTick = g_now;
     g_casts[2]++;
@@ -962,7 +974,7 @@ static void IshBarrage(void)
     {
         g_ishOn = 0;
         g_cd[2] = g_now + s_ishCooldown;
-        Log("Ishbosheth over: %u hits on enemies over %u ticks, %u tracers", g_ishHits, g_ishTicks, g_ishSprayed);
+        Log("Ishbosheth over: %u hits on enemies over %u ticks, %u tracers", g_ishHits - g_ishHits0, g_ishTicks - g_ishTicks0, g_ishSprayed - g_ishSprayed0);
         return;
     }
     float head[3], fwd[3];
