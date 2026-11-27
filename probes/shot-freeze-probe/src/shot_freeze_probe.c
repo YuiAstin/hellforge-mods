@@ -39,7 +39,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.2.1"
+#define VERSION "0.2.2"
 #include "kitbase/kb_core.h"
 
 static double g_now;
@@ -189,6 +189,80 @@ static int ActorApi(void)
     return 1;
 }
 
+/* ==== the game's motion records (MotionManager [game+0x3326558]) ============================================== */
+/* Some things in flight are moved by their motion record, not their physics body (the G-60 Anti-Tank Seeker: its body
+ * held still while it flew on). Map at +0x48A0 (entity -> index), records +0x48C8 (0x84 each, velocity first),
+ * positions +0x48D0 (0xA4 each, the position MoveObject writes), sources +0x48D8 (0x2C each, where motion starts from
+ * each frame; relative when the record's +0x3C is not -1). Every frozen throwable and missile is looked up here too, and
+ * its unit's own position is watched, so the log says which of them really stayed put. */
+typedef struct Mover { uint32_t entity, unit; float vel[3], pos[3], unitAt[3], unitDrift, releasedAt[3]; int motion, rides, gone; } Mover;
+#define MOVERS 128
+static Mover g_mov[MOVERS];
+static int g_nmov, g_motionOk;
+static uintptr_t Motion(void) { return Pointer(game + 0x3326558); }
+static int MotionIndex(uintptr_t m, uint32_t e, uint32_t* i) { return g_motionOk && m && Lookup(m + 0x48A0, e, 1u << 20, i); }
+static void MoverAdd(uint32_t e, uint32_t unit, const char* what)
+{
+    if (g_nmov >= MOVERS) return;
+    for (int k = 0; k < g_nmov; k++) if (g_mov[k].entity == e) return;
+    Mover* v = &g_mov[g_nmov++];
+    memset(v, 0, sizeof *v);
+    v->entity = e; v->unit = unit;
+    UnitNode(unit, 0, v->unitAt);
+    uintptr_t m = Motion(), rec, pos;
+    uint32_t i, parent = UINT32_MAX;
+    if (MotionIndex(m, e, &i) && (rec = Pointer(m + 0x48C8)) && (pos = Pointer(m + 0x48D0)) && ReadAt(rec + 0x84u * i, v->vel, 12) && ReadAt(pos + 0xA4u * i, v->pos, 12))
+    {
+        ReadAt(rec + 0x84u * i + 0x3C, &parent, 4);
+        v->motion = 1; v->rides = parent != UINT32_MAX;
+    }
+    Log("    %s %08X: unit at %.1f %.1f %.1f; motion record %s", what, e, (double)v->unitAt[0], (double)v->unitAt[1], (double)v->unitAt[2],
+        !v->motion ? "none" : v->rides ? "yes, riding a parent (velocity held only)" : "yes (velocity and position held)");
+    if (v->motion) Log("    its motion velocity %.1f m/s, position %.1f %.1f %.1f", (double)Len(v->vel), (double)v->pos[0], (double)v->pos[1], (double)v->pos[2]);
+}
+static void HoldMovers(void)
+{
+    static const float zero[3] = {0, 0, 0};
+    uintptr_t m = Motion(), rec = m ? Pointer(m + 0x48C8) : 0, pos = m ? Pointer(m + 0x48D0) : 0, src = m ? Pointer(m + 0x48D8) : 0;
+    for (int k = 0; k < g_nmov; k++)
+    {
+        Mover* v = &g_mov[k];
+        float p[3];
+        uint32_t i;
+        if (v->gone) continue;
+        if (UnitNode(v->unit, 0, p)) { float d = Dist(p, v->unitAt); if (d > v->unitDrift) v->unitDrift = d; }
+        if (!v->motion) continue;
+        if (!MotionIndex(m, v->entity, &i) || !rec || !pos) { v->gone = 1; continue; }
+        PutAt(rec + 0x84u * i, zero, 12);
+        if (!v->rides)
+        {
+            PutAt(pos + 0xA4u * i, v->pos, 12);
+            if (src) PutAt(src + 0x2Cu * i, v->pos, 12);
+        }
+    }
+}
+static void ReleaseMovers(void)
+{
+    uintptr_t m = Motion(), rec = m ? Pointer(m + 0x48C8) : 0;
+    for (int k = 0; k < g_nmov; k++)
+    {
+        Mover* v = &g_mov[k];
+        uint32_t i;
+        UnitNode(v->unit, 0, v->releasedAt);
+        Log("  %08X: its unit moved at most %.3f m while frozen%s", v->entity, (double)v->unitDrift, v->motion ? " (motion record held)" : "");
+        if (v->motion && !v->gone && MotionIndex(m, v->entity, &i) && rec) PutAt(rec + 0x84u * i, v->vel, 12);
+    }
+}
+static void AfterMovers(void)
+{
+    for (int k = 0; k < g_nmov; k++)
+    {
+        float p[3];
+        if (UnitNode(g_mov[k].unit, 0, p)) Log("  %08X: its unit moved %.2f m in the 0.3 s after the release", g_mov[k].entity, (double)Dist(p, g_mov[k].releasedAt));
+    }
+    g_nmov = 0;
+}
+
 /* ==== grenades and knives: Throwables ======================================================================== */
 typedef struct Thrown { uint32_t entity, actor; uint64_t resource; float pos[3], lin[3], ang[3], timer, drift, releasedAt[3]; double seen; int held, gone; } Thrown;
 #define THROWN 64
@@ -252,6 +326,9 @@ static int FreezeThrown(double minAge)
         got++;
         Log("  throwable %08X (resource %016llX, actor %08X): at %.1f %.1f %.1f, speed %.1f m/s, spin %.1f rad/s, timer %.2f s: frozen", e, (unsigned long long)res, actor,
             (double)t->pos[0], (double)t->pos[1], (double)t->pos[2], (double)Len(t->lin), (double)Len(t->ang), (double)t->timer);
+        uint32_t unit = UINT32_MAX;
+        ReadAt(h + 0xC, &unit, 4);
+        MoverAdd(e, unit, "throwable");
     }
     return got;
 }
@@ -408,6 +485,9 @@ static int FreezeMissiles(void)
         got++;
         Log("  missile %08X (resource %016llX): at %.1f %.1f %.1f, age %.2f s, engine %s: frozen", e, (unsigned long long)res, (double)s->pos[0], (double)s->pos[1],
             (double)s->pos[2], (double)s->clocks[1], s->engine ? "on (now off)" : "off");
+        uint32_t unit = UINT32_MAX;
+        ReadAt(h + 0xC, &unit, 4);
+        MoverAdd(e, unit, "missile");
     }
     return got;
 }
@@ -481,7 +561,7 @@ static void OnSpawn(HfMod* mod, const HfSpawnEvent* e, void* user)
 static void Stop(uintptr_t pool)
 {
     g_frozen = 1; g_frozenAt = g_now; g_reportAt = g_now + 1; g_afterAt = 0; g_spawnsLogged = 0;
-    g_nshot = g_nthr = g_nfuse = g_nmis = 0;
+    g_nshot = g_nthr = g_nfuse = g_nmis = g_nmov = 0;
     if (g_thrOk && !a_setVel && !ActorApi()) { g_thrOk = 0; Log("the engine's actor table is not readable: grenades stay off"); }
     Log("Ctrl+F11: time stopped");
     int s = FreezeShots(pool, 0), t = FreezeThrown(0), mi = FreezeMissiles(), f = HoldFuses(1);
@@ -500,6 +580,7 @@ static void Start(uintptr_t pool)
     if (pool) ReleaseShots(pool);
     ReleaseThrown();
     ReleaseMissiles();
+    ReleaseMovers();
     Log("  explosives: %d held; their countdowns run from where they were", g_nfuse);
     g_afterAt = g_now + 0.3;
 }
@@ -525,7 +606,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (!pool)
     {
         if (g_frozen) { Log("the mission ended while frozen: everything held is forgotten"); g_frozen = 0; }
-        g_nshot = g_nthr = g_nfuse = g_nmis = 0; g_afterAt = 0;
+        g_nshot = g_nthr = g_nfuse = g_nmis = g_nmov = 0; g_afterAt = 0;
         return;
     }
     int k = Focused() && (GetAsyncKeyState(VK_F11) & 0x8000) && (GetAsyncKeyState(VK_CONTROL) & 0x8000);
@@ -542,6 +623,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         HoldShots(pool);
         HoldAllThrown();
         HoldMissiles();
+        HoldMovers();
         HoldFuses(1);
         if (g_now >= g_reportAt) { Report(); g_reportAt = g_now + (g_now - g_frozenAt < 5 ? 1 : 10); }
         return;
@@ -554,6 +636,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         AfterShots(pool);
         AfterThrown();
         AfterMissiles();
+        AfterMovers();
         g_nshot = g_nfuse = 0;
     }
 }
@@ -578,8 +661,10 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     g_misOk = hf->code_matches(g + 0x64286C, "f3 0f 58 44 9f 08") && hf->code_matches(g + 0x642878, "80 7c 06 35 00") &&
               hf->code_matches(g + 0x6429B9, "80 7c 1e 35 00") && hf->code_matches(g + 0x645B80, "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 18");
     if (g_misOk) m_setEngine = (SetEngine)(g + 0x645B80);
-    Log("ready: Ctrl+F11 stops time and starts it again. Parts on: shots %s, grenades %s (actor table read at the first stop), fuses %s, missiles %s",
-        g_shotsOk ? "yes" : "NO", g_thrOk ? "yes" : "NO", g_fuseOk ? "yes" : "NO", g_misOk ? "yes" : "NO");
+    /* the motion map as ExplosiveUpdate reads it (0x8CB387: the manager, +0x48A8 count, +0x48A0 entries) */
+    g_motionOk = hf->code_matches(g + 0x8CB390, "45 8b 8a a8 48 00 00") && hf->code_matches(g + 0x8CB3AB, "49 8b ba a0 48 00 00");
+    Log("ready: Ctrl+F11 stops time and starts it again. Parts on: shots %s, grenades %s (actor table read at the first stop), fuses %s, missiles %s, motion records %s",
+        g_shotsOk ? "yes" : "NO", g_thrOk ? "yes" : "NO", g_fuseOk ? "yes" : "NO", g_misOk ? "yes" : "NO", g_motionOk ? "yes" : "NO");
 }
 /* The actor table is filled by the engine at start; read it once a mission runs */
 static void MissionStart(HfMod* mod, const HfEventInfo* info, void* user)
