@@ -131,13 +131,33 @@ KB_FN int MagRounds(uint32_t weapon)
     void* wm = hf_global_WeaponManager(self);
     return rounds && wm && weapon ? rounds(wm, weapon) : -1;
 }
+/* 1 when the weapon is in the map AddMagazineRounds reads (0x76E080: the map at [game.dll+0x3326648], buckets +0x20,
+ * size +0x28 (a power of two), empty key +0x2C, multiplier +0x30; each bucket the entity and its index, -1 none). The add
+ * does not check: a weapon not in it is read at index -1 and the game crashes (Hina, played: a weapon whose capacity
+ * read, MagazineCapacity's own map, but that this map lacks) */
+KB_FN int MagIn(uint32_t weapon)
+{
+    uintptr_t m = Pointer(game + 0x3326648u), buckets;
+    uint32_t size = 0, empty = 0, mult = 0;
+    if (!weapon || !m || !ReadAt(m + 0x28, &size, 4) || !ReadAt(m + 0x2C, &empty, 4) || !ReadAt(m + 0x30, &mult, 4) || !size || (size & (size - 1)) ||
+        size > (1u << 22) || !(buckets = Pointer(m + 0x20)))
+        return 0;
+    for (uint32_t k = 0; k < size; k++)
+    {
+        uint32_t e[2];
+        if (!ReadAt(buckets + 8ull * ((k + mult * weapon) & (size - 1)), e, 8)) return 0;
+        if (e[0] == weapon) return e[1] != UINT32_MAX;
+        if (e[0] == empty) return 0;
+    }
+    return 0;
+}
 /* the live capacity (attachments included); -1 when it has none. 0x743410 is a lookup in the magazine map, 0 for a
  * weapon not in it (read from the dump): no record check needed (component_record refuses a vanilla weapon's shared
  * record, so the check made every arsenal weapon read -1; Hina, played) */
 KB_FN int MagCapacity(uint32_t weapon)
 {
     HfFn_MagazineCapacity capacity = hf_fn_MagazineCapacity(self);
-    int32_t c = capacity && weapon && ResOf(weapon) ? capacity(NULL, weapon) : 0;
+    int32_t c = capacity && weapon && ResOf(weapon) && MagIn(weapon) ? capacity(NULL, weapon) : 0;
     return c > 0 ? c : -1;
 }
 /* rounds added past the capacity hold (W: 40 in a 10-round GL-21); the count is 32-bit (0x76E080), only the copy sent to
@@ -145,7 +165,7 @@ KB_FN int MagCapacity(uint32_t weapon)
 KB_FN void MagAdd(uint32_t weapon, int32_t n)
 {
     HfFn_AddMagazineRounds add = hf_fn_AddMagazineRounds(self);
-    if (add && weapon && n > 0) add(NULL, weapon, n);
+    if (add && weapon && n > 0 && MagIn(weapon)) add(NULL, weapon, n);
 }
 /* a weapon's magazine to its capacity and its spares in full (a resupply's refill, six times) */
 KB_FN void FillUp(uint32_t weapon)
