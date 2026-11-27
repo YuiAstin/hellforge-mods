@@ -50,7 +50,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.1.3"
+#define VERSION "0.1.4"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -58,6 +58,7 @@
 #include "kitbase/kb_friends.h"
 #include "kitbase/kb_allies.h"
 #include "kitbase/kb_damage.h"
+#include "kitbase/kb_hits.h"     /* 0.1.4: her gun's hits told as hers (the hit hooks: a gun's shots name the gun as their dealer) */
 #include "kitbase/kb_wield.h"
 #include "kitbase/kb_settings.h"
 #include "kitbase/kb_options.h"
@@ -187,9 +188,23 @@ static void GunRecords(int i)
          * of"), so it fired the game's own round. Her round is a copy of the gun's own, with its look: the gun's package,
          * which the kit loads before the gun is made and at the mission's start, holds everything it needs. Written into
          * her gun's own record (own_all: it is no other entity's) */
-        uint32_t stride = 0, now = 0;
+        /* 0.1.4: the round is not at the record's start (played: nothing was written). set_live put it just before
+         * fire_rate[0] (the Maxigun's copy: projectile at ...550, fire_rate[0] at ...554): found as the base round's id
+         * followed by the fire rate just set */
+        uint32_t stride = 0, w[2] = {0};
         uintptr_t r = proj ? 0 : hf->component_record("ProjectileWeaponComponentData", res, &stride);
-        if (r && ReadAt(r, &now, 4) && now == kBaseRound[i] && !hf->write(r, &g_round[i], 4)) { proj = 2; Log("her gun (%s's copy): its round %u written into its own record", kBaseName[i], g_round[i]); }
+        float want = rpm;
+        uint32_t wantBits;
+        memcpy(&wantBits, &want, 4);
+        if (!proj)
+        {
+            int at = -1;
+            for (int o = 0; r && o + 8 <= 0x200; o += 4)
+                if (ReadAt(r + o, w, 8) && (w[0] == kBaseRound[i] || w[0] == g_round[i]) && w[1] == wantBits) { at = o; break; }
+            if (at >= 0 && w[0] == g_round[i]) proj = 2;   /* (written before: the options screen's change) */
+            else if (at >= 0&& !hf->write(r + at, &g_round[i], 4)) { proj = 2; Log("her gun (%s's copy): its round %u written into its own record (+0x%X)", kBaseName[i], g_round[i], at); }
+            else Log("her gun (%s's copy): its round could not be written (record %s, the base round %s)", kBaseName[i], r ? "found" : "not found", at >= 0 ? "found, the write refused" : "not found before fire_rate");
+        }
     }
     HfField cap = HF_FIELD(WeaponMagazine, capacity);
     HfValue vc = HF_U32(s_gunRounds);
@@ -366,6 +381,7 @@ enum { K_IDLE, K_PACKAGE, K_WAITGL, K_PUTAWAY, K_TAKE, K_ASK, K_HELD, K_LETGO, K
 static int g_k;
 static atomic_uint g_gl;                  /* her gun (0: none) */
 static double g_kAt, g_madeAt, g_readyAt, g_awaySince, g_droppedSince;
+static double g_emptySince, g_roundsLogAt;   /* 0.1.4: her rounds at 0 for a second before the gun goes (a reload reads 0) */
 static uint32_t g_kSel, g_kOld, g_kNew, g_swapOld;   /* her selection at the start; the support weapon she had; its replacement; the gun a swap replaces */
 static uint64_t g_kOldRes;
 static atomic_uint g_bp;                  /* her gun's backpack (the Maxigun's copy only; 0: none) */
@@ -533,7 +549,7 @@ static void GunFrame(void)
         WieldAsk(3, "her gun in hand");
         GunFill(gl);
         g_k = K_HELD;
-        g_awaySince = g_droppedSince = g_bpOffSince = 0;
+        g_awaySince = g_droppedSince = g_bpOffSince = g_emptySince = g_roundsLogAt = 0;
         Log("Destroyer of Denouement %u%s: gun %u, %d rounds (%s %d)", g_uses, g_swap ? ", Lock & Load's new one" : " on", gl, GunRounds(gl),
             Pack() ? "in its backpack; the gun's own magazine" : "capacity", Pack() ? MagRounds(gl) : MagCapacity(gl));
         g_swap = 0;
@@ -544,7 +560,15 @@ static void GunFrame(void)
     {
         uint32_t sel = 0, support = 0;
         if (ResOf(gl) != res) { GunAbort("her gun is gone"); break; }
-        if (GunRounds(gl) == 0) { GunEnd("its rounds are spent"); break; }
+        {
+            int left = GunRounds(gl);
+            /* 0.1.4: played, the first gun went 9 s in ("its rounds are spent"): a magazine reads 0 while it reloads, so
+             * only 0 for a whole second counts; and her rounds are logged every 5 s (the first guns) */
+            if (g_uses <= 3 && g_now >= g_roundsLogAt) { g_roundsLogAt = g_now + 5; Log("Destroyer of Denouement %u: %d rounds", g_uses, left); }
+            if (left != 0) g_emptySince = 0;
+            else if (!g_emptySince) { g_emptySince = g_now; Log("Destroyer of Denouement %u: its rounds read 0 (a reload, or spent)", g_uses); }
+            else if (g_now - g_emptySince > 1.0) { GunEnd("its rounds are spent"); break; }
+        }
         ReadAt(rec + 0x1C, &sel, 4);
         ReadAt(rec + 8, &support, 4);
         if (Pack())
@@ -664,6 +688,64 @@ static uint32_t Held(uint32_t* selOut)
     if (selOut) *selOut = sel;
     return slots[sel - 1];
 }
+/* a fresh gun of the held one's kind: its package, spawned at her feet, 0.75 s, taken into its slot (the take drops the
+ * old one, then removed) and drawn */
+enum { LL_IDLE, LL_PACKAGE, LL_WAIT };
+static int g_ll;
+static uint32_t g_llOld, g_llNew, g_llSel;
+static uint64_t g_llRes, g_llPkg;
+static double g_llAt;
+static void LlFresh(uint32_t w)
+{
+    uint32_t sel = 0;
+    if (g_ll != LL_IDLE || Held(&sel) != w || !WieldReady()) { Log("Lock & Load: busy, or the swap is off"); return; }
+    g_llOld = w;
+    g_llSel = sel;
+    g_llRes = ResOf(w);
+    if (!g_llRes || !LoadoutPackage(g_llRes, &g_llPkg)) g_llPkg = 0;
+    g_ll = LL_PACKAGE;
+    g_llAt = g_now + 8;
+    Log("Lock & Load: a fresh gun of %u's kind (%016llx, selection %u)", w, (unsigned long long)g_llRes, sel);
+}
+static void LlFrame(void)
+{
+    HfFn_RemoveEntity remove = hf_fn_RemoveEntity(self);
+    void* em = hf_global_EntityManager(self);
+    uint32_t me = atomic_load(&g_avatar);
+    switch (g_ll)
+    {
+    case LL_PACKAGE:
+    {
+        int st = g_llPkg ? hf->load_package(self, g_llPkg) : HF_PACKAGE_RESIDENT;
+        if (st == HF_PACKAGE_LOADING) { if (g_now > g_llAt) { Log("Lock & Load: its package did not load"); g_ll = LL_IDLE; } break; }
+        g_llNew = SpawnNear(g_llRes, "a fresh gun");
+        if (!g_llNew) { g_ll = LL_IDLE; break; }
+        g_ll = LL_WAIT;
+        g_llAt = g_now + 0.75;
+        break;
+    }
+    case LL_WAIT:
+    {
+        if (g_now < g_llAt) break;
+        g_ll = LL_IDLE;
+        uint32_t sel = 0;
+        if (ResOf(g_llNew) != g_llRes) { Log("Lock & Load: the fresh gun does not read as one"); break; }
+        if (Held(&sel) != g_llOld)
+        {
+            Log("Lock & Load: the gun left her hands meanwhile: the fresh one removed");
+            if (remove && em) remove(em, g_llNew);
+            break;
+        }
+        WieldTake(me, g_llNew, g_llSel);   /* drops the old one */
+        if (ResOf(g_llOld) == g_llRes && remove && em) remove(em, g_llOld);
+        WieldAsk(g_llSel, "the fresh gun in hand");
+        FillUp(g_llNew);
+        Log("Lock & Load: fresh gun %u in place of %u, %d rounds in its magazine", g_llNew, g_llOld, MagRounds(g_llNew));
+        break;
+    }
+    default: g_ll = LL_IDLE;
+    }
+}
 static void LockAndLoad(void)
 {
     if (g_now < g_cd[1]) return;
@@ -673,10 +755,16 @@ static void LockAndLoad(void)
     g_casts[1]++;
     uint32_t gl = atomic_load(&g_gl);
     if (gl && w == gl && g_k == K_HELD && (s_llErgonomics > 0 || s_llRecoil)) { GunSwap(); return; }
-    int before = MagRounds(w);
-    FillUp(w);
-    if (gl && w == gl) { before = GunRounds(gl); GunFill(gl); }
-    Log("Lock & Load: her gun %u refilled (%d -> %d rounds)", w, before, gl && w == gl ? GunRounds(gl) : MagRounds(w));
+    if (gl && w == gl)
+    {
+        int before = GunRounds(gl);
+        GunFill(gl);
+        Log("Lock & Load: her gun %u refilled (%d -> %d rounds)", w, before, GunRounds(gl));
+        return;
+    }
+    /* 0.1.4: any other gun is replaced by a fresh one of its kind, full (W's way; played, the refill only filled the
+     * spares of her primary: its magazine size can't be read) */
+    LlFresh(w);
 }
 
 /* ---- Ishbosheth (C) ---------------------------------------------------------------------------------------------- */
@@ -693,6 +781,20 @@ static int Shoot(uint32_t round, const float from0[3], const float dir0[3])
     for (int k = 0; k < 3; k++) { dir[k] /= n; from[k] = from0[k] + dir[k] * 1.2f; }   /* clear of her own body */
     return hf->spawn_projectile(self, round, from, dir) == HF_ACT_REQUESTED;
 }
+static int IshPackage(void)
+{
+    static uint64_t pkg;
+    static int state;
+    if (!pkg && !LoadoutPackage(HF_ENTITY_MAXIGUN_BACKPACK, &pkg)) pkg = ~0ull;
+    if (pkg == ~0ull) return 0;
+    if (state != HF_PACKAGE_RESIDENT)
+    {
+        state = hf->load_package(self, pkg);
+        if (!state) { Log("Ishbosheth: the Maxigun Backpack's package %016llx could not be held", (unsigned long long)pkg); pkg = ~0ull; }
+        else if (state == HF_PACKAGE_RESIDENT) Log("Ishbosheth: the Maxigun Backpack's package %016llx is loaded (its rounds)", (unsigned long long)pkg);
+    }
+    return state;
+}
 static void Ishbosheth(void)
 {
     if (g_ishArmed || g_now < g_cd[2]) return;
@@ -705,20 +807,30 @@ static void IshFire(void)
 {
     float cam[3], fwd[3], head[3], q[3];
     if (!View(cam, fwd) || !HerHead(head)) return;
-    if (GunPackage() == HF_PACKAGE_LOADING) return;   /* (asked for at the mission's start: only a moment's wait) */
-    uint32_t round = g_ishRound[g_use] ? g_ishRound[g_use] : g_round[g_use], spray = g_round[g_use];
+    /* 0.1.4: always the Maxigun's copies (played: HellForge's catalogue doesn't know the MG-43 round's package, so the
+     * spawns of its copy were refused); their package is the Maxigun Backpack's, asked for from the mission's start */
+    if (IshPackage() == HF_PACKAGE_LOADING) return;
+    uint32_t round = g_ishRound[0] ? g_ishRound[0] : g_round[0], spray = g_round[0];
     float flat = sqrtf(fwd[0] * fwd[0] + fwd[1] * fwd[1]);
     if (!(flat > 0.05f) || !round) return;
     float cosMax = cosf(s_ishCone * 0.0174533f);
     struct { uint32_t e; float d2, q[3]; } t[32];
     int n = 0, cap = s_ishTargets > 32 ? 32 : s_ishTargets;
+    unsigned listed = 0, placed = 0, inRange = 0, inFan = 0;   /* 0.1.4: played, "0 of 0": where they drop out */
     for (int k = 0; k < FOES; k++)
     {
         uint32_t e = g_foe[k];
         float d2;
-        if (!e || !TargetPos(e, g_foeRes[k], q) || (d2 = Dist2(q, head)) > s_ishRange * s_ishRange || d2 < 1) continue;
+        if (!e) continue;
+        listed++;
+        if (!TargetPos(e, g_foeRes[k], q)) continue;
+        placed++;
+        if ((d2 = Dist2(q, head)) > s_ishRange * s_ishRange || d2 < 1) continue;
+        inRange++;
         float dx = q[0] - head[0], dy = q[1] - head[1], h = sqrtf(dx * dx + dy * dy);
-        if (h < 0.1f || (dx * fwd[0] + dy * fwd[1]) / (h * flat) < cosMax || !Alive(e)) continue;
+        if (h < 0.1f || (dx * fwd[0] + dy * fwd[1]) / (h * flat) < cosMax) continue;
+        inFan++;
+        if (!Alive(e)) continue;
         int j;
         if (n == cap) { if (d2 >= t[n - 1].d2) continue; j = n - 1; }
         else j = n++;
@@ -745,6 +857,7 @@ static void IshFire(void)
     g_casts[2]++;
     Log("Ishbosheth: %d of %d enemies in the fan (%.0f degrees each side, %.0f m) take a round of %.2f times her gun's; %d sweep rounds", hit, n,
         (double)s_ishCone, (double)s_ishRange, (double)s_ishMult, sprayed);
+    Log("Ishbosheth: enemies listed %u, placed %u, in range %u, in the fan %u, alive %d; rounds %u / %u", listed, placed, inRange, inFan, n, round, spray);
 }
 /* readied: her next shot (the gun in her hands loses a round) sets it off; the left button too, for a gun without a
  * magazine to read */
@@ -835,6 +948,26 @@ static void OnPlayer(HfMod* mod, const HfEventInfo* info, void* user)
     }
     else { g_alive = 0; g_ishArmed = 0; }
 }
+/* 0.1.4: her Helldiver's network id from the player list (played: no spawn of hers named it, so every hit read as not
+ * hers and her damage bonuses never applied). PlayerManager: count +0x84, slot i's peer +0x2C8 + 0x38 i, its Helldiver's
+ * network id +0x3A8 + 0x20 i; LocalUser: this machine's peer +0xB398 (the SDK's globals) */
+static void NetFromPlayers(void)
+{
+    static double at;
+    if (g_now < at) return;
+    at = g_now + 1;
+    uintptr_t pm = (uintptr_t)hf_global_PlayerManager(self), lu = (uintptr_t)hf_global_LocalUser(self);
+    uint64_t mine = 0, peer = 0;
+    uint32_t count = 0, net = 0;
+    if (!pm || !lu || !ReadAt(lu + 0xB398, &mine, 8) || !mine || !ReadAt(pm + 0x84, &count, 4) || count > 4) return;
+    for (uint32_t i = 0; i < count; i++)
+        if (ReadAt(pm + 0x2C8 + 0x38u * i, &peer, 8) && peer == mine && ReadAt(pm + 0x3A8 + 0x20u * i, &net, 4) && NetOk(net))
+        {
+            g_avatarNet = net;
+            Log("her Helldiver's network id %u (the player list, slot %u)", net, i);
+            return;
+        }
+}
 static void Reset(const char* why)
 {
     int start = !strcmp(why, "mission start");
@@ -854,6 +987,8 @@ static void Reset(const char* why)
     g_uses = g_swaps = g_refills = g_ishHits = g_ishSprayed = g_reloads = g_buffed = 0;
     g_buffDamage = 0;
     g_lastTarget = 0;
+    g_ll = LL_IDLE;
+    if (start) g_avatarNet = 0;   /* a new mission: a new network id, learned again */
     memset(g_foe, 0, sizeof g_foe);
     memset(g_foeRes, 0, sizeof g_foeRes);
 }
@@ -865,6 +1000,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     game = g;
     exe = x;
     if (!WieldPins()) Log("Destroyer of Denouement is off (the swap's code is not the reviewed one)");
+    HitsInstall("her hits");
     Log("ready: Destroyer of Denouement on %s (%d rounds, %.0f rpm + %.0f%%, AP %d, %.0f s cooldown; shield %.0f every %.0f s, -%.0f/s without it), "
         "Lock & Load on %s, Ishbosheth on %s", s_keys[0].label, s_gunRounds, (double)s_gunRpm, (double)(s_judgmentRate * 100), s_gunAp, (double)s_gunCooldown,
         (double)s_shieldMax, (double)s_shieldEvery, (double)s_shieldDecay, s_keys[1].label, s_keys[2].label);
@@ -957,12 +1093,14 @@ static void Tick(HfMod* mod, float dt, void* user)
         prev[i] = down;
     }
     if (!NetOk(g_avatarNet)) LearnNet();
+    if (!NetOk(g_avatarNet) && g_inMission) NetFromPlayers();
     /* her gun's package, asked for from the mission's start (Ishbosheth's rounds need it before any gun is out) */
     {
         static double pkgAt;
-        if (g_k == K_IDLE && g_now >= pkgAt) { pkgAt = g_now + 1; Gun(); GunPackage(); }
+        if (g_k == K_IDLE && g_now >= pkgAt) { pkgAt = g_now + 1; Gun(); GunPackage(); if (g_inMission) IshPackage(); }
     }
     GunFrame();
+    if (g_inMission) LlFrame();
     if (g_alive)
     {
         ShieldFrame(step);
