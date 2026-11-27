@@ -18,7 +18,15 @@
  * bytes; +0x68 the entity it perceives through: its squad) and its squad's record (AiSquadManager [game+0x33265A0],
  * 0x2510 bytes) four times a second, and logs every 4-byte word that changes, after a 4 s baseline that marks the words
  * that change by themselves (timers, positions) as noise. A value that is your Helldiver's entity, unit or network id is
- * flagged. Following now starts OFF. Test: Insert, stand still 6 s, comm wheel Follow, walk 10 s; Hold; Move. */
+ * flagged. Following now starts OFF. Test: Insert, stand still 6 s, comm wheel Follow, walk 10 s; Hold; Move.
+ *
+ * 0.4.0, the stick bug's numbers (Yui: 600 health and armour 4, a sentry's, "they are made of metal"): Insert spawns a
+ * copy of the trooper under a resource of the probe's own (add_entity, "yui/escort_probe/stick_bug", its own
+ * HealthComponentData), so the game's troopers keep theirs (kit base principle 6). Once the entities are in, its record
+ * gets main health 600 (+0x00), main armour 4 (+0x118), and every damage zone (38 at most, 0x228 bytes from +0x208, its
+ * name's hash at +0x60) armour 4 (+0xD8) and its health x4 (+0xE8), so no part of it falls to one shot. Following
+ * re-sends every 0.5 s (a stick bug more than 5 m away), to a point 1.5 m beside you, half a metre along the way you're
+ * moving: they trailed 10 to 40 m behind a sprinting Helldiver sent behind her once a second. */
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -33,7 +41,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.0"
+#define VERSION "0.4.0"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
@@ -41,6 +49,8 @@
 #include "kitbase/kb_spawn.h"
 
 #define SEAF UINT64_C(0x75F7E96AF7DCD303)
+static uint64_t g_bug;                     /* the stick bug: add_entity's copy of the trooper, 0 none */
+static uint64_t BugRes(void) { return g_bug ? g_bug : SEAF; }
 #define ESCORTS 2
 
 typedef struct Escort { uint32_t entity, net; double since; int hits, taken, maxHp, lastHp, dead, sent; } Escort;
@@ -63,13 +73,13 @@ static void Remove(Escort* e, const char* why)
 {
     if (!e->entity) return;
     Line(e, why);
-    if (!e->dead) Log("  taken away: %s", KbRemoveEntity(e->entity, SEAF) ? "yes" : "refused (not in a mission, or the id is no longer a trooper)");
+    if (!e->dead) Log("  taken away: %s", KbRemoveEntity(e->entity, BugRes()) ? "yes" : "refused (not in a mission, or the id is no longer a trooper)");
     memset(e, 0, sizeof *e);
 }
 static void SpawnFrame(void)
 {
     if (!g_want) return;
-    int r = KbLoadFor(SEAF);
+    int r = KbLoadFor(BugRes());
     if (r != HF_PACKAGE_RESIDENT)
     {
         if (!r) { Log("the trooper's package was refused"); g_want = 0; }
@@ -87,7 +97,7 @@ static void SpawnFrame(void)
         slot = g_esc[0].since <= g_esc[1].since ? 0 : 1;
         Remove(&g_esc[slot], "a third one asked for: the oldest goes");
     }
-    uint32_t e = KbSpawnEntity(SEAF, at, "a SEAF trooper");
+    uint32_t e = KbSpawnEntity(BugRes(), at, g_bug ? "a stick bug (the trooper copy)" : "a SEAF trooper");
     if (!e) return;
     Escort* x = &g_esc[slot];
     memset(x, 0, sizeof *x);
@@ -98,17 +108,29 @@ static void SpawnFrame(void)
     g_lastSpawnAt = g_now;
     Watch(e);
     Log("Insert: a SEAF trooper, entity %u, at %.1f %.1f %.1f; health %d; friend table says %s; walks %d", e, (double)at[0], (double)at[1], (double)at[2], hp,
-        FriendRes(SEAF) ? "a friend" : "NOT a friend", Walks(e));
+        FriendRes(BugRes()) ? "a friend" : "NOT a friend", Walks(e));
+    if (g_bug) Log("  it is the stick bug copy (%016llx)", (unsigned long long)g_bug);
 }
 static void FollowFrame(void)
 {
     static double next, report;
     float me[3], aim[3], p[3];
     if (g_now < next) return;
-    next = g_now + 1.0;
+    next = g_now + 0.5;
+    static float last[3];
+    static int haveLast;
     int say = g_now >= report;
     if (say) report = g_now + 2.0;
     if (!PlayerPose(me, aim)) return;
+    /* where she's heading: her move over the last half second, else where she faces */
+    float way[3] = {aim[0], aim[1], 0};
+    if (haveLast)
+    {
+        float dx = me[0] - last[0], dy = me[1] - last[1], m = sqrtf(dx * dx + dy * dy);
+        if (m > 0.4f) { way[0] = dx / m; way[1] = dy / m; }
+    }
+    memcpy(last, me, sizeof last);
+    haveLast = 1;
     for (int i = 0; i < ESCORTS; i++)
     {
         Escort* e = &g_esc[i];
@@ -124,7 +146,7 @@ static void FollowFrame(void)
         e->lastHp = hp;
         if (say) Line(e, "every 2 s");
         if (!g_follow || !g_setDest || !EntityPos(e->entity, p) || Dist2(me, p) < 25) continue;
-        float to[3] = {me[0] - aim[0] * 2.5f + (i ? aim[1] : -aim[1]) * 1.5f, me[1] - aim[1] * 2.5f + (i ? -aim[0] : aim[0]) * 1.5f, me[2]};
+        float to[3] = {me[0] + way[0] * 0.5f + (i ? way[1] : -way[1]) * 1.5f, me[1] + way[1] * 0.5f + (i ? -way[0] : way[0]) * 1.5f, me[2]};
         if (Walks(e->entity)) { g_setDest(NULL, e->entity, to); e->sent++; }
     }
 }
@@ -148,7 +170,7 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     for (int i = 0; i < ESCORTS; i++) if (g_esc[i].entity == s->entity) g_esc[i].net = s->network;
     if (g_now - g_lastSpawnAt > 3) return;
     static unsigned shown;
-    if (shown++ < 40) Log("  spawned near our call: entity %u, resource %016llx%s", s->entity, (unsigned long long)s->resource, s->resource == SEAF ? " (a trooper)" : "");
+    if (shown++ < 40) Log("  spawned near our call: entity %u, resource %016llx%s", s->entity, (unsigned long long)s->resource, s->resource == SEAF ? " (a trooper)" : s->resource == g_bug ? " (a stick bug)" : "");
 }
 
 /* ---- 0.2.x: what an order changes ---------------------------------------------------------------------------------- */
@@ -290,7 +312,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         return;
     }
     int f = Focused(), k[3] = {f && (GetAsyncKeyState(VK_INSERT) & 0x8000), f && (GetAsyncKeyState(VK_HOME) & 0x8000), f && (GetAsyncKeyState(VK_DELETE) & 0x8000)};
-    if (k[0] && !prev[0] && !g_want) { g_want = 1; g_wantSince = g_now; Log("Insert: asking for the trooper's package (%016llx; 0: it names none, spawned as is)", (unsigned long long)KbPackageOf(SEAF)); }
+    if (k[0] && !prev[0] && !g_want) { g_want = 1; g_wantSince = g_now; Log("Insert: asking for the trooper's package (%016llx; 0: it names none, spawned as is)", (unsigned long long)KbPackageOf(BugRes())); }
     if (k[1] && !prev[1]) { g_follow = !g_follow; Log("Home: following %s", g_follow ? "ON" : "OFF"); }
     if (k[2] && !prev[2]) for (int i = 0; i < ESCORTS; i++) Remove(&g_esc[i], "Delete");
     memcpy(prev, k, sizeof prev);
@@ -305,6 +327,35 @@ HF_MOD_EXPORT int escort_lua_log(unsigned version, const char* text)
     if (version != 1 || !text) return 0;
     if (lines++ < 4000) Log("[lua] %.480s", text);
     return 1;
+}
+/* 0.4.0: the stick bug's health record: main 600, armour 4, every zone armour 4 and health x4 */
+static void BugNumbers(HfMod* mod, HfEvent event, void* user)
+{
+    uint32_t stride = 0;
+    uintptr_t h = g_bug && hf->component_record ? hf->component_record("HealthComponentData", g_bug, &stride) : 0;
+    uintptr_t base = hf->component_record ? hf->component_record("HealthComponentData", SEAF, &stride) : 0;
+    if (!h || h == base) { Log("stick bug: its own health record is not there (%s): the trooper's numbers", h ? "shared with the trooper" : "none"); return; }
+    int32_t hp = 0, top = 600;
+    uint32_t armour = 0, four = 4;
+    ReadAt(h, &hp, 4);
+    ReadAt(h + 0x118, &armour, 4);
+    hf->write(h, &top, 4);
+    hf->write(h + 0x118, &four, 4);
+    int zones = 0;
+    for (int z = 0; z < 38; z++)
+    {
+        uintptr_t zr = h + 0x208 + 0x228ull * z;
+        uint32_t name = 0, za = 0;
+        int32_t zh = 0;
+        if (!ReadAt(zr + 0x60, &name, 4) || !name) continue;
+        ReadAt(zr + 0xD8, &za, 4);
+        ReadAt(zr + 0xE8, &zh, 4);
+        int32_t zh4 = zh > 0 ? zh * 4 : zh;
+        hf->write(zr + 0xD8, &four, 4);
+        hf->write(zr + 0xE8, &zh4, 4);
+        if (zones++ < 12) Log("  zone %d (%08x): armour %u -> 4, health %d -> %d", z, name, za, zh, zh4);
+    }
+    Log("stick bug %016llx: health %d -> 600, armour %u -> 4, %d zones", (unsigned long long)g_bug, hp, armour, zones);
 }
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {
@@ -323,6 +374,17 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     if (!api || api->version < 16 || api->size < offsetof(HfApi, global) + sizeof api->global || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
     Log("Escort Probe " VERSION ": research for Andoris (a SEAF trooper as a bodyguard)");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
+    if (api->add_entity)
+    {
+        static const char* const own[] = {"HealthComponentData", NULL};
+        HfEntity bug = {sizeof bug};
+        bug.base = SEAF;
+        bug.name = "yui/escort_probe/stick_bug";
+        bug.own_components = own;
+        g_bug = api->add_entity(mod, &bug);
+        Log(g_bug ? "stick bug: a copy of the SEAF trooper, %016llx" : "stick bug: the copy was refused (%016llx): the plain trooper", (unsigned long long)g_bug);
+        if (g_bug && api->on(mod, HF_EVENT_ENTITIES_READY, BugNumbers, NULL)) Log("stick bug: its numbers can't be set (no ENTITIES_READY)");
+    }
     int ok = api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_DAMAGE, OnDamage, NULL, 0) &&
              api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->on_game_thread(mod, Tick, NULL);
     if (!ok) Log("events or the game thread are unavailable");
