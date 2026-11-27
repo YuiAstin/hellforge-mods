@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.held-probe",
+  "name": "Held Probe (research)",
+  "version": "0.1.0",
+  "description": "Research only, for Hina's gun: what the game says she holds while she calls a stratagem, throws a grenade, switches weapons and drops her support weapon. Logs every change of her inventory selection and slots, and the game's weapon events, with the time and the keys held. Changes nothing. Solo or host. Turn off when done.",
+  "gameplay": false,
+  "code": {
+    "dll": "held_probe.dll",
+    "sdk": 16
+  }
+}
