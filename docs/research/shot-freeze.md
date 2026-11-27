@@ -1,10 +1,10 @@
-# Freezing shots in flight (research, 2026-11-26)
+# Freezing what is in flight (research, from 2026-11-26)
 
 Goal: a true time stop, with the shots already in the air held where they are and let go as they were. The kit base's
 pose hold (`kitbase/kb_hold.h`) already stops enemies one at a time; this is the projectile half. Game build 25480438;
 addresses are `game.dll` RVAs. Read from the game's code (the dump) and HellForge's shot rules
-(`native/mod-loader/actions.c`, YuiAstin/hellforge at c01f36b). **Not tested in game yet:** Shot Freeze Probe 0.1.0
-(`probes/shot-freeze-probe`) is the test.
+(`native/mod-loader/actions.c`, YuiAstin/hellforge at c01f36b). Shot Freeze Probe (`probes/shot-freeze-probe`) is the
+test: 0.1.0 for the shot pool (played 2026-11-27), 0.2.0 for grenades, missiles, rockets and fuses (not played yet).
 
 ## The shot pool
 
@@ -62,18 +62,70 @@ Data writes only, on the game thread; no code patched:
 - A frozen shot still checks hits along its (near zero) segment, so something that walks into it should still be hit.
   For a time stop that is fine: the enemies are held too.
 
-## What the probe answers
+## What 0.1.0 found (played 2026-11-27, four sessions)
 
-1. Do frozen shots stay alive and in place for 3 s (method A), and does zeroing the velocity end them, as the slow-shot
-   rule predicts (method B)?
-2. On release, do they fly on at their old speed, with their lifetime as it was?
-3. Do tracers and effects stay drawn where the shot is?
-4. By hand (Ctrl+F11): your own fire and enemy fire, frozen as it leaves the barrel.
+- **Method A works.** 12 of 12 shots held 3 s with 0.003 m drift, and on release flew on at their old speed
+  (a Liberator round 226 m in 0.3 s). Enemy and player shots in flight at the time were held too (up to 24 at once).
+- **Method B ends the shot**, as the slow-shot rule predicts (all four ended 0.02 s in). An explosive round that ends
+  goes off.
+- Its unattended test rounds (four shots upward every 12 s from 20 s into a mission, Eruptor rounds in cycles 3, 4, 7
+  and 8) were the explosions Yui kept seeing 45 s to 1:45 into every mission. 0.2.0 has no unattended rounds.
 
-## Not covered
+## Status (0.2.0)
 
-- **Grenades and thrown items:** physics entities, not pool shots (the kit base's velocity setters are the route).
-- **Seeking missiles:** their own manager, `[game+0x3326DF0]` (see [lock-on.md](lock-on.md)): speed at local instance
-  `+0x28`/`+0x30`, age at clocks `+8`.
+| What | Where it lives | Freeze | Tested |
+|---|---|---|---|
+| Bullets, Eruptor rounds (shot pool) | projectile pool | velocity and starting speed x 1e-6, gravity 0, lifetime held | **Works** (0.1.0, 2026-11-27): 12 of 12 held 3 s, drift 0.003 m, flew on at full speed |
+| Same, velocity set to 0 | projectile pool | — | **Ends the shot** (the slow-shot rule); an explosive round goes off |
+| Rockets (EAT, Recoilless, RL-77), grenade launcher rounds | projectile pool (assumed: they have pool projectile types) | method A plus the position written back every tick | 0.2.0, not yet played |
+| Thrown grenades and knives | physics bodies (Throwable component) | velocity 0 and position written back every tick through the engine's actor table; the old velocity given back | 0.2.0, not yet played |
+| Fuses (grenades, missiles, anything with an Explosive component) | Explosive component | the three countdowns written back every tick | 0.2.0, not yet played |
+| Seeking missiles (Spear, P-33, W.A.S.P.) | SeekingMissile component | the game's own engine switch off, the clocks held | 0.2.0, not yet played |
+
+0.1.0 ran ten test rounds on its own in every mission (four shots fired upward, Eruptor rounds in half of them). Those
+were the explosions 45 s to 1:45 into each mission (Yui, 2026-11-27). 0.2.0 does nothing until Ctrl+F11.
+
+## Thrown grenades and knives
+
+Throwable manager `[game+0x33264C0]` (component 259; ThrowableUpdate 0x6C3AE0):
+- +0x20 count; +0x48 headers, 8 bytes each (header +0 the entity's resource, +8 the entity, +0xC its unit);
+- +0x50 instances, 0x78 bytes each: +0 the physics actor (-1 none), +4 the actor to make, +0x4C its last velocity;
+- +0x60 flags, 0x2C bytes each: the update moves one only while bytes +0 and +1 are both set (0x6C3BD5).
+
+The engine's actor table `[game+0x3326338]` (a table of engine functions, filled at start):
+
+| Slot | What | Read from |
+|---|---|---|
+| +0x50 | position(actor, out vec3) | 0x5A0C7E (a distance from it) |
+| +0x60 | set position(actor, vec3) | 0x5B66A6, 0x6C4803 |
+| +0xA0 | set velocity(actor, linear, angular) | 0x5B6696 (zeros to stop a body), 0x6C4819 |
+| +0xA8 | velocity(actor, linear out, angular out or NULL) | 0x6C3C77, 0x6C4792 |
+
+The actor swap at 0x6C4792..0x6C4819 copies +0x50 and +0xA8 of the old actor into +0x60 and +0xA0 of the new one.
+
+## Fuses
+
+Explosive manager `[game+0x3326728]` (component 255; the world update calls 0x8CAFF0 for each, 0x573612):
++0x28 count, +0x50 headers, +0x60 instances, 0x40 bytes each:
+
+| Off | What |
+|---|---|
+| +0x00 | u8 done (the update does nothing more) |
+| +0x02 | u8 active; the world update then sets +0x15 |
+| +0x04 | f32 countdown; at 0 it calls 0x8CA7E0 |
+| +0x08 | f32 countdown (modes other than 0 to 3) |
+| +0x0C | u8 fuse lit |
+| +0x10 | f32 fuse left; when it reaches 0 with +0x0C set, the explosion (record +0x24) is requested (0x8CB1FA) and +0x0C cleared |
+| +0x38 | u32 mode |
+
+## Seeking missiles
+
+See [lock-on.md](lock-on.md) for the manager `[game+0x3326DF0]`. For a freeze: the update 0x642760 adds the frame time
+to the age (clocks +8, 0x64286C) and moves a missile only while state +0x35 is set (0x6429B9). It turns the engine
+on once, when the age passes record +0x38 (0x642878, one-shot flag clocks +2). SetMissileEngine (0x645B80) is the
+game's own switch, as a silo remote uses it.
+
+## Still not covered
+
 - Beams, arcs and explosions already going off.
 - **Co-op:** each machine likely steps its own copy of the shots; not read.

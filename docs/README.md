@@ -10,7 +10,7 @@
 | [research/teleport-blink.md](research/teleport-blink.md) | How to move a Helldiver from a C mod (blink / teleport), from the LIFT-182 Warp Pack's own code. |
 | [research/ias-stutter.md](research/ias-stutter.md) | Why HD2Runtime + IAS stutter together, and the garbage-collector tuning that became Smooth GC. |
 | [research/one-handed.md](research/one-handed.md) | What makes a weapon one-handed (Equipment +0xC4 bit 0, +0xC0 grip), where the records are, and the code that uses it. |
-| [research/shot-freeze.md](research/shot-freeze.md) | The game's shot pool and its step: how to hold shots in flight and let them go, for a time stop (Shot Freeze Probe). |
+| [research/shot-freeze.md](research/shot-freeze.md) | Holding what is in flight for a time stop: the shot pool (works), thrown grenades through the engine's actor table, fuses, seeking missiles (Shot Freeze Probe). |
 | [research/homing.md](research/homing.md) | Homing shots: what works (a game-guided seeking missile handed a target) and what didn't (HellForge's `homing` rule on ordinary shots), notes for the Destroyer. |
 | [research/lock-on.md](research/lock-on.md) | The game's lock-on and seeking missiles (static analysis plus the in-game recipe): where a missile's target lives and how to hand one to a sentry's or launcher's missiles. |
 
