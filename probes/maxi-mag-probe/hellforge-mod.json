@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.maxi-mag-probe",
+  "name": "Maxi Mag Probe (research)",
+  "version": "0.1.0",
+  "description": "Research only, for Hina's gun: can an M-1000 Maxigun have a magazine of its own and fire with no backpack? Two tries of the probe's own (nothing of the game's changed): Page Up puts in your hands the Maxigun with the MG-43's magazine added, Page Down the MG-43 wearing the Maxigun's model and firing record; End takes it away. Carry no support weapon when you try. The log says what each try owns and what its magazine reads each second. Solo or host. Turn off when done.",
+  "gameplay": false,
+  "code": {
+    "dll": "maxi_mag_probe.dll",
+    "sdk": 17
+  }
+}
