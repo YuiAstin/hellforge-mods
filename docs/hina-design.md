@@ -2,7 +2,7 @@
 
 Sorasaki Hina of Blue Archive (Gehenna Academy, head of the Prefect Team; her MG, Destroyer of Denouement). Her
 identity here (Yui, 2026-11-27): put as many rounds down range as possible, as efficiently as possible. Built as
-`mods/hina` 0.1.0 on branch `hina-kit`; not played yet.
+`mods/hina` 0.1.1 on branch `hina-kit`; not played yet.
 
 ## Her kit in Blue Archive
 
@@ -25,6 +25,10 @@ All numbers are settings (her page on the options screen, F9, and `hina.ini`).
 - Her gun in her hands, the way W's King of Hearts gives the GL-21 (the Wield Probe's swap): a copy of the **M-1000
   Maxigun**, or of the **MG-43 Machine Gun** for a profile without the Maxigun's warbond (Voymastina's premium
   fallback; the game's own catalogue says whether this profile owns the Maxigun). `gun_base` 1: always the MG-43.
+- **The Maxigun's copy comes with its backpack** (0.1.1). The game's Maxigun has no magazine: it draws its rounds from
+  the Maxigun Backpack it is linked to. So a copy of the backpack, linked to her gun and holding 6000 rounds, goes on
+  her back first (the inventory's take, slot 6: the backpack's), then the gun into her hands. Her own backpack comes
+  back afterwards, a new one of its kind, as her support weapon does. The MG-43's copy needs none.
 - **6000 rounds, 6000 rounds a minute, armour penetration 5** (the Veterancy System's Gatling upgrade numbers).
 - Her gun, its round and its damage are copies of her own (kit base principle 6): an entity copy of the gun (no armory
   entry, nothing in anyone's loadout), a copy of its round dealing a copy of its damage type with armour penetration 5.
@@ -78,9 +82,26 @@ rounds or damage types is changed.
   stratagem, throws a grenade, switches weapons and drops her support weapon. The kit takes only a primary or secondary
   selection as a switch; the probe's log says whether a stratagem or a grenade reads as one of those.
 
+- **Maxi Mag Probe** (branch `maxi-mag-probe`, `probes/maxi-mag-probe`): a Maxigun with a magazine of its own, two
+  tries (the Maxigun with the MG-43's magazine added; the MG-43 wearing the Maxigun's model and firing record). If one
+  fires from its own magazine, her gun needs no backpack.
+
+## From the game's code (2026-11-27)
+
+- **The Maxigun has no magazine** (HD2Runtime's weapon catalogue: backpack-dependent, a linked-ammo record, no magazine
+  or feed): hence the backpack.
+- **The inventory's take** (0x9AE030) takes slots 1 primary, 2 secondary, 3 support, 4 and 5 the held item, **6 the
+  backpack**; the item in that slot is dropped first.
+- **6000 rounds:** adding rounds (0x76E080) stores a 32-bit count with no cap; 2047 is only the count sent to the other
+  players (in co-op, theirs would read wrong).
+- **The fire rate is capped by the frame rate:** a weapon's frame (0x616AC0) fires at most one shot (its timer is the
+  60 / rpm interval), so 6000 rpm (100 a second) needs 100 frames a second; at 60 fps she fires about 3600. A way past
+  it, not built: her round's own row could fire two projectiles a shot (ProjectileSettings `pellet_count`).
+- **The Maxigun check:** its loadout id is its catalogue item (as the MG-43's is), and the check (0x136FB40) reads the
+  player's holdings of it.
+
 ## Open (to check in play)
 
-- Whether the Maxigun's copy fires without its backpack (it carries its ammunition there in the game).
-- Whether 6000 rounds fit a weapon's magazine count (a turret's is an 11-bit network field, 2047 at most).
-- Whether 6000 rounds a minute holds (the game may cap a weapon's rate).
-- Whether the catalogue check names the Maxigun right (an owner given the MG-43 means it doesn't).
+- Whether her gun fires from her backpack copy (the game may pair a backpack with its weapon by kind: the kit points
+  each copy at the other, and logs what it found).
+- Whether the HUD reads the backpack's rounds (the deposit manager's live amount).
