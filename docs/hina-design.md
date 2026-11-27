@@ -102,9 +102,10 @@ rounds or damage types is changed.
 
 ## From its first start (2026-11-27, logs only: the game crashed on the ship before a mission)
 
-- All three copies registered (both guns, the backpack). **They are in the armory too:** HellForge gives a weapon or
-  backpack entity copy a loadout record of its own, so `arsenal.tsv` lists them and a player can pick them in a
-  loadout (the Maxigun's only for its owners). The SDK has no switch to keep an entity copy out.
+- All three copies registered (both guns, the backpack). HellForge gives each a loadout record, so `arsenal.tsv` lists
+  them (as support weapons and a backpack), but a support weapon or backpack reaches a player only through a
+  stratagem, and they have none: no loadout shows them (Yui). Kept that way: no stratagem for them (were one ever
+  added, Koleda's way keeps a stratagem out of the loadout).
 - The Maxigun's copy took her round; **the MG-43's refused it** ("not one HellForge's catalogue knows the packages
   of"), so it fired the game's own round (AP 3). 0.1.2 writes the round into the gun's own record, and asks for the
   gun's package from the mission's start (her rounds' look, and Ishbosheth's rounds before any gun is out).
