@@ -457,7 +457,9 @@ static int g_k;
 static atomic_uint g_gl;                  /* her gun (0: none) */
 static double g_kAt, g_madeAt, g_readyAt, g_awaySince, g_droppedSince;
 static double g_emptySince, g_roundsLogAt;
-static uint32_t g_picked;                 /* 0.1.4: the weapon she picked up with the gun out (it ends the gun; she keeps it) */   /* 0.1.4: her rounds at 0 for a second before the gun goes (a reload reads 0) */
+static uint32_t g_picked;                 /* 0.1.4: the weapon she picked up with the gun out (it ends the gun; she keeps it) */
+static int g_dropped;                     /* 0.1.4: her gun dropped (or left for a pickup): her old support weapon where it lay */
+static float g_dropAt[3];   /* 0.1.4: her rounds at 0 for a second before the gun goes (a reload reads 0) */
 static uint32_t g_kSel, g_kOld, g_kNew, g_swapOld;   /* her selection at the start; the support weapon she had; its replacement; the gun a swap replaces */
 static uint64_t g_kOldRes;
 static atomic_uint g_bp;                  /* her gun's backpack (the Maxigun's copy only; 0: none) */
@@ -692,6 +694,9 @@ static void GunFrame(void)
             /* 0.1.4: a weapon picked up in its place (played: the pickup dropped her gun, and her old support weapon then
              * took the picked one's slot): she keeps the picked one, in hand, and her old one is not given back */
             g_picked = support && support != gl ? support : 0;
+            /* 0.1.4 (Yui): her old support weapon takes the dropped gun's place on the ground, as if she dropped it */
+            g_dropped = EntityPos(gl, g_dropAt);
+            if (!g_dropped) PlayerPose(g_dropAt, NULL), g_dropped = 1;
             Log("Destroyer of Denouement %u over (%s): %d rounds left", g_uses, g_picked ? "she picked up another weapon" : "she dropped it", GunRounds(gl));
             WieldDrop(me, atomic_load(&g_bp), 0xC);
             g_readyAt = g_now + s_gunCooldown;
@@ -727,14 +732,15 @@ static void GunFrame(void)
             if (bp && ResOf(bp) == g_bpRes && remove && em) remove(em, bp);
             atomic_store(&g_bp, 0);
         }
-        g_kNew = g_kOldRes && !g_picked ? SpawnNear(g_kOldRes, "a new support weapon of her kind") : 0;
+        g_kNew = !g_kOldRes ? 0 : g_dropped ? SpawnAt(g_kOldRes, g_dropAt, "her old support weapon where her gun lay")
+                                             : SpawnNear(g_kOldRes, "a new support weapon of her kind");
         if (g_picked)
         {
             uint32_t sel = 0;
             uintptr_t r = InventoryRecord(me);
             if (r) ReadAt(r + 0x1C, &sel, 4);
             if (sel != 3) WieldAsk(3, "the weapon she picked up in hand");
-            Log("Destroyer of Denouement %u: she keeps the weapon she picked up (%u)", g_uses, g_picked);
+            Log("Destroyer of Denouement %u: she keeps the weapon she picked up (%u); her old one goes where her gun lay", g_uses, g_picked);
             g_picked = 0;
         }
         g_bpNew = g_bpOldRes ? SpawnNear(g_bpOldRes, "a new backpack of her kind") : 0;
@@ -749,7 +755,16 @@ static void GunFrame(void)
             else Log("Destroyer of Denouement %u: the new backpack does not read as hers: left", g_uses);
             g_bpNew = 0;
         }
-        if (!g_kNew) { FillUp(g_weapon[g_kSel]); g_k = K_IDLE; break; }
+        if (!g_kNew) { FillUp(g_weapon[g_kSel]); g_k = K_IDLE; g_dropped = 0; break; }
+        if (g_dropped)
+        {
+            g_dropped = 0;
+            FillUp(g_kNew);
+            Log("Destroyer of Denouement %u: her old support weapon %u on the ground where her gun lay (%.1f %.1f %.1f)", g_uses, g_kNew, (double)g_dropAt[0],
+                (double)g_dropAt[1], (double)g_dropAt[2]);
+            g_k = K_IDLE;
+            break;
+        }
         if (ResOf(g_kNew) == g_kOldRes)
         {
             WieldTake(me, g_kNew, KB_SLOT_SUPPORT);
@@ -845,6 +860,8 @@ static void LlFrame(void)
     {
         if (g_now < g_llAt) break;
         g_ll = LL_IDLE;
+    g_dropped = 0;
+    g_picked = 0;
         uint32_t sel = 0;
         if (ResOf(g_llNew) != g_llRes) { Log("Lock & Load: the fresh gun does not read as one"); break; }
         if (Held(&sel) != g_llOld)

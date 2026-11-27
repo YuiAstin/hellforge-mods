@@ -21,7 +21,8 @@
  *   WieldTake(e, item, slot) the inventory's take: KB_SLOT_PRIMARY .. KB_SLOT_BACKPACK
  *   WieldDrop(e, item, off)  the inventory's drop, and the record's entry at +off cleared if it still names the item
  *   WieldAsk(sel, why)       her switch request for a selection (1-3)
- *   SpawnNear(res, what)     an entity spawned at her feet (0: none)
+ *   SpawnNear(res, what)     an entity spawned at her feet (0: none); SpawnAt(res, at, what) at a point
+ *   EntityPos(e, out)        an entity's position (its unit's root node)
  *   LoadoutPackage(res, *p)  an entity's LoadoutPackage (loaded with load_package; 0 none)
  *   MagRounds(w), MagCapacity(w), MagAdd(w, n), FillUp(w)   a weapon's magazine (-1: none); FillUp: magazine and spares
  *   DepositAmount(bp), DepositSet(bp, n)                    a backpack's ammunition now (-1: none) */
@@ -96,12 +97,19 @@ KB_FN void WieldDrop(uint32_t me, uint32_t item, uint32_t entryOffset)
     if (rec && ReadAt(rec + entryOffset, &now, 4) && now == item) g_wieldDrop(im, me, item, 0, 0, 1);
     if (rec && ReadAt(rec + entryOffset, &now, 4) && now == item) { now = 0; hf->write(rec + entryOffset, &now, 4); }
 }
-KB_FN uint32_t SpawnNear(uint64_t res, const char* what)
+/* an entity's position (its unit's root node; 0: none) */
+KB_FN int EntityPos(uint32_t e, float out[3])
+{
+    uint8_t d[24];
+    return e && Descriptor(e, d) && UnitNode(Word(d + 12), 0, out);
+}
+/* an entity spawned at a point (its pose there, upright), 1 m up as SpawnNear's */
+KB_FN uint32_t SpawnAt(uint64_t res, const float at[3], const char* what)
 {
     HfFn_RequestEntitySpawn spawn = hf_fn_RequestEntitySpawn(self);
-    float p[3];
+    float p[3] = {at[0], at[1], at[2]};
     uint32_t out = 0;
-    if (!spawn || !res || !PlayerPose(p, NULL)) { Log("%s could not be asked for", what); return 0; }
+    if (!spawn || !res) { Log("%s could not be asked for", what); return 0; }
     struct { uint32_t one, network; float pose[16]; void* context; uint64_t pad; } info;
     _Static_assert(sizeof info == 0x58, "the spawn record is 0x58 bytes");
     memset(&info, 0, sizeof info);
@@ -114,6 +122,13 @@ KB_FN uint32_t SpawnNear(uint64_t res, const char* what)
     spawn(&out, res, &info);
     if (!out || out == UINT32_MAX) { Log("%s: no entity came back", what); return 0; }
     return out;
+}
+/* an entity spawned at her feet (0: none) */
+KB_FN uint32_t SpawnNear(uint64_t res, const char* what)
+{
+    float p[3];
+    if (!PlayerPose(p, NULL)) { Log("%s could not be asked for", what); return 0; }
+    return SpawnAt(res, p, what);
 }
 /* an entity's LoadoutPackage (its record's +8); 1 with *pkg set */
 KB_FN int LoadoutPackage(uint64_t res, uint64_t* pkg)
