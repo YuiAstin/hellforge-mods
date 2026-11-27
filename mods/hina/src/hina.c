@@ -50,7 +50,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.1.2"
+#define VERSION "0.1.3"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -58,6 +58,7 @@
 #include "kitbase/kb_friends.h"
 #include "kitbase/kb_allies.h"
 #include "kitbase/kb_damage.h"
+#include "kitbase/kb_wield.h"
 #include "kitbase/kb_settings.h"
 #include "kitbase/kb_options.h"
 #include "kitbase/kb_roster.h"
@@ -357,92 +358,9 @@ static void StanceFrame(void)
 }
 
 /* ---- the weapon swap (W's King of Hearts, from the Wield Probe) ------------------------------------------------- */
-typedef void (*TakeFn)(void* inventory, uint32_t entity, uint32_t item, uint32_t slot, uint8_t flag);
-typedef void (*DropFn)(void* inventory, uint32_t entity, uint32_t item, uint8_t flag, uint64_t zero, uint8_t one);
-typedef void (*RequestFn)(void* object);
-static TakeFn g_take;
-static DropFn g_drop;
-static RequestFn g_request;
-static uint8_t g_context[0x8A0];
-static uint64_t g_package[2];
+/* (the swap primitives: kitbase/kb_wield.h, from W's King of Hearts and this kit) */
+static uint64_t g_package[2];             /* the gun's base's loadout package (~0: none) */
 static int g_pkg[2];
-static uintptr_t InventoryRecord(uint32_t e)
-{
-    uintptr_t m = (uintptr_t)hf_global_InventoryManager(self), records;
-    uint32_t i;
-    if (!m || !Lookup(m + 0x28, e, 1048576, &i) || i >= 65536 || !(records = Pointer(m + 0x50))) return 0;
-    return records + 0x30ull * i;
-}
-static uint64_t ResOf(uint32_t e) { uint8_t d[24]; return e && Descriptor(e, d) ? Quad(d) : 0; }
-static uintptr_t SwitchObject(uint32_t e)
-{
-    uintptr_t am = (uintptr_t)hf_global_AvatarManager(self), obj;
-    uint32_t i, who = 0;
-    if (!am || !Lookup(am + 0xF8, e, 1048576, &i) || i >= 1024) return 0;
-    obj = am + 0x53DCD0 + (uintptr_t)0x1238 * i;
-    return ReadAt(obj, &who, 4) && who == e ? obj : 0;
-}
-static int Ask(uint32_t selection, const char* why)
-{
-    uintptr_t obj = SwitchObject(atomic_load(&g_avatar));
-    if (!obj || !g_request || hf->write(obj + 4, &selection, 4)) { Log("the switch request could not be made (%s)", why); return 0; }
-    g_request((void*)obj);
-    return 1;
-}
-static uint32_t SpawnRes(uint64_t res, const char* what)
-{
-    HfFn_RequestEntitySpawn spawn = hf_fn_RequestEntitySpawn(self);
-    float p[3];
-    uint32_t out = 0;
-    if (!spawn || !PlayerPose(p, NULL)) { Log("%s could not be asked for", what); return 0; }
-    struct { uint32_t one, network; float pose[16]; void* context; uint64_t pad; } info;
-    _Static_assert(sizeof info == 0x58, "the spawn record is 0x58 bytes");
-    memset(&info, 0, sizeof info);
-    memset(g_context, 0, sizeof g_context);
-    info.one = 1;
-    info.network = 0x7FFF;
-    info.pose[0] = info.pose[5] = info.pose[10] = info.pose[15] = 1.0f;
-    info.pose[12] = p[0]; info.pose[13] = p[1]; info.pose[14] = p[2] + 1.0f;
-    info.context = g_context;
-    spawn(&out, res, &info);
-    if (!out || out == UINT32_MAX) { Log("%s: no entity came back", what); return 0; }
-    return out;
-}
-static int Rounds(uint32_t weapon)
-{
-    HfFn_MagazineRounds rounds = hf_fn_MagazineRounds(self);
-    void* wm = hf_global_WeaponManager(self);
-    return rounds && wm && weapon ? rounds(wm, weapon) : -1;
-}
-static int Capacity(uint32_t weapon)
-{
-    HfFn_MagazineCapacity capacity = hf_fn_MagazineCapacity(self);
-    uint32_t stride = 0;
-    uint64_t res = ResOf(weapon);
-    return capacity && res && hf->component_record("WeaponMagazineComponentData", res, &stride) ? capacity(NULL, weapon) : -1;
-}
-/* a weapon's magazine to its capacity and its spares in full */
-static void FillUp(uint32_t weapon)
-{
-    HfFn_AddMagazineRounds add = hf_fn_AddMagazineRounds(self);
-    HfFn_WeaponRefill refill = hf_fn_WeaponRefill(self);
-    if (!weapon || !ResOf(weapon)) return;
-    int have = Rounds(weapon), cap = Capacity(weapon);
-    if (add && have >= 0 && cap > have) add(NULL, weapon, cap - have);
-    if (refill) for (int i = 0; i < 6; i++) refill(0, weapon, 1.0f);
-}
-
-/* a backpack's ammunition now (the deposit manager [game+0x3326BE8]: its map at +0x20, live amounts at +0x50, 8 bytes
- * each; HD2Runtime's player-equipment research) */
-static uintptr_t DepositLive(uint32_t bp)
-{
-    uintptr_t m = Pointer(game + 53634536u), live;
-    uint32_t i;
-    if (!bp || !m || !Lookup(m + 32, bp, 1048576, &i) || i >= 65536 || !(live = Pointer(m + 80))) return 0;
-    return live + 8ull * i;
-}
-static int DepositAmount(uint32_t bp) { uintptr_t a = DepositLive(bp); int32_t v; return a && ReadAt(a, &v, 4) ? v : -1; }
-static int DepositSet(uint32_t bp, int32_t amount) { uintptr_t a = DepositLive(bp); return a && !hf->write(a, &amount, 4); }
 
 enum { K_IDLE, K_PACKAGE, K_WAITGL, K_PUTAWAY, K_TAKE, K_ASK, K_HELD, K_LETGO, K_REMOVE, K_WAITS };
 static int g_k;
@@ -463,9 +381,7 @@ static int GunPackage(void)
 {
     if (!g_package[g_use])
     {
-        uint32_t stride = 0;
-        uintptr_t r = hf->component_record("LoadoutPackageComponentData", kBaseEntity[g_use], &stride);
-        if (!r || !ReadAt(r + 8, &g_package[g_use], 8) || !g_package[g_use]) g_package[g_use] = ~0ull;
+        if (!LoadoutPackage(kBaseEntity[g_use], &g_package[g_use])) g_package[g_use] = ~0ull;
     }
     if (g_package[g_use] == ~0ull) return 0;
     if (g_pkg[g_use] != HF_PACKAGE_RESIDENT)
@@ -478,19 +394,18 @@ static int GunPackage(void)
 }
 static int Pack(void) { return g_use == 0 && g_bpRes; }   /* her gun comes with its backpack */
 /* her gun's rounds: the backpack's for the Maxigun's copy, the magazine's for the MG-43's */
-static int GunRounds(uint32_t gl) { return Pack() ? DepositAmount(atomic_load(&g_bp)) : Rounds(gl); }
+static int GunRounds(uint32_t gl) { return Pack() ? DepositAmount(atomic_load(&g_bp)) : MagRounds(gl); }
 static void GunFill(uint32_t gl)
 {
-    HfFn_AddMagazineRounds add = hf_fn_AddMagazineRounds(self);
     if (Pack()) { DepositSet(atomic_load(&g_bp), s_gunRounds); return; }
-    int have = Rounds(gl);
-    if (add && have >= 0 && have < s_gunRounds) add(NULL, gl, s_gunRounds - have);
+    int have = MagRounds(gl);
+    if (have >= 0 && have < s_gunRounds) MagAdd(gl, s_gunRounds - have);
 }
 static void GunStart(void)
 {
     uint32_t me = atomic_load(&g_avatar), slots[8] = {0};
     uintptr_t rec;
-    if (!g_take || !g_drop || !g_request) { Log("Destroyer of Denouement: off (the game's code is not the reviewed one)"); return; }
+    if (!WieldReady()) { Log("Destroyer of Denouement: off (the game's code is not the reviewed one)"); return; }
     Gun();
     if (!GunRes()) { Log("Destroyer of Denouement: her gun was not added (the log's start says why)"); return; }
     if (!(rec = InventoryRecord(me)) || !ReadAt(rec, slots, sizeof slots) || !SwitchObject(me)) { Log("Destroyer of Denouement: her inventory or her switch object was not found: nothing done"); return; }
@@ -513,7 +428,7 @@ static void GunEnd(const char* why)
 {
     if (g_k != K_HELD) return;
     Log("Destroyer of Denouement %u over (%s): %d rounds left", g_uses, why, GunRounds(atomic_load(&g_gl)));
-    Ask(g_kSel == 3 ? 1 : g_kSel, "her own weapon back in hand");
+    WieldAsk(g_kSel == 3 ? 1 : g_kSel, "her own weapon back in hand");
     g_k = K_LETGO;
     g_kAt = g_now + 1.0;
     g_readyAt = g_now + s_gunCooldown;
@@ -554,7 +469,7 @@ static void GunFrame(void)
     void* im = hf_global_InventoryManager(self);
     void* em = hf_global_EntityManager(self);
     HfFn_RemoveEntity remove = hf_fn_RemoveEntity(self);
-    uint32_t me = atomic_load(&g_avatar), gl = atomic_load(&g_gl), now = 0;
+    uint32_t me = atomic_load(&g_avatar), gl = atomic_load(&g_gl);
     uint64_t res = GunRes();
     uintptr_t rec;
     if (g_k == K_IDLE) return;
@@ -569,9 +484,7 @@ static void GunFrame(void)
             static int bpState;
             if (!bpPkg)
             {
-                uint32_t stride = 0;
-                uintptr_t r = hf->component_record("LoadoutPackageComponentData", HF_ENTITY_MAXIGUN_BACKPACK, &stride);
-                if (!r || !ReadAt(r + 8, &bpPkg, 8) || !bpPkg) bpPkg = ~0ull;
+                if (!LoadoutPackage(HF_ENTITY_MAXIGUN_BACKPACK, &bpPkg)) bpPkg = ~0ull;
             }
             if (bpPkg != ~0ull && bpState != HF_PACKAGE_RESIDENT)
             {
@@ -579,11 +492,11 @@ static void GunFrame(void)
                 if (bpState == HF_PACKAGE_LOADING) { if (g_now > g_kAt) GunAbort("its backpack's package did not load"); break; }
                 if (!bpState) bpPkg = ~0ull;
             }
-            uint32_t bp = SpawnRes(g_bpRes, "her gun's backpack");
+            uint32_t bp = SpawnNear(g_bpRes, "her gun's backpack");
             if (!bp) { GunAbort("no backpack"); break; }
             atomic_store(&g_bp, bp);
         }
-        gl = SpawnRes(res, "her gun");
+        gl = SpawnNear(res, "her gun");
         if (!gl) { GunAbort("no gun"); break; }
         atomic_store(&g_gl, gl);
         g_madeAt = g_now;
@@ -597,34 +510,32 @@ static void GunFrame(void)
         {
             uint32_t bp = atomic_load(&g_bp);
             if (ResOf(bp) != g_bpRes) { GunAbort("her gun's backpack does not read as one"); break; }
-            g_take(im, me, bp, 6, 0);   /* the inventory's take, slot 6: the backpack (her own is dropped by it) */
+            WieldTake(me, bp, KB_SLOT_BACKPACK);   /* the inventory's take, slot 6: the backpack (her own is dropped by it) */
             Log("Destroyer of Denouement %u: her gun's backpack %u on her back", g_uses, bp);
         }
-        if (g_swap || (g_kSel == 3 && g_kOld)) { Ask(1, "a support weapon is in her hands: put away first"); g_k = K_PUTAWAY; g_kAt = g_now + 0.8; }
+        if (g_swap || (g_kSel == 3 && g_kOld)) { WieldAsk(1, "a support weapon is in her hands: put away first"); g_k = K_PUTAWAY; g_kAt = g_now + 0.8; }
         else g_k = K_TAKE;
         break;
     case K_PUTAWAY:
         if (g_now >= g_kAt) g_k = K_TAKE;
         break;
     case K_TAKE:
-        g_take(im, me, gl, 3, 0);
+        WieldTake(me, gl, KB_SLOT_SUPPORT);
         g_k = K_ASK; g_kAt = g_now + 0.1;
         break;
     case K_ASK:
     {
-        HfFn_AddMagazineRounds add = hf_fn_AddMagazineRounds(self);
         if (g_now < g_kAt) break;
         /* what the take dropped: her own support weapon (the first call) or the gun a swap replaces */
         if (!g_swap && g_kOld && ResOf(g_kOld) == g_kOldRes && remove && em) remove(em, g_kOld);
         if (g_swap && g_swapOld && ResOf(g_swapOld) == res && remove && em) remove(em, g_swapOld);
         if (!g_swap && g_bpOld && ResOf(g_bpOld) == g_bpOldRes && remove && em) remove(em, g_bpOld);   /* the backpack she wore, dropped by the take */
-        Ask(3, "her gun in hand");
-        (void)add;
+        WieldAsk(3, "her gun in hand");
         GunFill(gl);
         g_k = K_HELD;
         g_awaySince = g_droppedSince = g_bpOffSince = 0;
         Log("Destroyer of Denouement %u%s: gun %u, %d rounds (%s %d)", g_uses, g_swap ? ", Lock & Load's new one" : " on", gl, GunRounds(gl),
-            Pack() ? "in its backpack; the gun's own magazine" : "capacity", Pack() ? Rounds(gl) : Capacity(gl));
+            Pack() ? "in its backpack; the gun's own magazine" : "capacity", Pack() ? MagRounds(gl) : MagCapacity(gl));
         g_swap = 0;
         g_swapOld = 0;
         break;
@@ -650,12 +561,7 @@ static void GunFrame(void)
         else if (g_now - g_droppedSince > 0.3)
         {
             Log("Destroyer of Denouement %u over (she dropped it): %d rounds left", g_uses, GunRounds(gl));
-            uint32_t bp = atomic_load(&g_bp), back = 0;
-            if (bp && ReadAt(rec + 0xC, &back, 4) && back == bp)
-            {
-                g_drop(im, me, bp, 0, 0, 1);
-                if (ReadAt(rec + 0xC, &back, 4) && back == bp) { back = 0; hf->write(rec + 0xC, &back, 4); }
-            }
+            WieldDrop(me, atomic_load(&g_bp), 0xC);
             g_readyAt = g_now + s_gunCooldown;
             g_k = K_REMOVE; g_kAt = g_now;
             break;
@@ -676,17 +582,8 @@ static void GunFrame(void)
     }
     case K_LETGO:
         if (g_now < g_kAt) break;
-        g_drop(im, me, gl, 0, 0, 1);
-        if (ReadAt(rec + 8, &now, 4) && now == gl) { now = 0; hf->write(rec + 8, &now, 4); }
-        {
-            uint32_t bp = atomic_load(&g_bp), back = 0;
-            if (bp && ResOf(bp) == g_bpRes)
-            {
-                ReadAt(rec + 0xC, &back, 4);
-                if (back == bp) g_drop(im, me, bp, 0, 0, 1);
-                if (ReadAt(rec + 0xC, &back, 4) && back == bp) { back = 0; hf->write(rec + 0xC, &back, 4); }
-            }
-        }
+        WieldDrop(me, gl, 0x8);
+        if (atomic_load(&g_bp) && ResOf(atomic_load(&g_bp)) == g_bpRes) WieldDrop(me, atomic_load(&g_bp), 0xC);
         g_k = K_REMOVE; g_kAt = g_now + 0.4;
         break;
     case K_REMOVE:
@@ -698,8 +595,8 @@ static void GunFrame(void)
             if (bp && ResOf(bp) == g_bpRes && remove && em) remove(em, bp);
             atomic_store(&g_bp, 0);
         }
-        g_kNew = g_kOldRes ? SpawnRes(g_kOldRes, "a new support weapon of her kind") : 0;
-        g_bpNew = g_bpOldRes ? SpawnRes(g_bpOldRes, "a new backpack of her kind") : 0;
+        g_kNew = g_kOldRes ? SpawnNear(g_kOldRes, "a new support weapon of her kind") : 0;
+        g_bpNew = g_bpOldRes ? SpawnNear(g_bpOldRes, "a new backpack of her kind") : 0;
         if (g_kNew || g_bpNew) { g_k = K_WAITS; g_kAt = g_now + 0.75; }
         else { FillUp(g_weapon[g_kSel]); g_k = K_IDLE; }
         break;
@@ -707,16 +604,16 @@ static void GunFrame(void)
         if (g_now < g_kAt) break;
         if (g_bpNew)
         {
-            if (ResOf(g_bpNew) == g_bpOldRes) { g_take(im, me, g_bpNew, 6, 0); Log("Destroyer of Denouement %u: her new backpack %u on her back", g_uses, g_bpNew); }
+            if (ResOf(g_bpNew) == g_bpOldRes) { WieldTake(me, g_bpNew, KB_SLOT_BACKPACK); Log("Destroyer of Denouement %u: her new backpack %u on her back", g_uses, g_bpNew); }
             else Log("Destroyer of Denouement %u: the new backpack does not read as hers: left", g_uses);
             g_bpNew = 0;
         }
         if (!g_kNew) { FillUp(g_weapon[g_kSel]); g_k = K_IDLE; break; }
         if (ResOf(g_kNew) == g_kOldRes)
         {
-            g_take(im, me, g_kNew, 3, 0);
+            WieldTake(me, g_kNew, KB_SLOT_SUPPORT);
             FillUp(g_kNew);
-            if (g_kSel == 3) Ask(3, "she had it in hand when the gun came");
+            if (g_kSel == 3) WieldAsk(3, "she had it in hand when the gun came");
             else FillUp(g_weapon[g_kSel]);
             Log("Destroyer of Denouement %u: her new support weapon %u taken", g_uses, g_kNew);
         }
@@ -776,10 +673,10 @@ static void LockAndLoad(void)
     g_casts[1]++;
     uint32_t gl = atomic_load(&g_gl);
     if (gl && w == gl && g_k == K_HELD && (s_llErgonomics > 0 || s_llRecoil)) { GunSwap(); return; }
-    int before = Rounds(w);
+    int before = MagRounds(w);
     FillUp(w);
     if (gl && w == gl) { before = GunRounds(gl); GunFill(gl); }
-    Log("Lock & Load: her gun %u refilled (%d -> %d rounds)", w, before, gl && w == gl ? GunRounds(gl) : Rounds(w));
+    Log("Lock & Load: her gun %u refilled (%d -> %d rounds)", w, before, gl && w == gl ? GunRounds(gl) : MagRounds(w));
 }
 
 /* ---- Ishbosheth (C) ---------------------------------------------------------------------------------------------- */
@@ -855,7 +752,7 @@ static void IshFrame(void)
 {
     if (!g_ishArmed) return;
     uint32_t w = Held(NULL);
-    int r = w ? Rounds(w) : -1;
+    int r = w ? MagRounds(w) : -1;
     int fired = 0;
     if (w && w == g_ishHeld && r >= 0 && g_ishRounds >= 0 && r < g_ishRounds) fired = 1;
     if (w && r < 0 && Focused() && (GetAsyncKeyState(VK_LBUTTON) & 0x8000)) fired = 1;   /* (not with a grenade or a stratagem in hand) */
@@ -874,14 +771,13 @@ static double g_buffDamage;
 static void ReloadFrame(void)
 {
     uint32_t w = Held(NULL), gl = atomic_load(&g_gl);
-    int r = w ? Rounds(w) : -1;
+    int r = w ? MagRounds(w) : -1;
     if (w && w == g_llHeld && r == 0 && g_llRounds > 0)
     {
         if (w != gl && s_reloadFree)
         {
-            HfFn_AddMagazineRounds add = hf_fn_AddMagazineRounds(self);
-            int cap = Capacity(w);
-            if (add && cap > 0) { add(NULL, w, cap); r = Rounds(w); }
+            int cap = MagCapacity(w);
+            if (cap > 0) { MagAdd(w, cap); r = MagRounds(w); }
             if (g_reloads < 12) Log("Lock & Load (passive): gun %u emptied: reloaded at once (%d rounds)", w, r);
         }
         g_reloads++;
@@ -961,11 +857,6 @@ static void Reset(const char* why)
     memset(g_foe, 0, sizeof g_foe);
     memset(g_foeRes, 0, sizeof g_foeRes);
 }
-static void Pin(void** slot, uintptr_t at, const char* pattern, const char* what)
-{
-    if (hf->code_matches(at, pattern)) *slot = (void*)at;
-    else Log("%s is not the reviewed code: Destroyer of Denouement is off", what);
-}
 static void Loaded(HfMod* mod, HfEvent event, void* user)
 {
     size_t gameSize = 0, exeSize = 0;
@@ -973,9 +864,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     if (!g || !x || gameSize != 74727424u || exeSize != 60719104u) { Log("REFUSED: the game's modules are not build " BUILD "'s: her kit stays off"); return; }
     game = g;
     exe = x;
-    Pin((void**)&g_take, game + 0x9AE030, "40 53 55 41 55 48 83 ec 40 48 89 7c 24 68 41 8b e8 4c 89 64 24 70 8b da", "the inventory's pickup (0x9AE030)");
-    Pin((void**)&g_drop, game + 0x9A8840, "40 53 56 41 56 48 81 ec a0 00 00 00 48 8b 05 bd 37 c9 01 48 33 c4 48 89", "the inventory's drop (0x9A8840)");
-    Pin((void**)&g_request, game + 0xA93430, "48 89 5c 24 18 48 89 6c 24 20 56 57 41 54 41 56 41 57 48 83 ec 50 48 8b 05 c3", "the Helldiver's switch request (0xA93430)");
+    if (!WieldPins()) Log("Destroyer of Denouement is off (the swap's code is not the reviewed one)");
     Log("ready: Destroyer of Denouement on %s (%d rounds, %.0f rpm + %.0f%%, AP %d, %.0f s cooldown; shield %.0f every %.0f s, -%.0f/s without it), "
         "Lock & Load on %s, Ishbosheth on %s", s_keys[0].label, s_gunRounds, (double)s_gunRpm, (double)(s_judgmentRate * 100), s_gunAp, (double)s_gunCooldown,
         (double)s_shieldMax, (double)s_shieldEvery, (double)s_shieldDecay, s_keys[1].label, s_keys[2].label);

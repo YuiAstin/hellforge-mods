@@ -45,6 +45,10 @@ kitbase/                 source of truth (header-only)
   kb_settings.h          layer 1: the settings table, .ini loader, skill keys and Mod Options Menu calls
   kb_roster.h            several kits installed together: the shared roster and the active kit
   kb_options.h           the kits' options screen over the game (HellForge's screens, SDK 17): rows, picker, Off
+  kb_allies.h            layer 2: shield pools on her allies or herself, taking hits first (Alva; Hina's shield)
+  kb_wield.h             layer 2: a weapon or backpack of the kit's own into her hands or onto her back, hers given
+                         back; magazines and backpack ammunition (W's King of Hearts, Hina's gun)
+  kb_guard.h             layer 2: a hit on her before it lands: a share of it, a leap's landing, a fatal hit
   hud/bindings.lua       HUD: key bindings (Mod Bindings Menu) the always-show-cooldowns option and the roster picker
                          (both left off the Mod Options Menu when the options screen is there: its HUD row and character column)
   hud/list.lua           HUD: finding the open stratagem list to sit beside
@@ -143,6 +147,16 @@ between blocks.
    stay, one line each, since the menu finds them by name). Kit extras after a change go in `kb_option_after`. The
    default .ini text stays in the kit as `DefaultIni` for `tools/inigen.py`, whose output is unchanged.
 5. **AK-12 on the base.** Layer 2 and 3 blocks move only when she needs them.
+6. **Two layer 2 blocks lifted (2026-11-27, branch `hina-kit`, with Hina 0.1.3; not played yet).** Each was in two
+   kits or more, so it moved (principle 1):
+   - `kb_wield.h`: the weapon swap's primitives, as W's King of Hearts and Hina's gun ran them (the inventory's take and
+     drop, the switch request, a spawn at her feet, a weapon's magazine, a backpack's ammunition), plus the backpack
+     slot (6). The swap's steps and timing stay in each kit (W's launcher; Hina's gun, backpack and Lock & Load swap).
+   - `kb_guard.h`: the lines Faelynn, Lenna, Leva, Destroyer and Voymastina each wrote for a hit on her: keep a share
+     of it (rounded; under 1 cancels), a leap's landing hit (impact or flat, dealt by nothing), a hit that would kill.
+   Hina uses `kb_wield.h`; Andoris is the first for `kb_guard.h`. The released kits keep their own copies until each
+   is next updated (their releases are not changed): `tools/kitbase_sync.py --check` now lists the two headers as
+   missing from every other kit, which the next sync writes.
 
 Steps 2 onward change behaviour, so each kit gets an in-game check before release, and kits ship on the base only
 once tested.

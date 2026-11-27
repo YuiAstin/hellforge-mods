@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.hina",
   "name": "Hina",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "icon": "icon.png",
   "description": "Sorasaki Hina's kit from Blue Archive for your Helldiver: the Gehenna Prefect, who puts as many rounds down range as possible. Destroyer of Denouement (Z): her own machine gun in her hands (a copy of the M-1000 Maxigun if you own it, else of the MG-43), 6000 rounds at 6000 rounds a minute, armour penetration 5, and a 3000 shield while she holds it (refilled every 5 minutes, draining once the gun is gone); it goes when she switches weapons or drops it. Lock & Load (X): the gun in her hands refilled; her own gun also gets +80 ergonomics and no recoil. Ishbosheth (C): her next shot sets off a fan of fire, 636% damage to every enemy in front of her. Passives: an emptied magazine reloads at once and her shots deal 21% more for 16 s; her gun fires 14% faster; 2.7% more damage while crouched or prone. Solo or host. Pick Hina in the character picker on the options screen (F9); her page there has every number and key. Her HUD needs Bingus Shared Loader and HD2Runtime. Settings on that page and in hina.ini. No character model included.",
   "gameplay": true,
