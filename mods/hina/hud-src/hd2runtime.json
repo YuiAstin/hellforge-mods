@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "Hina HUD",
+  "resource": "mods/yui/hina_hud",
+  "guid": "065e076e-7b00-5283-bc39-0e4a531b7d08",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.30.0",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}

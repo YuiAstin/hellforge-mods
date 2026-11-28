@@ -2,12 +2,14 @@
 
     python tools/package.py leva faelynn lenna
     python tools/package.py --out ../Releases leva
+    python tools/package.py --skip-check leva       without tools/precheck.py (refused when it FAILs)
 
 The zip holds the mod folder as it is here (with its default .ini), minus notes kept only in the repo.
 """
 import argparse, json, os, sys, zipfile
 
 import kitbase_sync
+import precheck
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO_ONLY = {'FUTURE.md', '.gitignore'}
@@ -35,7 +37,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('mods', nargs='+')
     ap.add_argument('--out', default=os.path.join(ROOT, '..', 'Releases'))
+    ap.add_argument('--skip-check', action='store_true', help='package without tools/precheck.py')
+    ap.add_argument('--sdk', help='the HellForge SDK precheck builds against (default ../HellForge/app/sdk)')
     a = ap.parse_args()
+    if not a.skip_check:
+        failed = [r.mod for r in precheck.run(a.mods, a.sdk) if r.failed()]
+        if failed:
+            sys.exit('precheck FAILed for ' + ', '.join(failed) + ': fix it, or --skip-check to package anyway')
     if not kitbase_sync.check([m for m in a.mods if m in kitbase_sync.kits()]):
         sys.exit('a kit carries a stale kitbase copy: run tools/kitbase_sync.py first')
     os.makedirs(a.out, exist_ok=True)

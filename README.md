@@ -16,6 +16,7 @@ Code mods for HellForge (offline Helldivers 2). Each folder under `mods/` is one
 | Alva | `mods/alva` | Alva's support kit from Girls' Frontline 2 (AN-94): a shield for her and every ally around her, freezing fields and bursts, shatter damage on frozen enemies; Confectance. T-Doll body. |
 | Vector | `mods/vector` | Vector's fire kit from Girls' Frontline 2: fire does nothing to her; Dead End Meltdown's igniting shots and fire bursts, Portent of Doom's napalm blast and Smolder, Searing Finale's napalm shells; fire that scales with the enemy's health and her own burn on machines the game's fire cannot hurt; Confectance Index. T-Doll body. Her own options screen where HellForge has screens over the game. |
 | Ascalon | `mods/ascalon` | Ascalon's kit from Arknights: hidden until she makes noise (a shimmer cloak), every hit strikes everyone within 15 m, Mortal Interrogation's bleed marks, Pursuit, Endowment and Descent, a parry and a dash; skill panel and damage numbers on the HUD. |
+| Hina | `mods/hina` | Sorasaki Hina's kit from Blue Archive: The End: Destroyer puts her own 6000-round machine gun in her hands with a 3000 shield while she holds it, Reload and Destroy refills the gun in her hands (her own gun with better handling), Ishbosheth turns her next shot into a fan of fire; instant reloads, a faster gun and a low-stance bonus as passives. Not played yet (branch `hina-kit`). |
 | Lost Contact | `mods/lost-contact` | Enemies that lose sight of you stop tracking you and search where they last saw you; patrols walk between their outposts instead of straight at you. On / observe / off, in lost-contact.ini, on keys or on the MODS tab; a kit can limit them (Lemuen: patrols only). |
 | Veterancy System | `mods/field-promotions` | Per-mission gear progression: your gear levels up as you use it, for that mission only. |
 | Fire Mission | `mods/fire-mission` | A stratagem that calls mortar sentries onto a spot. |
@@ -30,7 +31,8 @@ The character kits and Veterancy System have HUDs drawn with HD2Runtime (Bingus 
 ```
 python tools/deploy.py leva          # copy into ../HellForge/mods (game closed); your own leva.ini is kept
 python tools/inigen.py leva          # regenerate mods/leva/leva.ini (the defaults) after changing settings in the source
-python tools/package.py leva         # ../Releases/leva-<version>.zip, ready for HellForge's ADD MODS
+python tools/precheck.py leva        # before a release: manifest, icons, options page, HUD, skill icons, .ini, build
+python tools/package.py leva         # ../Releases/leva-<version>.zip, ready for HellForge's ADD MODS (runs precheck first)
 python tools/release_art.py Vector portrait.png s1.png s2.png s3.png   # page images for a release (docs/release-format.md)
 ```
 

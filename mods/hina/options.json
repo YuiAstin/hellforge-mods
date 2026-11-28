@@ -1,0 +1,19 @@
+{
+ "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
+ "advanced": [
+  ["drum_ergonomics", "The End: Destroyer", "Drum Ergonomics", "Ergonomics the 50-round drum adds to her MG-43 copy."],
+  ["drum_reload", "The End: Destroyer", "Drum Reload Speed", "How much faster the drum reloads (0.4: 40%; the Concussive animation is quick already, so 0 by default); it reloads on the move either way.", {"step": 0.05}],
+  ["gun_grace", "The End: Destroyer", "Switch Grace", "Seconds on her primary or secondary before her gun goes (a stratagem or a grenade never counts).", {"step": 0.1}],
+  ["ish_targets", "Ishbosheth", "Most Enemies", "The most enemies in the fan that take its round (the nearest first)."],
+  ["ish_duration", "Ishbosheth", "Barrage Seconds", "How long its barrage lasts (Blue Archive: about 10 s; a restart applies it).", {"step": 0.5}],
+  ["ish_every", "Ishbosheth", "Volley Interval", "Seconds between its volleys across the fan.", {"step": 0.01}],
+  ["ish_per_section", "Ishbosheth", "Tracers per Section", "Tracers in each of the fan's three sections (two outer, one inner) every volley."],
+  ["ish_tick", "Ishbosheth", "Hit Interval", "Seconds between the tracers aimed at the enemies in the fan (a restart applies it).", {"step": 0.05}],
+  ["ish_speed", "Ishbosheth", "Tracer Speed", "Metres a second of its tracers (slower: their trails are seen; 0: the round's own).", {"step": 10}],
+  ["reload_free", "Passives", "Instant Reload", "A magazine she empties reloads at once, without a spare (not her own gun: its rounds are its supply)."],
+  ["reload_cooldown", "Passives", "Instant Reload Cooldown", "Seconds before the reload passive works again for the same gun.", {"step": 5}],
+  ["oao_head", "Passives", "Out-and-Out Height", "Metres: her head lower than this over her feet counts as crouched or prone.", {"step": 0.05}]
+ ],
+ "when": {"gun_ap": "restart", "gun_durable": "restart", "ish_mult": "restart", "ish_duration": "restart", "ish_tick": "restart", "ish_speed": "restart"},
+ "hidden": ["options_key"]
+}
