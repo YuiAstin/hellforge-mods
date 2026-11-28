@@ -148,6 +148,7 @@ static int g_owned = -1;               /* the Maxigun: -1 not asked yet, 0 not o
 static int g_use;                      /* which copy this session uses */
 static int g_tuned;                    /* Lock & Load's handling is in her gun's records (the next one built has it) */
 
+#define MAXIGUN_MIX 0xDA20CFA7u   /* the M-1000 Maxigun's mixId (its itemId is HF_ITEM_M1000_MAXIGUN, cdfbf3c2) */
 static void Gun(void)
 {
     /* 0.1.4: asked again each second until it answers (played: at the mission's start HellForge said "not the reviewed
@@ -186,11 +187,15 @@ static void Gun(void)
         }
         if (has && progression)
         {
-            g_owned = has(progression, HF_ITEM_M1000_MAXIGUN) ? 1 : 0;
-            /* 0.1.4: the same question for items every profile has, to tell a real "not owned" from a check that reads the
-             * wrong thing (played: "not owned"; the code's field offsets are not the dump's) */
-            Log("HasCatalogueItem, for comparison: AR-23 Liberator %d, MG-43 Machine Gun %d, M-105 Stalwart %d (1 owned; the first should be 1)",
-                has(progression, HF_ITEM_AR23_LIBERATOR) ? 1 : 0, has(progression, HF_ITEM_MG43_MACHINE_GUN) ? 1 : 0, has(progression, HF_ITEM_M105_STALWART) ? 1 : 0);
+            /* 0.1.4: the function compares a record's +4, the item's mixId, not its itemId (the progression table: +4 mixId,
+             * +8 itemId). The two are the same for an armory weapon (the Liberator) but not for a stratagem's weapon: the
+             * Maxigun's itemId cdfbf3c2, its mixId da20cfa7 (the game's item catalogue). Played: asked by itemId, "not
+             * owned", though Yui can bring it. Its live code reads HellForge's moved catalogue (state_moves.c): hence
+             * offsets unlike the dump's */
+            g_owned = has(progression, MAXIGUN_MIX) ? 1 : 0;
+            Log("HasCatalogueItem by mixId: M-1000 Maxigun %d; for comparison AR-23 Liberator %d, MG-43 %d, M-105 Stalwart %d (by itemId the Maxigun reads %d)",
+                g_owned, has(progression, 0xAA035309u) ? 1 : 0, has(progression, 0x37B6732Cu) ? 1 : 0, has(progression, 0x75E7ABE4u) ? 1 : 0,
+                has(progression, HF_ITEM_M1000_MAXIGUN) ? 1 : 0);
             Log("the M-1000 Maxigun: %s (asked %u time(s)%s)", g_owned ? "owned: her gun is its copy" : "not owned: her gun is the MG-43's copy", tries,
                 own ? "; through the kit's own pin" : "");
         }
