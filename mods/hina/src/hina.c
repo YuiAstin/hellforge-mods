@@ -295,8 +295,18 @@ static void GunRecords(int i)
         }
     }
     HfField cap = HF_FIELD(WeaponMagazine, capacity);
-    HfValue vc = HF_U32(GunBelt());   /* 0.1.4: a belt (250 or 50), its rounds the kit's count (gun_rounds) */
+    HfValue vc = HF_U32(GunBelt());   /* 0.1.4: a belt (250 or 50) */
     mag = hf->set_live(self, res, &cap, &vc, 0) != 0;
+    /* 0.1.4 (Yui): gun_rounds as belts: the one in the gun and the spares (6000: 23 spare boxes or 119 spare drums), the
+     * game's own reloads and count; no refills. A resupply gives them all back */
+    if (mag)
+    {
+        uint32_t spares = (uint32_t)((s_gunRounds + GunBelt() - 1) / GunBelt()) - 1;
+        HfField fs = HF_FIELD(WeaponMagazine, starting_magazines), fm = HF_FIELD(WeaponMagazine, max_magazines), fr = HF_FIELD(WeaponMagazine, magazines_from_supply);
+        HfValue vs = HF_U32(spares);
+        int ok = (hf->set_live(self, res, &fs, &vs, 0) != 0) + (hf->set_live(self, res, &fm, &vs, 0) != 0) + (hf->set_live(self, res, &fr, &vs, 0) != 0);
+        Log("her gun (%s's copy): belts of %d, %u spares (%d of 3 fields set)", kBaseName[i], GunBelt(), spares, ok);
+    }
     for (int k = 0; k < 32 && g_round[i]; k++)
     {
         HfField f = HF_FIELD_AT(WeaponMagazine, pattern, k);
@@ -395,8 +405,49 @@ static void Link(void)
     Log("her gun's backpack (entity %016llx): the gun's record names it in %d place(s); it feeds her gun %s; %d rounds %s / %s", (unsigned long long)g_bpRes,
         named, fed ? "(set)" : "(it named no Maxigun: left)", s_gunRounds, a ? "capacity set" : "capacity REFUSED", b ? "at call-in" : "call-in REFUSED");
 }
+/* 0.1.4 (Yui: her MG-43 lacks its usual scope): the MG-43's customization and her copy's, logged once: its default
+ * attachments ({slot, item}: 1 underbarrel, 2 optics, 3 paint, 4 muzzle, 5 magazine, 6 ammunition), the slots the
+ * armory offers, and the optic and magazine units drawn without an attachment */
+static void CustomizationLog(void)
+{
+    static const struct { uint64_t res; const char* name; } kW[] = {{0x11c27d3babb38956ull, "the MG-43"}, {0xa3eab550f78d19a2ull, "her MG-43 copy"}};
+    for (unsigned w = 0; w < 2; w++)
+    {
+        char d[300], sl[120];
+        int n = 0, m = 0;
+        d[0] = sl[0] = 0;
+        for (int k = 0; k < 20; k += 2)
+        {
+            HfField fa = HF_FIELD_AT(WeaponCustomization, defaults, k), fb = HF_FIELD_AT(WeaponCustomization, defaults, k + 1);
+            HfLiveValue a, b;
+            memset(&a, 0, sizeof a);
+            memset(&b, 0, sizeof b);
+            if (!hf->get_live(self, kW[w].res, &fa, &a) || !hf->get_live(self, kW[w].res, &fb, &b)) break;
+            if (!a.now.number && !b.now.number) continue;
+            n += snprintf(d + n, sizeof d - n, " {%u, %08x}", (unsigned)a.now.number, (unsigned)b.now.number);
+            if (n >= (int)sizeof d - 24) break;
+        }
+        for (int k = 0; k < 10; k++)
+        {
+            HfField f = HF_FIELD_AT(WeaponCustomization, slots, k);
+            HfLiveValue v;
+            memset(&v, 0, sizeof v);
+            if (!hf->get_live(self, kW[w].res, &f, &v)) break;
+            if (v.now.number) m += snprintf(sl + m, sizeof sl - m, " %u", (unsigned)v.now.number);
+        }
+        HfField fo = HF_FIELD(WeaponCustomization, optics_unit), fm = HF_FIELD(WeaponCustomization, magazine_unit);
+        HfLiveValue o, mu;
+        memset(&o, 0, sizeof o);
+        memset(&mu, 0, sizeof mu);
+        hf->get_live(self, kW[w].res, &fo, &o);
+        hf->get_live(self, kW[w].res, &fm, &mu);
+        Log("customization of %s: defaults%s; armory slots%s; optic unit %016llx, magazine unit %016llx", kW[w].name, n ? d : " none", m ? sl : " none",
+            (unsigned long long)o.now.u64, (unsigned long long)mu.now.u64);
+    }
+}
 static void EntitiesReady(HfMod* mod, HfEvent event, void* user)
 {
+    CustomizationLog();
     for (int i = 0; i < 2; i++) GunRecords(i);
     DrumHandling();
     Link();
@@ -538,20 +589,12 @@ static int Pack(void) { return g_use == 0 && g_bpRes; }   /* her gun comes with 
 #define MAG_NET_MAX 2047
 static int g_pool = -1, g_lastMag = -1;
 static int GunRounds(uint32_t gl) { return Pack() ? DepositAmount(atomic_load(&g_bp)) : g_pool >= 0 ? g_pool : MagRounds(gl); }
-/* 0.1.4 (Yui): a belt at a time (250 or 50), reloaded the game's way; the spares kept stocked while the count lasts */
+/* 0.1.4 (Yui): a belt at a time (250 or 50), reloaded the game's way from its spare belts (GunRecords) */
 static void PoolTop(uint32_t gl)
 {
     int m = MagRounds(gl);
     if (m < 0) return;
     g_lastMag = m;
-}
-static void PoolSpares(uint32_t gl)
-{
-    static double at;
-    HfFn_WeaponRefill refill = hf_fn_WeaponRefill(self);
-    if (g_now < at || !refill || g_pool <= 0) return;
-    at = g_now + 2;
-    refill(0, gl, 1.0f);
 }
 static void PoolFrame(uint32_t gl)
 {
@@ -560,7 +603,6 @@ static void PoolFrame(uint32_t gl)
     if (m < 0) return;
     if (g_lastMag >= 0 && m < g_lastMag && g_lastMag - m <= 64) { g_pool -= g_lastMag - m; if (g_pool < 0) g_pool = 0; }
     g_lastMag = m;
-    PoolSpares(gl);
 }
 static void GunFill(uint32_t gl)
 {
@@ -1447,7 +1489,10 @@ static const KbOption kOptions[] = {
 static void OptionAfter(const char* name, int changed)
 {
     if (!changed || !g_entsReady) return;
-    if (!strcmp(name, "gun_rounds") || !strcmp(name, "gun_rpm") || !strcmp(name, "judgment_rate")) for (int i = 0; i < 2; i++) GunRecords(i);
+    if (!strcmp(name, "gun_rounds") || !strcmp(name, "gun_rpm") || !strcmp(name, "judgment_rate") || !strcmp(name, "gun_drum")) for (int i = 0; i < 2; i++) GunRecords(i);
+    /* 0.1.4 (played: the drum chosen mid-mission did nothing; its records were set only at the game's start): her next
+     * gun takes the belt and the drum's handling */
+    if (!strcmp(name, "gun_drum") || !strcmp(name, "drum_ergonomics")) DrumHandling();
 }
 HF_MOD_EXPORT int hina_option_get(const char* name, double* out) { return OptionGet(name, out); }
 HF_MOD_EXPORT int hina_option_set(const char* name, double value) { return OptionSet(name, value); }
