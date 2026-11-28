@@ -398,6 +398,26 @@ static void DrumHandling(void)
         int a = s_gunDrum ? hf->set_live(self, res, &fmv, &one, 0) != 0 : (hf->set_live(self, res, &fmv, NULL, 0), 1);
         int b = s_gunDrum && s_drumReload > 0 ? hf->set_live(self, res, &fd, &dur, 0) != 0 : (hf->set_live(self, res, &fd, NULL, 0), 1);
         if (s_gunDrum) Log("her MG-43's drum reload: on the move (%s), %.2f s (%s)", a ? "set" : "refused", 4.55 * (1 - s_drumReload), b ? "set" : "refused");
+        /* (Yui) the drum's reload animation: the Liberator Concussive's (its default magazine is that drum): its kinds and
+         * her animation events copied (the gun's own state machine events kept: the MG-43's model has its own) */
+        static const HfField kAnim[8] = {HF_FIELD(WeaponReload, event_type_0), HF_FIELD(WeaponReload, wielder_event_0), HF_FIELD(WeaponReload, event_type_1),
+            HF_FIELD(WeaponReload, wielder_event_1), HF_FIELD(WeaponReload, event_type_2), HF_FIELD(WeaponReload, wielder_event_2),
+            HF_FIELD(WeaponReload, event_type_3), HF_FIELD(WeaponReload, wielder_event_3)};
+        int copied = 0;
+        uint32_t first = 0, mine = 0;
+        for (int k = 0; k < 8; k++)
+        {
+            if (!s_gunDrum) { hf->set_live(self, res, &kAnim[k], NULL, 0); continue; }
+            HfLiveValue v, m;
+            memset(&v, 0, sizeof v);
+            memset(&m, 0, sizeof m);
+            if (!hf->get_live(self, DRUM_DONOR, &kAnim[k], &v)) continue;
+            hf->get_live(self, res, &kAnim[k], &m);
+            if (k == 1) { first = (uint32_t)v.base.number; mine = (uint32_t)m.base.number; }
+            HfValue nv = HF_U32((uint32_t)v.base.number);
+            copied += hf->set_live(self, res, &kAnim[k], &nv, 0) != 0;
+        }
+        if (s_gunDrum) Log("her MG-43's drum reload animation: the Concussive's (%d of 8 fields; her first animation %08x, the MG-43's %08x)", copied, first, mine);
     }
     if (!s_gunDrum || !s_drumErgonomics) { hf->set_live(self, res, &erg, NULL, 0); return; }
     HfLiveValue e;
@@ -513,8 +533,114 @@ static void CustomizationLog(void)
             (unsigned long long)o.now.u64, (unsigned long long)mu.now.u64);
     }
 }
+/* 0.1.4 (played: all three scopes drew the missing-model mark): which weapons draw which optic, to find the packages
+ * that hold the optic models: each weapon's default optic attachment and its optic unit (HD2Runtime's weapon list) */
+static void OpticScan(void)
+{
+    static const struct { uint64_t res; const char* name; } kAll[] = {
+    {UINT64_C(0xA8A91EB54892B6B2), "AR-11 Arbitrator"},
+    {UINT64_C(0x84354339522C932D), "AR-2 Coyote"},
+    {UINT64_C(0x968211C0033DCE64), "AR-23 Liberator"},
+    {UINT64_C(0xA7EE1EBF58FCDF1F), "AR-23A Liberator Carbine"},
+    {UINT64_C(0xCF5F176E0E322BE1), "AR-23C Liberator Concussive"},
+    {UINT64_C(0x43CB1033961A2276), "AR-23P Liberator Penetrator"},
+    {UINT64_C(0xBC29613666DF696B), "AR-32 Pacifier"},
+    {UINT64_C(0x708EA298C82093D0), "AR-59 Suppressor"},
+    {UINT64_C(0xCE063AA33D95A812), "AR-61 Tenderizer"},
+    {UINT64_C(0xA955C4EA6F6D4203), "AR/GL-21 One-Two"},
+    {UINT64_C(0x076DD5D4F4360204), "ARC-12 Blitzer"},
+    {UINT64_C(0x5FECAB819F96A3E8), "BR-14 Adjudicator"},
+    {UINT64_C(0xF49227A0630A3F7F), "CB-9 Exploding Crossbow"},
+    {UINT64_C(0xE3B6AEDD07FCB464), "CQC-19 Stun Lance"},
+    {UINT64_C(0xFCD8A6E67EAC635A), "CQC-2 Saber"},
+    {UINT64_C(0x52CDBFBACA3CB397), "CQC-30 Stun Baton"},
+    {UINT64_C(0x792D5D2A340FD6E6), "CQC-42 Machete"},
+    {UINT64_C(0x75816077C139C850), "CQC-5 Combat Hatchet"},
+    {UINT64_C(0x7E1F76163C667E4B), "CQC-73 Entrenchment Tool"},
+    {UINT64_C(0x72170A55A1F37FF1), "DBS-2 Double Freedom"},
+    {UINT64_C(0x4FB0F8C02F55C82B), "FLAM-66 Torcher"},
+    {UINT64_C(0x006E44327BB953FE), "GL-15 Evictor"},
+    {UINT64_C(0x9EB160830321BFD6), "GP-20 Ultimatum"},
+    {UINT64_C(0x52E4334E6A128CAF), "GP-31 Grenade Pistol"},
+    {UINT64_C(0x80F1A156D9FA1E36), "JAR-5 Dominator"},
+    {UINT64_C(0xC85F576D5E086147), "LAS-12 Sai"},
+    {UINT64_C(0x3C86E871923F3970), "LAS-13 Trident"},
+    {UINT64_C(0x8645F167B3C813A2), "LAS-16 Sickle"},
+    {UINT64_C(0x295BEB26DC4F8FF1), "LAS-17 Double-Edge Sickle"},
+    {UINT64_C(0x7E3145A5BAA4B948), "LAS-22 Shear"},
+    {UINT64_C(0x27EE1ED8F6FB6356), "LAS-5 Scythe"},
+    {UINT64_C(0x416D053372C4E433), "LAS-58 Talon"},
+    {UINT64_C(0x7B06196E90154C88), "LAS-7 Dagger"},
+    {UINT64_C(0x4D58C77087B774C5), "M6C/SOCOM Pistol"},
+    {UINT64_C(0xBE70EE0D8D44028E), "M7S SMG"},
+    {UINT64_C(0x90DDC374F4E3D756), "M90A Shotgun"},
+    {UINT64_C(0x4DBD74F49C8FFC13), "MA5C Assault Rifle"},
+    {UINT64_C(0x9571CA51F0DAF35B), "MP-98 Knight"},
+    {UINT64_C(0xD6B1FB05B9109353), "P-11 Stim Pistol"},
+    {UINT64_C(0x1A437158E1B8D2A1), "P-113 Verdict"},
+    {UINT64_C(0x3575AABC5F1F9326), "P-19 Redeemer"},
+    {UINT64_C(0x05E4E5C2DB6E44A2), "P-2 Peacemaker"},
+    {UINT64_C(0x14D5D4506056C7A4), "P-33 Missile Pistol"},
+    {UINT64_C(0xE91F569C2AD8AF01), "P-34 Breacher"},
+    {UINT64_C(0x0B882808C6F498E8), "P-35 Re-Educator"},
+    {UINT64_C(0x8D3D52A3B2F19402), "P-4 Senator"},
+    {UINT64_C(0xC780BCD79547DA0F), "P-69 Veto"},
+    {UINT64_C(0x3F92BA65EF65CCA9), "P-72 Crisper"},
+    {UINT64_C(0xCF8934FF6567A42D), "P-92 Warrant"},
+    {UINT64_C(0xDBB6C961C59FADC1), "P/40-K Bolt Pistol"},
+    {UINT64_C(0xEEA5E3CEF1E12C14), "PLAS-1 Scorcher"},
+    {UINT64_C(0xFB3A19078694708A), "PLAS-101 Purifier"},
+    {UINT64_C(0xAA69A60D74A3EC54), "PLAS-15 Loyalist"},
+    {UINT64_C(0x30061F91AF477F5E), "PLAS-39 Accelerator Rifle"},
+    {UINT64_C(0x0F83639AB8C86165), "R-2 Amendment"},
+    {UINT64_C(0x7B75E5132FFD4CA6), "R-2124 Constitution"},
+    {UINT64_C(0xB6AFF2195568767F), "R-36 Eruptor"},
+    {UINT64_C(0xE5796355A8FD67E0), "R-4 Hyena"},
+    {UINT64_C(0xE6D932BE83729076), "R-6 Deadeye"},
+    {UINT64_C(0x03E67A19B07C6523), "R-63 Diligence"},
+    {UINT64_C(0x4C786785C79D44E7), "R-63CS Diligence Counter Sniper"},
+    {UINT64_C(0xF0338468DCDB6A6C), "R-72 Censor"},
+    {UINT64_C(0x1ABBFF60D26BA391), "R/40-K Hot-Shot Marksman Rifle"},
+    {UINT64_C(0x4E310B1FE4C52B52), "SG-20 Halt"},
+    {UINT64_C(0x2B28E17FFED05F7C), "SG-22 Bushwhacker"},
+    {UINT64_C(0x46183B50961D1328), "SG-225 Breaker"},
+    {UINT64_C(0xC12A34F375BD5A87), "SG-225IE Breaker Incendiary"},
+    {UINT64_C(0x5EBAEA70C0D060B9), "SG-225SP Breaker Spray&Pray"},
+    {UINT64_C(0xD323DE60855898AC), "SG-451 Cookout"},
+    {UINT64_C(0x41EAC4A03987FAA0), "SG-8 Punisher"},
+    {UINT64_C(0x05D8D8C073B9D502), "SG-8P Punisher Plasma"},
+    {UINT64_C(0x4F749E2EE26F532D), "SG-8S Slugger"},
+    {UINT64_C(0xDCD1C835407EF7BA), "SG-97 Sweeper"},
+    {UINT64_C(0x186EA95DE7306B1A), "SMG-203 Gallant"},
+    {UINT64_C(0x94BD931B5FB4EE95), "SMG-32 Reprimand"},
+    {UINT64_C(0x4E4A613EB9BF5C24), "SMG-37 Defender"},
+    {UINT64_C(0x0807AEA5217E4767), "SMG-72 Pummeler"},
+    {UINT64_C(0x8A307BD1811A5FE9), "SMG/FLAM-34 Stoker"},
+    {UINT64_C(0x4BA41B6F9F405CC2), "StA-11 SMG"},
+    {UINT64_C(0xCDF28BE026BB7D84), "StA-52 Assault Rifle"},
+    {UINT64_C(0xF992CE97577C8A7F), "VG-70 Variable"}};
+    for (unsigned w = 0; w < sizeof kAll / sizeof kAll[0]; w++)
+    {
+        uint32_t item = 0;
+        for (int k = 0; k < 20; k += 2)
+        {
+            HfField fa = HF_FIELD_AT(WeaponCustomization, defaults, k), fb = HF_FIELD_AT(WeaponCustomization, defaults, k + 1);
+            HfLiveValue a, b;
+            memset(&a, 0, sizeof a);
+            memset(&b, 0, sizeof b);
+            if (!hf->get_live(self, kAll[w].res, &fa, &a)) break;
+            if ((uint32_t)a.now.number == 2 && hf->get_live(self, kAll[w].res, &fb, &b)) { item = (uint32_t)b.now.number; break; }
+        }
+        HfField fo = HF_FIELD(WeaponCustomization, optics_unit);
+        HfLiveValue o;
+        memset(&o, 0, sizeof o);
+        hf->get_live(self, kAll[w].res, &fo, &o);
+        if (item || o.now.u64) Log("optics: %s: default optic %08x, optic unit %016llx", kAll[w].name, item, (unsigned long long)o.now.u64);
+    }
+}
 static void EntitiesReady(HfMod* mod, HfEvent event, void* user)
 {
+    OpticScan();
     CustomizationLog();
     for (int i = 0; i < 2; i++) GunRecords(i);
     DrumHandling();
