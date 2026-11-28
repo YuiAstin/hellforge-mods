@@ -88,7 +88,36 @@ local function facing(unit)
     if l < 0.01 then return 0, 0 end
     return x / l, y / l
 end
+-- 0.1.3: the player list's avatar is nil on HellForge 0.5 too (played: "the local player has no avatar now" all
+-- mission); her entity from the Escort Probe's DLL (escort_avatar_entity: the kit base's, learned from her weapon events),
+-- the player list only as a fallback
+local ffi_ = require('ffi')
+pcall(ffi_.cdef, [[
+typedef unsigned int (*fp1_avatar)(void);
+void *fp1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
+void *fp1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
+]])
+local k32 = ffi_.load('kernel32')
+local dll_avatar
+local function dll_entity()
+    if not dll_avatar then
+        local m = k32.fp1_GetModuleHandleA('escort_probe.dll')
+        if m == nil then return nil, 'the Escort Probe (escort_probe.dll, 0.10.2+) is not loaded' end
+        local f = k32.fp1_GetProcAddress(m, 'escort_avatar_entity')
+        if f == nil then return nil, 'escort_probe.dll has no escort_avatar_entity (0.10.2+ needed)' end
+        dll_avatar = ffi_.cast('fp1_avatar', f)
+    end
+    local e = tonumber(dll_avatar())
+    if not e or e == 0 then return nil, 'the Escort Probe has not seen her Helldiver yet (fire a shot)' end
+    return e
+end
 local function me()
+    local id, why1 = dll_entity()
+    if id then
+        local unit, n = my_unit()
+        if not unit then return nil, nil, 'her unit was not found' end
+        return { id = id, unit = unit, units = n }, id
+    end
     if not okW then return nil, nil, "HD2Runtime's event_world module is not there: " .. tostring(W) end
     local okO, world, why = pcall(W.open)
     if not okO or not world then return nil, nil, 'no world (' .. tostring(why or world) .. ')' end
@@ -96,7 +125,7 @@ local function me()
     if not okP then return nil, nil, 'the player list: ' .. tostring(players) end
     local id
     for _, pl in ipairs(players) do if pl['local'] then id = tonumber(pl.avatar) end end
-    if not id or id <= 0 then return nil, nil, 'the local player has no avatar now' end
+    if not id or id <= 0 then return nil, nil, tostring(why1) .. '; and the player list has no avatar for her' end
     local unit, n = my_unit()
     if not unit then return nil, nil, 'her unit was not found' end
     return { id = id, unit = unit, units = n }, id
@@ -209,6 +238,6 @@ hd2.input.bind('flight_probe.fall', { key = 'Ctrl+F6', on_press = function()
     local ok = pcall(S.Unit.animation_event, unit, 'fall')
     hd2.after(0.2, function() log('fall event: %s; layers %s -> %s', ok and 'sent' or 'FAILED', before, layers(unit)) end, { scope = 'session' })
 end })
-log('0.1.2 loaded (airborne flag %s, SetVelocity %s, layer getter %s): F6 flight (Numpad 8 / Numpad 2 / Up arrow), F7 hover test, Ctrl+F7 drop test, Ctrl+F6 fall event',
+log('0.1.3 loaded (airborne flag %s, SetVelocity %s, layer getter %s): F6 flight (Numpad 8 / Numpad 2 / Up arrow), F7 hover test, Ctrl+F7 drop test, Ctrl+F6 fall event',
     airborne and 'ready' or 'NO', set_velocity and 'ready' or 'NO', get_state and 'yes' or 'no')
 if why then log('not this build: %s', why) end
