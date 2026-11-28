@@ -345,6 +345,41 @@ static void GunRecords(int i)
         (unsigned long long)res, (double)rpm, rate, s_gunRounds, mag ? "set" : "REFUSED", g_round[i], proj == 2 ? "written" : proj ? "set" : "REFUSED", pat);
 }
 /* Lock & Load's handling on her gun's records (on: +ll_ergonomics, no recoil; off: back to its own) */
+/* 0.1.4 (Yui: HellForge 0.5's attachment work): "the game finds the package of a vanilla attachment's unit" (its SDK
+ * docs), so her copy names the scope as a default attachment, by its item id, not as a bare optic unit (that drew the
+ * missing-model mark). The item ids: the game's attachment items (0x58 bytes, id at +8; groups: count at game+0x348DA98,
+ * {items, count} pointers at game+0x37C5B50; HellForge's AttachmentItemById research), the one whose record names the
+ * optic's unit */
+static uint32_t g_opticItem[3];
+static void OpticItems(void)
+{
+    uint32_t groups = 0, found = 0;
+    if (!game || !ReadAt(game + 0x348DA98, &groups, 4) || groups > 4096) { Log("optics: the attachment groups can't be read"); return; }
+    for (uint32_t g = 0; g < groups; g++)
+    {
+        uintptr_t gp = Pointer(game + 0x37C5B50 + 8ull * g), items;
+        uint32_t count = 0;
+        if (!gp || !(items = Pointer(gp)) || !ReadAt(gp + 8, &count, 4) || count > 100000) continue;
+        for (uint32_t k = 0; k < count; k++)
+        {
+            uint8_t rec[0x58];
+            if (!ReadAt(items + 0x58ull * k, rec, sizeof rec)) break;
+            for (int o = 0; o + 8 <= 0x58; o += 4)
+                for (int q = 0; q < 3; q++)
+                {
+                    uint64_t v;
+                    memcpy(&v, rec + o, 8);
+                    if (v == kOptics[q].unit && !g_opticItem[q])
+                    {
+                        memcpy(&g_opticItem[q], rec + 8, 4);
+                        found++;
+                        Log("optics: %s is attachment item %08x (its unit at +0x%X of the item, group %u)", kOptics[q].name, g_opticItem[q], o, g);
+                    }
+                }
+        }
+    }
+    if (found < 3) Log("optics: %u of 3 scopes found among %u attachment groups", found, groups);
+}
 /* her MG-43 copy's optic: the customization's optic unit, and for the 4x and 10x its default optic attachment cleared (it
  * would be drawn instead) */
 static void GunOptic(void)
@@ -354,6 +389,23 @@ static void GunOptic(void)
     if (!res) return;
     HfField fu = HF_FIELD(WeaponCustomization, optics_unit);
     HfValue vu = HF_U64(kOptics[o].unit);
+    if (!g_opticItem[0] && !g_opticItem[1] && !g_opticItem[2]) OpticItems();
+    if (g_opticItem[o])
+    {
+        /* the scope as her copy's default optic attachment (the game loads its model), no bare unit */
+        hf->set_live(self, res, &fu, NULL, 0);
+        for (int k = 0; k < 20; k += 2)
+        {
+            HfField fa = HF_FIELD_AT(WeaponCustomization, defaults, k), fb = HF_FIELD_AT(WeaponCustomization, defaults, k + 1);
+            HfLiveValue a;
+            memset(&a, 0, sizeof a);
+            if (!hf->get_live(self, res, &fa, &a) || (uint32_t)a.base.number != 2) continue;
+            HfValue two = HF_U32(2), item = HF_U32(g_opticItem[o]);
+            int ok = (hf->set_live(self, res, &fa, &two, 0) != 0) + (hf->set_live(self, res, &fb, &item, 0) != 0);
+            Log("her MG-43's optic: %s as its default attachment %08x (%d of 2 set)", kOptics[o].name, g_opticItem[o], ok);
+            return;
+        }
+    }
     int ok = hf->set_live(self, res, &fu, &vu, 0) != 0, cleared = 0;
     for (int k = 0; k < 20; k += 2)
     {
