@@ -2,7 +2,9 @@
 
 Andoris is the Assault Rifle Doll of Girls' Frontline 2: Exilium, a Bulwark: she takes the hits, mends herself and
 her side, and sets enemies up for Electric damage. Her stick bugs, the Self-Patrolling Turrets, stand with her. This
-is her design; nothing is built yet. Source for her GFL2 kit: https://www.prydwen.gg/gfl-exilium/characters/andoris
+is her design. Built so far: `mods/andoris` 0.1.0 on branch `andoris-kit` (2026-11-29, untested): Simplified Decision
+(Z), Electrocharge and its spread, Delayed Response (Self-Repair, Dullness, taking damage heals) and the T-Doll body;
+her stick bugs (X) and Reinforced Program (C) next. Source for her GFL2 kit: https://www.prydwen.gg/gfl-exilium/characters/andoris
 (the site's own unofficial translation of the CN kit, at V6).
 
 Decided (Yui, 2026-11-26):

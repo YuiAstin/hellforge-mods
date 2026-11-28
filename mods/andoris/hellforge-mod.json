@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "id": "yui.andoris",
+  "name": "Andoris",
+  "version": "0.1.0",
+  "icon": "icon.png",
+  "description": "Andoris's kit from Girls' Frontline 2 for your Helldiver: a Bulwark who takes the hits, mends herself and sets enemies up for Electric damage. Simplified Decision (Z): her next shot is an Electric shot, +110% damage and an arc on the hit, and Electrocharges the enemy (her hits on it heal her and deal more; it spreads to enemies beside it). Delayed Response (passive): once a life a hit that would kill her is cancelled and she is mended; each hit on her makes her duller (less damage taken, up to 24%); taking damage heals her a little. T-Doll body: more health and stamina, and a Hellbomb if her stamina runs dry. Her stick bugs (X) and Reinforced Program (C) are not in this build yet. Solo or host. Pick Andoris in the character picker on the options screen (F9). Her HUD needs Bingus Shared Loader and HD2Runtime. No character model included.",
+  "gameplay": true,
+  "code": {
+    "dll": "andoris.dll",
+    "sdk": 17
+  }
+}

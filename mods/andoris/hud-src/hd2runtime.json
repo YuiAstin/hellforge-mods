@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "Andoris HUD",
+  "resource": "mods/yui/andoris_hud",
+  "guid": "e81d8b70-def4-5677-9fd5-b2c406cc551b",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.30.0",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}

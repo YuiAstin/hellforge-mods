@@ -1,0 +1,11 @@
+{
+ "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
+ "advanced": [
+  ["ec_spread", "Electrocharge", "Spread Interval", "Seconds between its spreads to the enemies beside it.", {"step": 0.5}],
+  ["dull_decay", "Dullness", "Stack Lost After", "Seconds without a hit before a stack is lost.", {"step": 0.5}],
+  ["hurt_every", "Taking Damage Heals", "At Most Every", "Seconds between its heals at the most.", {"step": 0.1}],
+  ["arc_explosion", "Simplified Decision", "Arc Explosion", "The explosion row its arc is (157: the G-31 Arc grenade's; 0: none)."]
+ ],
+ "hidden": ["hellbomb_explosion", "hellbomb_hold", "options_key"],
+ "when": {"hp_mult": "mission"}
+}
