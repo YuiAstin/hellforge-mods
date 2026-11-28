@@ -10,6 +10,7 @@
   ["ish_tick", "Ishbosheth", "Hit Interval", "Seconds between the tracers aimed at the enemies in the fan (a restart applies it).", {"step": 0.05}],
   ["ish_speed", "Ishbosheth", "Tracer Speed", "Metres a second of its tracers (slower: their trails are seen; 0: the round's own).", {"step": 10}],
   ["reload_free", "Passives", "Instant Reload", "A magazine she empties reloads at once, without a spare (not her own gun: its rounds are its supply)."],
+  ["reload_cooldown", "Passives", "Instant Reload Cooldown", "Seconds before the reload passive works again for the same gun.", {"step": 5}],
   ["oao_head", "Passives", "Out-and-Out Height", "Metres: her head lower than this over her feet counts as crouched or prone.", {"step": 0.05}]
  ],
  "when": {"gun_ap": "restart", "ish_mult": "restart", "ish_duration": "restart", "ish_tick": "restart", "ish_speed": "restart"},

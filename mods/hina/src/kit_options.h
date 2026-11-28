@@ -60,6 +60,8 @@ static const OpRow kOpRows[] = {
      "Metres a second of its tracers (slower: their trails are seen; 0: the round's own).", NULL, 1, OP_RESTART},
     {"reload_free", "Passives", "Instant Reload", OP_TOGGLE, 0, 1, 1,
      "A magazine she empties reloads at once, without a spare (not her own gun: its rounds are its supply).", NULL, 1, OP_LIVE},
+    {"reload_cooldown", "Passives", "Instant Reload Cooldown", OP_SLIDER, 0, 600, 5,
+     "Seconds before the reload passive works again for the same gun.", NULL, 1, OP_LIVE},
     {"oao_head", "Passives", "Out-and-Out Height", OP_SLIDER, 0.2f, 2, 0.05f,
      "Metres: her head lower than this over her feet counts as crouched or prone.", NULL, 1, OP_LIVE},
 };

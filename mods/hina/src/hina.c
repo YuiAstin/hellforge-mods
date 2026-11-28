@@ -70,7 +70,7 @@ KB_ROSTER_EXPORTS(hina)
 KB_OPTIONS_EXPORTS(hina)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
-static int s_gunBase = 1, s_gunRounds = 6000, s_gunAp = 5;
+static int s_gunBase = 1, s_gunRounds = 1200, s_gunAp = 5;   /* (Yui: as many rounds as her rate: a minute's fire) */
 static int s_gunDrum = 0, s_drumErgonomics = 30;
 /* 0.1.4 (Yui): her MG-43 copy's scope: 0 the 1.5x red dot (the MG-43's own, the wiki's; the game's "Support Scope"
  * unit), 1 the 4x Combat Scope, 2 the 10x Sniper Scope (the game has no 12x). Drawn through the customization's optic
@@ -91,6 +91,7 @@ static int s_ishTargets = 12;
 static int s_ishPerSection = 2;
 static float s_ishDuration = 10, s_ishEvery = 0.1f, s_ishTick = 0.5f, s_ishSpeed = 200;   /* 0.1.4: the barrage */
 static int s_reloadFree = 1;
+static float s_reloadCooldown = 60;   /* 0.1.4 (Yui): the passive once a minute for each gun */
 static float s_reloadBuff = 0.21f, s_reloadSeconds = 16, s_judgmentRate = 0.14f, s_oaoBonus = 0.027f, s_oaoHead = 1.2f;
 static int s_optionsKey = 0x78;        /* options_key: the virtual key that opens the options screen (120: F9; 0: none) */
 
@@ -102,7 +103,7 @@ static const KbSetting kSettings[] = {
     KB_F("ish_cooldown", s_ishCooldown, 0, 600), KB_F("ish_mult", s_ishMult, 0.1, 50), KB_F("ish_cone", s_ishCone, 1, 90), KB_F("ish_range", s_ishRange, 5, 300),
     KB_I("ish_targets", s_ishTargets, 1, 32), KB_F("ish_duration", s_ishDuration, 1, 60), KB_F("ish_every", s_ishEvery, 0.02, 2), KB_I("ish_per_section", s_ishPerSection, 1, 8),
     KB_F("ish_tick", s_ishTick, 0.1, 10), KB_F("ish_speed", s_ishSpeed, 0, 3000),
-    KB_I("reload_free", s_reloadFree, 0, 1), KB_F("reload_buff", s_reloadBuff, 0, 5), KB_F("reload_seconds", s_reloadSeconds, 0, 120),
+    KB_I("reload_free", s_reloadFree, 0, 1), KB_F("reload_buff", s_reloadBuff, 0, 5), KB_F("reload_seconds", s_reloadSeconds, 0, 120), KB_F("reload_cooldown", s_reloadCooldown, 0, 600),
     KB_F("judgment_rate", s_judgmentRate, 0, 3), KB_F("oao_bonus", s_oaoBonus, 0, 5), KB_F("oao_head", s_oaoHead, 0.2, 2),
     KB_I("options_key", s_optionsKey, 0, 255),
 };
@@ -133,15 +134,16 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; ish_tick take effect at the next start.)\n"
                "ish_cooldown = %g\nish_mult = %g\nish_cone = %g\nish_range = %g\nish_targets = %d\nish_duration = %g\nish_every = %g\nish_per_section = %d\nish_tick = %g\nish_speed = %g\n"
                "; Passives. Lock & Load: an emptied magazine reloads at once (reload_free 1; not her own gun) and her shots deal\n"
-               "; reload_buff more for reload_seconds s. Prefect Team Member Judgment: her own gun fires judgment_rate faster.\n"
+               "; reload_buff more for reload_seconds s; once each reload_cooldown s for each gun. Prefect Team Member\n"
+               "; Judgment: her own gun fires judgment_rate faster.\n"
                "; Out-and-Out: her shots deal oao_bonus more while her head is lower than oao_head m over her feet (crouched, prone).\n"
-               "reload_free = %d\nreload_buff = %g\nreload_seconds = %g\njudgment_rate = %g\noao_bonus = %g\noao_head = %g\n"
+               "reload_free = %d\nreload_buff = %g\nreload_seconds = %g\nreload_cooldown = %g\njudgment_rate = %g\noao_bonus = %g\noao_head = %g\n"
                "; The options screen's key (120: F9; 0: none).\noptions_key = %d\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_gunBase, s_gunDrum, s_gunOptic, s_drumErgonomics, s_gunRounds, (double)s_gunRpm, s_gunAp, (double)s_gunCooldown,
             (double)s_gunGrace, (double)s_shieldMax, (double)s_shieldEvery, (double)s_shieldDecay, (double)s_llCooldown, (double)s_llErgonomics,
             s_llRecoil, (double)s_ishCooldown, (double)s_ishMult, (double)s_ishCone, (double)s_ishRange, s_ishTargets, (double)s_ishDuration, (double)s_ishEvery, s_ishPerSection, (double)s_ishTick,
             (double)s_ishSpeed, s_reloadFree,
-            (double)s_reloadBuff, (double)s_reloadSeconds, (double)s_judgmentRate, (double)s_oaoBonus, (double)s_oaoHead, s_optionsKey);
+            (double)s_reloadBuff, (double)s_reloadSeconds, (double)s_reloadCooldown, (double)s_judgmentRate, (double)s_oaoBonus, (double)s_oaoHead, s_optionsKey);
 }
 
 /* ---- her gun, its rounds, Ishbosheth's rounds: copies of her own (index 0 the Maxigun's, 1 the MG-43's) --------- */
@@ -363,11 +365,29 @@ static void GunOptic(void)
 }
 static double DrumErg(void) { return g_use == 1 && s_gunDrum ? s_drumErgonomics : 0; }   /* (the MG-43's copy only) */
 /* the drum's ergonomics on her MG-43 copy (from the records' readiness, and again when Lock & Load's handling goes) */
+/* 0.1.4 (Yui: the drum's look): no machine-gun drum among the game's magazine models (HD2Runtime's attachment research);
+ * the nearest, the Liberator's drum (Rifle 5,5x50mm. Drum, the Concussive's), as her MG-43 copy's magazine unit, drawn at
+ * its attach_mag joint if its model has one (its own box is part of its model) */
+#define DRUM_UNIT UINT64_C(0xE8DE5E95B9635C21)
+#define DRUM_DONOR UINT64_C(0xCF5F176E0E322BE1)   /* the AR-23C Liberator Concussive */
+static int DrumPackage(void)
+{
+    static uint64_t pkg;
+    if (!s_gunDrum) return HF_PACKAGE_RESIDENT;
+    if (!pkg && !LoadoutPackage(DRUM_DONOR, &pkg)) pkg = ~0ull;
+    return pkg == ~0ull ? HF_PACKAGE_RESIDENT : hf->load_package(self, pkg);
+}
 static void DrumHandling(void)
 {
     HfField erg = HF_FIELD(WeaponData, ergonomics);
     uint64_t res = g_gunRes[1];
     if (!res) return;
+    {
+        HfField fm = HF_FIELD(WeaponCustomization, magazine_unit);
+        HfValue vm = HF_U64(DRUM_UNIT);
+        int ok = s_gunDrum ? hf->set_live(self, res, &fm, &vm, 0) != 0 : (hf->set_live(self, res, &fm, NULL, 0), 1);
+        Log("her MG-43's magazine model: %s (%s)", s_gunDrum ? "the Liberator's drum" : "its own", ok ? "set" : "refused");
+    }
     if (!s_gunDrum || !s_drumErgonomics) { hf->set_live(self, res, &erg, NULL, 0); return; }
     HfLiveValue e;
     memset(&e, 0, sizeof e);
@@ -585,6 +605,9 @@ static int HandPackage(void)
 }
 static int g_k;
 static atomic_uint g_gl;                  /* her gun (0: none) */
+#define RELOAD_GUNS 8
+static uint64_t g_reloadRes[RELOAD_GUNS];   /* (the reload passive's guns and when: ReloadReady) */
+static double g_reloadAt[RELOAD_GUNS];
 static double g_kAt, g_madeAt, g_readyAt, g_awaySince, g_droppedSince;
 static double g_putAt;
 static unsigned g_frame, g_madeFrame;   /* 0.1.4: frames, for spawn waits counted in frames, not seconds */
@@ -731,7 +754,7 @@ static void GunFrame(void)
     {
     case K_PACKAGE:
         if (GunPackage() == HF_PACKAGE_LOADING) { if (g_now > g_kAt) GunAbort("its package did not load"); break; }
-        if (g_use == 1 && OpticPackage() == HF_PACKAGE_LOADING && g_now <= g_kAt) break;   /* (its optic's model first) */
+        if (g_use == 1 && (OpticPackage() == HF_PACKAGE_LOADING || DrumPackage() == HF_PACKAGE_LOADING) && g_now <= g_kAt) break;   /* (its optic's and drum's models first) */
         if (Pack() && !g_swap)
         {
             static uint64_t bpPkg;
@@ -1058,6 +1081,7 @@ static void LlFrame(void)
     {
         if (g_frame < g_llFrame + 2 || (ResOf(g_llNew) != g_llRes && g_now < g_llAt)) break;
         g_ll = LL_IDLE;
+    memset(g_reloadRes, 0, sizeof g_reloadRes);
     g_dropped = 0;
     g_picked = 0;
     g_hand = 0;
@@ -1285,13 +1309,28 @@ static int g_llRounds = -1;
 static unsigned g_reloads, g_buffed;
 static double g_buffDamage;
 /* Lock & Load (passive): an emptied magazine of the gun in her hands reloads at once, and the buff */
+/* 0.1.4 (Yui): the passive once a reload_cooldown for each gun: the guns it went off for, and when */
+static int ReloadReady(uint32_t w)
+{
+    uint64_t res = ResOf(w);
+    int free = -1;
+    for (int k = 0; k < RELOAD_GUNS; k++)
+    {
+        if (g_reloadRes[k] == res) { if (g_now < g_reloadAt[k] + s_reloadCooldown) return 0; g_reloadAt[k] = g_now; return 1; }
+        if (!g_reloadRes[k] || (free < 0 && g_now >= g_reloadAt[k] + s_reloadCooldown)) free = free < 0 ? k : free;
+    }
+    if (free < 0) free = 0;
+    g_reloadRes[free] = res;
+    g_reloadAt[free] = g_now;
+    return 1;
+}
 static void ReloadFrame(void)
 {
     uint32_t w = Held(NULL), gl = atomic_load(&g_gl);
     int r = w ? MagRounds(w) : -1;
     /* 0.1.4: not a weapon of one or two rounds a magazine (played: a one-shot launcher reloaded free after every shot
      * and kept the buff's timer restarting) */
-    if (w && w == g_llHeld && r == 0 && g_llRounds > 0 && (MagCapacity(w) < 0 || MagCapacity(w) >= 3))
+    if (w && w == g_llHeld && r == 0 && g_llRounds > 0 && (MagCapacity(w) < 0 || MagCapacity(w) >= 3) && ReloadReady(w))
     {
         if (w != gl && s_reloadFree)
         {
@@ -1505,7 +1544,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     /* her gun's package, asked for from the mission's start (Ishbosheth's rounds need it before any gun is out) */
     {
         static double pkgAt;
-        if (g_k == K_IDLE && g_now >= pkgAt) { pkgAt = g_now + 1; Gun(); GunPackage(); if (g_inMission) { IshPackage(); HandPackage(); if (g_use == 1) OpticPackage(); } }
+        if (g_k == K_IDLE && g_now >= pkgAt) { pkgAt = g_now + 1; Gun(); GunPackage(); if (g_inMission) { IshPackage(); HandPackage(); if (g_use == 1) { OpticPackage(); DrumPackage(); } } }
     }
     GunFrame();
     if (g_inMission) LlFrame();
@@ -1528,7 +1567,7 @@ static const KbOption kOptions[] = {
     {"ish_cooldown", &s_ishCooldown, NULL}, {"ish_mult", &s_ishMult, NULL}, {"ish_cone", &s_ishCone, NULL}, {"ish_range", &s_ishRange, NULL},
     {"ish_targets", NULL, &s_ishTargets}, {"ish_duration", &s_ishDuration, NULL}, {"ish_every", &s_ishEvery, NULL}, {"ish_per_section", NULL, &s_ishPerSection},
     {"ish_tick", &s_ishTick, NULL}, {"ish_speed", &s_ishSpeed, NULL},
-    {"reload_free", NULL, &s_reloadFree}, {"reload_buff", &s_reloadBuff, NULL}, {"reload_seconds", &s_reloadSeconds, NULL},
+    {"reload_free", NULL, &s_reloadFree}, {"reload_buff", &s_reloadBuff, NULL}, {"reload_seconds", &s_reloadSeconds, NULL}, {"reload_cooldown", &s_reloadCooldown, NULL},
     {"judgment_rate", &s_judgmentRate, NULL}, {"oao_bonus", &s_oaoBonus, NULL}, {"oao_head", &s_oaoHead, NULL},
 };
 /* her gun's rate and rounds take effect on its records at once (the next gun built has them) */
