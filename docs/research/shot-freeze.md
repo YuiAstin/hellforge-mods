@@ -129,3 +129,17 @@ game's own switch, as a silo remote uses it.
 
 - Beams, arcs and explosions already going off.
 - **Co-op:** each machine likely steps its own copy of the shots; not read.
+
+## What 0.3.0 found (played 2026-11-28): damage held back while frozen
+
+Yui used only gas, fire and arc weapons during the stops (Hina's kit active). HellForge's damage-pre cancel removes the
+amount but the hit still happens, so hit markers keep appearing.
+
+| Element | Kind | What | Seen |
+|---|---|---|---|
+| 5 | 2 (damage over time) | gas (Veterancy's `gas_element = 5`, learned from gas armaments) | 2,530 ticks of about 8, 19,386 in all |
+| 3 | 4 (explosion) and 6 (ability) | Arc Thrower: kind 4 hits of 0, kind 6 hits of 75 | 14 + 6 hits |
+| 7 | 6 (ability) | fire (by elimination: the only other weapon used); about 1,000 per hit before armour | 11 hits, 11,250 |
+
+No burning damage over time (kind 2, element 7) showed up; the flamer's hits were withheld before any burn.
+HellForge has no call to deal the withheld damage later, so for now it is lost, not stored.
