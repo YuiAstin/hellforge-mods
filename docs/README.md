@@ -23,5 +23,6 @@ The research notes were written while working, so their file paths point at a sc
 - [kit-base.md](kit-base.md): the shared kit base: what the four GFL2 kits have in common, the layers, and the extraction steps.
 - [leva-design.md](leva-design.md): Leva's original kit plan.
 - [leva-future.md](leva-future.md): ideas parked for later (a Lenna + Leva duo arc, a Wise Support rework).
+- [andoris-design.md](andoris-design.md): Andoris's kit, a Bulwark with her stick bugs (design; not built).
 - [executor-design.md](executor-design.md): Executor the Ex Foedere's kit (built as `mods/executor`, a test build).
 - [hina-design.md](hina-design.md): Hina's kit from Blue Archive (built as `mods/hina` on branch `hina-kit`, not played yet).
