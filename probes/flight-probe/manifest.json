@@ -1,7 +1,7 @@
 {
   "Version": 1,
   "Guid": "ce0b0e43-2051-571a-b762-8f1dc5a451e6",
-  "Name": "Flight Probe 0.1.0",
+  "Name": "Flight Probe 0.1.1",
   "Description": "Requires Bingus Shared Loader v15+ / API 1 and HD2Runtime 0.30.0+ / API 1; install dependencies separately.",
   "Options": [
     {

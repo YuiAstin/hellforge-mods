@@ -3,14 +3,14 @@
 -- airborne flag (game.dll+0x5A3D80) and moves it with SetVelocity (game.dll+0x4A7550), as JumpTest does. Flight here is
 -- that pair every frame: the upward speed set to climb + 9.82 x dt so gravity's pull that frame is cancelled.
 --
--- Keys (in a mission; none is F5, F8 or F9):
---   F6          flight on / off. While on: Page Up climbs, Page Down descends, Up arrow flies along where she faces
+-- Keys (in a mission; none is F5, F8, F9, F10 (HD2Runtime's settings), Page Up / Page Down / End (Maxi Mag Probe, Escort Probe)):
+--   F6          flight on / off. While on: Numpad 8 climbs, Numpad 2 descends, Up arrow flies along where she faces
 --               (her body's facing); nothing held = hover. Off: the flag is cleared and she falls the game's way.
 --   F7          hover test, 10 s: 5 s with the flag set every frame, then 5 s with only the speed set (does the game's
 --               ground check / slow-speed rule drop her?). Height drift logged each 0.5 s.
---   F10         drop test: climbs to 5 m, then 10 m, then 20 m above where it started (one height a press), lets go,
+--   Ctrl+F7     drop test: climbs to 5 m, then 10 m, then 20 m above where it started (one height a press), lets go,
 --               and logs the speed at touchdown and the health lost (the fall-damage threshold).
---   F11         sends the animation event 'fall' (a pose for the air?) and logs the layers before and after.
+--   Ctrl+F6     sends the animation event 'fall' (a pose for the air?) and logs the layers before and after.
 -- While flying, every 0.5 s: height over the start, vertical speed, the animation layers (animation_get_state), the
 -- backpack worn. Uses HD2Runtime by SkyeShade through its public API; the two game functions are called only for her
 -- own avatar and only while their first bytes are this build's (JumpTest's checks). Research only.
@@ -77,11 +77,15 @@ local function facing(unit)
     if l < 0.01 then return 0, 0 end
     return x / l, y / l
 end
+-- 0.1.1: 0.1.0 said "no local player or avatar" every time: which part is missing is now said (and an id that comes
+-- as a 64-bit number is taken through tonumber)
 local function me()
     local player = hd2.local_player()
-    local avatar = player and player:avatar()
-    local id = avatar and avatar.id
-    if not player or type(id) ~= 'number' or id <= 0 then return nil end
+    if not player then return nil, nil, 'no local player' end
+    local ok, avatar = pcall(player.avatar, player)
+    if not ok or not avatar then return nil, nil, 'no avatar (' .. tostring(avatar) .. ')' end
+    local id = tonumber(avatar.id)
+    if not id or id <= 0 then return nil, nil, 'its id is ' .. tostring(avatar.id) .. ' (' .. type(avatar.id) .. ')' end
     return player, id
 end
 local function push(id, vx, vy, vz, flag)
@@ -101,7 +105,7 @@ local held = {}
 local function hold(name, key)
     hd2.input.bind('flight_probe.' .. name, { key = key, on_press = function() held[name] = true end, on_release = function() held[name] = false end })
 end
-hold('up', 'PageUp'); hold('down', 'PageDown'); hold('fwd', 'Up')
+hold('up', 'Numpad8'); hold('down', 'Numpad2'); hold('fwd', 'Up')   -- (0.1.1: not Page Up / Page Down / End: the Maxi Mag Probe's)
 
 -- what runs each frame: one mode at a time
 local mode, t, z0, lastz, vz, flagged, health0, nextlog, target
@@ -112,8 +116,8 @@ local function stop(why_)
     mode = nil
 end
 local function begin(m)
-    local player, id = me()
-    if not player then log('%s: no local player or avatar', m); return false end
+    local player, id, missing = me()
+    if not player then log('%s: %s', m, tostring(missing)); return false end
     if not set_velocity or not airborne then log('%s: unavailable (%s)', m, tostring(why)); return false end
     local p = player:position()
     mode, t, z0, lastz, vz, nextlog = m, 0, p.z, p.z, 0, 0
@@ -176,13 +180,13 @@ end })
 hd2.input.bind('flight_probe.hover', { key = 'F7', on_press = function()
     if not mode and begin('hover') then log('hover test: flag every frame for 5 s, then the speed only') end
 end })
-hd2.input.bind('flight_probe.drop', { key = 'F10', on_press = function()
+hd2.input.bind('flight_probe.drop', { key = 'Ctrl+F7', on_press = function()
     if mode then return end
     target = dropHeights[dropNext]
     dropNext = dropNext % #dropHeights + 1
     if begin('drop') then droppedAt = nil; log('drop test: climbing to %d m', target) end
 end })
-hd2.input.bind('flight_probe.fall', { key = 'F11', on_press = function()
+hd2.input.bind('flight_probe.fall', { key = 'Ctrl+F6', on_press = function()
     local player = hd2.local_player()
     local unit = player and my_unit(player)
     if not unit then log('fall event: no unit'); return end
@@ -190,6 +194,6 @@ hd2.input.bind('flight_probe.fall', { key = 'F11', on_press = function()
     local ok = pcall(S.Unit.animation_event, unit, 'fall')
     hd2.after(0.2, function() log('fall event: %s; layers %s -> %s', ok and 'sent' or 'FAILED', before, layers(unit)) end, { scope = 'session' })
 end })
-log('0.1.0 loaded (airborne flag %s, SetVelocity %s, layer getter %s): F6 flight (Page Up / Page Down / Up arrow), F7 hover test, F10 drop test, F11 fall event',
+log('0.1.1 loaded (airborne flag %s, SetVelocity %s, layer getter %s): F6 flight (Numpad 8 / Numpad 2 / Up arrow), F7 hover test, Ctrl+F7 drop test, Ctrl+F6 fall event',
     airborne and 'ready' or 'NO', set_velocity and 'ready' or 'NO', get_state and 'yes' or 'no')
 if why then log('not this build: %s', why) end
