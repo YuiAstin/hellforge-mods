@@ -83,7 +83,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.10.2"
+#define VERSION "0.10.3"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
@@ -102,7 +102,7 @@ static void Watch(uint32_t e);
  * network id stayed 0 and none of its hits were seen) */
 static uint32_t g_seenEnt[32], g_seenNet[32];
 static unsigned g_seenAt;
-static uint32_t SeenNet(uint32_t e) { for (int i = 0; i < 32; i++) if (g_seenEnt[i] == e) return g_seenNet[i]; return 0; }
+static uint32_t SeenNet(uint32_t e) { for (int i = 0; i < 32; i++) if (g_seenEnt[i] == e && g_seenNet[i] != 0x7FFF) return g_seenNet[i]; return 0; }
 static int g_follow = 0, g_want, g_spawns;
 static double g_wantSince, g_lastSpawnAt = -100;
 
@@ -224,8 +224,11 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 
 /* ---- 0.10.0: friendly fire, who targets whom, the taunt ------------------------------------------------------------ */
 static unsigned g_dealt, g_onYou;
+/* 0.10.3: never 0x7FFF, "no one" (Yui, played: 0.10.1 took the escort's id from its spawn event, 0x7FFF, so a fire
+ * tornado's burns, dealt by no one, read as the escort's) */
 static int EscortOf(uint32_t net)
 {
+    if (!net || net == 0x7FFF || net == UINT32_MAX) return -1;
     for (int i = 0; i < ESCORTS; i++) if (g_esc[i].entity && g_esc[i].net && g_esc[i].net == net) return i;
     return -1;
 }
