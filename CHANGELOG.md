@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-28: Commando Plus 0.7.1 (works on HellForge 0.5)
+
+- Fixed: on HellForge 0.5 no base ever counted as cleared, so no ammo boxes were banked for the Outpost Caches and the Super Destroyer's window never grew. 0.5 keeps the game's entities in a larger table of its own, so the mod could not find where the enemy spawners were; it now finds them through the game's own lookup there. Still works on HellForge 0.4.
+
 ## 2026-11-27: W 0.9.1
 
 - D12 now destroys Illuminate spawners. A mark's blast reaches 8 m, carries a demolition force of 60 (a spawner needs 50), and on a tall target goes off at half its height instead of at its base.
