@@ -351,6 +351,7 @@ static void GunRecords(int i)
  * {items, count} pointers at game+0x37C5B50; HellForge's AttachmentItemById research), the one whose record names the
  * optic's unit */
 static uint32_t g_opticItem[3];
+static uint64_t g_opticPkg[3];   /* the item's +0x10 hash: its model's package, perhaps (played: 9e394f6df55783e7 for the 1.5x) */
 static void OpticItems(void)
 {
     uint32_t groups = 0, found = 0;
@@ -372,6 +373,7 @@ static void OpticItems(void)
                     if (v == kOptics[q].unit && !g_opticItem[q])
                     {
                         memcpy(&g_opticItem[q], rec + 8, 4);
+                        memcpy(&g_opticPkg[q], rec + 0x10, 8);
                         found++;
                         Log("optics: %s is attachment item %08x (its unit at +0x%X of the item, group %u)", kOptics[q].name, g_opticItem[q], o, g);
                         /* its whole item, 11 words of 8: a package of its model may be named there */
@@ -399,8 +401,9 @@ static void GunOptic(void)
     if (!g_opticItem[0] && !g_opticItem[1] && !g_opticItem[2]) OpticItems();
     if (g_opticItem[o])
     {
-        /* the scope as her copy's default optic attachment (the game loads its model), no bare unit */
-        hf->set_live(self, res, &fu, NULL, 0);
+        /* the scope as her copy's default optic attachment, and its unit as the one drawn without an attachment (a gun
+         * spawned directly builds no attachment: the Escort Probe's MG-43 had no scope either; the drum shows this way) */
+        hf->set_live(self, res, &fu, &vu, 0);
         for (int k = 0; k < 20; k += 2)
         {
             HfField fa = HF_FIELD_AT(WeaponCustomization, defaults, k), fb = HF_FIELD_AT(WeaponCustomization, defaults, k + 1);
@@ -1354,6 +1357,16 @@ static int OpticPackage(void)
     {
         if (!pkg[o][d] && !LoadoutPackage(kOptics[o].donor[d], &pkg[o][d])) pkg[o][d] = ~0ull;
         if (pkg[o][d] != ~0ull && hf->load_package(self, pkg[o][d]) == HF_PACKAGE_LOADING) st = HF_PACKAGE_LOADING;
+    }
+    /* the attachment item's own package (its +0x10), if that is one */
+    static int itemState[3];
+    if (g_opticPkg[o] && itemState[o] != -1 && itemState[o] != HF_PACKAGE_RESIDENT)
+    {
+        int was = itemState[o];
+        itemState[o] = hf->load_package(self, g_opticPkg[o]);
+        if (!itemState[o]) { Log("optics: %016llx (the item's +0x10) is not a package HellForge can load", (unsigned long long)g_opticPkg[o]); itemState[o] = -1; }
+        else if (itemState[o] == HF_PACKAGE_RESIDENT && was != HF_PACKAGE_RESIDENT) Log("optics: %016llx, the scope item's package, is loaded", (unsigned long long)g_opticPkg[o]);
+        if (itemState[o] == HF_PACKAGE_LOADING) st = HF_PACKAGE_LOADING;
     }
     return st;
 }
