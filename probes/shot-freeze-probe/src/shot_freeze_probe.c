@@ -39,7 +39,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.3.0"
+#define VERSION "0.4.0"
 #include "kitbase/kb_core.h"
 
 static double g_now;
@@ -561,6 +561,51 @@ static void OnSpawn(HfMod* mod, const HfSpawnEvent* e, void* user)
         m && ThrowableOf(m, e->entity, &a, &r, NULL) ? " (a throwable)" : "");
 }
 
+/* ==== particles: the engine's particle world (docs/research/particle-freeze.md) ================================== */
+/* Flames, gas, arcs and burning ground are particle effects. Each engine World owns one ParticleWorld, whose virtual
+ * update(this, dt) (helldivers2.exe+0x1875A0) is called once a frame by World::update_scene (exe+0x1B12CC). While time
+ * is stopped it is called with dt 0, as the game's own pause does: the particles stop moving, ageing and spawning and
+ * stay drawn. The original is always called (it also builds the frame's job data). Every real ParticleWorld is held
+ * (vtable exe+0x16711C8); the log says which ones the hook saw. */
+typedef uintptr_t (*PwUpdate)(void* pw, float dt);
+static PwUpdate g_pwOrig;
+static volatile int g_pwFreeze, g_pwOk;
+static void* volatile g_pwSeen[8];
+static volatile float g_pwLastDt[8];
+static volatile unsigned g_pwCalls[8], g_pwHeld[8];
+static uintptr_t PwUpdateDetour(void* pw, float dt)
+{
+    int k = 0;
+    while (k < 8 && g_pwSeen[k] && g_pwSeen[k] != pw) k++;
+    if (k < 8) { if (!g_pwSeen[k]) g_pwSeen[k] = pw; g_pwCalls[k]++; g_pwLastDt[k] = dt; }
+    if (g_pwFreeze && *(uintptr_t*)pw == exe + 0x16711C8) { if (k < 8) g_pwHeld[k]++; dt = 0; }
+    return g_pwOrig(pw, dt);
+}
+static void PwSetup(void)
+{
+    if (!hf->code_matches(exe + 0x1875A0, "F3 0F 11 4C 24 10 48 89 4C 24 08 55 53 56 57 41 56 48 8D AC 24 B0 D7 FF FF B8 50 29 00 00 E8") ||
+        !hf->code_matches(exe + 0x1B12CC, "48 8B 8F 88 08 23 00 48 85 C9 74 18 48 8B 01 0F 28 CE FF 90 48 01 00 00"))
+    {
+        Log("particles: the particle world's update is not the reviewed code: particles stay off");
+        return;
+    }
+    if (hf->hook(self, exe + 0x1875A0, (void*)PwUpdateDetour, (void**)&g_pwOrig) || !g_pwOrig) { Log("particles: the hook failed: particles stay off"); return; }
+    g_pwOk = 1;
+}
+static void PwReport(const char* when)
+{
+    uintptr_t world = Pointer(game + 0x346BFA0), mine = world ? Pointer(world + 0x230888) : 0;
+    for (int k = 0; k < 8 && g_pwSeen[k]; k++)
+    {
+        uintptr_t vt = 0;
+        ReadAt((uintptr_t)g_pwSeen[k], &vt, 8);
+        Log("  particle world %p%s: %s, %u updates, %u of them held, last dt %.4f", g_pwSeen[k], (uintptr_t)g_pwSeen[k] == mine ? " (the game's world)" : "",
+            vt == exe + 0x16711C8 ? "real" : "dummy", g_pwCalls[k], g_pwHeld[k], (double)g_pwLastDt[k]);
+        g_pwCalls[k] = g_pwHeld[k] = 0;
+    }
+    if (world) { uint32_t queued = 0; ReadAt(world + 0x230048, &queued, 4); Log("  (%s) the game's world %p, particle world %p, %u particle commands queued", when, (void*)world, (void*)mine, queued); }
+}
+
 /* ==== damage while time is stopped =========================================================================== */
 /* Fire, gas and arcs have nothing in flight to hold (a player flamer's flame is a particle effect whose hits arrive as
  * damage; an arc hits its whole chain in one frame; clouds and burning ground are areas). So while time is stopped their
@@ -600,6 +645,8 @@ static void WithheldReport(void)
 static void Stop(uintptr_t pool)
 {
     g_frozen = 1; g_frozenAt = g_now; g_reportAt = g_now + 1; g_afterAt = 0; g_spawnsLogged = 0;
+    g_pwFreeze = g_pwOk;
+    if (g_pwOk) PwReport("before the stop");
     g_nshot = g_nthr = g_nfuse = g_nmis = g_nmov = 0;
     if (g_thrOk && !a_setVel && !ActorApi()) { g_thrOk = 0; Log("the engine's actor table is not readable: grenades stay off"); }
     Log("Ctrl+F11: time stopped");
@@ -615,7 +662,9 @@ static void Stop(uintptr_t pool)
 static void Start(uintptr_t pool)
 {
     g_frozen = 0;
+    g_pwFreeze = 0;
     Log("Ctrl+F11: time runs again after %.2f s", g_now - g_frozenAt);
+    if (g_pwOk) PwReport("while stopped");
     if (pool) ReleaseShots(pool);
     ReleaseThrown();
     ReleaseMissiles();
@@ -646,6 +695,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     if (!pool)
     {
         if (g_frozen) { Log("the mission ended while frozen: everything held is forgotten"); g_frozen = 0; g_nwh = 0; }
+        g_pwFreeze = 0;
         g_nshot = g_nthr = g_nfuse = g_nmis = g_nmov = 0; g_afterAt = 0;
         return;
     }
@@ -701,10 +751,11 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     g_misOk = hf->code_matches(g + 0x64286C, "f3 0f 58 44 9f 08") && hf->code_matches(g + 0x642878, "80 7c 06 35 00") &&
               hf->code_matches(g + 0x6429B9, "80 7c 1e 35 00") && hf->code_matches(g + 0x645B80, "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 18");
     if (g_misOk) m_setEngine = (SetEngine)(g + 0x645B80);
+    PwSetup();
     /* the motion map as ExplosiveUpdate reads it (0x8CB387: the manager, +0x48A8 count, +0x48A0 entries) */
     g_motionOk = hf->code_matches(g + 0x8CB390, "45 8b 8a a8 48 00 00") && hf->code_matches(g + 0x8CB3AB, "49 8b ba a0 48 00 00");
-    Log("ready: Ctrl+F11 stops time and starts it again. Parts on: shots %s, grenades %s (actor table read at the first stop), fuses %s, missiles %s, motion records %s",
-        g_shotsOk ? "yes" : "NO", g_thrOk ? "yes" : "NO", g_fuseOk ? "yes" : "NO", g_misOk ? "yes" : "NO", g_motionOk ? "yes" : "NO");
+    Log("ready: Ctrl+F11 stops time and starts it again. Parts on: shots %s, grenades %s (actor table read at the first stop), fuses %s, missiles %s, motion records %s, particles %s",
+        g_shotsOk ? "yes" : "NO", g_thrOk ? "yes" : "NO", g_fuseOk ? "yes" : "NO", g_misOk ? "yes" : "NO", g_motionOk ? "yes" : "NO", g_pwOk ? "yes" : "NO");
 }
 /* The actor table is filled by the engine at start; read it once a mission runs */
 static void MissionStart(HfMod* mod, const HfEventInfo* info, void* user)
@@ -718,7 +769,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     hf = api;
     self = mod;
     if (!api || api->version < 16 || api->size < offsetof(HfApi, global) + sizeof api->global || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
-    Log("Shot Freeze Probe " VERSION ": research towards a time stop (shots, rockets, grenades, missiles and fuses held and let go; fire, gas and arc damage withheld)");
+    Log("Shot Freeze Probe " VERSION ": research towards a time stop (shots, rockets, grenades, missiles and fuses held and let go; fire, gas and arc damage withheld; particles paused)");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     if (!api->subscribe(mod, HF_ON_SPAWN, (HfListener)OnSpawn, NULL, 0)) Log("spawn events are unavailable");
     if (!api->subscribe(mod, HF_ON_DAMAGE_PRE, (HfListener)OnDamagePre, NULL, 0)) Log("damage events are unavailable: fire, gas and arcs are not withheld");
