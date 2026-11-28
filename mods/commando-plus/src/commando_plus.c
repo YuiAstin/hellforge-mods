@@ -49,7 +49,7 @@
 #include "hellforge_content.h"
 
 #define BUILD "25480438"
-#define VERSION "0.7.0"
+#define VERSION "0.7.1"
 #define CALL_IN HF_STRATAGEM_CALL_IN_DESTROYER   /* 123 */
 #define RESUPPLY HF_STRATAGEM_RESUPPLY           /* 33 */
 #define UNLIMITED 0xFFFFFFFFu
@@ -323,14 +323,43 @@ static atomic_uint g_avatar;      /* the local Helldiver (HF_ON_WEAPON) */
 static double g_missionAt;         /* g_now at mission start */
 static unsigned g_spLogged, g_goneLogged;
 static void CachesReset(void) { g_nsp = g_nbase = 0; g_basesPaid = g_callsPaid = g_basesCleared = 0; g_spLogged = g_goneLogged = 0; }
+/* 0.7.1: the game's own lookup of an entity's descriptor (SDK 16: hf->function "EntityDescriptor", game.dll+0xFD9D40).
+ * HellForge 0.5 moves the entity records and maps out of the manager (its entity-table fix), so the fixed offsets below
+ * found no spawner's position: 18 spawners noted, 0 bases, nothing cleared (2026-11-28). The game's function follows
+ * the move; as Veterancy's Last Stand fix (0.20.0). */
+static uint8_t* (*g_descriptorFn)(uint32_t entity);
+static int g_descriptorSeen;      /* the fixed offsets have found an entity: the records are where the game has them */
+static unsigned g_descriptorAsks;
+static int DescriptorAsk(uint32_t entity, uint8_t out[24])
+{
+#if defined(HF_MOD_SDK_VERSION) && HF_MOD_SDK_VERSION >= 16
+    if (!g_descriptorFn && g_descriptorAsks < 6 && hf->version >= 16 && hf->size >= offsetof(HfApi, function) + sizeof hf->function && hf->function)
+    {
+        g_descriptorAsks++;
+        g_descriptorFn = (uint8_t* (*)(uint32_t))hf->function(self, "EntityDescriptor");
+        if (g_descriptorFn) Log("entities: their records are not at the game's own offsets (HellForge moved them): read through the game's lookup from now on");
+    }
+    if (!g_descriptorFn) return 0;
+    uint8_t* d = g_descriptorFn(entity);
+    return d && ReadAt((uintptr_t)d, out, 24) && Word(out + 8) == entity;
+#else
+    (void)entity; (void)out;
+    return 0;
+#endif
+}
 static uint32_t UnitOf(uint32_t entity)
 {
     uintptr_t root = Pointer(game + 0x346BF98);
     uint32_t index;
     uint8_t d[24];
-    if (!root || !entity || entity == 0x7FFF || !Lookup(root + 0xF1AEB0, entity, 1048576, &index) || index >= 262144 ||
-        !ReadAt(root + 0xF32F18 + 24u * index, d, 24) || Word(d + 8) != entity) return 0;
-    return Word(d + 12);
+    if (!entity || entity == 0x7FFF || entity == UINT32_MAX) return 0;
+    if (g_descriptorFn) return DescriptorAsk(entity, d) ? Word(d + 12) : 0;
+    if (root && Lookup(root + 0xF1AEB0, entity, 1048576, &index) && index < 262144 &&
+        ReadAt(root + 0xF32F18 + 24u * index, d, 24) && Word(d + 8) == entity) { g_descriptorSeen = 1; return Word(d + 12); }
+    /* nothing at the fixed offsets: an entity that is gone, or records that moved. While the offsets have found none at
+     * all, the game's lookup is tried; once it answers, it is the one used. */
+    if (!g_descriptorSeen && DescriptorAsk(entity, d)) return Word(d + 12);
+    return 0;
 }
 static int Position(uint32_t entity, float out[3])
 {
