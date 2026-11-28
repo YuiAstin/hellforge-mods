@@ -3,8 +3,8 @@
  * identity (Yui): put as many rounds down range as possible, as efficiently as possible.
  *
  *   Destroyer of Denouement (key_s1, default Z): her signature gun in her hands, the way W's King of Hearts gives the
- *     GL-21 (the Wield Probe's swap): a copy of the M-1000 Maxigun (gun_base 0, when this profile owns it) or of the
- *     MG-43 Machine Gun (the fallback: without the Maxigun, or gun_base 1) with gun_rounds rounds, gun_rpm rounds a
+ *     GL-21 (the Wield Probe's swap): a copy of the MG-43 Machine Gun (gun_base 1, the default), or of the M-1000
+ *     Maxigun (gun_base 0, when this profile owns it; else the MG-43's) with gun_rounds rounds, gun_rpm rounds a
  *     minute and armour penetration gun_ap (its own entity, round and damage: add_entity, add_projectile, add_damage;
  *     kit base principle 6). It goes when she switches to another weapon (her primary or secondary for gun_grace s;
  *     a stratagem or a grenade in her hands does not count, Yui), drops it, spends its rounds or presses Z again; her
@@ -70,8 +70,9 @@ KB_ROSTER_EXPORTS(hina)
 KB_OPTIONS_EXPORTS(hina)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
-static int s_gunBase = 0, s_gunRounds = 6000, s_gunAp = 5;
-static float s_gunRpm = 6000, s_gunCooldown = 30, s_gunGrace = 0.5f;
+static int s_gunBase = 1, s_gunRounds = 6000, s_gunAp = 5;   /* 0.1.4 (Yui): the MG-43 by default; the Maxigun an option */
+static float s_gunRpm = 1200,   /* 0.1.4 (Yui): her MG42's rate (Blue Archive's Destroyer of Denouement is one) */
+    s_gunCooldown = 30, s_gunGrace = 0.5f;
 static float s_shieldMax = 3000, s_shieldEvery = 300, s_shieldDecay = 100;
 static float s_llCooldown = 20, s_llErgonomics = 80;
 static int s_llRecoil = 1;
@@ -101,8 +102,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
     fprintf(f, "; Hina %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for a\n"
                "; combo (Shift+Q). The game still sees the keys too (Shift sprints, R reloads), so pick ones it leaves alone.\n"
                "key_s1 = %s\nkey_s2 = %s\nkey_s3 = %s\n"
-               "; Destroyer of Denouement: her gun in her hands, a copy of the M-1000 Maxigun (gun_base 0, with the Maxigun's\n"
-               "; warbond) or of the MG-43 Machine Gun (without it, or gun_base 1), with gun_rounds rounds, gun_rpm rounds a minute\n"
+               "; Destroyer of Denouement: her gun in her hands, a copy of the MG-43 Machine Gun (gun_base 1) or of the M-1000\n"
+               "; Maxigun (gun_base 0, when this profile owns it), with gun_rounds rounds, gun_rpm rounds a minute (her MG42's 1200)\n"
                "; and armour penetration gun_ap (5: tank). It goes when she is on her primary or secondary for gun_grace s, drops\n"
                "; it or spends it; the cooldown starts then. Takes effect at the next start.\n"
                "gun_base = %d\ngun_rounds = %d\ngun_rpm = %g\ngun_ap = %d\ngun_cooldown = %g\ngun_grace = %g\n"
