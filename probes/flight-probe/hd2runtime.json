@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "name": "Flight Probe",
+  "resource": "mods/yui/flight_probe",
+  "guid": "ce0b0e43-2051-571a-b762-8f1dc5a451e6",
+  "requires": {
+    "bingus": {
+      "min_release": 15,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.30.0",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  },
+  "sdk": "../../../dl/HD2Runtime/sdk",
+  "ide_library": "../../../dl/HD2Runtime/sdk/stubs"
+}
