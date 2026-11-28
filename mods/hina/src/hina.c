@@ -477,6 +477,8 @@ static int HandPackage(void)
 static int g_k;
 static atomic_uint g_gl;                  /* her gun (0: none) */
 static double g_kAt, g_madeAt, g_readyAt, g_awaySince, g_droppedSince;
+static double g_putAt;
+static unsigned g_frame, g_madeFrame;   /* 0.1.4: frames, for spawn waits counted in frames, not seconds */
 static double g_emptySince, g_roundsLogAt;   /* 0.1.4: her rounds at 0 for a second before the gun goes (a reload reads 0) */
 static uint32_t g_picked;                 /* 0.1.4: the weapon she picked up with the gun out (it ends the gun; she keeps it) */
 static int g_dropped;                     /* 0.1.4: her gun dropped (or left for a pickup): her old support weapon dropped too */
@@ -642,11 +644,14 @@ static void GunFrame(void)
         if (!gl) { GunAbort("no gun"); break; }
         atomic_store(&g_gl, gl);
         g_madeAt = g_now;
+        g_madeFrame = g_frame;
         g_k = K_WAITGL;
         break;
     case K_WAITGL:
-        /* its spawn has to finish before it is taken (taken in its spawn frame it stayed where it was made) */
-        if (g_now < g_madeAt + 0.75) break;
+        /* its spawn has to finish before it is taken (taken in its spawn frame it stayed where it was made: W's Wield
+         * Probe 0.5.1). 0.1.4 (Yui: the delay shows): two frames and readable, not a flat 0.75 s (the Escort Probe 0.9.0:
+         * a spawned gun reads the very frame it is asked for) */
+        if (g_frame < g_madeFrame + 2 || (ResOf(gl) != res && g_now < g_madeAt + 1.5)) break;
         if (ResOf(gl) != res) { GunAbort("her gun does not read as one"); break; }
         if (Pack() && !g_swap)
         {
@@ -655,12 +660,18 @@ static void GunFrame(void)
             WieldTake(me, bp, KB_SLOT_BACKPACK);   /* the inventory's take, slot 6: the backpack (her own is dropped by it) */
             Log("Destroyer of Denouement %u: her gun's backpack %u on her back", g_uses, bp);
         }
-        if (g_swap || (g_kSel == 3 && g_kOld)) { WieldAsk(1, "a support weapon is in her hands: put away first"); g_k = K_PUTAWAY; g_kAt = g_now + 0.8; }
+        if (g_swap || (g_kSel == 3 && g_kOld)) { WieldAsk(1, "a support weapon is in her hands: put away first"); g_k = K_PUTAWAY; g_kAt = g_now + 0.8; g_putAt = g_now; }
         else g_k = K_TAKE;
         break;
     case K_PUTAWAY:
-        if (g_now >= g_kAt) g_k = K_TAKE;
+    {
+        /* 0.1.4: on as soon as her selection reads the primary (0.1 s at least), not a flat 0.8 s */
+        uintptr_t r = InventoryRecord(me);
+        uint32_t sel = 0;
+        if (r) ReadAt(r + 0x1C, &sel, 4);
+        if (g_now >= g_kAt || (sel == 1 && g_now >= g_putAt + 0.1)) g_k = K_TAKE;
         break;
+    }
     case K_TAKE:
         WieldTake(me, gl, KB_SLOT_SUPPORT);
         g_k = K_ASK; g_kAt = g_now + 0.1;
@@ -902,6 +913,7 @@ static int g_ll;
 static uint32_t g_llOld, g_llNew, g_llSel;
 static uint64_t g_llRes, g_llPkg;
 static double g_llAt;
+static unsigned g_llFrame;
 static void LlFresh(uint32_t w)
 {
     uint32_t sel = 0;
@@ -928,12 +940,13 @@ static void LlFrame(void)
         g_llNew = SpawnNear(g_llRes, "a fresh gun");
         if (!g_llNew) { g_ll = LL_IDLE; break; }
         g_ll = LL_WAIT;
-        g_llAt = g_now + 0.75;
+        g_llAt = g_now + 1.5;   /* the latest; taken two frames after the spawn once it reads (0.1.4) */
+        g_llFrame = g_frame;
         break;
     }
     case LL_WAIT:
     {
-        if (g_now < g_llAt) break;
+        if (g_frame < g_llFrame + 2 || (ResOf(g_llNew) != g_llRes && g_now < g_llAt)) break;
         g_ll = LL_IDLE;
     g_dropped = 0;
     g_picked = 0;
@@ -1339,6 +1352,7 @@ HF_MOD_EXPORT int hina_key(unsigned version, int skill, int* vk, int* mods)
 static void Tick(HfMod* mod, float dt, void* user)
 {
     KbOptionsTick();   /* the options screen's changes, in a mission or not */
+    g_frame++;
     double step = dt > 0 && dt < 1 ? dt : 0;
     g_now += step;
     int inMission = hf->game_state(self) == HF_STATE_MISSION;
