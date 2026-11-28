@@ -41,7 +41,14 @@
  * there yet, and the take comes the first frame all three are (the kits wait a flat 0.75 s: W's Wield Probe 0.5.1 took
  * in the very frame it asked for the spawn, and the gun stayed where it was made). The drop comes the first frame the
  * take shows; 0.1 s later the MG-43 is moved 1.5 m in front of you (the Warp Pack's position setter, its velocity
- * zeroed) and the trooper goes; its position is logged for 2 s. */
+ * zeroed) and the trooper goes; its position is logged for 2 s.
+ *   Played: all three were there in the very frame of the spawn (0 ms), the take showed 21 ms later and the drop went;
+ *   the MG-43 then read at your feet, and the move crashed the game (the setter is for characters); the trooper had come
+ *   up beside you (Yui).
+ *
+ * 0.7.0: the trooper at your feet (1 m in front), the take the frame both are ready, the drop the frame the take shows,
+ * the trooper taken away two frames after, no move; the MG-43's position logged for 2 s. Is it a pickup, and was the
+ * trooper seen? */
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -56,7 +63,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.6.0"
+#define VERSION "0.7.0"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
@@ -325,7 +332,7 @@ static int g_hand;
 static double g_handAt, g_handT0, g_handLogAt;
 static uint32_t g_handSeaf, g_handGun;
 static float g_handTo[3];
-static int g_handMoves;
+static int g_handMoves, g_handFrames;
 static void HandPins(void)
 {
     if (hf->code_matches(game + 0x9AE030, "40 53 55 41 55 48 83 ec 40 48 89 7c 24 68 41 8b e8 4c 89 64 24 70 8b da")) g_handTake = (HandTakeFn)(game + 0x9AE030);
@@ -368,13 +375,15 @@ static void HandFrame(void)
         }
         float me[3], aim[3], hid[3];
         if (!PlayerPose(me, aim) || !g_handTake || !g_handDrop || !im) { Log("Shift+Insert: not ready (your Helldiver, or the take and drop)"); g_hand = H_IDLE; break; }
-        /* out of view: 25 m under your feet (the ground hides it); the MG-43 beside it */
-        hid[0] = me[0]; hid[1] = me[1]; hid[2] = me[2] - 25;
+        /* 0.7.0: at your feet, 1 m in front (0.6.0: spawned 25 m under you, the trooper came up beside you anyway); seen
+         * for as few frames as can be: the take the frame both are ready, the drop the frame it shows, the trooper gone
+         * two frames after */
+        hid[0] = me[0] + aim[0]; hid[1] = me[1] + aim[1]; hid[2] = me[2];
         g_handTo[0] = me[0] + aim[0] * 1.5f; g_handTo[1] = me[1] + aim[1] * 1.5f; g_handTo[2] = me[2] + 0.3f;
         g_handT0 = g_now;
         g_handSeaf = KbSpawnEntity(SEAF, hid, "a SEAF trooper (a hand, under the ground)");
         g_handGun = KbSpawnEntity(MG43_ENTITY, hid, "a fresh MG-43 (under the ground)");
-        Log("Shift+Insert: trooper %u and MG-43 %u spawned 25 m under you; each frame from now: are they ready?", g_handSeaf, g_handGun);
+        Log("Shift+Insert: trooper %u and MG-43 %u spawned 1 m in front of you; each frame from now: are they ready?", g_handSeaf, g_handGun);
         g_hand = g_handSeaf && g_handGun ? H_READY : H_IDLE;
         g_handAt = g_now + 3;   /* the latest */
         g_handLogAt = 0;
@@ -412,23 +421,17 @@ static void HandPoll(void)
             g_handDrop(im, g_handSeaf, g_handGun, 0, 0, 1);
             HandGunAt("just after the drop");
             g_hand = H_DROPPED;
-            g_handAt = g_now + 0.1;
+            g_handFrames = 0;
         }
         else if (g_now > g_handAt) { Log("Shift+Insert: the take never showed in 1.5 s"); g_hand = H_DROPPED; g_handAt = g_now; }
         return;
     }
-    if (g_hand == H_DROPPED && g_now >= g_handAt)
+    /* 0.7.0: no move (0.6.0: the Warp Pack's setter on the MG-43 crashed the game, game.dll+0x5A2C69: it is for
+     * characters) */
+    if (g_hand == H_DROPPED && ++g_handFrames >= 2)
     {
-        HandGunAt("0.1 s after the drop");
-        if (g_setPosition)
-        {
-            float zero[3] = {0, 0, 0};
-            g_setPosition(NULL, g_handGun, g_handTo);
-            if (g_setVelocity) g_setVelocity(NULL, g_handGun, zero);
-            Log("Shift+Insert %6.0f ms: moved to %.1f %.1f %.1f (1.5 m in front of you)", Ms(), (double)g_handTo[0], (double)g_handTo[1], (double)g_handTo[2]);
-        }
-        else Log("Shift+Insert: no warp setter: the MG-43 stays under the ground");
-        KbRemoveEntity(g_handSeaf, SEAF);
+        HandGunAt("two frames after the drop");
+        Log("Shift+Insert %6.0f ms: the trooper goes (%s)", Ms(), KbRemoveEntity(g_handSeaf, SEAF) ? "taken away" : "could not be taken away");
         g_hand = H_MOVED;
         g_handMoves = 0;
         g_handAt = g_now + 0.2;
