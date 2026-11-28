@@ -4,7 +4,7 @@ Goal: a true time stop, with the shots already in the air held where they are an
 pose hold (`kitbase/kb_hold.h`) already stops enemies one at a time; this is the projectile half. Game build 25480438;
 addresses are `game.dll` RVAs. Read from the game's code (the dump) and HellForge's shot rules
 (`native/mod-loader/actions.c`, YuiAstin/hellforge at c01f36b). Shot Freeze Probe (`probes/shot-freeze-probe`) is the
-test: 0.1.0 for the shot pool (played 2026-11-27), 0.2.0 for grenades, missiles, rockets and fuses (not played yet).
+test: 0.1.0 to 0.4.4, played 2026-11-27 and 28. **For a true time stop this must be combined with the pose freeze** (below).
 
 ## The shot pool
 
@@ -71,19 +71,40 @@ Data writes only, on the game thread; no code patched:
 - Its unattended test rounds (four shots upward every 12 s from 20 s into a mission, Eruptor rounds in cycles 3, 4, 7
   and 8) were the explosions Yui kept seeing 45 s to 1:45 into every mission. 0.2.0 has no unattended rounds.
 
-## Status (0.2.0)
+## Status (final, Shot Freeze Probe 0.4.4, played 2026-11-27 and 28)
 
-| What | Where it lives | Freeze | Tested |
-|---|---|---|---|
-| Bullets, Eruptor rounds (shot pool) | projectile pool | velocity and starting speed x 1e-6, gravity 0, lifetime held | **Works** (0.1.0, 2026-11-27): 12 of 12 held 3 s, drift 0.003 m, flew on at full speed |
-| Same, velocity set to 0 | projectile pool | — | **Ends the shot** (the slow-shot rule); an explosive round goes off |
-| Rockets (EAT, Recoilless, RL-77), grenade launcher rounds | projectile pool (assumed: they have pool projectile types) | method A plus the position written back every tick | 0.2.0, not yet played |
-| Thrown grenades and knives | physics bodies (Throwable component) | velocity 0 and position written back every tick through the engine's actor table; the old velocity given back | 0.2.0, not yet played |
-| Fuses (grenades, missiles, anything with an Explosive component) | Explosive component | the three countdowns written back every tick | 0.2.0, not yet played |
-| Seeking missiles (Spear, P-33, W.A.S.P.) | SeekingMissile component | the game's own engine switch off, the clocks held | 0.2.0, not yet played |
+| What | How it is held | Result |
+|---|---|---|
+| Bullets, Eruptor rounds, enemy fire (shot pool) | velocity and starting speed x 1e-6, gravity 0, lifetime and position written back each tick | **Works:** up to 256 held at once, 0 drift, fly on at their old speed |
+| Same, velocity set to 0 | — | **Ends the shot** (slow-shot rule); an explosive round goes off |
+| Rockets (EAT, Recoilless, RL-77), grenade launcher rounds | as the shot pool | **Works** |
+| Thrown grenades and knives | the engine's actor table: velocity 0 and position each tick, the old velocity given back; the throwable's own countdown (instance +4) held | **Works** |
+| G-60 Anti-Tank Seeker (homing) | its physics body is not what moves it: its **motion record** (MotionManager) is held, velocity 0 and position pinned **where its unit is** (the record's own position runs ~4 m ahead) | **Works** after 0.2.3 |
+| Fuses (Explosive component) | the three countdowns written back each tick; only lit fuses and the explosives of frozen things (mines on the map are left alone) | **Works** |
+| Seeking missiles (Spear, P-33, W.A.S.P.) | SetMissileEngine off, clocks held | **Works:** 1-2 cm drift |
+| Fire, gas, arc damage | HF_ON_DAMAGE_PRE cancels damage over time and any damage with an element; gas = element 5, arc = 3, fire = 7 | **Works**, but hit markers still show, and the withheld damage is lost (no API to deal it later) |
+| Particles (flames, gas, smoke, sparks) | ParticleWorld::update (exe 0x1875A0) at 2% of dt | **Works:** what is out crawls; a flamer releases a thin creeping stream. At 0 nothing is emitted; spawning and motion share the one dt ([particle-freeze.md](particle-freeze.md)) |
+| Arc bolts | ArcUpdate / ArcPost skipped while frozen ([arc-freeze.md](arc-freeze.md)) | **Works:** an arc fired during a stop comes out at the release |
 
-0.1.0 ran ten test rounds on its own in every mission (four shots fired upward, Eruptor rounds in half of them). Those
-were the explosions 45 s to 1:45 into each mission (Yui, 2026-11-27). 0.2.0 does nothing until Ctrl+F11.
+The probe is hands on only (Ctrl+F11). 0.1.0 ran test rounds on its own in every mission (Eruptor shots fired upward);
+those were the explosions 45 s to 1:45 into each mission (2026-11-27). Ctrl+F10 never reached the probe in play
+(Windows' menu key or an overlay): avoid it, as F5/F8 (HellForge), F9 (W's options) and F12 (Steam screenshots).
+
+## Toward a true time stop: combine with the pose freeze
+
+This probe is only the half of a time stop that is **in flight**: shots, grenades, missiles, fuses, damage,
+particles, arcs. The **enemies themselves** are the other half, and they are not held here. That is the kit base's
+pose hold (`kitbase/kb_hold.h`, as W's freeze and the Time Stop Probe use it), which holds an enemy in its pose where it
+stands. A true time stop should run both together on one switch:
+
+- **The pose freeze** on every enemy (and other units) in range: no movement, no animation, no attacks;
+- **this freeze** on everything already in the air and on lingering effects;
+- **the player stays free:** shots, grenades and missiles the player fires during the stop leave the barrel and are
+  frozen once they have flown 2 m (or left the hand), and land after the release.
+
+Still to decide for a kit: whether the withheld damage should land at the release (needs a way to deal damage later),
+whether hit markers should be hidden during the stop, and the status effects (burning, gas confusion) whose durations
+keep counting down while held.
 
 ## Thrown grenades and knives
 
