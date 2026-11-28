@@ -664,6 +664,8 @@ static void GunFrame(void)
         GunFill(gl);
         g_k = K_HELD;
         g_awaySince = g_droppedSince = g_bpOffSince = g_emptySince = g_roundsLogAt = 0;
+        g_dropped = 0;   /* (played: a pickup with no old support weapon left these set, and the next gun's end acted on them: a crash) */
+        g_picked = 0;
         Log("Destroyer of Denouement %u%s: gun %u, %d rounds (%s %d)", g_uses, g_swap ? ", Lock & Load's new one" : " on", gl, GunRounds(gl),
             Pack() ? "in its backpack; the gun's own magazine" : "capacity", Pack() ? MagRounds(gl) : MagCapacity(gl));
         g_swap = 0;
@@ -741,7 +743,7 @@ static void GunFrame(void)
         g_kNew = g_kOldRes ? SpawnNear(g_kOldRes, "a new support weapon of her kind") : 0;
         g_bpNew = g_bpOldRes ? SpawnNear(g_bpOldRes, "a new backpack of her kind") : 0;
         if (g_kNew || g_bpNew) { g_k = K_WAITS; g_kAt = g_now + 0.75; }
-        else { FillUp(g_weapon[g_kSel]); g_k = K_IDLE; }
+        else { FillUp(g_weapon[g_kSel]); g_k = K_IDLE; g_dropped = 0; g_picked = 0; }
         break;
     case K_WAITS:
         if (g_now < g_kAt) break;
@@ -751,7 +753,7 @@ static void GunFrame(void)
             else Log("Destroyer of Denouement %u: the new backpack does not read as hers: left", g_uses);
             g_bpNew = 0;
         }
-        if (!g_kNew) { FillUp(g_weapon[g_kSel]); g_k = K_IDLE; g_dropped = 0; break; }
+        if (!g_kNew) { FillUp(g_weapon[g_kSel]); g_k = K_IDLE; g_dropped = 0; g_picked = 0; break; }
         /* 0.1.4: dropped (or left for a pickup): her old support weapon to the ground, through the game's own take and
          * drop (played: one spawned on the ground could not be picked up; the drop makes it a pickup), at her feet where
          * the gun fell; a weapon she picked up meanwhile is dropped by that take and taken back after */
@@ -785,8 +787,14 @@ static void GunFrame(void)
         break;
     case K_RETAKE:
         if (g_now < g_kAt) break;
-        WieldTake(me, g_picked, KB_SLOT_SUPPORT);
-        WieldAsk(3, "the weapon she picked up in hand");
+        {
+            uintptr_t r = InventoryRecord(me);
+            uint32_t now = 0;
+            if (r) ReadAt(r + 8, &now, 4);
+            if (!ResOf(g_picked)) Log("Destroyer of Denouement %u: the weapon she picked up (%u) is gone", g_uses, g_picked);
+            else if (now != g_picked) WieldTake(me, g_picked, KB_SLOT_SUPPORT);
+            if (ResOf(g_picked)) WieldAsk(3, "the weapon she picked up in hand");
+        }
         Log("Destroyer of Denouement %u: she keeps the weapon she picked up (%u)", g_uses, g_picked);
         g_picked = 0;
         g_k = K_IDLE;
