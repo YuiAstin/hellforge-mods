@@ -576,7 +576,7 @@ static volatile unsigned g_pwCalls[8], g_pwHeld[8];
 /* 0.4.1, mode B: the world's update keeps its dt (effects age and emit), but each per-cloud "particle_simulate" job
  * (kernel exe+0x182E20, its dt at job +0x10, read once at 0x182E43) gets 0: the particles already out should stay
  * where they are while a flamer keeps emitting new ones, which then hang too, if emission is not done in that job.
- * Mode A (0.4.0): the whole world's update with dt 0 (nothing moves, nothing is emitted). Ctrl+F10 switches. */
+ * Mode A (0.4.0): the whole world's update with dt 0 (nothing moves, nothing is emitted). The stops alternate B, A, B... */
 typedef uintptr_t (*SimKernel)(uintptr_t a, uintptr_t b, uintptr_t c, uint8_t* job);
 static SimKernel g_simOrig;
 static volatile int g_pwMode, g_simOk;
@@ -705,6 +705,9 @@ static void WithheldReport(void)
 static void Stop(uintptr_t pool)
 {
     g_frozen = 1; g_frozenAt = g_now; g_reportAt = g_now + 1; g_afterAt = 0; g_spawnsLogged = 0;
+    /* 0.4.2: the stops alternate, B first (Ctrl+F10 never reached the probe in play) */
+    static unsigned stops;
+    g_pwMode = g_simOk ? (int)(stops++ % 2 == 0) : 0;
     g_pwFreeze = g_pwOk;
     if (g_pwOk) { Log("  particles: mode %c (%s)", 'A' + g_pwMode, g_pwMode ? "they keep coming out but stay where they are" : "nothing moves, nothing comes out"); PwReport("before the stop"); }
     g_nshot = g_nthr = g_nfuse = g_nmis = g_nmov = 0;
@@ -760,14 +763,6 @@ static void Tick(HfMod* mod, float dt, void* user)
         g_nshot = g_nthr = g_nfuse = g_nmis = g_nmov = 0; g_afterAt = 0;
         return;
     }
-    static int prev10;
-    int k10 = Focused() && (GetAsyncKeyState(VK_F10) & 0x8000) && (GetAsyncKeyState(VK_CONTROL) & 0x8000);
-    if (k10 && !prev10 && g_pwOk)
-    {
-        if (!g_simOk) Log("Ctrl+F10: mode B is off (the simulate job was not hooked)");
-        else { g_pwMode ^= 1; Log("Ctrl+F10: particles in mode %c from the next stop%s", 'A' + g_pwMode, g_frozen ? " (now too)" : ""); }
-    }
-    prev10 = k10;
     int k = Focused() && (GetAsyncKeyState(VK_F11) & 0x8000) && (GetAsyncKeyState(VK_CONTROL) & 0x8000);
     if (k && !prev)
     {
@@ -824,7 +819,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     ArcSetup(g);
     /* the motion map as ExplosiveUpdate reads it (0x8CB387: the manager, +0x48A8 count, +0x48A0 entries) */
     g_motionOk = hf->code_matches(g + 0x8CB390, "45 8b 8a a8 48 00 00") && hf->code_matches(g + 0x8CB3AB, "49 8b ba a0 48 00 00");
-    Log("ready: Ctrl+F11 stops time and starts it again. Parts on: shots %s, grenades %s (actor table read at the first stop), fuses %s, missiles %s, motion records %s, particles %s (Ctrl+F10 switches mode A / B), arcs %s",
+    Log("ready: Ctrl+F11 stops time and starts it again. Parts on: shots %s, grenades %s (actor table read at the first stop), fuses %s, missiles %s, motion records %s, particles %s (the stops alternate mode B and mode A), arcs %s",
         g_shotsOk ? "yes" : "NO", g_thrOk ? "yes" : "NO", g_fuseOk ? "yes" : "NO", g_misOk ? "yes" : "NO", g_motionOk ? "yes" : "NO", g_pwOk ? "yes" : "NO", g_arcOk ? "yes" : "NO");
 }
 /* The actor table is filled by the engine at start; read it once a mission runs */
