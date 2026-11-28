@@ -43,23 +43,34 @@ do
     end
 end
 
-local function my_unit(player)
-    local p = player:position()
-    if not p or not S then return nil end
-    local best, bestd
+-- 0.1.2: HD2Runtime 0.50.1's player:avatar() and player:position() read nil on HellForge 0.5 (it moved the entity
+-- records: "the avatar has no health record"), so her avatar's id comes from the player list itself (HD2Runtime's
+-- event_world, as its own avatar() does before that read) and her unit and place from the engine (the Helldiver unit:
+-- the only one solo, else the one nearest where she last was)
+local okW, W = pcall(require, 'hd2runtime/runtime/event_world')
+local lastPos
+local function unit_pos(unit)
+    local ok, x, y, z = pcall(function() return S.Vector3.to_elements(S.Unit.world_position(unit, 1)) end)
+    if ok and x then return { x = x, y = y, z = z } end
+end
+local function my_unit()
+    if not S then return nil end
+    local best, bestd, n = nil, nil, 0
     for _, world in ipairs(S.Application.worlds() or {}) do
         local ok, units = pcall(S.World.units_by_resource, world, AVATAR)
         if ok and type(units) == 'table' then
             for _, unit in ipairs(units) do
-                local okp, x, y, z = pcall(function() return S.Vector3.to_elements(S.Unit.world_position(unit, 1)) end)
-                if okp and x then
-                    local d = (x - p.x) ^ 2 + (y - p.y) ^ 2 + (z - p.z) ^ 2
+                local p = unit_pos(unit)
+                if p then
+                    n = n + 1
+                    local d = lastPos and ((p.x - lastPos.x) ^ 2 + (p.y - lastPos.y) ^ 2 + (p.z - lastPos.z) ^ 2) or 0
                     if not bestd or d < bestd then best, bestd = unit, d end
                 end
             end
         end
     end
-    return best
+    if best then lastPos = unit_pos(best) end
+    return best, n
 end
 local get_state = S and S.Unit and S.Unit.animation_get_state
 local function layers(unit)
@@ -77,17 +88,20 @@ local function facing(unit)
     if l < 0.01 then return 0, 0 end
     return x / l, y / l
 end
--- 0.1.1: 0.1.0 said "no local player or avatar" every time: which part is missing is now said (and an id that comes
--- as a 64-bit number is taken through tonumber)
 local function me()
-    local player = hd2.local_player()
-    if not player then return nil, nil, 'no local player' end
-    local ok, avatar = pcall(player.avatar, player)
-    if not ok or not avatar then return nil, nil, 'no avatar (' .. tostring(avatar) .. ')' end
-    local id = tonumber(avatar.id)
-    if not id or id <= 0 then return nil, nil, 'its id is ' .. tostring(avatar.id) .. ' (' .. type(avatar.id) .. ')' end
-    return player, id
+    if not okW then return nil, nil, "HD2Runtime's event_world module is not there: " .. tostring(W) end
+    local okO, world, why = pcall(W.open)
+    if not okO or not world then return nil, nil, 'no world (' .. tostring(why or world) .. ')' end
+    local okP, players = pcall(W.players, world, true)
+    if not okP then return nil, nil, 'the player list: ' .. tostring(players) end
+    local id
+    for _, pl in ipairs(players) do if pl['local'] then id = tonumber(pl.avatar) end end
+    if not id or id <= 0 then return nil, nil, 'the local player has no avatar now' end
+    local unit, n = my_unit()
+    if not unit then return nil, nil, 'her unit was not found' end
+    return { id = id, unit = unit, units = n }, id
 end
+local function hp() return 'n/a (HD2Runtime cannot read health on HellForge 0.5)' end
 local function push(id, vx, vy, vz, flag)
     if not set_velocity then return false end
     vbuf[0], vbuf[1], vbuf[2] = vx, vy, vz
@@ -95,9 +109,10 @@ local function push(id, vx, vy, vz, flag)
     if flag and airborne then ok = pcall(airborne, nil, id, 1) and ok end
     return ok
 end
-local function pack_name(player)
-    local p = player:backpack()
-    return type(p) == 'table' and tostring(p.name or p.catalog or p.id or '?') or 'none'
+local function pack_name()
+    local player = hd2.local_player()
+    local ok, p = pcall(function() return player and player:backpack() end)
+    return ok and type(p) == 'table' and tostring(p.name or p.catalog or p.id or '?') or 'unknown'
 end
 
 -- held keys
@@ -110,7 +125,7 @@ hold('up', 'Numpad8'); hold('down', 'Numpad2'); hold('fwd', 'Up')   -- (0.1.1: n
 -- what runs each frame: one mode at a time
 local mode, t, z0, lastz, vz, flagged, health0, nextlog, target
 local function stop(why_)
-    local player, id = me()
+    local _, id = me()
     if id and airborne then pcall(airborne, nil, id, 0) end
     log('%s off (%s) after %.1f s', tostring(mode), why_, t or 0)
     mode = nil
@@ -119,10 +134,11 @@ local function begin(m)
     local player, id, missing = me()
     if not player then log('%s: %s', m, tostring(missing)); return false end
     if not set_velocity or not airborne then log('%s: unavailable (%s)', m, tostring(why)); return false end
-    local p = player:position()
+    local p = unit_pos(player.unit)
+    if not p then log('%s: her place could not be read', m); return false end
     mode, t, z0, lastz, vz, nextlog = m, 0, p.z, p.z, 0, 0
-    health0 = player:health()
-    log('%s ON at height %.1f, health %s, backpack %s, layers %s', m, p.z, tostring(health0), pack_name(player), layers(my_unit(player)))
+    health0 = hp()
+    log('%s ON: entity %d, height %.1f, %d Helldiver units, backpack %s, layers %s', m, id, p.z, player.units, pack_name(), layers(player.unit))
     return true
 end
 
@@ -132,7 +148,7 @@ hd2.on_frame(function(dt)
     if not mode or dt <= 0 then return end
     local player, id = me()
     if not player then stop('no avatar'); return end
-    local p = player:position()
+    local p = unit_pos(player.unit)
     if not p then return end
     t = t + dt
     vz = (p.z - lastz) / dt
@@ -141,7 +157,7 @@ hd2.on_frame(function(dt)
     if mode == 'flight' then
         local up = (held.up and CLIMB or 0) - (held.down and CLIMB or 0)
         local fx, fy = 0, 0
-        if held.fwd then fx, fy = facing(my_unit(player)); fx, fy = fx * FLY, fy * FLY end
+        if held.fwd then fx, fy = facing(player.unit); fx, fy = fx * FLY, fy * FLY end
         push(id, fx, fy, up + G * dt, true)
     elseif mode == 'hover' then
         push(id, 0, 0, G * dt, t < 5)
@@ -157,10 +173,10 @@ hd2.on_frame(function(dt)
         else
             if vz < fallPeak then fallPeak = vz end
             if t - droppedAt > 0.3 and vz > -0.5 then
-                local hp = player:health()
+                local hp1 = hp()
                 hd2.after(0.5, function()
-                    local hp2 = player:health()
-                    log('drop test: from %d m: touchdown at %.1f m/s (fastest fall), health %s -> %s (0.5 s later %s)', target, fallPeak, tostring(health0), tostring(hp), tostring(hp2))
+                    local hp2 = hp()
+                    log('drop test: from %d m: touchdown at %.1f m/s (fastest fall), health %s -> %s (0.5 s later %s)', target, fallPeak, tostring(health0), tostring(hp1), tostring(hp2))
                 end, { scope = 'session' })
                 droppedAt = nil; mode = nil
                 return
@@ -170,7 +186,7 @@ hd2.on_frame(function(dt)
     end
     if t >= nextlog and mode then
         nextlog = t + 0.5
-        log('%s +%.1f s: height %.2f, vertical %.2f m/s, layers %s', mode, t, h, vz, layers(my_unit(player)))
+        log('%s +%.1f s: height %.2f, vertical %.2f m/s, layers %s', mode, t, h, vz, layers(player.unit))
     end
 end, { scope = 'session' })
 
@@ -187,13 +203,12 @@ hd2.input.bind('flight_probe.drop', { key = 'Ctrl+F7', on_press = function()
     if begin('drop') then droppedAt = nil; log('drop test: climbing to %d m', target) end
 end })
 hd2.input.bind('flight_probe.fall', { key = 'Ctrl+F6', on_press = function()
-    local player = hd2.local_player()
-    local unit = player and my_unit(player)
+    local unit = my_unit()
     if not unit then log('fall event: no unit'); return end
     local before = layers(unit)
     local ok = pcall(S.Unit.animation_event, unit, 'fall')
     hd2.after(0.2, function() log('fall event: %s; layers %s -> %s', ok and 'sent' or 'FAILED', before, layers(unit)) end, { scope = 'session' })
 end })
-log('0.1.1 loaded (airborne flag %s, SetVelocity %s, layer getter %s): F6 flight (Numpad 8 / Numpad 2 / Up arrow), F7 hover test, Ctrl+F7 drop test, Ctrl+F6 fall event',
+log('0.1.2 loaded (airborne flag %s, SetVelocity %s, layer getter %s): F6 flight (Numpad 8 / Numpad 2 / Up arrow), F7 hover test, Ctrl+F7 drop test, Ctrl+F6 fall event',
     airborne and 'ready' or 'NO', set_velocity and 'ready' or 'NO', get_state and 'yes' or 'no')
 if why then log('not this build: %s', why) end
