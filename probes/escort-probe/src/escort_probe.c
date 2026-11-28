@@ -56,7 +56,19 @@
  *   Played: it never let go (3 s), and the trooper's removal took the MG-43 with it.
  *
  * 0.9.0: the slot's entry cleared by hand the frame after the drop (as WieldDrop does), the trooper gone the frame
- * after: about three frames in all. */
+ * after: about three frames in all.
+ *
+ * 0.10.0, Andoris's open questions (Yui: SEAF can hurt the player; Lost Contact's research shows the enemies' lists):
+ *   - Friendly fire: every hit an escort deals is seen before it lands (HF_ON_DAMAGE_PRE, its dealer or owner the
+ *     escort's network id); the first 40 are logged with their target, and one on you is CANCELLED and flagged (what
+ *     the kit's guard will do).
+ *   - Drawing fire: every 2 s, how many enemies' behaviours have each escort as their target, and how many have you
+ *     (the behaviours [game+0x3326740]: count +0x20, records +0x60, 0x1F8 each; +0x18 the target's entry copy, +0x68
+ *     the perceiver's key, +0x78 has-target).
+ *   - End, a taunt (unproven route, ai-modding.md): every enemy whose target is you gets the newest stick bug instead:
+ *     an entry for it (your entry copied, its id and position put in) added to its perceiver's list A when missing
+ *     (16 at most), and its behaviour's target copy set to it. For 10 s the log says each second how many still have it:
+ *     does the game keep the target, or does its next refresh drop it? */
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -71,7 +83,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.9.0"
+#define VERSION "0.10.0"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
@@ -201,6 +213,119 @@ static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
     if (g_now - g_lastSpawnAt > 3) return;
     static unsigned shown;
     if (shown++ < 40) Log("  spawned near our call: entity %u, resource %016llx%s", s->entity, (unsigned long long)s->resource, s->resource == SEAF ? " (a trooper)" : s->resource == g_bug ? " (a stick bug)" : "");
+}
+
+/* ---- 0.10.0: friendly fire, who targets whom, the taunt ------------------------------------------------------------ */
+static unsigned g_dealt, g_onYou;
+static int EscortOf(uint32_t net)
+{
+    for (int i = 0; i < ESCORTS; i++) if (g_esc[i].entity && g_esc[i].net && g_esc[i].net == net) return i;
+    return -1;
+}
+static void OnDamagePre(HfMod* mod, HfDamagePreEvent* ev, void* user)
+{
+    HfDamageEvent* d = &ev->damage;
+    int i = EscortOf(d->dealer);
+    if (i < 0) i = EscortOf(d->owner);
+    if (i < 0) return;
+    uint32_t me = atomic_load(&g_avatar);
+    int you = me && d->target == me;
+    g_dealt++;
+    if (you)
+    {
+        g_onYou++;
+        ev->cancel = 1;
+        Log("  FRIENDLY FIRE: escort %u hit YOU: kind %u, element %u, %d damage: cancelled (%u so far)", g_esc[i].entity, d->kind, d->element, d->amount, g_onYou);
+    }
+    else if (g_dealt <= 40)
+        Log("  escort %u deals: target %u, kind %u, element %u, %d damage", g_esc[i].entity, d->target, d->kind, d->element, d->amount);
+}
+static uintptr_t InManager(uintptr_t cell, uint32_t mapOff, uint32_t recOff, uint32_t stride, uint32_t e);
+static uintptr_t PerceptionOf(uint32_t e) { return InManager(0x3326548, 0x30, 0x50, 0x13F8, e); }
+/* each behaviour record: fn(record) for those with a target; count of records */
+static uint32_t Behaviours(uintptr_t* recs)
+{
+    uintptr_t m = Pointer(game + 0x3326740);
+    uint32_t n = 0;
+    *recs = 0;
+    if (!m || !ReadAt(m + 0x20, &n, 4) || n > 16384 || !(*recs = Pointer(m + 0x60))) return 0;
+    return n;
+}
+static void TargetCount(int out[ESCORTS + 1])
+{
+    uintptr_t recs;
+    uint32_t n = Behaviours(&recs), me = atomic_load(&g_avatar);
+    memset(out, 0, sizeof(int) * (ESCORTS + 1));
+    for (uint32_t k = 0; k < n; k++)
+    {
+        uint32_t t = 0;
+        uint8_t has = 0;
+        if (!ReadAt(recs + 0x1F8ull * k + 0x18, &t, 4) || !t || !ReadAt(recs + 0x1F8ull * k + 0x78, &has, 1) || !has) continue;
+        if (t == me) out[ESCORTS]++;
+        for (int i = 0; i < ESCORTS; i++) if (g_esc[i].entity && t == g_esc[i].entity) out[i]++;
+    }
+}
+static double g_tauntUntil;
+static uint32_t g_tauntBug;
+static void TargetFrame(void)
+{
+    static double next;
+    if (g_now < next) return;
+    int any = 0;
+    for (int i = 0; i < ESCORTS; i++) any |= g_esc[i].entity && !g_esc[i].dead;
+    if (!any) { next = g_now + 2; return; }
+    int c[ESCORTS + 1];
+    TargetCount(c);
+    if (g_tauntBug && g_now < g_tauntUntil)
+    {
+        int on = 0;
+        for (int i = 0; i < ESCORTS; i++) if (g_esc[i].entity == g_tauntBug) on = c[i];
+        Log("taunt +%.0f s: %d enemies target the stick bug %u, %d target you", 10 - (g_tauntUntil - g_now), on, g_tauntBug, c[ESCORTS]);
+        next = g_now + 1;
+        return;
+    }
+    Log("targets: escort %u (network %u) by %d, escort %u (network %u) by %d; you by %d; their hits: %u dealt, %u on you (cancelled)", g_esc[0].entity, g_esc[0].net,
+        c[0], g_esc[1].entity, g_esc[1].net, c[1], c[ESCORTS], g_dealt, g_onYou);
+    next = g_now + 2;
+}
+static void Taunt(void)
+{
+    Escort* b = NULL;
+    for (int i = 0; i < ESCORTS; i++) if (g_esc[i].entity && !g_esc[i].dead && (!b || g_esc[i].since > b->since)) b = &g_esc[i];
+    float p[3];
+    uint32_t me = atomic_load(&g_avatar);
+    if (!b || !me || !EntityPos(b->entity, p)) { Log("End: no stick bug out (or her Helldiver unknown): nothing done"); return; }
+    uintptr_t recs;
+    uint32_t n = Behaviours(&recs);
+    int found = 0, added = 0, full = 0, set = 0, had = 0;
+    for (uint32_t k = 0; k < n; k++)
+    {
+        uintptr_t r = recs + 0x1F8ull * k;
+        uint8_t ent[0x50], has = 0;
+        uint32_t perceiver = 0;
+        if (!ReadAt(r + 0x18, ent, sizeof ent) || *(uint32_t*)ent != me || !ReadAt(r + 0x78, &has, 1) || !has) continue;
+        found++;
+        ReadAt(r + 0x68, &perceiver, 4);
+        *(uint32_t*)ent = b->entity;
+        memcpy(ent + 4, p, 12);
+        uintptr_t pr = PerceptionOf(perceiver);
+        if (pr)
+        {
+            uint32_t c = 0, there = 0;
+            if (ReadAt(pr + 0x310, &c, 4) && c <= 16)
+            {
+                for (uint32_t j = 0; j < c; j++) { uint32_t id = 0; if (ReadAt(pr + 0x318 + 0x50u * j, &id, 4) && id == b->entity) there = 1; }
+                if (there) had++;
+                else if (c < 16 && !hf->write(pr + 0x318 + 0x50u * c, ent, sizeof ent)) { uint32_t c1 = c + 1; if (!hf->write(pr + 0x310, &c1, 4)) added++; }
+                else full++;
+            }
+        }
+        if (!hf->write(r + 0x18, ent, sizeof ent)) set++;
+    }
+    g_tauntBug = b->entity;
+    g_tauntUntil = g_now + 10;
+    Log("End: taunt: %d enemies had you as their target; %d now have the stick bug %u (its entry added to %d perceivers' lists, %d had it, %d lists full)", found, set, b->entity,
+        added, had, full);
 }
 
 /* ---- 0.2.x: what an order changes ---------------------------------------------------------------------------------- */
@@ -483,7 +608,11 @@ static void Tick(HfMod* mod, float dt, void* user)
         g_hand = H_IDLE;
         return;
     }
+    static int prevEnd;
     int f = Focused(), k[3] = {f && (GetAsyncKeyState(VK_INSERT) & 0x8000), f && (GetAsyncKeyState(VK_HOME) & 0x8000), f && (GetAsyncKeyState(VK_DELETE) & 0x8000)};
+    int end = f && (GetAsyncKeyState(VK_END) & 0x8000);
+    if (end && !prevEnd) Taunt();
+    prevEnd = end;
     int shift = f && (GetAsyncKeyState(VK_SHIFT) & 0x8000);
     if (k[0] && !prev[0] && shift)
     {
@@ -497,6 +626,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     HandFrame();
     HandPoll();
     FollowFrame();
+    TargetFrame();
     WatchFrame();
 }
 /* 0.3.0: the Lua half (data/, built from hud-src/addon.lua) logs through here: its lines go into this log */
@@ -545,7 +675,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     exe = x;
     KbWorldInstall();
     HandPins();
-    Log("ready: in a mission, Insert a SEAF trooper beside you (2 at most), Home following on/off, Delete takes them away; Shift+Insert a trooper that takes and drops an MG-43");
+    Log("ready: in a mission, Insert a stick bug beside you (2 at most), Home following on/off, End taunt (enemies on you switch to it), Delete takes them away; Shift+Insert a trooper that takes and drops an MG-43");
 }
 HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
 {
@@ -565,7 +695,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         Log(g_bug ? "stick bug: a copy of the SEAF trooper, %016llx" : "stick bug: the copy was refused (%016llx): the plain trooper", (unsigned long long)g_bug);
         if (g_bug && api->on(mod, HF_EVENT_ENTITIES_READY, BugNumbers, NULL)) Log("stick bug: its numbers can't be set (no ENTITIES_READY)");
     }
-    int ok = api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_DAMAGE, OnDamage, NULL, 0) &&
+    int ok = api->subscribe(mod, HF_ON_WEAPON, OnWeapon, NULL, 0) && api->subscribe(mod, HF_ON_DAMAGE, OnDamage, NULL, 0) && !hf_on_damage_pre(mod, OnDamagePre, NULL, 0) &&
              api->subscribe(mod, HF_ON_SPAWN, OnSpawn, NULL, 0) && api->on_game_thread(mod, Tick, NULL);
     if (!ok) Log("events or the game thread are unavailable");
     return 0;
