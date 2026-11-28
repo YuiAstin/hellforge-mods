@@ -120,6 +120,10 @@ As every GFL2 kit: more health and stamina; stamina run to 0 sets off a Hellbomb
    enemy's perceiver's list, and the enemy's behaviour target set to it (`docs/research/ai-modding.md`: the route is
    unproven, the next perception refresh may drop it). Escort Probe 0.10.0's End key tries it on every enemy targeting
    her and logs for 10 s whether they keep the stick bug.
+   **Played (0.10.0, 2026-11-29): the taunt holds.** Before it, 53 to 54 enemies had her and 0 or 1 the stick bug; one
+   press switched all 53 (its entry added to 9 perceivers' lists, 23 had it already), and 10 s later 45 still had the
+   stick bug, 40 and more until it died. It took 20 hits (651 damage, 600 health and armour 4) in 50 s. Its own hits
+   on others were not seen (its network id was never learned: fixed in 0.10.1).
 
 ## The stick bug model
 
