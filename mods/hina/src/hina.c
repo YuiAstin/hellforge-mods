@@ -1587,6 +1587,40 @@ static void ReloadSpend(uint64_t res)
     g_reloadRes[k] = res;
     g_reloadAt[k] = g_now;
 }
+/* 0.1.4 (Yui, played: the Sweeper never reloaded free): a weapon loaded round by round keeps its loaded rounds in the
+ * WeaponRounds manager (game.dll+0x3326CF0: buckets +0x28, size +0x30, empty key +0x34, multiplier +0x38), not in
+ * WeaponMagazines. Its fill: 0x77A6F0 (unused, weapon, rounds), the round weapons' case of the reload's set-loaded-rounds
+ * 0x7422B0: it writes the active feed's count and queues its network field; it reads index -1 for a weapon not in the
+ * map, so the map is looked in first. Its capacity: MagazineCapacity (0x743410) handles it (the active feed's) */
+static int RoundsIn(uint32_t w)
+{
+    uintptr_t m = Pointer(game + 0x3326CF0u), buckets;
+    uint32_t size = 0, empty = 0, mult = 0;
+    if (!w || !m || !ReadAt(m + 0x30, &size, 4) || !ReadAt(m + 0x34, &empty, 4) || !ReadAt(m + 0x38, &mult, 4) || !size || (size & (size - 1)) ||
+        size > (1u << 22) || !(buckets = Pointer(m + 0x28)))
+        return 0;
+    for (uint32_t k = 0; k < size; k++)
+    {
+        uint32_t e[2];
+        if (!ReadAt(buckets + 8ull * ((k + mult * w) & (size - 1)), e, 8)) return 0;
+        if (e[0] == w) return e[1] != UINT32_MAX;
+        if (e[0] == empty) return 0;
+    }
+    return 0;
+}
+static int RoundsCapacity(uint32_t w)
+{
+    HfFn_MagazineCapacity capacity = hf_fn_MagazineCapacity(self);
+    int32_t c = capacity && RoundsIn(w) ? capacity(NULL, w) : 0;
+    return c > 0 ? c : -1;
+}
+static int RoundsFill(uint32_t w, int32_t rounds)
+{
+    typedef void (*SetRounds)(void* unused, uint32_t weapon, int32_t rounds);
+    if (!RoundsIn(w) || rounds <= 0) return 0;
+    ((SetRounds)(game + 0x77A6F0u))(NULL, w, rounds);
+    return 1;
+}
 static uint32_t g_llWait;     /* the gun whose free reload is being waited on (its rounds read a frame or more late) */
 static double g_llWaitUntil;
 static unsigned g_llTold;
@@ -1620,7 +1654,7 @@ static void ReloadFrame(void)
     {
         static unsigned drawn;
         if (drawn++ < 30) Log("Lock & Load (passive): she holds gun %u (%016llx): %d rounds, capacity %d, %s", w, (unsigned long long)ResOf(w), r,
-                              MagCapacity(w), MagIn(w) ? "a magazine the kit can fill" : "not in the magazine map");
+                              MagIn(w) ? MagCapacity(w) : RoundsCapacity(w), MagIn(w) ? "a magazine" : RoundsIn(w) ? "loaded by rounds" : "neither a magazine nor rounds the kit knows");
     }
     if (w && w == g_llHeld && r == 0 && g_llRounds > 0 && w != g_llWait)
     {
@@ -1631,7 +1665,12 @@ static void ReloadFrame(void)
         else if (cap >= 1 && cap < 3) {}
         else if (left > 0) { if (g_llTold++ < 20) Log("Lock & Load (passive): gun %u emptied: this gun's next in %.0f s", w, left); }
         else if ((w == gl && Pack()) || !s_reloadFree) ReloadLanded(w, res, -1);   /* (the Maxigun copy feeds from its backpack) */
-        else if (cap < 0) { if (g_llTold++ < 20) Log("Lock & Load (passive): gun %u (%016llx) emptied: its magazine is not one the kit can fill (time not spent)", w, (unsigned long long)res); }
+        else if (cap < 0)
+        {
+            int rc = RoundsCapacity(w);
+            if (rc >= 3 && RoundsFill(w, rc)) { g_llWait = w; g_llWaitUntil = g_now + 0.5; if (g_llTold++ < 20) Log("Lock & Load (passive): gun %u loads by rounds: %d set", w, rc); }
+            else if (g_llTold++ < 20) Log("Lock & Load (passive): gun %u (%016llx) emptied: its magazine is not one the kit can fill (rounds %s, capacity %d; time not spent)", w, (unsigned long long)res, RoundsIn(w) ? "kept" : "not kept", rc);
+        }
         else { MagAdd(w, cap); g_llWait = w; g_llWaitUntil = g_now + 0.5; }
     }
     g_llHeld = w;
