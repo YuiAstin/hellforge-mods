@@ -160,6 +160,9 @@ static const uint32_t kFiredRound[2] = {HF_PROJECTILE_M1000_MAXIGUN, 148u};
 static const uint32_t kBaseDamage[2] = {HF_DAMAGE_M1000_MAXIGUN, HF_DAMAGE_EXO45_PATRIOT_EXOSUIT_RIGHT_GUN_AND_1_OTHER};
 static const char* const kBaseName[2] = {"M-1000 Maxigun", "MG-43 Machine Gun"};
 static uint32_t g_round[2], g_damage[2], g_ishRound[2], g_ishDamage[2];
+/* Shared Mods (kitbase/kb_extras.h): what her fitted mods give, read at a mission's start; Ishbosheth's rows as made */
+static KbSmBonus g_sm = {"hina", 1, 1, 1, 1, {1, 1, 1, 1}};
+static int32_t g_ishStd[2], g_ishDurable[2];
 #define TRACER_ROUND 226u                /* the APW-1 Anti-Materiel Rifle's round: a bright trail (Koleda's tracers) */
 static uint32_t g_tracer[2][2];         /* Ishbosheth's tracers by gun copy: [0] on targets (x ish_mult), [1] the sweep (her gun's) */
 static uint64_t g_gunRes[2];
@@ -248,6 +251,7 @@ static void RowsReady(HfMod* mod, HfEvent event, void* user)
             for (int a = 0; a < 4; a++) row->armor_penetration[a] = a < 3 ? ap : (ap > 2 ? ap - 2 : ap);
             /* 0.1.4 (Yui): her gun's durable damage gun_durable (the MG-43's own 23), Ishbosheth's that x ish_mult */
             if (s_gunDurable > 0) row->durable_damage = k ? (int32_t)(s_gunDurable * s_ishMult + 0.5f) : s_gunDurable;
+            if (k) { g_ishStd[i] = row->standard_damage; g_ishDurable[i] = row->durable_damage; }
             Log("damage %u (%s, %s): %d / %d, armour penetration %u -> %u", ids[k], kBaseName[i], k ? "Ishbosheth" : "her gun", row->standard_damage,
                 row->durable_damage, before, ap);
         }
@@ -769,7 +773,7 @@ static void GunEnd(const char* why)
     WieldAsk(g_kSel == 3 ? 1 : g_kSel, "her own weapon back in hand");
     g_k = K_LETGO;
     g_kAt = g_now + 1.0;
-    g_readyAt = g_now + s_gunCooldown;
+    g_readyAt = g_now + s_gunCooldown * g_sm.cooldown;
 }
 /* she died or the mission ended with the gun out: nothing of hers is left to put back */
 static void GunAbort(const char* why)
@@ -788,7 +792,7 @@ static void GunAbort(const char* why)
     g_swapOld = 0;
     g_swap = 0;
     g_k = K_IDLE;
-    g_readyAt = g_now + s_gunCooldown;
+    g_readyAt = g_now + s_gunCooldown * g_sm.cooldown;
 }
 /* Reload and Destroy on her own gun: a new one built with the handling, full, in its place */
 static void GunSwap(void)
@@ -925,7 +929,7 @@ static void GunFrame(void)
             g_dropped = 1;
             Log("The End: Destroyer %u over (%s): %d rounds left", g_uses, g_picked ? "she picked up another weapon" : "she dropped it", GunRounds(gl));
             WieldDrop(me, atomic_load(&g_bp), 0xC);
-            g_readyAt = g_now + s_gunCooldown;
+            g_readyAt = g_now + s_gunCooldown * g_sm.cooldown;
             g_k = K_REMOVE; g_kAt = g_now;
             break;
         }
@@ -1166,7 +1170,7 @@ static void LockAndLoad(void)
     if (g_now < g_cd[1]) return;
     uint32_t w = Held(NULL);
     if (!w) { Log("Reload and Destroy: no gun in her hands"); return; }
-    g_cd[1] = g_now + s_llCooldown;
+    g_cd[1] = g_now + s_llCooldown * g_sm.cooldown;
     g_casts[1]++;
     uint32_t gl = atomic_load(&g_gl);
     if (gl && w == gl && g_k == K_HELD && (s_llErgonomics > 0 || s_llRecoil)) { GunSwap(); return; }
@@ -1332,7 +1336,7 @@ static void IshFire(void)
     g_ishOn = 1;
     g_ishStart = g_now;
     g_ishHits0 = g_ishHits; g_ishSprayed0 = g_ishSprayed; g_ishTicks0 = g_ishTicks;
-    g_ishUntil = g_now + s_ishDuration;
+    g_ishUntil = g_now + s_ishDuration * g_sm.duration;
     g_ishNextTracer = g_ishNextTick = g_now;
     g_casts[2]++;
     Log("Ishbosheth: on for %.0f s (a volley of 3 x %d tracers every %.2f s across %.0f degrees each side; every %.2f s the %d nearest enemies within %.0f m take %.2f times "
@@ -1345,7 +1349,7 @@ static void IshBarrage(void)
     if (g_now >= g_ishUntil || !g_alive)
     {
         g_ishOn = 0;
-        g_cd[2] = g_now + s_ishCooldown;
+        g_cd[2] = g_now + s_ishCooldown * g_sm.cooldown;
         Log("Ishbosheth over: %u hits on enemies over %u ticks, %u tracers", g_ishHits - g_ishHits0, g_ishTicks - g_ishTicks0, g_ishSprayed - g_ishSprayed0);
         return;
     }
@@ -1599,10 +1603,26 @@ static void NetFromPlayers(void)
             return;
         }
 }
+/* at a mission's start: her Shared Mods (1 each when she stands by or none are fitted); Skill Damage on Ishbosheth's rows */
+static void SharedModsRead(void)
+{
+    if (kb_kit_on) SharedMods("hina", &g_sm);
+    else SmNone(&g_sm, "hina");
+    for (int i = 0; i < 2; i++)
+    {
+        HfDamageInfo* row = g_ishDamage[i] && g_ishStd[i] && hf->damage_row ? (HfDamageInfo*)hf->damage_row(g_ishDamage[i]) : NULL;
+        if (!row) continue;
+        row->standard_damage = (int32_t)(g_ishStd[i] * (double)g_sm.damage + 0.5);
+        row->durable_damage = (int32_t)(g_ishDurable[i] * (double)g_sm.damage + 0.5);
+    }
+    if (kb_kit_on && (g_sm.cooldown != 1 || g_sm.damage != 1 || g_sm.duration != 1))
+        Log("Shared Mods: cooldowns x%.2f, Ishbosheth's damage x%.2f (%d a round), its barrage %.1f s", (double)g_sm.cooldown, (double)g_sm.damage,
+            (int)(g_ishStd[g_use] * (double)g_sm.damage + 0.5), (double)(s_ishDuration * g_sm.duration));
+}
 static void Reset(const char* why)
 {
     int start = !strcmp(why, "mission start");
-    if (start) KitDecide();
+    if (start) { KitDecide(); SharedModsRead(); }
     if (g_uses || g_casts[1] || g_casts[2])
         Log("%s: her gun %u times (%u Reload and Destroy swaps), Reload and Destroy %u, Ishbosheth %u (%u enemies hit, %u sweep rounds); %u shield refills, %u hits on her shield "
             "(%.0f kept off, %u broke); %u reloads; %u hits buffed (+%.0f damage)",
@@ -1661,9 +1681,9 @@ static HinaHud g_hud = {1};
 HF_MOD_EXPORT HinaHud* hina_hud_state(void)
 {
     g_hud.in_mission = (uint32_t)(g_inMission && g_alive && kb_kit_on);
-    g_hud.cd[0] = g_k != K_IDLE ? 0 : (float)fmax(0, g_readyAt - g_now); g_hud.cd_max[0] = s_gunCooldown;
-    g_hud.cd[1] = (float)fmax(0, g_cd[1] - g_now); g_hud.cd_max[1] = s_llCooldown;
-    g_hud.cd[2] = (float)fmax(0, g_cd[2] - g_now); g_hud.cd_max[2] = s_ishCooldown;
+    g_hud.cd[0] = g_k != K_IDLE ? 0 : (float)fmax(0, g_readyAt - g_now); g_hud.cd_max[0] = s_gunCooldown * g_sm.cooldown;
+    g_hud.cd[1] = (float)fmax(0, g_cd[1] - g_now); g_hud.cd_max[1] = s_llCooldown * g_sm.cooldown;
+    g_hud.cd[2] = (float)fmax(0, g_cd[2] - g_now); g_hud.cd_max[2] = s_ishCooldown * g_sm.cooldown;
     g_hud.gun_on = (uint32_t)(g_k != K_IDLE);
     int r = g_k == K_HELD ? GunRounds(atomic_load(&g_gl)) : 0;
     g_hud.rounds = (uint32_t)(r > 0 ? r : 0);

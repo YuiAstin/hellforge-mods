@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "yui.shared-mods",
+  "name": "Shared Mods",
+  "version": "0.1.0",
+  "description": "Mods for the character kits, found on the battlefield: a kill of yours can drop one (heavies more often, and rarer ones). A rare mod is kept as soon as it drops; a common or uncommon one is carried and kept only if the mission ends well (lost if it fails or is left). A copy found again ranks it up (rank 5 at most). Fit them on the kits' options screen (F9), SHARED MODS tab: four slots for each kit and a capacity. First mods: Cooldown (her skills' cooldowns), Resistance (damage she takes), Duration (her skills' durations), Skill Damage. Needs a character kit with the options screen. Solo or host. Settings in shared-mods.ini.",
+  "gameplay": true,
+  "code": {
+    "dll": "shared_mods.dll",
+    "sdk": 17
+  }
+}

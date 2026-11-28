@@ -30,6 +30,7 @@
 
 #include "kb_roster.h"
 #include "kb_settings.h"
+#include "kb_extras.h"                 /* other mods' tabs on the screen (Shared Mods) */
 
 /* a row's control: a slider (few steps), a switch (0 or 1), a field to type in with - and + (a wide range: its limits
  * are the setting's own in the .ini, not the slider's), or one button a choice (choices: "A|B|C" for 0, 1, 2) */
@@ -59,7 +60,6 @@ KB_FN void KbOptionsTick(void) {}
 KB_FN int KbOptionsOn(void) { return 0; }
 #else
 
-typedef struct KbOpBox { float x0, y0, x1, y1, alpha; const char* tip; } KbOpBox;
 typedef struct KbOpKit
 {
     char id[32];
@@ -702,6 +702,7 @@ KB_VAR float g_opOpenT, g_opKitsT = 1;
 KB_VAR char g_opView[32];              /* the kit whose rows are shown */
 KB_VAR HfImage* g_opImage[KB_ROSTER_MAX];
 KB_VAR const unsigned char* g_opImageOf[KB_ROSTER_MAX];
+KB_VAR int g_opTab;                    /* 0 the kit's options, n the nth extra's tab (kb_extras.h) */
 KB_FN int OpScreenDraw(void* user, const HfDraw* d, const HfInput* in, float dt)
 {
     if (in->closing) return 0;
@@ -779,7 +780,37 @@ KB_FN int OpScreenDraw(void* user, const HfDraw* d, const HfInput* in, float dt)
         d->text((cx0 + cx1) / 2, y1 - 22, "A pick starts at the next mission", 16, HF_FACE_BODY, HF_ALIGN_CENTRE, grey);
     }
     (void)overTile;
-    if (view >= 0 && g_opKits.kit[view].body)
+    /* the tabs over the rows: the kit's options, then each extra's (Shared Mods); none while there are no extras */
+    KbExtras* xs = kb_extras;
+    int nx = xs && xs->magic == KB_EXTRAS_MAGIC ? (int)(xs->count > KB_EXTRAS_MAX ? KB_EXTRAS_MAX : xs->count) : 0;
+    KbOpExtra extra[KB_EXTRAS_MAX];
+    for (int i = 0; i < nx; i++) extra[i] = xs->tab[i];
+    if (g_opTab > nx) g_opTab = 0;
+    if (nx > 0)
+    {
+        float tx = x0;
+        for (int t = 0; t <= nx; t++)
+        {
+            const char* label = t ? extra[t - 1].label : "KIT OPTIONS";
+            float w = d->text_width(label, 22, HF_FACE_TITLE) + 44, tx1 = tx + w;
+            int on = t == g_opTab, over = OpIn(in, tx, y0 - 52, tx1, y0 - 6);
+            d->rect(tx, y0 - 52, tx1, y0 - 6, on ? yellow : HF_RGBA(14, 16, 18, (uint32_t)((over ? 250 : 220) * a)), on ? 0 : over ? yellow : grey, 2);
+            d->text((tx + tx1) / 2, y0 - 29, label, 22, HF_FACE_TITLE, HF_ALIGN_CENTRE, on ? ink : over ? yellow : white);
+            if (over && click) g_opTab = t;
+            tx = tx1 + 8;
+        }
+    }
+    if (g_opTab > 0 && extra[g_opTab - 1].body)
+    {
+        /* an extra's tab: the kit shown in the column (its rows' kit, else the picked one) */
+        const char* kit = view >= 0 ? g_opKits.kit[view].id : picked < g_opKits.n ? g_opKits.id[picked] : "";
+        const char* kitName = "";
+        for (int i = 0; i < g_opKits.n; i++) if (!strncmp(g_opKits.id[i], kit, 31)) kitName = g_opKits.name[i];
+        if (!strcmp(kit, KB_OP_OFF_ID)) kit = kitName = "";
+        KbOpBox box = {x0, y0, bx1, y1, a, tip};
+        extra[g_opTab - 1].body(d, in, dt, &box, kit, kitName);
+    }
+    else if (view >= 0 && g_opKits.kit[view].body)
     {
         KbOpBox box = {x0, y0, bx1, y1, a, tip};
         g_opKits.kit[view].body(d, in, dt, &box);
@@ -789,8 +820,9 @@ KB_FN int OpScreenDraw(void* user, const HfDraw* d, const HfInput* in, float dt)
 KB_FN void OpScreenOpened(void* user, int open)
 {
     KbOpHub* h = kb_ophub;
-    if (open) { g_opOpenT = 0; g_opKitsT = 1; g_opView[0] = 0; if (h) InterlockedIncrement(&h->opens); }
-    else if (h) InterlockedIncrement(&h->closes);
+    KbExtras* x = kb_extras;
+    if (open) { g_opOpenT = 0; g_opKitsT = 1; g_opView[0] = 0; if (h) InterlockedIncrement(&h->opens); if (x) InterlockedIncrement(&x->opens); }
+    else { if (h) InterlockedIncrement(&h->closes); if (x) InterlockedIncrement(&x->closes); }
 }
 
 /* the game thread: what the screen asked for is set, and saved once it has closed */
@@ -882,7 +914,7 @@ KB_FN void KbOptionsStart_(const HfApi* api, HfMod* mod, const char* id, const c
         HfScreen screen = {sizeof screen, "Character kits' options", (uint32_t)g_opKey, HF_SCREEN_MODAL, NULL, OpScreenDraw, OpScreenOpened, NULL};
         g_opScreen = api->add_screen(mod, &screen);
         if (g_opScreen && RosterLock()) { own = !h->screen; h->screen = 1; RosterUnlock(); }
-        if (own) { g_opOwner = 1; RosterAddOff(); }
+        if (own) { g_opOwner = 1; RosterAddOff(); KbExtras* x = Extras(); if (x) x->tabs = 1; }
         else if (!g_opScreen) api->log(mod, "options screen: HellForge refused this kit's (modloader.log says why; the manifest needs \"sdk\": 17); another kit may add it");
     }
     g_opOn = 1;
