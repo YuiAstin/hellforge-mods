@@ -8,6 +8,7 @@
 | [research/native-tables.md](research/native-tables.md) | The game's settings lists (explosion, arc, damage, projectile, stratagem), how More Plasma Stratagems adds explosions of its own, and how Leva 0.5.0 adds a private explosion and arc for her lockdown. Also its other reusable patterns (typed writes, private entities, Lua mod options, HellForge-built icons). |
 | [research/ai-modding.md](research/ai-modding.md) | AI modding in HellForge: friendly AI (sentries, guard dogs), enemy AI and the tools each relies on, tagged proven / static / speculative. |
 | [research/teleport-blink.md](research/teleport-blink.md) | How to move a Helldiver from a C mod (blink / teleport), from the LIFT-182 Warp Pack's own code. |
+| [research/flight.md](research/flight.md) | Flight for the player's Helldiver: gravity (one world constant), the airborne flag, SetVelocity every frame, the Hover Pack's data, and the probes to run. |
 | [research/ias-stutter.md](research/ias-stutter.md) | Why HD2Runtime + IAS stutter together, and the garbage-collector tuning that became Smooth GC. |
 | [research/one-handed.md](research/one-handed.md) | What makes a weapon one-handed (Equipment +0xC4 bit 0, +0xC0 grip), where the records are, and the code that uses it. |
 | [research/shot-freeze.md](research/shot-freeze.md) | Time stop, the in-flight half (works, as played): shots, rockets, grenades, the G-60 seeker, fuses, missiles, fire/gas/arc damage, particles and arcs held (Shot Freeze Probe). Combine with the pose freeze for a true time stop. |
