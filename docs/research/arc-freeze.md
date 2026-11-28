@@ -339,3 +339,8 @@ shimmers with Option A and the ParticleWorld hook both on, the cause is engine-s
 - That a unit scaled to 0 on Y draws nothing. **[I]**
 - What 0x13C1416 creates (a second arc source). **[?]**
 - Co-op: the arc system is simulated on each machine; a client freezing it locally would drift from the host. **[I]**
+
+## As played (2026-11-28, Shot Freeze Probe 0.4.2 to 0.4.4)
+
+- Both hooks held every frame of each stop, no crash. An arc fired during a stop is not drawn at all until the
+  release, then fires (Yui: fine for the time stop). The particle speed (2, 5 or 10%) makes no difference to it.
