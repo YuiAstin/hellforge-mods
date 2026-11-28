@@ -52,7 +52,11 @@
  *   Played: the trooper was seen for a moment, and the MG-43 went with it (its position no longer read after).
  *
  * 0.8.0: the trooper stays until its support slot lets the MG-43 go (each 50 ms logged, 3 s at most): how long the
- * drop really takes. */
+ * drop really takes.
+ *   Played: it never let go (3 s), and the trooper's removal took the MG-43 with it.
+ *
+ * 0.9.0: the slot's entry cleared by hand the frame after the drop (as WieldDrop does), the trooper gone the frame
+ * after: about three frames in all. */
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -67,7 +71,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.8.0"
+#define VERSION "0.9.0"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
@@ -436,17 +440,21 @@ static void HandPoll(void)
     /* 0.8.0: the trooper goes the frame its support slot no longer holds the MG-43 (0.7.0: taken away two frames after
      * the drop, it took the MG-43 with it: its position no longer read); each 50 ms until then the slot and the MG-43's
      * position are logged, 3 s at most */
+    /* 0.9.0: played 0.8.0, the slot never let the MG-43 go (3 s), and the trooper's removal took it along. The drop
+     * leaves the slot's entry (kb_wield.h's WieldDrop clears it by hand, which Hina does and this probe did not): cleared
+     * here the frame after the drop, and the trooper goes the frame after that */
     if (g_hand == H_DROPPED)
     {
-        uint32_t now = HandSupport(g_handSeaf);
         g_handFrames++;
-        if (now == g_handGun && Ms() < 3000)
+        if (g_handFrames == 1)
         {
-            if (g_now >= g_handLogAt) { g_handLogAt = g_now + 0.05; Log("Shift+Insert %6.0f ms (frame %d): still in the trooper's support slot", Ms(), g_handFrames); HandGunAt("meanwhile"); }
+            uintptr_t r = HandRecord(g_handSeaf);
+            uint32_t now = 0, zero = 0;
+            if (r && ReadAt(r + 8, &now, 4) && now == g_handGun) hf->write(r + 8, &zero, 4);
+            Log("Shift+Insert %6.0f ms: the trooper's support slot cleared (it held %u)", Ms(), now);
+            HandGunAt("then");
             return;
         }
-        Log("Shift+Insert %6.0f ms (frame %d): the trooper's support slot now %u", Ms(), g_handFrames, now);
-        HandGunAt("then");
         Log("Shift+Insert %6.0f ms: the trooper goes (%s)", Ms(), KbRemoveEntity(g_handSeaf, SEAF) ? "taken away" : "could not be taken away");
         g_hand = H_MOVED;
         g_handMoves = 0;
