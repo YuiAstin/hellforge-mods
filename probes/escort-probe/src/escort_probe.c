@@ -83,7 +83,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.10.0"
+#define VERSION "0.10.1"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
@@ -98,6 +98,11 @@ static uint64_t BugRes(void) { return g_bug ? g_bug : SEAF; }
 typedef struct Escort { uint32_t entity, net; double since; int hits, taken, maxHp, lastHp, dead, sent; } Escort;
 static Escort g_esc[ESCORTS];
 static void Watch(uint32_t e);
+/* 0.10.1: spawns' network ids as they come (0.10.0 played: an escort's spawn event came before the escort was kept, so its
+ * network id stayed 0 and none of its hits were seen) */
+static uint32_t g_seenEnt[32], g_seenNet[32];
+static unsigned g_seenAt;
+static uint32_t SeenNet(uint32_t e) { for (int i = 0; i < 32; i++) if (g_seenEnt[i] == e) return g_seenNet[i]; return 0; }
 static int g_follow = 0, g_want, g_spawns;
 static double g_wantSince, g_lastSpawnAt = -100;
 
@@ -144,6 +149,7 @@ static void SpawnFrame(void)
     Escort* x = &g_esc[slot];
     memset(x, 0, sizeof *x);
     x->entity = e; x->since = g_now;
+    x->net = SeenNet(e);
     int32_t hp = 0; uint32_t life = 0;
     if (HealthOf(e, &hp, &life)) x->maxHp = x->lastHp = hp;
     g_spawns++;
@@ -209,6 +215,7 @@ static void OnDamage(HfMod* mod, const HfEventInfo* info, void* user)
 static void OnSpawn(HfMod* mod, const HfEventInfo* info, void* user)
 {
     const HfSpawnEvent* s = (const HfSpawnEvent*)info;
+    g_seenEnt[g_seenAt % 32] = s->entity; g_seenNet[g_seenAt % 32] = s->network; g_seenAt++;
     for (int i = 0; i < ESCORTS; i++) if (g_esc[i].entity == s->entity) g_esc[i].net = s->network;
     if (g_now - g_lastSpawnAt > 3) return;
     static unsigned shown;

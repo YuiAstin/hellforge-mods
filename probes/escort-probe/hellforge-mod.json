@@ -2,7 +2,7 @@
   "format": 1,
   "id": "yui.escort-probe",
   "name": "Escort Probe (research)",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Research only, for Andoris's bodyguards: can a mod spawn the game's SEAF trooper beside you, keep it with you, and does it fight and take hits? In a mission: Insert a trooper beside you (2 at most, a third replaces the oldest), Home following on/off, Delete takes them away. Shift+Insert (0.7.0): a trooper at your feet takes a fresh MG-43 the frame both are ready, drops it, its slot is cleared and it is gone two frames later. Logs their distance, health and the hits they take. Solo or host. 0.3.0: its Lua half (needs Bingus Shared Loader and HD2Runtime) logs the game Lua's follow / comm / order functions and their calls. Turn off when done. 0.10.0 (for Andoris): every hit an escort deals is logged, and one on you is cancelled; every 2 s, how many enemies target each escort and you; End taunts: enemies targeting you switch to the newest stick bug, and the log says for 10 s whether they keep it.",
   "gameplay": false,
   "code": {
