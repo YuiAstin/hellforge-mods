@@ -105,13 +105,21 @@ As every GFL2 kit: more health and stamina; stamina run to 0 sets off a Hellbomb
 
 ## New
 
-1. **Her companions.** The Escort Probe (0.1.0, installed, not yet played): the game's SEAF trooper spawned beside her,
-   2 at most, led to her every second, its health and the hits it takes logged. What it answers: does it spawn as a
-   soldier (or the "?"), does it fight, does it keep up, is it shot at, does it ever shoot her.
+1. **Her companions.** The Escort Probe (branch `escort-probe`), the game's SEAF trooper as a companion.
+   - Played: it spawns as a soldier, **fights** (0.2.1: its combat filled the log before any order) and **follows**,
+     also on the comm wheel's orders (0.2.2). 0.4.0 made the stick bug its own trooper copy (600 health, armour 4).
+   - **SEAF can hurt the player** (Yui). The kit cancels any hit dealt by one of her stick bugs that lands on her,
+     before it lands (`kb_guard.h`'s cancel, the hit's dealer or owner one of her bugs' network ids).
+   - Open, Escort Probe 0.10.0 (installed, not yet played): the hits a stick bug deals (one on her cancelled and
+     flagged), how many enemies target each stick bug and her every 2 s, and the stick bug copy in a mission.
 2. **Her stick bug model on that unit.** How a custom model reaches the game through HellForge (archive, materials,
    the unit it replaces) isn't known yet: tried with a plain cube before the real model.
-3. **Drawing fire to a stick bug** beyond what the game's AI does by itself: Lost Contact's perception reading is
-   where to start, only if play shows enemies ignore them.
+3. **Drawing fire to a stick bug.** First whether enemies shoot SEAF by themselves (they do in the game). If not
+   enough, a taunt (Yui: Lost Contact's research shows the enemies' lists): Lost Contact takes the player *out* of an
+   enemy's perception lists and clears its target; the taunt does the reverse: an entry for the stick bug in the
+   enemy's perceiver's list, and the enemy's behaviour target set to it (`docs/research/ai-modding.md`: the route is
+   unproven, the next perception refresh may drop it). Escort Probe 0.10.0's End key tries it on every enemy targeting
+   her and logs for 10 s whether they keep the stick bug.
 
 ## The stick bug model
 
