@@ -15,7 +15,7 @@
  *     and her own backpack comes back with her weapon, a new one of its kind, as her support weapon does.
  *     While she holds it she has a shield (kitbase/kb_allies.h, Alva's): shield_max, refilled to shield_max every
  *     shield_every s, never above it. Once the gun is gone the shield drains, shield_decay a second, until a refill.
- *   Lock & Load (key_s2, default X): the gun in her hands refilled in full (magazine and spares); on her own gun also
+ *   Reload and Destroy (key_s2, default X): the gun in her hands refilled in full (magazine and spares); on her own gun also
  *     +ll_ergonomics ergonomics and no recoil (ll_recoil 1) for the rest of that gun's time out: a new one of it,
  *     built with them, full, takes its place (weapon handling is read when a weapon is built).
  *   Ishbosheth (key_s3, default C; her EX, Denouement: Ishbosheth): readied by the key, set off by her next trigger
@@ -128,7 +128,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Her shield while she holds it: shield_max, refilled to shield_max every shield_every s; once the gun is gone it\n"
                "; drains shield_decay a second until the next refill.\n"
                "shield_max = %g\nshield_every = %g\nshield_decay = %g\n"
-               "; Lock & Load: cooldown; the gun in her hands refilled; her own gun also +ll_ergonomics and no recoil (ll_recoil 1).\n"
+               "; Reload and Destroy: cooldown; the gun in her hands refilled; her own gun also +ll_ergonomics and no recoil (ll_recoil 1).\n"
                "ll_cooldown = %g\nll_ergonomics = %g\nll_recoil = %d\n"
                "; Ishbosheth: cooldown (from its end); readied by its key, set off by her next shot: for ish_duration s, every\n"
                "; ish_every s a volley across ish_cone degrees each side of her aim, ish_per_section tracers in each of its three\n"
@@ -166,7 +166,7 @@ static uint64_t g_bpRes;               /* her gun's backpack: a copy of the Maxi
 static int g_rowsReady, g_entsReady;
 static int g_owned = -1;               /* the Maxigun: -1 not asked yet, 0 not owned (or unknown), 1 owned */
 static int g_use;                      /* which copy this session uses */
-static int g_tuned;                    /* Lock & Load's handling is in her gun's records (the next one built has it) */
+static int g_tuned;                    /* Reload and Destroy's handling is in her gun's records (the next one built has it) */
 
 #define MAXIGUN_MIX 0xDA20CFA7u   /* the M-1000 Maxigun's mixId (its itemId is HF_ITEM_M1000_MAXIGUN, cdfbf3c2) */
 static void Gun(void)
@@ -350,7 +350,7 @@ static void GunRecords(int i)
     Log("her gun (%s's copy, entity %016llx): fire rate %.0f in %d of 3 slots, %d rounds %s, its round %u %s (and in %d pattern slots)", kBaseName[i],
         (unsigned long long)res, (double)rpm, rate, s_gunRounds, mag ? "set" : "REFUSED", g_round[i], proj == 2 ? "written" : proj ? "set" : "REFUSED", pat);
 }
-/* Lock & Load's handling on her gun's records (on: +ll_ergonomics, no recoil; off: back to its own) */
+/* Reload and Destroy's handling on her gun's records (on: +ll_ergonomics, no recoil; off: back to its own) */
 /* 0.1.4 (Yui: HellForge 0.5's attachment work): "the game finds the package of a vanilla attachment's unit" (its SDK
  * docs), so her copy names the scope as a default attachment, by its item id, not as a bare optic unit (that drew the
  * missing-model mark). The item ids: the game's attachment items (0x58 bytes, id at +8; groups: count at game+0x348DA98,
@@ -436,7 +436,7 @@ static void GunOptic(void)
         cleared == 2 ? "; its default optic attachment cleared" : "");
 }
 static double DrumErg(void) { return g_use == 1 && s_gunDrum ? s_drumErgonomics : 0; }   /* (the MG-43's copy only) */
-/* the drum's ergonomics on her MG-43 copy (from the records' readiness, and again when Lock & Load's handling goes) */
+/* the drum's ergonomics on her MG-43 copy (from the records' readiness, and again when Reload and Destroy's handling goes) */
 /* 0.1.4 (Yui: the drum's look): no machine-gun drum among the game's magazine models (HD2Runtime's attachment research);
  * the nearest, the Liberator's drum (Rifle 5,5x50mm. Drum, the Concussive's), as her MG-43 copy's magazine unit, drawn at
  * its attach_mag joint if its model has one (its own box is part of its model) */
@@ -511,7 +511,7 @@ static void Handling(int on)
         HfValue v = HF_F32(base + DrumErg() + s_llErgonomics);
         ok += hf->set_live(self, res, &erg, &v, 0) != 0;
         if (s_llRecoil) for (int k = 0; k < 6; k++) { HfValue z = HF_F32(0); ok += hf->set_live(self, res, &recoil[k], &z, 0) != 0; }
-        Log("Lock & Load: her gun's handling: ergonomics %.0f -> %.0f%s (%d fields set)", base + DrumErg(), base + DrumErg() + s_llErgonomics, s_llRecoil ? ", no recoil" : "", ok);
+        Log("Reload and Destroy: her gun's handling: ergonomics %.0f -> %.0f%s (%d fields set)", base + DrumErg(), base + DrumErg() + s_llErgonomics, s_llRecoil ? ", no recoil" : "", ok);
     }
     else
     {
@@ -825,7 +825,7 @@ static atomic_uint g_bp;                  /* her gun's backpack (the Maxigun's c
 static uint32_t g_bpOld, g_bpNew;         /* the backpack she wore; its replacement */
 static uint64_t g_bpOldRes;
 static double g_bpOffSince;
-static int g_swap;                        /* Lock & Load is putting a new gun (with its handling) in place of this one */
+static int g_swap;                        /* Reload and Destroy is putting a new gun (with its handling) in place of this one */
 static unsigned g_uses, g_swaps;
 static uint64_t GunRes(void) { return g_gunRes[g_use]; }
 /* the gun's package (its base's loadout package: her gun's model and her rounds' look): HF_PACKAGE_RESIDENT, LOADING,
@@ -890,7 +890,7 @@ static void GunStart(void)
     Gun();
     if (!GunRes()) { Log("The End: Destroyer: her gun was not added (the log's start says why)"); return; }
     if (!(rec = InventoryRecord(me)) || !ReadAt(rec, slots, sizeof slots) || !SwitchObject(me)) { Log("The End: Destroyer: her inventory or her switch object was not found: nothing done"); return; }
-    Handling(0);   /* a new call: her gun as it is (Lock & Load's handling is for the gun it was used on) */
+    Handling(0);   /* a new call: her gun as it is (Reload and Destroy's handling is for the gun it was used on) */
     g_kSel = slots[7] >= 1 && slots[7] <= 3 ? slots[7] : 1;
     g_kOld = slots[2];
     g_kOldRes = ResOf(g_kOld);
@@ -933,7 +933,7 @@ static void GunAbort(const char* why)
     g_k = K_IDLE;
     g_readyAt = g_now + s_gunCooldown;
 }
-/* Lock & Load on her own gun: a new one built with the handling, full, in its place */
+/* Reload and Destroy on her own gun: a new one built with the handling, full, in its place */
 static void GunSwap(void)
 {
     if (g_k != K_HELD) return;
@@ -941,7 +941,7 @@ static void GunSwap(void)
     g_swapOld = atomic_load(&g_gl);
     g_swap = 1;
     g_swaps++;
-    Log("Lock & Load: a new gun with the handling in place of %u", g_swapOld);
+    Log("Reload and Destroy: a new gun with the handling in place of %u", g_swapOld);
     g_k = K_PACKAGE;
     g_kAt = g_now + 8;
 }
@@ -1027,7 +1027,7 @@ static void GunFrame(void)
         g_awaySince = g_droppedSince = g_bpOffSince = g_emptySince = g_roundsLogAt = 0;
         g_dropped = 0;   /* (played: a pickup with no old support weapon left these set, and the next gun's end acted on them: a crash) */
         g_picked = 0;
-        Log("The End: Destroyer %u%s: gun %u, %d rounds (%s %d)", g_uses, g_swap ? ", Lock & Load's new one" : " on", gl, GunRounds(gl),
+        Log("The End: Destroyer %u%s: gun %u, %d rounds (%s %d)", g_uses, g_swap ? ", Reload and Destroy's new one" : " on", gl, GunRounds(gl),
             Pack() ? "in its backpack; the gun's own magazine" : "capacity", Pack() ? MagRounds(gl) : MagCapacity(gl));
         g_swap = 0;
         g_swapOld = 0;
@@ -1233,7 +1233,7 @@ static void ShieldBroke(uint32_t e)
     if (e == atomic_load(&g_avatar) && told++ < 10) Log("her shield broke");
 }
 
-/* ---- Lock & Load (X) ----------------------------------------------------------------------------------------------- */
+/* ---- Reload and Destroy (X) ----------------------------------------------------------------------------------------------- */
 static double g_cd[3];
 static unsigned g_casts[3];
 static uint32_t Held(uint32_t* selOut)
@@ -1255,14 +1255,14 @@ static unsigned g_llFrame;
 static void LlFresh(uint32_t w)
 {
     uint32_t sel = 0;
-    if (g_ll != LL_IDLE || Held(&sel) != w || !WieldReady()) { Log("Lock & Load: busy, or the swap is off"); return; }
+    if (g_ll != LL_IDLE || Held(&sel) != w || !WieldReady()) { Log("Reload and Destroy: busy, or the swap is off"); return; }
     g_llOld = w;
     g_llSel = sel;
     g_llRes = ResOf(w);
     if (!g_llRes || !LoadoutPackage(g_llRes, &g_llPkg)) g_llPkg = 0;
     g_ll = LL_PACKAGE;
     g_llAt = g_now + 8;
-    Log("Lock & Load: a fresh gun of %u's kind (%016llx, selection %u)", w, (unsigned long long)g_llRes, sel);
+    Log("Reload and Destroy: a fresh gun of %u's kind (%016llx, selection %u)", w, (unsigned long long)g_llRes, sel);
 }
 static void LlFrame(void)
 {
@@ -1274,7 +1274,7 @@ static void LlFrame(void)
     case LL_PACKAGE:
     {
         int st = g_llPkg ? hf->load_package(self, g_llPkg) : HF_PACKAGE_RESIDENT;
-        if (st == HF_PACKAGE_LOADING) { if (g_now > g_llAt) { Log("Lock & Load: its package did not load"); g_ll = LL_IDLE; } break; }
+        if (st == HF_PACKAGE_LOADING) { if (g_now > g_llAt) { Log("Reload and Destroy: its package did not load"); g_ll = LL_IDLE; } break; }
         g_llNew = SpawnNear(g_llRes, "a fresh gun");
         if (!g_llNew) { g_ll = LL_IDLE; break; }
         g_ll = LL_WAIT;
@@ -1287,10 +1287,10 @@ static void LlFrame(void)
         if (g_frame < g_llFrame + 2 || (ResOf(g_llNew) != g_llRes && g_now < g_llAt)) break;
         g_ll = LL_IDLE;
         uint32_t sel = 0;
-        if (ResOf(g_llNew) != g_llRes) { Log("Lock & Load: the fresh gun does not read as one"); break; }
+        if (ResOf(g_llNew) != g_llRes) { Log("Reload and Destroy: the fresh gun does not read as one"); break; }
         if (Held(&sel) != g_llOld)
         {
-            Log("Lock & Load: the gun left her hands meanwhile: the fresh one removed");
+            Log("Reload and Destroy: the gun left her hands meanwhile: the fresh one removed");
             if (remove && em) remove(em, g_llNew);
             break;
         }
@@ -1298,7 +1298,7 @@ static void LlFrame(void)
         if (ResOf(g_llOld) == g_llRes && remove && em) remove(em, g_llOld);
         WieldAsk(g_llSel, "the fresh gun in hand");
         FillUp(g_llNew);
-        Log("Lock & Load: fresh gun %u in place of %u, %d rounds in its magazine", g_llNew, g_llOld, MagRounds(g_llNew));
+        Log("Reload and Destroy: fresh gun %u in place of %u, %d rounds in its magazine", g_llNew, g_llOld, MagRounds(g_llNew));
         break;
     }
     default: g_ll = LL_IDLE;
@@ -1308,7 +1308,7 @@ static void LockAndLoad(void)
 {
     if (g_now < g_cd[1]) return;
     uint32_t w = Held(NULL);
-    if (!w) { Log("Lock & Load: no gun in her hands"); return; }
+    if (!w) { Log("Reload and Destroy: no gun in her hands"); return; }
     g_cd[1] = g_now + s_llCooldown;
     g_casts[1]++;
     uint32_t gl = atomic_load(&g_gl);
@@ -1317,7 +1317,7 @@ static void LockAndLoad(void)
     {
         int before = GunRounds(gl);
         GunFill(gl);
-        Log("Lock & Load: her gun %u refilled (%d -> %d rounds)", w, before, GunRounds(gl));
+        Log("Reload and Destroy: her gun %u refilled (%d -> %d rounds)", w, before, GunRounds(gl));
         return;
     }
     /* 0.1.4: any other gun filled where it is (its attachments kept), now that its magazine size reads (played: the
@@ -1327,7 +1327,7 @@ static void LockAndLoad(void)
     if (cap > 0)
     {
         FillUp(w);
-        Log("Lock & Load: her gun %u refilled (%d -> %d rounds, capacity %d; spares too)", w, before, MagRounds(w), cap);
+        Log("Reload and Destroy: her gun %u refilled (%d -> %d rounds, capacity %d; spares too)", w, before, MagRounds(w), cap);
         return;
     }
     LlFresh(w);
@@ -1667,7 +1667,7 @@ static void Reset(const char* why)
     int start = !strcmp(why, "mission start");
     if (start) KitDecide();
     if (g_uses || g_casts[1] || g_casts[2])
-        Log("%s: her gun %u times (%u Lock & Load swaps), Lock & Load %u, Ishbosheth %u (%u enemies hit, %u sweep rounds); %u shield refills, %u hits on her shield "
+        Log("%s: her gun %u times (%u Reload and Destroy swaps), Reload and Destroy %u, Ishbosheth %u (%u enemies hit, %u sweep rounds); %u shield refills, %u hits on her shield "
             "(%.0f kept off, %u broke); %u reloads; %u hits buffed (+%.0f damage)",
             why, g_uses, g_swaps, g_casts[1], g_casts[2], g_ishHits, g_ishSprayed, g_refills, g_allyHits, g_allyAbsorbed, g_allyBroke, g_reloads, g_buffed, g_buffDamage);
     GunAbort(start ? "a mission started" : "the mission ended");
@@ -1680,7 +1680,7 @@ static void Reset(const char* why)
     g_ishOn = 0;
     g_buffUntil = 0;
     g_uses = g_swaps = g_refills = g_ishHits = g_ishSprayed = g_reloads = g_buffed = 0;
-    memset(g_reloadRes, 0, sizeof g_reloadRes);   /* (Yui, played: these sat in Lock & Load's fresh-gun step, so every X wiped */
+    memset(g_reloadRes, 0, sizeof g_reloadRes);   /* (Yui, played: these sat in Reload and Destroy's fresh-gun step, so every X wiped */
     g_llWait = 0;                                 /*  the passive's per-gun times: a new mission's start, not a skill's) */
     g_dropped = 0;
     g_picked = 0;
@@ -1702,7 +1702,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     if (!WieldPins()) Log("The End: Destroyer is off (the swap's code is not the reviewed one)");
     HitsInstall("her hits");
     Log("ready: The End: Destroyer on %s (%d rounds, %.0f rpm + %.0f%%, AP %d, %.0f s cooldown; shield %.0f every %.0f s, -%.0f/s without it), "
-        "Lock & Load on %s, Ishbosheth on %s", s_keys[0].label, s_gunRounds, (double)s_gunRpm, (double)(s_judgmentRate * 100), s_gunAp, (double)s_gunCooldown,
+        "Reload and Destroy on %s, Ishbosheth on %s", s_keys[0].label, s_gunRounds, (double)s_gunRpm, (double)(s_judgmentRate * 100), s_gunAp, (double)s_gunCooldown,
         (double)s_shieldMax, (double)s_shieldEvery, (double)s_shieldDecay, s_keys[1].label, s_keys[2].label);
 }
 
@@ -1710,7 +1710,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
 typedef struct HinaHud
 {
     uint32_t version, in_mission;
-    float cd[3], cd_max[3];            /* seconds left, full cooldowns: The End: Destroyer, Lock & Load, Ishbosheth */
+    float cd[3], cd_max[3];            /* seconds left, full cooldowns: The End: Destroyer, Reload and Destroy, Ishbosheth */
     uint32_t gun_on, rounds, rounds_max;
     float shield, shield_max;
     uint32_t ish_armed;
@@ -1930,7 +1930,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         api->log(mod, "her gun's backpack (a copy of the Maxigun Backpack): entity %016llx", (unsigned long long)g_bpRes);
     }
     KbOptionsStart(api, mod, "hina", "Hina", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, s_optionsKey);
-    api->log(mod, "Hina %s: keys %s / %s / %s (The End: Destroyer, Lock & Load, Ishbosheth)", VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label);
+    api->log(mod, "Hina %s: keys %s / %s / %s (The End: Destroyer, Reload and Destroy, Ishbosheth)", VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label);
     if (s_badKey) api->log(mod, "hina.ini: a key could not be read (bits %d: s1, s2, s3); its default stays", s_badKey);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     if (api->on(mod, HF_EVENT_PROJECTILES_READY, RowsReady, NULL)) api->log(mod, "her rounds' armour penetration can't be set: the base's");

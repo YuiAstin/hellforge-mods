@@ -33,7 +33,7 @@ void *hinhud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAdd
 local k32 = ffi.load('kernel32')
 
 local ELECTRIC, YELLOW, INK, PANEL, TEXT, MUTED = {188, 150, 255}, {232, 214, 255}, {8, 9, 10}, {12, 14, 16}, {240, 243, 245}, {150, 156, 160}
-local NAMES = {'DESTROYER OF DENOUEMENT', 'LOCK & LOAD', 'ISHBOSHETH'}
+local NAMES = {'THE END: DESTROYER', 'RELOAD AND DESTROY', 'ISHBOSHETH'}
 
 -- the kit, for the shared parts below
 local KIT = {name = 'Hina', id = 'hina', module = k32.hinhud1_GetModuleHandleA, proc = k32.hinhud1_GetProcAddress}
@@ -463,9 +463,9 @@ local OPTIONS = {
     {'shield_max', 'slider', 'Shield: Amount', 0, 10000, 50, 'Her shield while she holds her gun, and its cap.'},
     {'shield_every', 'slider', 'Shield: Refill Interval', 10, 1200, 10, 'Seconds between refills of her shield to its amount.'},
     {'shield_decay', 'slider', 'Shield: Drain Without The Gun', 0, 1000, 5, 'Shield lost a second once her gun is gone, until the next refill.'},
-    {'ll_cooldown', 'slider', 'Lock & Load: Cooldown', 0, 120, 1, 'Seconds before Lock & Load can be used again.', true},
-    {'ll_ergonomics', 'slider', 'Lock & Load: Ergonomics', 0, 200, 5, 'Ergonomics it adds to her own gun.'},
-    {'ll_recoil', 'toggle', 'Lock & Load: No Recoil', nil, nil, nil, 'It also takes her own gun\'s recoil away.'},
+    {'ll_cooldown', 'slider', 'Reload and Destroy: Cooldown', 0, 120, 1, 'Seconds before Reload and Destroy can be used again.', true},
+    {'ll_ergonomics', 'slider', 'Reload and Destroy: Ergonomics', 0, 200, 5, 'Ergonomics it adds to her own gun.'},
+    {'ll_recoil', 'toggle', 'Reload and Destroy: No Recoil', nil, nil, nil, 'It also takes her own gun\'s recoil away.'},
     {'ish_cooldown', 'slider', 'Ishbosheth: Cooldown', 0, 120, 1, 'Seconds before Ishbosheth can be readied again.', true},
     {'ish_mult', 'slider', 'Ishbosheth: Damage', 1, 20, 0.05, 'Each enemy in the fan takes a round of this times her gun\'s damage (6.36: Blue Archive\'s 636%). From the next start.'},
     {'ish_cone', 'slider', 'Ishbosheth: Fan', 5, 90, 1, 'Degrees each side of her aim the fan reaches.'},

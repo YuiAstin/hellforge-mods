@@ -20,11 +20,11 @@ static const OpRow kOpRows[] = {
      "Seconds between refills of her shield to its amount."},
     {"shield_decay", "Shield", "Drain Without The Gun", OP_FIELD, 0, 1000, 5,
      "Shield lost a second once her gun is gone, until the next refill."},
-    {"ll_cooldown", "Lock & Load", "Cooldown", OP_FIELD, 0, 120, 1,
-     "Seconds before Lock & Load can be used again."},
-    {"ll_ergonomics", "Lock & Load", "Ergonomics", OP_FIELD, 0, 200, 5,
+    {"ll_cooldown", "Reload and Destroy", "Cooldown", OP_FIELD, 0, 120, 1,
+     "Seconds before Reload and Destroy can be used again."},
+    {"ll_ergonomics", "Reload and Destroy", "Ergonomics", OP_FIELD, 0, 200, 5,
      "Ergonomics it adds to her own gun."},
-    {"ll_recoil", "Lock & Load", "No Recoil", OP_TOGGLE, 0, 1, 1,
+    {"ll_recoil", "Reload and Destroy", "No Recoil", OP_TOGGLE, 0, 1, 1,
      "It also takes her own gun's recoil away."},
     {"ish_cooldown", "Ishbosheth", "Cooldown", OP_FIELD, 0, 120, 1,
      "Seconds before Ishbosheth can be readied again."},
@@ -67,4 +67,4 @@ static const OpRow kOpRows[] = {
     {"oao_head", "Passives", "Out-and-Out Height", OP_SLIDER, 0.2f, 2, 0.05f,
      "Metres: her head lower than this over her feet counts as crouched or prone.", NULL, 1, OP_LIVE},
 };
-static const char* const kOpKeyLabels[3] = {"Destroyer of Denouement", "Lock & Load", "Ishbosheth"};
+static const char* const kOpKeyLabels[3] = {"The End: Destroyer", "Reload and Destroy", "Ishbosheth"};

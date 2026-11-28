@@ -40,7 +40,7 @@ All numbers are settings (her page on the options screen, F9, and `hina.ini`).
   above 3000. Once the gun is gone the shield **drains** (100 a second) until the next refill, so switching off doesn't
   punish her at once (Yui). A new life brings a full shield with her next gun.
 
-### X: Lock & Load
+### X: Reload and Destroy
 
 - The gun in her hands refilled in full (magazine and spares), whatever gun it is.
 - On her own gun also **+80 ergonomics and no recoil**: weapon handling is read when a weapon is built, so a new gun
