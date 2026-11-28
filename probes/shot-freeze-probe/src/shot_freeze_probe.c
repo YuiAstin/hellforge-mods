@@ -39,7 +39,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.4.1"
+#define VERSION "0.4.2"
 #include "kitbase/kb_core.h"
 
 static double g_now;
@@ -624,6 +624,48 @@ static void PwReport(const char* when)
     if (world) { uint32_t queued = 0; ReadAt(world + 0x230048, &queued, 4); Log("  (%s) the game's world %p, particle world %p, %u particle commands queued", when, (void*)world, (void*)mine, queued); }
 }
 
+/* ==== arcs (docs/research/arc-freeze.md) ====================================================================== */
+/* An arc bolt is a particle effect plus a stretched mesh unit, both placed every frame by the arc system from its
+ * gameplay state, which runs on the frame time: ArcUpdate (0x13B4EB0) moves the head and hops, ArcPost (0x13B5510)
+ * reads the collision queries the update sent that frame. While time is stopped both are skipped (the frozen answer is
+ * latched in the update so the post of the same frame agrees): every arc holds its state and its last pose, and on
+ * release carries on. A dt of 0 instead would end every arc in flight (0x13B5148). */
+typedef void (*ArcFn)(void* sys);
+static ArcFn g_arcUpdateOrig, g_arcPostOrig;
+static volatile int g_arcLatch, g_arcOk;
+static volatile unsigned g_arcSkipped;
+static void* ArcSystem(void) { return (void*)Pointer(game + 0x346D5B0); }
+static void ArcUpdateDetour(void* sys)
+{
+    g_arcLatch = g_frozen && g_arcOk;
+    if (g_arcLatch && sys == ArcSystem()) { g_arcSkipped++; return; }
+    g_arcUpdateOrig(sys);
+}
+static void ArcPostDetour(void* sys)
+{
+    if (g_arcLatch && sys == ArcSystem()) return;
+    g_arcPostOrig(sys);
+}
+static void ArcSetup(uintptr_t g)
+{
+    if (!hf->code_matches(g + 0x13B4EB0, "4C 8B DC 49 89 5B 18 49 89 73 20 55 41 54 41 55 41 56 41 57 49 8D AB F8 FE FF FF 48 81 EC E0 01") ||
+        !hf->code_matches(g + 0x13B4EF5, "48 8B 05 4C 14 F7 01 4C 8D B1 30 51 01 00") ||
+        !hf->code_matches(g + 0x13B5510, "48 8B C4 48 89 58 10 48 89 70 18 48 89 78 20 55 41 54 41 55 41 56 41 57 48 8D A8 68 FA FF FF 48") ||
+        !hf->code_matches(g + 0x13F7659, "48 8D 8F F8 55 9E 01 E8 4B D8 FB FF") || !hf->code_matches(g + 0xAB5FD0, "49 8D 8E 18 98 A0 02 E8 34 F5 8F 00") ||
+        !hf->code_matches(g + 0x13F2AE9, "48 8D 81 F8 55 9E 01 48 89 05 B9 AA 07 02"))
+    {
+        Log("arcs: the arc system is not the reviewed code: arcs stay off");
+        return;
+    }
+    if (hf->hook(self, g + 0x13B4EB0, (void*)ArcUpdateDetour, (void**)&g_arcUpdateOrig) || !g_arcUpdateOrig) { Log("arcs: the update could not be hooked: arcs stay off"); return; }
+    if (hf->hook(self, g + 0x13B5510, (void*)ArcPostDetour, (void**)&g_arcPostOrig) || !g_arcPostOrig)
+    {
+        Log("arcs: the post pass could not be hooked: arcs stay off");
+        return;   /* g_arcOk stays 0: the update detour only skips while it is 1 */
+    }
+    g_arcOk = 1;
+}
+
 /* ==== damage while time is stopped =========================================================================== */
 /* Fire, gas and arcs have nothing in flight to hold (a player flamer's flame is a particle effect whose hits arrive as
  * damage; an arc hits its whole chain in one frame; clouds and burning ground are areas). So while time is stopped their
@@ -683,6 +725,7 @@ static void Start(uintptr_t pool)
     g_pwFreeze = 0;
     Log("Ctrl+F11: time runs again after %.2f s", g_now - g_frozenAt);
     if (g_pwOk) PwReport("while stopped");
+    if (g_arcOk) { Log("  arcs: %u frames of the arc system skipped", g_arcSkipped); g_arcSkipped = 0; }
     if (pool) ReleaseShots(pool);
     ReleaseThrown();
     ReleaseMissiles();
@@ -778,10 +821,11 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
               hf->code_matches(g + 0x6429B9, "80 7c 1e 35 00") && hf->code_matches(g + 0x645B80, "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 18");
     if (g_misOk) m_setEngine = (SetEngine)(g + 0x645B80);
     PwSetup();
+    ArcSetup(g);
     /* the motion map as ExplosiveUpdate reads it (0x8CB387: the manager, +0x48A8 count, +0x48A0 entries) */
     g_motionOk = hf->code_matches(g + 0x8CB390, "45 8b 8a a8 48 00 00") && hf->code_matches(g + 0x8CB3AB, "49 8b ba a0 48 00 00");
-    Log("ready: Ctrl+F11 stops time and starts it again. Parts on: shots %s, grenades %s (actor table read at the first stop), fuses %s, missiles %s, motion records %s, particles %s (Ctrl+F10 switches mode A / B)",
-        g_shotsOk ? "yes" : "NO", g_thrOk ? "yes" : "NO", g_fuseOk ? "yes" : "NO", g_misOk ? "yes" : "NO", g_motionOk ? "yes" : "NO", g_pwOk ? "yes" : "NO");
+    Log("ready: Ctrl+F11 stops time and starts it again. Parts on: shots %s, grenades %s (actor table read at the first stop), fuses %s, missiles %s, motion records %s, particles %s (Ctrl+F10 switches mode A / B), arcs %s",
+        g_shotsOk ? "yes" : "NO", g_thrOk ? "yes" : "NO", g_fuseOk ? "yes" : "NO", g_misOk ? "yes" : "NO", g_motionOk ? "yes" : "NO", g_pwOk ? "yes" : "NO", g_arcOk ? "yes" : "NO");
 }
 /* The actor table is filled by the engine at start; read it once a mission runs */
 static void MissionStart(HfMod* mod, const HfEventInfo* info, void* user)
@@ -795,7 +839,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     hf = api;
     self = mod;
     if (!api || api->version < 16 || api->size < offsetof(HfApi, global) + sizeof api->global || !api->build_id() || strcmp(api->build_id(), BUILD)) return 1;
-    Log("Shot Freeze Probe " VERSION ": research towards a time stop (shots, rockets, grenades, missiles and fuses held and let go; fire, gas and arc damage withheld; particles paused)");
+    Log("Shot Freeze Probe " VERSION ": research towards a time stop (shots, rockets, grenades, missiles and fuses held and let go; fire, gas and arc damage withheld; particles paused; arcs held)");
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     if (!api->subscribe(mod, HF_ON_SPAWN, (HfListener)OnSpawn, NULL, 0)) Log("spawn events are unavailable");
     if (!api->subscribe(mod, HF_ON_DAMAGE_PRE, (HfListener)OnDamagePre, NULL, 0)) Log("damage events are unavailable: fire, gas and arcs are not withheld");

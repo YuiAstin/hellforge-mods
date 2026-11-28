@@ -12,6 +12,7 @@
 | [research/one-handed.md](research/one-handed.md) | What makes a weapon one-handed (Equipment +0xC4 bit 0, +0xC0 grip), where the records are, and the code that uses it. |
 | [research/shot-freeze.md](research/shot-freeze.md) | Holding what is in flight for a time stop: the shot pool (works), thrown grenades through the engine's actor table, fuses, seeking missiles (Shot Freeze Probe). |
 | [research/particle-freeze.md](research/particle-freeze.md) | Freezing particle effects (flames, gas, arcs) for a time stop: the engine's particle world update and a dt of 0 (static reading, untested). |
+| [research/arc-freeze.md](research/arc-freeze.md) | Holding Arc Thrower bolts for a time stop: the arc system's update and post pass skipped while frozen (static reading). |
 | [research/homing.md](research/homing.md) | Homing shots: what works (a game-guided seeking missile handed a target) and what didn't (HellForge's `homing` rule on ordinary shots), notes for the Destroyer. |
 | [research/lock-on.md](research/lock-on.md) | The game's lock-on and seeking missiles (static analysis plus the in-game recipe): where a missile's target lives and how to hand one to a sentry's or launcher's missiles. |
 
