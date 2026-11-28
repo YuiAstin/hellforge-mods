@@ -128,3 +128,37 @@ Read from the memory dump the Booster Table Probe writes (tools/dump-analysis). 
 - Slow/Stun Resistance booster: x0.5 on the build-up at `0x69A505`.
 - The damage event's cancel leaves a hit's status (SDK note), so cancelling an EMS blast's damage on an ally does not
   stop its stun: refusing the status in the add hook does. Which rows EMS puts on a Helldiver is still to be logged.
+
+## Weapons: magazines, rounds and aim (build 25480438, from the game.dll dump and Hina's play, 2026-11-28)
+
+Read statically (game.dll RVAs), then used by Hina 0.1.4 and seen working in play.
+
+- **Three weapon managers keyed by entity**, each a hash map (linear probing, slot `(i + multiplier * entity) & (size - 1)`,
+  each bucket `{entity, index}`, `-1` none):
+
+  | Manager (pointer at) | Map: buckets, size, empty key, multiplier | Holds |
+  |---|---|---|
+  | WeaponManager `0x3326660` | +0x28, +0x30, +0x34, +0x38 | every weapon: its kind flags (+0x50, 40-byte rows: bit 7 magazine, bit 8 rounds, bit 9 heat) |
+  | WeaponMagazines `0x3326648` | +0x20, +0x28, +0x2C, +0x30 | magazine weapons: AddMagazineRounds (`0x76E080`) |
+  | WeaponRounds `0x3326CF0` | +0x28, +0x30, +0x34, +0x38 | weapons loaded by rounds (shotguns like the Sweeper): live rows of 20 bytes at +0x58: spare rounds, the active feed (0 or 1), rounds loaded in each feed |
+
+- **MagazineRounds** (`0x742900`, on WeaponManager) reads any kind by its flags (for rounds: the active feed's count; it
+  may add a chambered round). **MagazineCapacity** (`0x743410`) handles both magazines and rounds (the active feed's
+  capacity: the rounds record's +0x48 / +0x4C).
+- **AddMagazineRounds does not check its map:** a weapon not in WeaponMagazines (a shotgun loaded by rounds) is read at
+  index -1 and the game crashes. Look first.
+- **Set loaded rounds** (`0x7422B0`, `(WeaponManager, weapon, rounds)`): what the reload's step (ReloadMagazine
+  `0x7768F0`) calls; it sends heat weapons to `0x764E00`, magazines to `0x76E2A0`, rounds to **`0x77A6F0`**
+  (`(unused, weapon, rounds)`: writes the active feed's count and queues its network field). No authority check and no
+  map check (index -1 crashes): host or solo, after looking in WeaponRounds. Takes no spare rounds.
+- **Aiming down sights is avatar state bit 82:** bit 18 of the dword at AvatarManager (`0x3326D20`) +0x53E888 + 0x1238
+  x her index (the manager's map: buckets +0xF8, size +0x100, empty key +0x104, multiplier +0x108; indices below the
+  simulated count at +0x70). `0xA40B50` reads it for the start and stop aim actions (`0xA40C20`, `0xA40C60`), and the
+  walk speed picks the `aim` / `crouch_aim` speeds by it. It is the state, not the input: hold and toggle aim alike.
+  Seen right in play, also through quick on and off.
+- **Network fields:** a magazine's rounds are 11 bits (2047), spare magazines (`magazines_remaining`) 5 bits (31).
+- **ProjectileWeapon.fire_rate has three slots** (the weapon menu's choices), the middle the default the gun spawns with.
+- **A weapon spawned straight from its entity builds no attachments** (its scope draws the missing-model mark): the
+  pickup spawn (`0x9A6630`) hands its spawn record (+0x50) the attachments' list `0x74B010(NULL, resource)` builds, and
+  so must a mod's spawn (kitbase `SpawnAt`).
+- **The warp setter (`0x5A2BB0`) crashes on a weapon.**

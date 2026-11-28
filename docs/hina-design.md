@@ -1,8 +1,8 @@
 # Hina: the Gehenna Prefect's machine gun (design)
 
 Sorasaki Hina of Blue Archive (Gehenna Academy, head of the Prefect Team; her MG, The End: Destroyer). Her
-identity here (Yui, 2026-11-27): put as many rounds down range as possible, as efficiently as possible. Built as
-`mods/hina` 0.1.2 on branch `hina-kit`; not played yet (its first start, 2026-11-27, logged below).
+identity here (Yui, 2026-11-27): put as many rounds down range as possible, as efficiently as possible. First released as
+`mods/hina` 0.1.4 (2026-11-28), played by Yui on HellForge 0.5.
 
 ## Her kit in Blue Archive
 
@@ -16,49 +16,55 @@ identity here (Yui, 2026-11-27): put as many rounds down range as possible, as e
 Blue Archive has one active skill (the EX); the rest are passives. Yui kept the three passives as passives and gave her
 two actives of her own (Z, X), with the EX on C.
 
-## In Helldivers
+## In Helldivers (0.1.4, as released)
 
 All numbers are settings (her page on the options screen, F9, and `hina.ini`).
 
 ### Z: The End: Destroyer
 
-- Her gun in her hands, the way W's King of Hearts gives the GL-21 (the Wield Probe's swap): a copy of the **M-1000
-  Maxigun**, or of the **MG-43 Machine Gun** for a profile without the Maxigun's warbond (Voymastina's premium
-  fallback; the game's own catalogue says whether this profile owns the Maxigun). `gun_base` 1: always the MG-43.
-- **The Maxigun's copy comes with its backpack** (0.1.1). The game's Maxigun has no magazine: it draws its rounds from
-  the Maxigun Backpack it is linked to. So a copy of the backpack, linked to her gun and holding 6000 rounds, goes on
-  her back first (the inventory's take, slot 6: the backpack's), then the gun into her hands. Her own backpack comes
-  back afterwards, a new one of its kind, as her support weapon does. The MG-43's copy needs none.
-- **6000 rounds, 6000 rounds a minute, armour penetration 5** (the Veterancy System's Gatling upgrade numbers).
-- Her gun, its round and its damage are copies of her own (kit base principle 6): an entity copy of the gun (no armory
-  entry, nothing in anyone's loadout), a copy of its round dealing a copy of its damage type with armour penetration 5.
+- Her gun in her hands, the way W's King of Hearts gives the GL-21 (the Wield Probe's swap). **An MG-43 copy by
+  default** (her MG42: Yui, 2026-11-28); a copy of the **M-1000 Maxigun** as an option for a profile that owns it
+  (`gun_base` 0; it comes with a copy of its backpack, which holds its rounds).
+- **1200 rounds at 1200 rounds a minute** (a minute's fire), **armour penetration 5**, **durable damage 53** (the
+  MG-43's own 23 felt terrible: Yui). Her passive's 14% on the rate.
+- **Belts:** a 250-round box by default, or a 50-round drum (`gun_drum`) with +30 ergonomics, the Liberator's drum
+  model, reloads on the move and the Liberator Concussive's reload animation. Her rounds are the belt in the gun and
+  spare belts (the game's own reloads; 31 spares at most, the network field's 5 bits).
+- **Scope** (`gun_optic`): the 1.5x red dot (the MG-43's own), the 4x Combat Scope or the 10x Sniper Scope.
+- **Fire rates in the weapon menu:** the MG-43's own 630 and 900 around hers (1200, the default), each with her
+  passive's share. The game has three slots only.
 - **It goes like W's launcher:** she switches to her primary or secondary (0.5 s), drops it, spends its rounds, or
-  presses Z again. A stratagem or a grenade in her hands is not a switch (Yui). Her own weapon comes back; a support
-  weapon she carried is replaced by a new one of its kind, refilled.
-- **Cooldown 30 s from when the gun is gone** (W's).
-- **Her shield while she holds it:** 3000 (Alva's shield pool, `kb_allies.h`), refilled to 3000 every 5 minutes, never
-  above 3000. Once the gun is gone the shield **drains** (100 a second) until the next refill, so switching off doesn't
-  punish her at once (Yui). A new life brings a full shield with her next gun.
+  presses Z again. A stratagem or a grenade in her hands is not a switch. Her old support weapon is dropped where her
+  gun fell (by a SEAF trooper's hands, spawned out of sight and removed); a weapon she picked up stays in her hands.
+- **Cooldown 30 s from when the gun is gone.**
+- **Her shield while she holds it:** 3000, refilled every 5 minutes, draining 100 a second once the gun is gone.
 
 ### X: Reload and Destroy
 
-- The gun in her hands refilled in full (magazine and spares), whatever gun it is.
-- On her own gun also **+80 ergonomics and no recoil**: weapon handling is read when a weapon is built, so a new gun
-  with them, full, takes the place of the one in her hands (a short put-away and draw), and keeps them until it goes.
+- The gun in her hands refilled in full (magazine and spares), whatever gun it is: in place when the kit can fill its
+  magazine, else a fresh gun of its kind, full, takes its place.
+- On her own gun also **+80 ergonomics and no recoil** (a new gun with the handling, full).
 - Cooldown 20 s.
 
 ### C: Ishbosheth (her EX)
 
-- Readied by the key; **her next trigger pull** (any gun) sets it off.
-- Every enemy within 30 degrees of her aim (each side) out to 40 m (the 12 nearest) takes a round dealing **6.36 times**
-  her gun's round (636%); 16 rounds of her gun sweep the fan. Koleda's Full Speed cone, from her trigger.
-- Cooldown 30 s from when it goes off.
+- Readied by the key; **her next shot** (any gun) sets it off: a **10 s barrage** that fires only while she is firing
+  (Blue Archive's Hina cannot move during it; the timer runs regardless).
+- Every 0.1 s a volley of tracers across the fan, **2 in each of its 3 sections** (two outer, one inner), slowed to
+  200 m/s so the trails are seen: each deals her gun's round (90, AP 5).
+- Every 0.5 s the 12 nearest enemies in the fan out to 40 m each take a tracer dealing **6.36 times** her gun's round
+  (572 / 337 durable, AP 5).
+- The fan is 30 degrees each side of her aim, **10 while she aims down her sights** (the game's own aim state: hold or
+  toggle).
+- Cooldown 30 s from its end.
 
 ### Passives
 
-- **Lock & Load:** a magazine she empties reloads at once (no spare used; not her own gun, whose rounds are its whole
-  supply), and her shots deal 21% more for 16 s.
-- **Prefect Team Member Judgment:** her own gun fires 14% faster (on top of its 6000).
+- **Lock & Load:** a magazine she empties reloads at once (no spare used) and her shots deal 21% more for 16 s.
+  **Once each 60 s for each gun** (by its kind). Magazine guns, guns loaded by rounds (the Sweeper) and her MG-43 copy
+  (its belt; her round count unchanged); not weapons of one or two rounds (a launcher), not the Maxigun copy (fed by
+  its backpack: the buff only). A gun's time is spent only when the reload lands.
+- **Prefect Team Member Judgment:** her own gun fires 14% faster.
 - **Out-and-Out:** her shots deal 2.7% more while she is crouched or prone (her head lower than 1.2 m over her feet; the
   game has no "in cover" to read).
 
@@ -74,6 +80,8 @@ rounds or damage types is changed.
 | The fan of fire | Koleda's Full Speed cone |
 | The premium fallback | Voymastina |
 | Her copies' numbers | the Veterancy System's Gatling (AP and fire rate edits on rows of its own) |
+| Ishbosheth's tracers | Koleda's Full Speed tracers (copies of the APW-1's round, slowed) |
+| Her old weapon dropped | the Escort Probe's SEAF trooper as a hand |
 | Options screen, HUD, keys, roster | every kit |
 
 ## Research
@@ -114,8 +122,23 @@ rounds or damage types is changed.
 - Maxi Mag Probe: try A refused (no network type for that set of parts); try B registered, with a magazine of its own
   (6000 set) firing the Maxigun's round at 1500 rpm.
 
-## Open (to check in play)
+## From play (0.1.3 to 0.1.4, 2026-11-28)
 
-- Whether her gun fires from her backpack copy (the game may pair a backpack with its weapon by kind: the kit points
-  each copy at the other, and logs what it found).
-- Whether the HUD reads the backpack's rounds (the deposit manager's live amount).
+The game's code notes (addresses, layouts) are in [research/game-notes.md](research/game-notes.md#weapons-magazines-rounds-and-aim-build-25480438).
+
+- **Her avatar comes from her weapon events:** the player spawn event fires only on the ship, so the kit learns her
+  avatar from the first weapon event that names her, and her network id from the player list.
+- **A magazine's rounds are an 11-bit network field (2047 at most), spare magazines 5 bits (31):** her rounds as belts
+  (gun_rounds = her rate) fit, where 6000 in one magazine did not.
+- **AddMagazineRounds crashes on a weapon not in its map** (the Sweeper): the kit looks first. Guns loaded by rounds keep
+  theirs in another manager, filled by the game's own set-loaded-rounds.
+- **A gun spawned straight from its entity builds no attachments:** its scope drew the missing-model mark until the
+  spawn was handed the attachments' list the game's pickup spawn builds.
+- **The MG-43's round copy:** the round it fires is its record's 148, not the pattern's.
+- **HellForge 0.5 moved the catalogue's fields,** so its HasCatalogueItem is refused; the kit's own copy reads
+  ownership by the item's mixId (by itemId the Maxigun reads 0).
+- **The warp setter (0x5A2BB0) crashes on a weapon;** a SEAF trooper's hands drop one instead: take it into its slot 3,
+  drop it, clear the slot's entry, remove the trooper the next frame (without the clear, the trooper takes the gun
+  with it).
+- **Bug found in play:** a clear meant for the mission's start sat in X's fresh-gun step, so every X reset the reload
+  passive's per-gun times.
