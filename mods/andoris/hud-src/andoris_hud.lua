@@ -27,7 +27,7 @@ end
 
 local ffi = require('ffi')
 pcall(ffi.cdef, [[
-typedef struct andhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t armed, charged, dull, dull_max, repair; float repair_in; uint32_t keys[3]; char key_label[3][24]; } andhud1_state;
+typedef struct andhud1_state { uint32_t version, in_mission; float cd[3], cd_max[3]; uint32_t armed, charged, dull, dull_max, repair; float repair_in; uint32_t keys[3]; char key_label[3][24]; uint32_t bugs; } andhud1_state;
 void *andhud1_GetModuleHandleA(const char *name) __asm__("GetModuleHandleA");
 void *andhud1_GetProcAddress(void *module, const char *name) __asm__("GetProcAddress");
 ]])
@@ -370,7 +370,7 @@ local function ability(d, i, x, y, size, alpha)
     local ready = left <= 0.05
     local passive = false
     local on = i == 1 and state.armed ~= 0
-    local later = i ~= 1   -- (0.1.0: her stick bugs and her ultimate are not in this build)
+    local later = i == 3   -- (0.2.0: her ultimate is not in this build)
     local a = alpha
     -- the icon's tile, framed like a stratagem's
     local t = math.max(1, 2 * s)
@@ -446,6 +446,7 @@ local function status_bar(d)
     local r = tonumber(state.repair)
     if r == 2 then bits[#bits + 1] = 'SELF-REPAIR READY'
     elseif r == 1 then bits[#bits + 1] = ('SELF-REPAIR %.0fs'):format(math.ceil(tonumber(state.repair_in))) end
+    if tonumber(state.bugs) > 0 then bits[#bits + 1] = ('STICK BUGS %d'):format(tonumber(state.bugs)) end
     if tonumber(state.charged) > 0 then bits[#bits + 1] = ('ELECTROCHARGED %d'):format(tonumber(state.charged)) end
     if #bits > 0 then heavy(d, table.concat(bits, '   '), cx, y - 6 * s, 20 * s, 'title', rgba(YELLOW, 1), 'center') end
 end
@@ -467,6 +468,11 @@ local OPTIONS = {
     {'dull_max', 'slider', 'Dullness: Most Stacks', 0, 20, 1, 'Stacks of Dullness at most (a stack for each hit on her).', true},
     {'dull_per', 'slider', 'Dullness: Per Stack', 0, 0.1, 0.005, 'Less damage taken per stack (0.03: 3%).'},
     {'hurt_heal', 'slider', 'Taking Damage Heals', 0, 0.3, 0.01, 'Health back after a hit on her, at most once a second (0.05: 5%).'},
+    {'to_cooldown', 'slider', 'Tender Offensive: Cooldown', 0, 120, 1, 'Seconds from a stick bug until the next can be called.', true},
+    {'to_max', 'slider', 'Tender Offensive: Most Stick Bugs', 1, 3, 1, 'Stick bugs out at most (one more takes the oldest away).'},
+    {'to_refund', 'slider', 'Tender Offensive: Cut When Destroyed', 0, 60, 1, 'Seconds off the cooldown when a stick bug is destroyed.'},
+    {'bug_health', 'slider', 'Stick Bug: Health', 50, 5000, 50, 'A stick bug\'s health. After a restart of the game.', true},
+    {'ms_mult', 'slider', 'Momentum Support: Damage', 0, 3, 0.05, 'Each stick bug near the enemy adds this share of her Electric shot (1: 100%).'},
     {'hp_mult', 'slider', 'Body: Health', 1, 5, 0.1, 'Times a Helldiver\'s health (the T-Doll\'s body). From the next mission.', true},
     {'stamina_mult', 'slider', 'Body: Stamina', 1, 10, 0.5, 'Times her sprint before the bar empties.'},
     {'hellbomb_on_exhaustion', 'toggle', 'Body: Hellbomb When Exhausted', nil, nil, nil, 'Running her stamina dry sets off a Hellbomb on her. For fun.'},

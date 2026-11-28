@@ -2,9 +2,10 @@
 
 Andoris is the Assault Rifle Doll of Girls' Frontline 2: Exilium, a Bulwark: she takes the hits, mends herself and
 her side, and sets enemies up for Electric damage. Her stick bugs, the Self-Patrolling Turrets, stand with her. This
-is her design. Built so far: `mods/andoris` 0.1.0 on branch `andoris-kit` (2026-11-29, untested): Simplified Decision
-(Z), Electrocharge and its spread, Delayed Response (Self-Repair, Dullness, taking damage heals) and the T-Doll body;
-her stick bugs (X) and Reinforced Program (C) next. Source for her GFL2 kit: https://www.prydwen.gg/gfl-exilium/characters/andoris
+is her design. Built so far, on branch `andoris-kit`: `mods/andoris` 0.1.0 (2026-11-29): Simplified Decision (Z),
+Electrocharge and its spread, Delayed Response (Self-Repair, Dullness, taking damage heals) and the T-Doll body; **Z
+played** (9 Electric shots, each with its arc and Electrocharge). 0.2.0 (untested): Tender Offensive (X), her stick
+bugs, with Momentum Support and Negative Charge. Reinforced Program (C) next. Source for her GFL2 kit: https://www.prydwen.gg/gfl-exilium/characters/andoris
 (the site's own unofficial translation of the CN kit, at V6).
 
 Decided (Yui, 2026-11-26):
@@ -57,7 +58,7 @@ Z, X, C.
 
 ### Z: Simplified Decision
 
-Her next shot, from any weapon, is an Electric shot: 110% of its damage as Electric, an arc on the hit (Leva's), and
+Her next shot, from any weapon, is an Electric shot: **+110%** of its damage (x2.1; Yui kept it after play, 2026-11-29), an arc on the hit (Leva's), and
 **Electrocharge** on the enemy for 10 s: what she deals to it heals her by 20%, it takes 15% more from her Electric
 hits, and every 5 s it spreads to the enemies within 3 m. Cooldown 6 s.
 
@@ -78,6 +79,10 @@ A stick bug: one more of her companions, placed where she aims (6 m at most) or 
   30% of it (a chain arc to each, Leva's). Reapplied, it stays.
 - **Destroyed:** the cooldown of Tender Offensive is cut by 10 s (GFL2's +1 Confectance).
 - Cooldown 20 s; a call during the cooldown says how long is left.
+- As built (0.2.0): HellForge has no call that deals damage, so Momentum Support adds its 100% to her Electric shot itself
+  (one share per stick bug within 25 m) with one arc on the enemy, and Negative Charge's 30% is an arc (the G-31's) on
+  each other Negative-Charged enemy. Drawing fire is the Escort Probe's taunt, every 3 s, on the enemies targeting her
+  within 40 m of a stick bug. Its weak gun is the trooper's own rifle.
 
 ### C: Reinforced Program (ultimate)
 

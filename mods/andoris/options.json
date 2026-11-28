@@ -1,11 +1,105 @@
 {
  "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
  "advanced": [
-  ["ec_spread", "Electrocharge", "Spread Interval", "Seconds between its spreads to the enemies beside it.", {"step": 0.5}],
-  ["dull_decay", "Dullness", "Stack Lost After", "Seconds without a hit before a stack is lost.", {"step": 0.5}],
-  ["hurt_every", "Taking Damage Heals", "At Most Every", "Seconds between its heals at the most.", {"step": 0.1}],
-  ["arc_explosion", "Simplified Decision", "Arc Explosion", "The explosion row its arc is (157: the G-31 Arc grenade's; 0: none)."]
+  [
+   "ec_spread",
+   "Electrocharge",
+   "Spread Interval",
+   "Seconds between its spreads to the enemies beside it.",
+   {
+    "step": 0.5
+   }
+  ],
+  [
+   "dull_decay",
+   "Dullness",
+   "Stack Lost After",
+   "Seconds without a hit before a stack is lost.",
+   {
+    "step": 0.5
+   }
+  ],
+  [
+   "hurt_every",
+   "Taking Damage Heals",
+   "At Most Every",
+   "Seconds between its heals at the most.",
+   {
+    "step": 0.1
+   }
+  ],
+  [
+   "arc_explosion",
+   "Simplified Decision",
+   "Arc Explosion",
+   "The explosion row its arc is (157: the G-31 Arc grenade's; 0: none)."
+  ],
+  [
+   "bug_armour",
+   "Stick Bug",
+   "Armour",
+   "Its armour (4: a sentry's). After a restart of the game."
+  ],
+  [
+   "bug_follow",
+   "Stick Bug",
+   "Follows Past",
+   "Metres from her before it is sent back to her side.",
+   {
+    "step": 0.5
+   }
+  ],
+  [
+   "taunt_every",
+   "Stick Bug",
+   "Draws Fire Every",
+   "Seconds between its pulls on the enemies targeting her (0: never).",
+   {
+    "step": 0.5
+   }
+  ],
+  [
+   "taunt_radius",
+   "Stick Bug",
+   "Draws Fire Within",
+   "Metres around a stick bug that its pull reaches.",
+   {
+    "step": 1
+   }
+  ],
+  [
+   "ms_range",
+   "Momentum Support",
+   "Range",
+   "Metres from the enemy a stick bug strikes from.",
+   {
+    "step": 1
+   }
+  ],
+  [
+   "nc_seconds",
+   "Negative Charge",
+   "Time",
+   "Seconds an enemy stays Negative-Charged.",
+   {
+    "step": 1
+   }
+  ],
+  [
+   "nc_arcs",
+   "Negative Charge",
+   "Arcs",
+   "Her Electric shot on a Negative-Charged enemy arcs to every other one."
+  ]
  ],
- "hidden": ["hellbomb_explosion", "hellbomb_hold", "options_key"],
- "when": {"hp_mult": "mission"}
+ "hidden": [
+  "hellbomb_explosion",
+  "hellbomb_hold",
+  "options_key"
+ ],
+ "when": {
+  "hp_mult": "mission",
+  "bug_health": "restart",
+  "bug_armour": "restart"
+ }
 }

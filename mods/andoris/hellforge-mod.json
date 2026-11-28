@@ -2,9 +2,9 @@
   "format": 1,
   "id": "yui.andoris",
   "name": "Andoris",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "icon": "icon.png",
-  "description": "Andoris's kit from Girls' Frontline 2 for your Helldiver: a Bulwark who takes the hits, mends herself and sets enemies up for Electric damage. Simplified Decision (Z): her next shot is an Electric shot, +110% damage and an arc on the hit, and Electrocharges the enemy (her hits on it heal her and deal more; it spreads to enemies beside it). Delayed Response (passive): once a life a hit that would kill her is cancelled and she is mended; each hit on her makes her duller (less damage taken, up to 24%); taking damage heals her a little. T-Doll body: more health and stamina, and a Hellbomb if her stamina runs dry. Her stick bugs (X) and Reinforced Program (C) are not in this build yet. Solo or host. Pick Andoris in the character picker on the options screen (F9). Her HUD needs Bingus Shared Loader and HD2Runtime. No character model included.",
+  "description": "Andoris's kit from Girls' Frontline 2 for your Helldiver: a Bulwark who takes the hits, mends herself and sets enemies up for Electric damage. Simplified Decision (Z): her next shot is an Electric shot, +110% damage and an arc on the hit, and Electrocharges the enemy (her hits on it heal her and deal more; it spreads to enemies beside it). Delayed Response (passive): once a life a hit that would kill her is cancelled and she is mended; each hit on her makes her duller (less damage taken, up to 24%); taking damage heals her a little. T-Doll body: more health and stamina, and a Hellbomb if her stamina runs dry. Tender Offensive (X): a stick bug beside her (3 at most) that walks with her, draws the enemies on her and takes their fire; it can't hurt her; her Electric shot hits harder for each one near the enemy and puts Negative Charge on it, and her Electric shot on a Negative-Charged enemy arcs to the others. Reinforced Program (C) is not in this build yet. Solo or host. Pick Andoris in the character picker on the options screen (F9). Her HUD needs Bingus Shared Loader and HD2Runtime. No character model included.",
   "gameplay": true,
   "code": {
     "dll": "andoris.dll",
