@@ -110,8 +110,11 @@ As every GFL2 kit: more health and stamina; stamina run to 0 sets off a Hellbomb
      also on the comm wheel's orders (0.2.2). 0.4.0 made the stick bug its own trooper copy (600 health, armour 4).
    - **SEAF can hurt the player** (Yui). The kit cancels any hit dealt by one of her stick bugs that lands on her,
      before it lands (`kb_guard.h`'s cancel, the hit's dealer or owner one of her bugs' network ids).
-   - Open, Escort Probe 0.10.0 (installed, not yet played): the hits a stick bug deals (one on her cancelled and
-     flagged), how many enemies target each stick bug and her every 2 s, and the stick bug copy in a mission.
+   - **Played (Escort Probe 0.10.3, 2026-11-29): the guard works.** Its bullets (4 hits, 61 to 64 damage) and HE
+     grenades (3 hits, 45, 58 and 250) landed on her and every one was cancelled before it landed; its 127 hits on
+     enemies went through. A stick bug's hit is known by the hit's dealer or owner network id turned into its entity
+     (HellForge's entity_of_network): the spawn event gives the id asked for (0x7FFF, "no one"), which environmental
+     damage (a fire tornado) also carries, so it must never be matched.
 2. **Her stick bug model on that unit.** How a custom model reaches the game through HellForge (archive, materials,
    the unit it replaces) isn't known yet: tried with a plain cube before the real model.
 3. **Drawing fire to a stick bug.** First whether enemies shoot SEAF by themselves (they do in the game). If not
