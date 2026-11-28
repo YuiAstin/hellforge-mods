@@ -43,6 +43,12 @@ KB_VAR KbTakeFn g_wieldTake;
 KB_VAR KbDropFn g_wieldDrop;
 KB_VAR KbRequestFn g_wieldRequest;
 KB_VAR uint8_t g_wieldContext[0x8A0];
+/* a weapon's attachments for its spawn (game.dll+0x74B010: (unused, entity resource) -> a game-allocated list, a count
+ * and up to 10 units, of its customization's default attachments' models; NULL for none). The game's own pickup spawn
+ * (0x9A6630) puts it in the spawn record's +0x50; without it a spawned gun has no scope (Hina's MG-43, the Escort
+ * Probe's: no scope, as a stratagem's MG-43 has) */
+typedef void* (*KbAttachListFn)(void* unused, uint64_t res);
+KB_VAR KbAttachListFn g_wieldAttach;
 
 KB_FN int WieldPin(void** slot, uintptr_t at, const char* pattern, const char* what)
 {
@@ -54,6 +60,9 @@ KB_FN int WieldPins(void)
 {
     int ok = WieldPin((void**)&g_wieldTake, game + 0x9AE030, "40 53 55 41 55 48 83 ec 40 48 89 7c 24 68 41 8b e8 4c 89 64 24 70 8b da", "the inventory's pickup (0x9AE030)");
     ok &= WieldPin((void**)&g_wieldDrop, game + 0x9A8840, "40 53 56 41 56 48 81 ec a0 00 00 00 48 8b 05 bd 37 c9 01 48 33 c4 48 89", "the inventory's drop (0x9A8840)");
+    if (hf->code_matches(game + 0x74B010, "48 89 5c 24 08 57 48 81 ec 80 00 00 00 48 8b 05 ?? ?? ?? ?? 48 33 c4 48 89 44 24 70 48 8b da"))
+        g_wieldAttach = (KbAttachListFn)(game + 0x74B010);
+    else Log("the attachments' list (0x74B010) is not the reviewed code: spawned guns come without their attachments");
     ok &= WieldPin((void**)&g_wieldRequest, game + 0xA93430, "48 89 5c 24 18 48 89 6c 24 20 56 57 41 54 41 56 41 57 48 83 ec 50 48 8b 05 c3", "the Helldiver's switch request (0xA93430)");
     return ok;
 }
@@ -112,6 +121,11 @@ KB_FN uint32_t SpawnAt(uint64_t res, const float at[3], const char* what)
     info.pose[0] = info.pose[5] = info.pose[10] = info.pose[15] = 1.0f;
     info.pose[12] = p[0]; info.pose[13] = p[1]; info.pose[14] = p[2] + 1.0f;
     info.context = g_wieldContext;
+    {
+        uint32_t stride = 0;
+        if (g_wieldAttach && hf->component_record("WeaponCustomizationComponentData", res, &stride))
+            info.pad = (uint64_t)(uintptr_t)g_wieldAttach(NULL, res);   /* +0x50: its attachments (the pickup spawn's way) */
+    }
     spawn(&out, res, &info);
     if (!out || out == UINT32_MAX) { Log("%s: no entity came back", what); return 0; }
     return out;

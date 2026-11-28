@@ -401,9 +401,9 @@ static void GunOptic(void)
     if (!g_opticItem[0] && !g_opticItem[1] && !g_opticItem[2]) OpticItems();
     if (g_opticItem[o])
     {
-        /* the scope as her copy's default optic attachment, and its unit as the one drawn without an attachment (a gun
-         * spawned directly builds no attachment: the Escort Probe's MG-43 had no scope either; the drum shows this way) */
-        hf->set_live(self, res, &fu, &vu, 0);
+        /* the scope as her copy's default optic attachment, built on her gun at its spawn: SpawnNear hands the game the
+         * attachments' list as its pickup spawn does (kb_wield.h, game.dll+0x74B010); no bare optic unit */
+        hf->set_live(self, res, &fu, NULL, 0);
         for (int k = 0; k < 20; k += 2)
         {
             HfField fa = HF_FIELD_AT(WeaponCustomization, defaults, k), fb = HF_FIELD_AT(WeaponCustomization, defaults, k + 1);
