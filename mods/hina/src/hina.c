@@ -160,7 +160,7 @@ static const uint32_t kBaseDamage[2] = {HF_DAMAGE_M1000_MAXIGUN, HF_DAMAGE_EXO45
 static const char* const kBaseName[2] = {"M-1000 Maxigun", "MG-43 Machine Gun"};
 static uint32_t g_round[2], g_damage[2], g_ishRound[2], g_ishDamage[2];
 #define TRACER_ROUND 226u                /* the APW-1 Anti-Materiel Rifle's round: a bright trail (Koleda's tracers) */
-static uint32_t g_tracer[2][2];         /* Ishbosheth's tracers by gun copy: [0] on targets, [1] the sweep (both x ish_mult) */
+static uint32_t g_tracer[2][2];         /* Ishbosheth's tracers by gun copy: [0] on targets (x ish_mult), [1] the sweep (her gun's) */
 static uint64_t g_gunRes[2];
 static uint64_t g_bpRes;               /* her gun's backpack: a copy of the Maxigun Backpack, linked to the Maxigun's copy */
 static int g_rowsReady, g_entsReady;
@@ -1897,7 +1897,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         {
             static const char* const tn[2][2] = {{"yui/hina/ishbosheth_tracer_maxigun", "yui/hina/sweep_tracer_maxigun"},
                                                  {"yui/hina/ishbosheth_tracer_mg43", "yui/hina/sweep_tracer_mg43"}};
-            uint32_t dmgs[2] = {g_ishDamage[i], g_ishDamage[i]};   /* (the sweep's too: every round of the barrage x ish_mult) */
+            uint32_t dmgs[2] = {g_ishDamage[i], g_damage[i]};   /* (Yui: the sweep's tracers her gun's own damage, 90 on the MG-43) */
             for (int t = 0; t < 2; t++)
             {
                 if (!dmgs[t]) continue;
