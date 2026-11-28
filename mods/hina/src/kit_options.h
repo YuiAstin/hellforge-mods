@@ -33,7 +33,7 @@ static const OpRow kOpRows[] = {
     {"ish_cone", "Ishbosheth", "Fan", OP_SLIDER, 5, 90, 1,
      "Degrees each side of her aim the fan reaches."},
     {"ish_aim_cone", "Ishbosheth", "Fan While Aiming", OP_SLIDER, 1, 90, 1,
-     "Degrees each side of her aim the fan reaches while she aims down her sights (right mouse button held)."},
+     "Degrees each side of her aim the fan reaches while she aims down her sights (hold or toggle)."},
     {"ish_range", "Ishbosheth", "Range", OP_FIELD, 5, 150, 1,
      "Metres the fan reaches."},
     {"reload_buff", "Passives", "Lock & Load Damage", OP_SLIDER, 0, 1, 0.01f,

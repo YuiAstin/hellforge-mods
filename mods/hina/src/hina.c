@@ -132,7 +132,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Reload and Destroy: cooldown; the gun in her hands refilled; her own gun also +ll_ergonomics and no recoil (ll_recoil 1).\n"
                "ll_cooldown = %g\nll_ergonomics = %g\nll_recoil = %d\n"
                "; Ishbosheth: cooldown (from its end); readied by its key, set off by her next shot: for ish_duration s, every\n"
-               "; ish_every s a volley across ish_cone degrees each side of her aim (ish_aim_cone while she aims: right mouse held), ish_per_section tracers in each of its three\n"
+               "; ish_every s a volley across ish_cone degrees each side of her aim (ish_aim_cone while she aims down her sights), ish_per_section tracers in each of its three\n"
                "; sections (two outer, one inner), at ish_speed m/s (0: the round's own; at most 80 tracers a second in all),\n"
                "; and every ish_tick s the ish_targets nearest enemies there out to ish_range m take a tracer each; every round of it\n"
                "; deals ish_mult times her gun's damage. It fires only while she holds the trigger. (ish_mult, ish_duration and\n"
@@ -1401,8 +1401,40 @@ static void Ishbosheth(void)
  * ish_tick s the ish_targets nearest enemies in the fan take a tracer each; every round of it ish_mult times her gun's
  * (it fires only while she holds the trigger). Tracers: copies of the APW-1's round (its bright trail), slowed to
  * ish_speed m/s so the trail is seen (Koleda's round_speed). Cooldown from its end. */
-/* the fan's half-angle now: tighter while she aims down her sights (the right mouse button held; a toggled aim is not seen) */
-static float IshCone(void) { return Focused() && (GetAsyncKeyState(VK_RBUTTON) & 0x8000) ? s_ishAimCone : s_ishCone; }
+/* 0.1.4 (Yui): whether she aims down her sights, the game's own state (hold or toggle alike): avatar state bit 82, bit 18
+ * of the AvatarManager's +0x53E888 + 0x1238 x her index, as game.dll 0xA40B50 (the aim check of the start and stop aim
+ * actions) reads it; her index from the manager's map (buckets +0xF8, size +0x100, empty key +0x104, multiplier +0x108).
+ * -1: not read (the right mouse button then) */
+static int Aiming(void)
+{
+    uint32_t me = atomic_load(&g_avatar);
+    uintptr_t m = Pointer(game + 0x3326D20u), buckets;
+    uint32_t size = 0, empty = 0, mult = 0, count = 0;
+    if (!me || !m || !ReadAt(m + 0x100, &size, 4) || !ReadAt(m + 0x104, &empty, 4) || !ReadAt(m + 0x108, &mult, 4) || !ReadAt(m + 0x70, &count, 4) ||
+        !size || (size & (size - 1)) || size > (1u << 16) || !(buckets = Pointer(m + 0xF8)))
+        return -1;
+    for (uint32_t k = 0; k < size; k++)
+    {
+        uint32_t e[2], bits = 0;
+        if (!ReadAt(buckets + 8ull * ((k + mult * me) & (size - 1)), e, 8)) return -1;
+        if (e[0] == me)
+        {
+            if (e[1] == UINT32_MAX || e[1] >= count || !ReadAt(m + 0x53E888 + 0x1238ull * e[1], &bits, 4)) return -1;
+            return (bits >> 18) & 1;
+        }
+        if (e[0] == empty) return -1;
+    }
+    return -1;
+}
+/* the fan's half-angle now: tighter while she aims down her sights */
+static float IshCone(void)
+{
+    static int was = -2;
+    int a = Aiming();
+    if (a != was) { static unsigned told; if (told++ < 12) Log("Ishbosheth: aiming %s", a < 0 ? "not read (the right mouse button instead)" : a ? "on" : "off"); was = a; }
+    if (a < 0) a = Focused() && (GetAsyncKeyState(VK_RBUTTON) & 0x8000);
+    return a ? s_ishAimCone : s_ishCone;
+}
 static int IshOrigin(float head[3], float fwd[3])
 {
     float cam[3], feet[3];
