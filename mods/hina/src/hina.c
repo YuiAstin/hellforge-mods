@@ -70,7 +70,9 @@ KB_ROSTER_EXPORTS(hina)
 KB_OPTIONS_EXPORTS(hina)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
-static int s_gunBase = 1, s_gunRounds = 6000, s_gunAp = 5;   /* 0.1.4 (Yui): the MG-43 by default; the Maxigun an option */
+static int s_gunBase = 1, s_gunRounds = 6000, s_gunAp = 5;
+static int s_gunDrum = 0, s_drumErgonomics = 30;   /* 0.1.4 (Yui): her MG-43's belt, a 250-round box (the MG-43's own way) or a 50-round drum, +30 ergonomics */   /* 0.1.4 (Yui): the MG-43 by default; the Maxigun an option */
+static int GunBelt(void) { return s_gunDrum ? 50 : 250; }
 static float s_gunRpm = 1200,   /* 0.1.4 (Yui): her MG42's rate (Blue Archive's Destroyer of Denouement is one) */
     s_gunCooldown = 30, s_gunGrace = 0.5f;
 static float s_shieldMax = 3000, s_shieldEvery = 300, s_shieldDecay = 100;
@@ -85,7 +87,7 @@ static float s_reloadBuff = 0.21f, s_reloadSeconds = 16, s_judgmentRate = 0.14f,
 static int s_optionsKey = 0x78;        /* options_key: the virtual key that opens the options screen (120: F9; 0: none) */
 
 static const KbSetting kSettings[] = {
-    KB_I("gun_base", s_gunBase, 0, 1), KB_I("gun_rounds", s_gunRounds, 1, 100000), KB_F("gun_rpm", s_gunRpm, 60, 12000), KB_I("gun_ap", s_gunAp, 0, 10),
+    KB_I("gun_base", s_gunBase, 0, 1), KB_I("gun_drum", s_gunDrum, 0, 1), KB_I("drum_ergonomics", s_drumErgonomics, 0, 200), KB_I("gun_rounds", s_gunRounds, 1, 100000), KB_F("gun_rpm", s_gunRpm, 60, 12000), KB_I("gun_ap", s_gunAp, 0, 10),
     KB_F("gun_cooldown", s_gunCooldown, 0, 600), KB_F("gun_grace", s_gunGrace, 0, 10),
     KB_F("shield_max", s_shieldMax, 0, 100000), KB_F("shield_every", s_shieldEvery, 1, 3600), KB_F("shield_decay", s_shieldDecay, 0, 100000),
     KB_F("ll_cooldown", s_llCooldown, 0, 600), KB_F("ll_ergonomics", s_llErgonomics, 0, 200), KB_I("ll_recoil", s_llRecoil, 0, 1),
@@ -105,8 +107,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Destroyer of Denouement: her gun in her hands, a copy of the MG-43 Machine Gun (gun_base 1) or of the M-1000\n"
                "; Maxigun (gun_base 0, when this profile owns it), with gun_rounds rounds, gun_rpm rounds a minute (her MG42's 1200)\n"
                "; and armour penetration gun_ap (5: tank). It goes when she is on her primary or secondary for gun_grace s, drops\n"
-               "; it or spends it; the cooldown starts then. Takes effect at the next start.\n"
-               "gun_base = %d\ngun_rounds = %d\ngun_rpm = %g\ngun_ap = %d\ngun_cooldown = %g\ngun_grace = %g\n"
+               "; it or spends it; the cooldown starts then. Takes effect at the next start. The MG-43's copy reloads from them a belt\n"
+               "; at a time: gun_drum 0 a 250-round box, 1 a 50-round drum with drum_ergonomics more ergonomics.\n"
+               "gun_base = %d\ngun_drum = %d\ndrum_ergonomics = %d\ngun_rounds = %d\ngun_rpm = %g\ngun_ap = %d\ngun_cooldown = %g\ngun_grace = %g\n"
                "; Her shield while she holds it: shield_max, refilled to shield_max every shield_every s; once the gun is gone it\n"
                "; drains shield_decay a second until the next refill.\n"
                "shield_max = %g\nshield_every = %g\nshield_decay = %g\n"
@@ -124,7 +127,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Out-and-Out: her shots deal oao_bonus more while her head is lower than oao_head m over her feet (crouched, prone).\n"
                "reload_free = %d\nreload_buff = %g\nreload_seconds = %g\njudgment_rate = %g\noao_bonus = %g\noao_head = %g\n"
                "; The options screen's key (120: F9; 0: none).\noptions_key = %d\n",
-            VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_gunBase, s_gunRounds, (double)s_gunRpm, s_gunAp, (double)s_gunCooldown,
+            VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_gunBase, s_gunDrum, s_drumErgonomics, s_gunRounds, (double)s_gunRpm, s_gunAp, (double)s_gunCooldown,
             (double)s_gunGrace, (double)s_shieldMax, (double)s_shieldEvery, (double)s_shieldDecay, (double)s_llCooldown, (double)s_llErgonomics,
             s_llRecoil, (double)s_ishCooldown, (double)s_ishMult, (double)s_ishCone, (double)s_ishRange, s_ishTargets, (double)s_ishDuration, (double)s_ishEvery, s_ishPerSection, (double)s_ishTick,
             (double)s_ishSpeed, s_reloadFree,
@@ -292,7 +295,7 @@ static void GunRecords(int i)
         }
     }
     HfField cap = HF_FIELD(WeaponMagazine, capacity);
-    HfValue vc = HF_U32(s_gunRounds);
+    HfValue vc = HF_U32(GunBelt());   /* 0.1.4: a belt (250 or 50), its rounds the kit's count (gun_rounds) */
     mag = hf->set_live(self, res, &cap, &vc, 0) != 0;
     for (int k = 0; k < 32 && g_round[i]; k++)
     {
@@ -311,6 +314,21 @@ static void GunRecords(int i)
         (unsigned long long)res, (double)rpm, rate, s_gunRounds, mag ? "set" : "REFUSED", g_round[i], proj == 2 ? "written" : proj ? "set" : "REFUSED", pat);
 }
 /* Lock & Load's handling on her gun's records (on: +ll_ergonomics, no recoil; off: back to its own) */
+static double DrumErg(void) { return g_use == 1 && s_gunDrum ? s_drumErgonomics : 0; }   /* (the MG-43's copy only) */
+/* the drum's ergonomics on her MG-43 copy (from the records' readiness, and again when Lock & Load's handling goes) */
+static void DrumHandling(void)
+{
+    HfField erg = HF_FIELD(WeaponData, ergonomics);
+    uint64_t res = g_gunRes[1];
+    if (!res) return;
+    if (!s_gunDrum || !s_drumErgonomics) { hf->set_live(self, res, &erg, NULL, 0); return; }
+    HfLiveValue e;
+    memset(&e, 0, sizeof e);
+    double base = hf->get_live(self, res, &erg, &e) ? e.base.number : 0;
+    HfValue v = HF_F32(base + s_drumErgonomics);
+    int ok = hf->set_live(self, res, &erg, &v, 0) != 0;
+    Log("her MG-43's drum: ergonomics %.0f -> %.0f (%s)", base, base + s_drumErgonomics, ok ? "set" : "refused");
+}
 static void Handling(int on)
 {
     uint64_t res = g_gunRes[g_use];
@@ -324,15 +342,16 @@ static void Handling(int on)
         HfLiveValue e;
         memset(&e, 0, sizeof e);
         double base = hf->get_live(self, res, &erg, &e) ? e.base.number : 0;
-        HfValue v = HF_F32(base + s_llErgonomics);
+        HfValue v = HF_F32(base + DrumErg() + s_llErgonomics);
         ok += hf->set_live(self, res, &erg, &v, 0) != 0;
         if (s_llRecoil) for (int k = 0; k < 6; k++) { HfValue z = HF_F32(0); ok += hf->set_live(self, res, &recoil[k], &z, 0) != 0; }
-        Log("Lock & Load: her gun's handling: ergonomics %.0f -> %.0f%s (%d fields set)", base, base + s_llErgonomics, s_llRecoil ? ", no recoil" : "", ok);
+        Log("Lock & Load: her gun's handling: ergonomics %.0f -> %.0f%s (%d fields set)", base + DrumErg(), base + DrumErg() + s_llErgonomics, s_llRecoil ? ", no recoil" : "", ok);
     }
     else
     {
         hf->set_live(self, res, &erg, NULL, 0);
         for (int k = 0; k < 6; k++) hf->set_live(self, res, &recoil[k], NULL, 0);
+        if (g_use == 1) DrumHandling();
         Log("her gun's handling back to its own");
     }
     g_tuned = on;
@@ -379,6 +398,7 @@ static void Link(void)
 static void EntitiesReady(HfMod* mod, HfEvent event, void* user)
 {
     for (int i = 0; i < 2; i++) GunRecords(i);
+    DrumHandling();
     Link();
     g_entsReady = 1;
 }
@@ -518,17 +538,20 @@ static int Pack(void) { return g_use == 0 && g_bpRes; }   /* her gun comes with 
 #define MAG_NET_MAX 2047
 static int g_pool = -1, g_lastMag = -1;
 static int GunRounds(uint32_t gl) { return Pack() ? DepositAmount(atomic_load(&g_bp)) : g_pool >= 0 ? g_pool : MagRounds(gl); }
+/* 0.1.4 (Yui): a belt at a time (250 or 50), reloaded the game's way; the spares kept stocked while the count lasts */
 static void PoolTop(uint32_t gl)
 {
     int m = MagRounds(gl);
     if (m < 0) return;
-    if (m < MAG_NET_MAX / 2 && g_pool > m)
-    {
-        int want = g_pool < MAG_NET_MAX ? g_pool : MAG_NET_MAX;
-        if (want > m) MagAdd(gl, want - m);
-        m = MagRounds(gl);
-    }
     g_lastMag = m;
+}
+static void PoolSpares(uint32_t gl)
+{
+    static double at;
+    HfFn_WeaponRefill refill = hf_fn_WeaponRefill(self);
+    if (g_now < at || !refill || g_pool <= 0) return;
+    at = g_now + 2;
+    refill(0, gl, 1.0f);
 }
 static void PoolFrame(uint32_t gl)
 {
@@ -537,14 +560,20 @@ static void PoolFrame(uint32_t gl)
     if (m < 0) return;
     if (g_lastMag >= 0 && m < g_lastMag && g_lastMag - m <= 64) { g_pool -= g_lastMag - m; if (g_pool < 0) g_pool = 0; }
     g_lastMag = m;
-    PoolTop(gl);
+    PoolSpares(gl);
 }
 static void GunFill(uint32_t gl)
 {
     if (Pack()) { DepositSet(atomic_load(&g_bp), s_gunRounds); return; }
     g_pool = s_gunRounds;
     g_lastMag = -1;
+    {
+        int have = MagRounds(gl), cap = MagCapacity(gl), want = cap > 0 ? cap : GunBelt();
+        if (want > g_pool) want = g_pool;
+        if (have >= 0 && have < want) MagAdd(gl, want - have);
+    }
     PoolTop(gl);
+
 }
 static void GunStart(void)
 {
@@ -1404,7 +1433,8 @@ static void Tick(HfMod* mod, float dt, void* user)
 /* ---- Mod Options Menu ------------------------------------------------------------------------------------------- */
 static const KbOption kOptions[] = {
     {"gun_rounds", NULL, &s_gunRounds}, {"gun_rpm", &s_gunRpm, NULL}, {"gun_ap", NULL, &s_gunAp}, {"gun_cooldown", &s_gunCooldown, NULL},
-    {"gun_grace", &s_gunGrace, NULL}, {"gun_base", NULL, &s_gunBase},
+    {"gun_grace", &s_gunGrace, NULL}, {"gun_base", NULL, &s_gunBase}, {"gun_drum", NULL, &s_gunDrum},
+    {"drum_ergonomics", NULL, &s_drumErgonomics},
     {"shield_max", &s_shieldMax, NULL}, {"shield_every", &s_shieldEvery, NULL}, {"shield_decay", &s_shieldDecay, NULL},
     {"ll_cooldown", &s_llCooldown, NULL}, {"ll_ergonomics", &s_llErgonomics, NULL}, {"ll_recoil", NULL, &s_llRecoil},
     {"ish_cooldown", &s_ishCooldown, NULL}, {"ish_mult", &s_ishMult, NULL}, {"ish_cone", &s_ishCone, NULL}, {"ish_range", &s_ishRange, NULL},

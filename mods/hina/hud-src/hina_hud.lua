@@ -458,6 +458,7 @@ local OPTIONS = {
     {'gun_ap', 'slider', 'Destroyer of Denouement: Armour Penetration', 1, 8, 1, 'Her gun\'s armour penetration (4 heavy, 5 tank, 6 anti-tank). From the next start.'},
     {'gun_cooldown', 'slider', 'Destroyer of Denouement: Cooldown', 0, 300, 1, 'Seconds after her gun is gone before it can be called again.', true},
     {'gun_base', 'choice', 'Destroyer of Denouement: Gun', {'Maxigun (if owned)', 'MG-43'}, nil, nil, 'Which gun hers is a copy of: the M-1000 Maxigun needs its warbond; the MG-43 is free.'},
+    {'gun_drum', 'choice', 'Destroyer of Denouement: Belt', {'Box (250)', 'Drum (50)'}, nil, nil, 'The MG-43 copy\'s belt: a 250-round box, or a 50-round drum that handles better (more ergonomics).'},
     {'shield_max', 'slider', 'Shield: Amount', 0, 10000, 50, 'Her shield while she holds her gun, and its cap.'},
     {'shield_every', 'slider', 'Shield: Refill Interval', 10, 1200, 10, 'Seconds between refills of her shield to its amount.'},
     {'shield_decay', 'slider', 'Shield: Drain Without The Gun', 0, 1000, 5, 'Shield lost a second once her gun is gone, until the next refill.'},
