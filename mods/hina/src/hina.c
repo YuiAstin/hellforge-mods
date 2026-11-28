@@ -25,7 +25,7 @@
  *     of the APW-1's round (Koleda's Full Speed tracers), slowed to ish_speed m/s. Cooldown
  *     ish_cooldown from its end.
  *   Lock & Load (passive, Blue Archive's Normal skill): a magazine she empties is reloaded at once (free: no spare
- *     used; not her own gun, whose rounds are its whole supply), and her shots deal reload_buff more for
+ *     used; her MG-43 copy too, its belt from no spare and its count unchanged; not the Maxigun copy, fed from its backpack), and her shots deal reload_buff more for
  *     reload_seconds s.
  *   Prefect Team Member Judgment (passive): her own gun fires judgment_rate faster (on top of gun_rpm).
  *   Out-and-Out (passive, her Sub skill): her shots deal oao_bonus more while she is crouched or prone (her head lower
@@ -137,7 +137,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; deals ish_mult times her gun's damage. It fires only while she holds the trigger. (ish_mult, ish_duration and\n"
                "; ish_tick take effect at the next start.)\n"
                "ish_cooldown = %g\nish_mult = %g\nish_cone = %g\nish_range = %g\nish_targets = %d\nish_duration = %g\nish_every = %g\nish_per_section = %d\nish_tick = %g\nish_speed = %g\n"
-               "; Passives. Lock & Load: an emptied magazine reloads at once (reload_free 1; not her own gun) and her shots deal\n"
+               "; Passives. Lock & Load: an emptied magazine reloads at once (reload_free 1; her MG-43 copy too, not the Maxigun copy) and her shots deal\n"
                "; reload_buff more for reload_seconds s; once each reload_cooldown s for each gun. Prefect Team Member\n"
                "; Judgment: her own gun fires judgment_rate faster.\n"
                "; Out-and-Out: her shots deal oao_bonus more while her head is lower than oao_head m over her feet (crouched, prone).\n"
@@ -1559,7 +1559,7 @@ static void ReloadLanded(uint32_t w, uint64_t res, int r)
     g_reloads++;
     if (s_reloadBuff > 0 && s_reloadSeconds > 0) g_buffUntil = g_now + s_reloadSeconds;
     if (g_llTold++ < 20) Log("Lock & Load (passive): gun %u (%016llx) emptied: %s; its next in %.0f s", w, (unsigned long long)res,
-                             r >= 0 ? "reloaded at once" : "her own gun: the buff only", (double)s_reloadCooldown);
+                             r >= 0 ? "reloaded at once" : "the Maxigun copy: the buff only", (double)s_reloadCooldown);
 }
 static void ReloadFrame(void)
 {
@@ -1578,6 +1578,13 @@ static void ReloadFrame(void)
     }
     /* 0.1.4: not a weapon of one or two rounds a magazine (played: a one-shot launcher reloaded free after every shot
      * and kept the buff's timer restarting) */
+    /* (Yui, played: no proc seen on the P-33; each weapon she draws logged with how its magazine reads, the first times) */
+    if (w && w != g_llHeld)
+    {
+        static unsigned drawn;
+        if (drawn++ < 30) Log("Lock & Load (passive): she holds gun %u (%016llx): %d rounds, capacity %d, %s", w, (unsigned long long)ResOf(w), r,
+                              MagCapacity(w), MagIn(w) ? "a magazine the kit can fill" : "not in the magazine map");
+    }
     if (w && w == g_llHeld && r == 0 && g_llRounds > 0 && w != g_llWait)
     {
         uint64_t res = ResOf(w);
@@ -1586,7 +1593,7 @@ static void ReloadFrame(void)
         if (!res) {}
         else if (cap >= 1 && cap < 3) {}
         else if (left > 0) { if (g_llTold++ < 20) Log("Lock & Load (passive): gun %u emptied: this gun's next in %.0f s", w, left); }
-        else if (w == gl || !s_reloadFree) ReloadLanded(w, res, -1);
+        else if ((w == gl && Pack()) || !s_reloadFree) ReloadLanded(w, res, -1);   /* (the Maxigun copy feeds from its backpack) */
         else if (cap < 0) { if (g_llTold++ < 20) Log("Lock & Load (passive): gun %u (%016llx) emptied: its magazine is not one the kit can fill (time not spent)", w, (unsigned long long)res); }
         else { MagAdd(w, cap); g_llWait = w; g_llWaitUntil = g_now + 0.5; }
     }
