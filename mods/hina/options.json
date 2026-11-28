@@ -14,6 +14,6 @@
   ["reload_cooldown", "Passives", "Instant Reload Cooldown", "Seconds before the reload passive works again for the same gun.", {"step": 5}],
   ["oao_head", "Passives", "Out-and-Out Height", "Metres: her head lower than this over her feet counts as crouched or prone.", {"step": 0.05}]
  ],
- "when": {"gun_ap": "restart", "ish_mult": "restart", "ish_duration": "restart", "ish_tick": "restart", "ish_speed": "restart"},
+ "when": {"gun_ap": "restart", "gun_durable": "restart", "ish_mult": "restart", "ish_duration": "restart", "ish_tick": "restart", "ish_speed": "restart"},
  "hidden": ["options_key"]
 }

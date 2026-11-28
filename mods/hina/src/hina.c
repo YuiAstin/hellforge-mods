@@ -70,7 +70,7 @@ KB_ROSTER_EXPORTS(hina)
 KB_OPTIONS_EXPORTS(hina)
 
 /* ---- settings ------------------------------------------------------------------------------------------------- */
-static int s_gunBase = 1, s_gunRounds = 1200, s_gunAp = 5;   /* (Yui: as many rounds as her rate: a minute's fire) */
+static int s_gunBase = 1, s_gunRounds = 1200, s_gunAp = 5, s_gunDurable = 53;   /* (Yui: rounds as many as her rate; durable 53, the MG-43's 23 felt terrible) */
 static int s_gunDrum = 0, s_drumErgonomics = 30;
 static float s_drumReload = 0;   /* the drum's reload this much faster (Yui: the Concussive's animation is quick already; 0.4 an option); on the move always */
 /* 0.1.4 (Yui): her MG-43 copy's scope: 0 the 1.5x red dot (the MG-43's own, the wiki's; the game's "Support Scope"
@@ -101,7 +101,7 @@ static float s_reloadBuff = 0.21f, s_reloadSeconds = 16, s_judgmentRate = 0.14f,
 static int s_optionsKey = 0x78;        /* options_key: the virtual key that opens the options screen (120: F9; 0: none) */
 
 static const KbSetting kSettings[] = {
-    KB_I("gun_base", s_gunBase, 0, 1), KB_I("gun_drum", s_gunDrum, 0, 1), KB_I("gun_optic", s_gunOptic, 0, 2), KB_I("drum_ergonomics", s_drumErgonomics, 0, 200), KB_F("drum_reload", s_drumReload, 0, 0.9), KB_I("gun_rounds", s_gunRounds, 1, 100000), KB_F("gun_rpm", s_gunRpm, 60, 12000), KB_I("gun_ap", s_gunAp, 0, 10),
+    KB_I("gun_base", s_gunBase, 0, 1), KB_I("gun_drum", s_gunDrum, 0, 1), KB_I("gun_optic", s_gunOptic, 0, 2), KB_I("drum_ergonomics", s_drumErgonomics, 0, 200), KB_F("drum_reload", s_drumReload, 0, 0.9), KB_I("gun_rounds", s_gunRounds, 1, 100000), KB_F("gun_rpm", s_gunRpm, 60, 12000), KB_I("gun_ap", s_gunAp, 0, 10), KB_I("gun_durable", s_gunDurable, 0, 5000),
     KB_F("gun_cooldown", s_gunCooldown, 0, 600), KB_F("gun_grace", s_gunGrace, 0, 10),
     KB_F("shield_max", s_shieldMax, 0, 100000), KB_F("shield_every", s_shieldEvery, 1, 3600), KB_F("shield_decay", s_shieldDecay, 0, 100000),
     KB_F("ll_cooldown", s_llCooldown, 0, 600), KB_F("ll_ergonomics", s_llErgonomics, 0, 200), KB_I("ll_recoil", s_llRecoil, 0, 1),
@@ -120,12 +120,12 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "key_s1 = %s\nkey_s2 = %s\nkey_s3 = %s\n"
                "; The End: Destroyer: her gun in her hands, a copy of the MG-43 Machine Gun (gun_base 1) or of the M-1000\n"
                "; Maxigun (gun_base 0, when this profile owns it), with gun_rounds rounds, gun_rpm rounds a minute (her MG42's 1200)\n"
-               "; and armour penetration gun_ap (5: tank). It goes when she is on her primary or secondary for gun_grace s, drops\n"
+               "; and armour penetration gun_ap (5: tank), gun_durable damage to durable parts (Ishbosheth's x ish_mult). It goes when she is on her primary or secondary for gun_grace s, drops\n"
                "; it or spends it; the cooldown starts then. Takes effect at the next start. The MG-43's copy reloads from them a belt\n"
                "; at a time: gun_drum 0 a 250-round box, 1 a 50-round drum with drum_ergonomics more ergonomics (at most 31 spare\n"
                "; belts: the game sends the count in 5 bits; the drum reloads on the move and drum_reload faster).\n"
                "; gun_optic: 0 the 1.5x red dot, 1 the 4x Combat Scope, 2 the 10x Sniper Scope.\n"
-               "gun_base = %d\ngun_drum = %d\ngun_optic = %d\ndrum_reload = %g\ndrum_ergonomics = %d\ngun_rounds = %d\ngun_rpm = %g\ngun_ap = %d\ngun_cooldown = %g\ngun_grace = %g\n"
+               "gun_base = %d\ngun_drum = %d\ngun_optic = %d\ndrum_reload = %g\ndrum_ergonomics = %d\ngun_rounds = %d\ngun_rpm = %g\ngun_ap = %d\ngun_durable = %d\ngun_cooldown = %g\ngun_grace = %g\n"
                "; Her shield while she holds it: shield_max, refilled to shield_max every shield_every s; once the gun is gone it\n"
                "; drains shield_decay a second until the next refill.\n"
                "shield_max = %g\nshield_every = %g\nshield_decay = %g\n"
@@ -144,7 +144,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Out-and-Out: her shots deal oao_bonus more while her head is lower than oao_head m over her feet (crouched, prone).\n"
                "reload_free = %d\nreload_buff = %g\nreload_seconds = %g\nreload_cooldown = %g\njudgment_rate = %g\noao_bonus = %g\noao_head = %g\n"
                "; The options screen's key (120: F9; 0: none).\noptions_key = %d\n",
-            VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_gunBase, s_gunDrum, s_gunOptic, (double)s_drumReload, s_drumErgonomics, s_gunRounds, (double)s_gunRpm, s_gunAp, (double)s_gunCooldown,
+            VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_gunBase, s_gunDrum, s_gunOptic, (double)s_drumReload, s_drumErgonomics, s_gunRounds, (double)s_gunRpm, s_gunAp, s_gunDurable, (double)s_gunCooldown,
             (double)s_gunGrace, (double)s_shieldMax, (double)s_shieldEvery, (double)s_shieldDecay, (double)s_llCooldown, (double)s_llErgonomics,
             s_llRecoil, (double)s_ishCooldown, (double)s_ishMult, (double)s_ishCone, (double)s_ishAimCone, (double)s_ishRange, s_ishTargets, (double)s_ishDuration, (double)s_ishEvery, s_ishPerSection, (double)s_ishTick,
             (double)s_ishSpeed, s_reloadFree,
@@ -245,6 +245,8 @@ static void RowsReady(HfMod* mod, HfEvent event, void* user)
             if (!row) { Log("damage %u (%s, %s): its row is not there", ids[k], kBaseName[i], k ? "Ishbosheth" : "her gun"); continue; }
             uint32_t ap = (uint32_t)s_gunAp, before = row->armor_penetration[0];
             for (int a = 0; a < 4; a++) row->armor_penetration[a] = a < 3 ? ap : (ap > 2 ? ap - 2 : ap);
+            /* 0.1.4 (Yui): her gun's durable damage gun_durable (the MG-43's own 23), Ishbosheth's that x ish_mult */
+            if (s_gunDurable > 0) row->durable_damage = k ? (int32_t)(s_gunDurable * s_ishMult + 0.5f) : s_gunDurable;
             Log("damage %u (%s, %s): %d / %d, armour penetration %u -> %u", ids[k], kBaseName[i], k ? "Ishbosheth" : "her gun", row->standard_damage,
                 row->durable_damage, before, ap);
         }
@@ -1855,7 +1857,7 @@ static void Tick(HfMod* mod, float dt, void* user)
 
 /* ---- Mod Options Menu ------------------------------------------------------------------------------------------- */
 static const KbOption kOptions[] = {
-    {"gun_rounds", NULL, &s_gunRounds}, {"gun_rpm", &s_gunRpm, NULL}, {"gun_ap", NULL, &s_gunAp}, {"gun_cooldown", &s_gunCooldown, NULL},
+    {"gun_rounds", NULL, &s_gunRounds}, {"gun_rpm", &s_gunRpm, NULL}, {"gun_ap", NULL, &s_gunAp}, {"gun_durable", NULL, &s_gunDurable}, {"gun_cooldown", &s_gunCooldown, NULL},
     {"gun_grace", &s_gunGrace, NULL}, {"gun_base", NULL, &s_gunBase}, {"gun_drum", NULL, &s_gunDrum}, {"gun_optic", NULL, &s_gunOptic},
     {"drum_ergonomics", NULL, &s_drumErgonomics}, {"drum_reload", &s_drumReload, NULL},
     {"shield_max", &s_shieldMax, NULL}, {"shield_every", &s_shieldEvery, NULL}, {"shield_decay", &s_shieldDecay, NULL},

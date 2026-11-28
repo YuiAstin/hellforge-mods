@@ -456,6 +456,7 @@ local OPTIONS = {
     {'gun_rounds', 'slider', 'The End: Destroyer: Rounds', 100, 20000, 100, 'Rounds her gun holds: its whole supply.'},
     {'gun_rpm', 'slider', 'The End: Destroyer: Fire Rate', 300, 12000, 100, 'Rounds a minute her gun fires (her passive adds its share on top).'},
     {'gun_ap', 'slider', 'The End: Destroyer: Armour Penetration', 1, 8, 1, 'Her gun\'s armour penetration (4 heavy, 5 tank, 6 anti-tank). From the next start.'},
+    {'gun_durable', 'slider', 'The End: Destroyer: Durable Damage', 5, 500, 1, 'Her gun\'s damage to durable parts (the MG-43\'s own 23); Ishbosheth\'s is this times its multiplier. From the next start.'},
     {'gun_cooldown', 'slider', 'The End: Destroyer: Cooldown', 0, 300, 1, 'Seconds after her gun is gone before it can be called again.', true},
     {'gun_base', 'choice', 'The End: Destroyer: Gun', {'Maxigun (if owned)', 'MG-43'}, nil, nil, 'Which gun hers is a copy of: the M-1000 Maxigun needs its warbond; the MG-43 is free.'},
     {'gun_drum', 'choice', 'The End: Destroyer: Belt', {'Box (250)', 'Drum (50)'}, nil, nil, 'The MG-43 copy\'s belt: a 250-round box, or a 50-round drum that handles better (more ergonomics).'},

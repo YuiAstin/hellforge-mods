@@ -6,6 +6,8 @@ static const OpRow kOpRows[] = {
      "Rounds a minute her gun fires (her passive adds its share on top)."},
     {"gun_ap", "The End", "Destroyer: Armour Penetration", OP_SLIDER, 1, 8, 1,
      "Her gun's armour penetration (4 heavy, 5 tank, 6 anti-tank). From the next start.", NULL, 0, OP_RESTART},
+    {"gun_durable", "The End", "Destroyer: Durable Damage", OP_FIELD, 5, 500, 1,
+     "Her gun's damage to durable parts (the MG-43's own 23); Ishbosheth's is this times its multiplier. From the next start.", NULL, 0, OP_RESTART},
     {"gun_cooldown", "The End", "Destroyer: Cooldown", OP_FIELD, 0, 300, 1,
      "Seconds after her gun is gone before it can be called again."},
     {"gun_base", "The End", "Destroyer: Gun", OP_CHOICE, 0, 1, 1,
