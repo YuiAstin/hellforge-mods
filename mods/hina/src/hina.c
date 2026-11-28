@@ -52,7 +52,7 @@
 #include "hellforge_functions.h"
 #include "hellforge_globals.h"
 
-#define VERSION "0.1.4"
+#define VERSION "0.1.5"
 #define BUILD "25480438"
 
 #include "kitbase/kb_core.h"
@@ -1282,6 +1282,27 @@ static int Aiming(void)
     }
     return -1;
 }
+/* 0.1.5 (a player's report: the game stops responding when they right-click with her gun; not seen here): each time
+ * she starts or stops aiming with a gun in her hands, the log says what it is and how its scope stands, before the
+ * game draws the aim, so a hang's last line names the case */
+static void AimWatch(void)
+{
+    static int was = -2;
+    static unsigned told;
+    int a = Aiming();
+    if (a == was) return;
+    was = a;
+    if (a <= 0 || told >= 40) return;
+    told++;
+    uint32_t sel = 0, w = Held(&sel), gl = atomic_load(&g_gl);
+    static const char* const kOpticName[3] = {"1.5x red dot", "4x Combat Scope", "10x Sniper Scope"};
+    int o = s_gunOptic < 0 || s_gunOptic > 2 ? 0 : s_gunOptic;
+    if (w && w == gl)
+        Log("aiming with her gun %u (%s's copy, %016llx): scope %s (its packages %s), %s, rounds %d", w, kBaseName[g_use], (unsigned long long)ResOf(w),
+            g_use == 1 ? kOpticName[o] : "the Maxigun's own", g_use == 1 ? (OpticPackage() == HF_PACKAGE_LOADING ? "STILL LOADING" : "loaded") : "-",
+            g_use == 1 ? (s_gunDrum ? "the drum" : "the box") : "its backpack", GunRounds(w));
+    else Log("aiming with gun %u (%016llx, selection %u): not hers", w, (unsigned long long)ResOf(w), sel);
+}
 /* the fan's half-angle now: tighter while she aims down her sights */
 static float IshCone(void)
 {
@@ -1744,6 +1765,7 @@ static void Tick(HfMod* mod, float dt, void* user)
         ShieldFrame(step);
         StanceFrame();
         ReloadFrame();
+        AimWatch();
         IshFrame();
     }
 }
