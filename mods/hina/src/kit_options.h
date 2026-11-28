@@ -12,6 +12,8 @@ static const OpRow kOpRows[] = {
      "Which gun hers is a copy of: the M-1000 Maxigun needs its warbond; the MG-43 is free.", "Maxigun (if owned)|MG-43"},
     {"gun_drum", "Destroyer of Denouement", "Belt", OP_CHOICE, 0, 1, 1,
      "The MG-43 copy's belt: a 250-round box, or a 50-round drum that handles better (more ergonomics).", "Box (250)|Drum (50)"},
+    {"gun_optic", "Destroyer of Denouement", "Scope", OP_CHOICE, 0, 2, 1,
+     "The MG-43 copy's scope (the game has no 12x; 10x is its largest).", "1.5x Red Dot|4x Combat Scope|10x Sniper Scope"},
     {"shield_max", "Shield", "Amount", OP_FIELD, 0, 10000, 50,
      "Her shield while she holds her gun, and its cap."},
     {"shield_every", "Shield", "Refill Interval", OP_FIELD, 10, 1200, 10,
