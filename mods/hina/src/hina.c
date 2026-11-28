@@ -2,7 +2,7 @@
  * Helldiver (solo or host), built on the kit base (kitbase/, docs/kit-base.md; her design: docs/hina-design.md). Her
  * identity (Yui): put as many rounds down range as possible, as efficiently as possible.
  *
- *   Destroyer of Denouement (key_s1, default Z): her signature gun in her hands, the way W's King of Hearts gives the
+ *   The End: Destroyer (key_s1, default Z): her signature gun in her hands, the way W's King of Hearts gives the
  *     GL-21 (the Wield Probe's swap): a copy of the MG-43 Machine Gun (gun_base 1, the default), or of the M-1000
  *     Maxigun (gun_base 0, when this profile owns it; else the MG-43's) with gun_rounds rounds, gun_rpm rounds a
  *     minute and armour penetration gun_ap (its own entity, round and damage: add_entity, add_projectile, add_damage;
@@ -85,7 +85,7 @@ static const struct { uint64_t unit, donor[3]; const char* name; } kOptics[3] = 
     {UINT64_C(0x3D18C135000C36DC), {UINT64_C(0x43CB1033961A2276), UINT64_C(0x03E67A19B07C6523), UINT64_C(0xE6D932BE83729076)}, "4x Combat Scope (the Liberator Penetrator's, the Diligence's, the Deadeye's)"},
     {UINT64_C(0x19FC5C5B031A4AF2), {UINT64_C(0x4C786785C79D44E7), UINT64_C(0xB6AFF2195568767F), 0}, "10x Sniper Scope (the Diligence Counter Sniper's, the Eruptor's)"}};   /* 0.1.4 (Yui): her MG-43's belt, a 250-round box (the MG-43's own way) or a 50-round drum, +30 ergonomics */   /* 0.1.4 (Yui): the MG-43 by default; the Maxigun an option */
 static int GunBelt(void) { return s_gunDrum ? 50 : 250; }
-static float s_gunRpm = 1200,   /* 0.1.4 (Yui): her MG42's rate (Blue Archive's Destroyer of Denouement is one) */
+static float s_gunRpm = 1200,   /* 0.1.4 (Yui): her MG42's rate (Blue Archive's The End: Destroyer is one) */
     s_gunCooldown = 30, s_gunGrace = 0.5f;
 static float s_shieldMax = 3000, s_shieldEvery = 300, s_shieldDecay = 100;
 static float s_llCooldown = 20, s_llErgonomics = 80;
@@ -117,7 +117,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
     fprintf(f, "; Hina %s. Keys: a letter, digit, F1-F24, Mouse3, Mouse4 or Mouse5, with Shift+, Ctrl+ or Alt+ in front for a\n"
                "; combo (Shift+Q). The game still sees the keys too (Shift sprints, R reloads), so pick ones it leaves alone.\n"
                "key_s1 = %s\nkey_s2 = %s\nkey_s3 = %s\n"
-               "; Destroyer of Denouement: her gun in her hands, a copy of the MG-43 Machine Gun (gun_base 1) or of the M-1000\n"
+               "; The End: Destroyer: her gun in her hands, a copy of the MG-43 Machine Gun (gun_base 1) or of the M-1000\n"
                "; Maxigun (gun_base 0, when this profile owns it), with gun_rounds rounds, gun_rpm rounds a minute (her MG42's 1200)\n"
                "; and armour penetration gun_ap (5: tank). It goes when she is on her primary or secondary for gun_grace s, drops\n"
                "; it or spends it; the cooldown starts then. Takes effect at the next start. The MG-43's copy reloads from them a belt\n"
@@ -886,10 +886,10 @@ static void GunStart(void)
 {
     uint32_t me = atomic_load(&g_avatar), slots[8] = {0};
     uintptr_t rec;
-    if (!WieldReady()) { Log("Destroyer of Denouement: off (the game's code is not the reviewed one)"); return; }
+    if (!WieldReady()) { Log("The End: Destroyer: off (the game's code is not the reviewed one)"); return; }
     Gun();
-    if (!GunRes()) { Log("Destroyer of Denouement: her gun was not added (the log's start says why)"); return; }
-    if (!(rec = InventoryRecord(me)) || !ReadAt(rec, slots, sizeof slots) || !SwitchObject(me)) { Log("Destroyer of Denouement: her inventory or her switch object was not found: nothing done"); return; }
+    if (!GunRes()) { Log("The End: Destroyer: her gun was not added (the log's start says why)"); return; }
+    if (!(rec = InventoryRecord(me)) || !ReadAt(rec, slots, sizeof slots) || !SwitchObject(me)) { Log("The End: Destroyer: her inventory or her switch object was not found: nothing done"); return; }
     Handling(0);   /* a new call: her gun as it is (Lock & Load's handling is for the gun it was used on) */
     g_kSel = slots[7] >= 1 && slots[7] <= 3 ? slots[7] : 1;
     g_kOld = slots[2];
@@ -900,7 +900,7 @@ static void GunStart(void)
     g_bpNew = 0;
     g_swap = 0;
     g_uses++;
-    Log("Destroyer of Denouement %u: the %s's copy%s; her selection %u, her support weapon %u (%016llx), her backpack %u (%016llx)", g_uses, kBaseName[g_use],
+    Log("The End: Destroyer %u: the %s's copy%s; her selection %u, her support weapon %u (%016llx), her backpack %u (%016llx)", g_uses, kBaseName[g_use],
         Pack() ? " with its backpack" : "", g_kSel, g_kOld, (unsigned long long)g_kOldRes, g_bpOld, (unsigned long long)g_bpOldRes);
     g_k = K_PACKAGE;
     g_kAt = g_now + 8;
@@ -908,7 +908,7 @@ static void GunStart(void)
 static void GunEnd(const char* why)
 {
     if (g_k != K_HELD) return;
-    Log("Destroyer of Denouement %u over (%s): %d rounds left", g_uses, why, GunRounds(atomic_load(&g_gl)));
+    Log("The End: Destroyer %u over (%s): %d rounds left", g_uses, why, GunRounds(atomic_load(&g_gl)));
     WieldAsk(g_kSel == 3 ? 1 : g_kSel, "her own weapon back in hand");
     g_k = K_LETGO;
     g_kAt = g_now + 1.0;
@@ -921,7 +921,7 @@ static void GunAbort(const char* why)
     void* em = hf_global_EntityManager(self);
     uint32_t gl = atomic_load(&g_gl);
     if (g_k == K_IDLE) return;
-    Log("Destroyer of Denouement %u cut short (%s)", g_uses, why);
+    Log("The End: Destroyer %u cut short (%s)", g_uses, why);
     if (g_inMission && gl && ResOf(gl) == GunRes() && remove && em) remove(em, gl);
     if (g_inMission && g_swapOld && ResOf(g_swapOld) == GunRes() && remove && em) remove(em, g_swapOld);
     uint32_t bp = atomic_load(&g_bp);
@@ -996,7 +996,7 @@ static void GunFrame(void)
             uint32_t bp = atomic_load(&g_bp);
             if (ResOf(bp) != g_bpRes) { GunAbort("her gun's backpack does not read as one"); break; }
             WieldTake(me, bp, KB_SLOT_BACKPACK);   /* the inventory's take, slot 6: the backpack (her own is dropped by it) */
-            Log("Destroyer of Denouement %u: her gun's backpack %u on her back", g_uses, bp);
+            Log("The End: Destroyer %u: her gun's backpack %u on her back", g_uses, bp);
         }
         if (g_swap || (g_kSel == 3 && g_kOld)) { WieldAsk(1, "a support weapon is in her hands: put away first"); g_k = K_PUTAWAY; g_kAt = g_now + 0.8; g_putAt = g_now; }
         else g_k = K_TAKE;
@@ -1027,7 +1027,7 @@ static void GunFrame(void)
         g_awaySince = g_droppedSince = g_bpOffSince = g_emptySince = g_roundsLogAt = 0;
         g_dropped = 0;   /* (played: a pickup with no old support weapon left these set, and the next gun's end acted on them: a crash) */
         g_picked = 0;
-        Log("Destroyer of Denouement %u%s: gun %u, %d rounds (%s %d)", g_uses, g_swap ? ", Lock & Load's new one" : " on", gl, GunRounds(gl),
+        Log("The End: Destroyer %u%s: gun %u, %d rounds (%s %d)", g_uses, g_swap ? ", Lock & Load's new one" : " on", gl, GunRounds(gl),
             Pack() ? "in its backpack; the gun's own magazine" : "capacity", Pack() ? MagRounds(gl) : MagCapacity(gl));
         g_swap = 0;
         g_swapOld = 0;
@@ -1042,9 +1042,9 @@ static void GunFrame(void)
             int left = GunRounds(gl);
             /* 0.1.4: played, the first gun went 9 s in ("its rounds are spent"): a magazine reads 0 while it reloads, so
              * only 0 for a whole second counts; and her rounds are logged every 5 s (the first guns) */
-            if (g_uses <= 3 && g_now >= g_roundsLogAt) { g_roundsLogAt = g_now + 5; Log("Destroyer of Denouement %u: %d rounds", g_uses, left); }
+            if (g_uses <= 3 && g_now >= g_roundsLogAt) { g_roundsLogAt = g_now + 5; Log("The End: Destroyer %u: %d rounds", g_uses, left); }
             if (left != 0) g_emptySince = 0;
-            else if (!g_emptySince) { g_emptySince = g_now; Log("Destroyer of Denouement %u: its rounds read 0 (a reload, or spent)", g_uses); }
+            else if (!g_emptySince) { g_emptySince = g_now; Log("The End: Destroyer %u: its rounds read 0 (a reload, or spent)", g_uses); }
             else if (g_now - g_emptySince > 1.0) { GunEnd("its rounds are spent"); break; }
         }
         ReadAt(rec + 0x1C, &sel, 4);
@@ -1066,7 +1066,7 @@ static void GunFrame(void)
              * weapon picked up in its place stays hers, in hand (played: her old one took the picked one's slot) */
             g_picked = support && support != gl ? support : 0;
             g_dropped = 1;
-            Log("Destroyer of Denouement %u over (%s): %d rounds left", g_uses, g_picked ? "she picked up another weapon" : "she dropped it", GunRounds(gl));
+            Log("The End: Destroyer %u over (%s): %d rounds left", g_uses, g_picked ? "she picked up another weapon" : "she dropped it", GunRounds(gl));
             WieldDrop(me, atomic_load(&g_bp), 0xC);
             g_readyAt = g_now + s_gunCooldown;
             g_k = K_REMOVE; g_kAt = g_now;
@@ -1119,8 +1119,8 @@ static void GunFrame(void)
         if (g_dropped && g_hand && !(InventoryRecord(g_hand) && ResOf(g_hand) == SEAF_TROOPER && ResOf(g_kNew) == g_kOldRes) && g_now < g_handUntil) break;
         if (g_bpNew)
         {
-            if (ResOf(g_bpNew) == g_bpOldRes) { WieldTake(me, g_bpNew, KB_SLOT_BACKPACK); Log("Destroyer of Denouement %u: her new backpack %u on her back", g_uses, g_bpNew); }
-            else Log("Destroyer of Denouement %u: the new backpack does not read as hers: left", g_uses);
+            if (ResOf(g_bpNew) == g_bpOldRes) { WieldTake(me, g_bpNew, KB_SLOT_BACKPACK); Log("The End: Destroyer %u: her new backpack %u on her back", g_uses, g_bpNew); }
+            else Log("The End: Destroyer %u: the new backpack does not read as hers: left", g_uses);
             g_bpNew = 0;
         }
         if (!g_kNew) { FillUp(g_weapon[g_kSel]); g_k = K_IDLE; g_dropped = 0; g_picked = 0; break; }
@@ -1130,7 +1130,7 @@ static void GunFrame(void)
         if (g_dropped)
         {
             g_dropped = 0;
-            if (ResOf(g_kNew) != g_kOldRes) { Log("Destroyer of Denouement %u: the new support weapon does not read as hers: left", g_uses); g_k = K_IDLE; break; }
+            if (ResOf(g_kNew) != g_kOldRes) { Log("The End: Destroyer %u: the new support weapon does not read as hers: left", g_uses); g_k = K_IDLE; break; }
             FillUp(g_kNew);
             if (g_hand && ResOf(g_hand) == SEAF_TROOPER && InventoryRecord(g_hand))
             {
@@ -1140,7 +1140,7 @@ static void GunFrame(void)
                 break;
             }
             if (g_hand) { HfFn_RemoveEntity rm = hf_fn_RemoveEntity(self); void* em2 = hf_global_EntityManager(self); if (rm && em2 && ResOf(g_hand) == SEAF_TROOPER) rm(em2, g_hand); g_hand = 0; }
-            Log("Destroyer of Denouement %u: no trooper for the drop: her own hands do it", g_uses);
+            Log("The End: Destroyer %u: no trooper for the drop: her own hands do it", g_uses);
             WieldTake(me, g_kNew, KB_SLOT_SUPPORT);
             g_k = K_DROPOLD;
             g_kAt = g_now + 0.3;
@@ -1152,9 +1152,9 @@ static void GunFrame(void)
             FillUp(g_kNew);
             if (g_kSel == 3) WieldAsk(3, "she had it in hand when the gun came");
             else FillUp(g_weapon[g_kSel]);
-            Log("Destroyer of Denouement %u: her new support weapon %u taken", g_uses, g_kNew);
+            Log("The End: Destroyer %u: her new support weapon %u taken", g_uses, g_kNew);
         }
-        else Log("Destroyer of Denouement %u: the new support weapon does not read as hers: left", g_uses);
+        else Log("The End: Destroyer %u: the new support weapon does not read as hers: left", g_uses);
         g_k = K_IDLE;
         break;
     case K_HANDDROP:
@@ -1168,7 +1168,7 @@ static void GunFrame(void)
             if (now != g_kNew && g_now < g_handUntil) break;
         }
         WieldDrop(g_hand, g_kNew, 0x8);
-        Log("Destroyer of Denouement %u: her old support weapon %u dropped by a trooper where her gun fell%s", g_uses, g_kNew, g_picked ? " (the weapon she picked up stays in her hands)" : "");
+        Log("The End: Destroyer %u: her old support weapon %u dropped by a trooper where her gun fell%s", g_uses, g_kNew, g_picked ? " (the weapon she picked up stays in her hands)" : "");
         g_picked = 0;
         g_k = K_HANDGONE;
         g_kAt = g_now;   /* the next frame */
@@ -1182,7 +1182,7 @@ static void GunFrame(void)
     case K_DROPOLD:
         if (g_now < g_kAt) break;
         WieldDrop(me, g_kNew, 0x8);
-        Log("Destroyer of Denouement %u: her old support weapon %u dropped where her gun fell", g_uses, g_kNew);
+        Log("The End: Destroyer %u: her old support weapon %u dropped where her gun fell", g_uses, g_kNew);
         if (g_picked) { g_k = K_RETAKE; g_kAt = g_now + 0.3; }
         else g_k = K_IDLE;
         break;
@@ -1192,11 +1192,11 @@ static void GunFrame(void)
             uintptr_t r = InventoryRecord(me);
             uint32_t now = 0;
             if (r) ReadAt(r + 8, &now, 4);
-            if (!ResOf(g_picked)) Log("Destroyer of Denouement %u: the weapon she picked up (%u) is gone", g_uses, g_picked);
+            if (!ResOf(g_picked)) Log("The End: Destroyer %u: the weapon she picked up (%u) is gone", g_uses, g_picked);
             else if (now != g_picked) WieldTake(me, g_picked, KB_SLOT_SUPPORT);
             if (ResOf(g_picked)) WieldAsk(3, "the weapon she picked up in hand");
         }
-        Log("Destroyer of Denouement %u: she keeps the weapon she picked up (%u)", g_uses, g_picked);
+        Log("The End: Destroyer %u: she keeps the weapon she picked up (%u)", g_uses, g_picked);
         g_picked = 0;
         g_k = K_IDLE;
         break;
@@ -1286,10 +1286,6 @@ static void LlFrame(void)
     {
         if (g_frame < g_llFrame + 2 || (ResOf(g_llNew) != g_llRes && g_now < g_llAt)) break;
         g_ll = LL_IDLE;
-    memset(g_reloadRes, 0, sizeof g_reloadRes);
-    g_dropped = 0;
-    g_picked = 0;
-    g_hand = 0;
         uint32_t sel = 0;
         if (ResOf(g_llNew) != g_llRes) { Log("Lock & Load: the fresh gun does not read as one"); break; }
         if (Held(&sel) != g_llOld)
@@ -1528,37 +1524,71 @@ static int g_llRounds = -1;
 static unsigned g_reloads, g_buffed;
 static double g_buffDamage;
 /* Lock & Load (passive): an emptied magazine of the gun in her hands reloads at once, and the buff */
-/* 0.1.4 (Yui): the passive once a reload_cooldown for each gun: the guns it went off for, and when */
-static int ReloadReady(uint32_t w)
+/* 0.1.4 (Yui): the passive once a reload_cooldown for each gun (by its kind: a fresh copy of the same gun shares it).
+ * The time is spent only when the passive lands: played, every emptying spent it, also when the free reload did not
+ * come (its rounds still read 0), so a gun's emptying could use up the time and leave nothing. */
+static int ReloadSlot(uint64_t res)
 {
-    uint64_t res = ResOf(w);
-    int free = -1;
+    int free = -1, oldest = 0;
     for (int k = 0; k < RELOAD_GUNS; k++)
     {
-        if (g_reloadRes[k] == res) { if (g_now < g_reloadAt[k] + s_reloadCooldown) return 0; g_reloadAt[k] = g_now; return 1; }
-        if (!g_reloadRes[k] || (free < 0 && g_now >= g_reloadAt[k] + s_reloadCooldown)) free = free < 0 ? k : free;
+        if (g_reloadRes[k] == res) return k;
+        if (!g_reloadRes[k] && free < 0) free = k;
+        if (g_reloadAt[k] < g_reloadAt[oldest]) oldest = k;
     }
-    if (free < 0) free = 0;
-    g_reloadRes[free] = res;
-    g_reloadAt[free] = g_now;
-    return 1;
+    return free >= 0 ? free : oldest;
+}
+static double ReloadLeft(uint64_t res)
+{
+    for (int k = 0; k < RELOAD_GUNS; k++)
+        if (g_reloadRes[k] == res) return g_reloadAt[k] + s_reloadCooldown - g_now;
+    return 0;
+}
+static void ReloadSpend(uint64_t res)
+{
+    int k = ReloadSlot(res);
+    g_reloadRes[k] = res;
+    g_reloadAt[k] = g_now;
+}
+static uint32_t g_llWait;     /* the gun whose free reload is being waited on (its rounds read a frame or more late) */
+static double g_llWaitUntil;
+static unsigned g_llTold;
+static void ReloadLanded(uint32_t w, uint64_t res, int r)
+{
+    ReloadSpend(res);
+    g_reloads++;
+    if (s_reloadBuff > 0 && s_reloadSeconds > 0) g_buffUntil = g_now + s_reloadSeconds;
+    if (g_llTold++ < 20) Log("Lock & Load (passive): gun %u (%016llx) emptied: %s; its next in %.0f s", w, (unsigned long long)res,
+                             r >= 0 ? "reloaded at once" : "her own gun: the buff only", (double)s_reloadCooldown);
 }
 static void ReloadFrame(void)
 {
     uint32_t w = Held(NULL), gl = atomic_load(&g_gl);
     int r = w ? MagRounds(w) : -1;
+    if (g_llWait)
+    {
+        uint64_t res = ResOf(g_llWait);
+        int now = MagRounds(g_llWait);
+        if (res && now > 0) { ReloadLanded(g_llWait, res, now); g_llWait = 0; }
+        else if (!res || g_now >= g_llWaitUntil)
+        {
+            if (g_llTold++ < 20) Log("Lock & Load (passive): gun %u's free reload did not land (rounds %d): its time not spent", g_llWait, now);
+            g_llWait = 0;
+        }
+    }
     /* 0.1.4: not a weapon of one or two rounds a magazine (played: a one-shot launcher reloaded free after every shot
      * and kept the buff's timer restarting) */
-    if (w && w == g_llHeld && r == 0 && g_llRounds > 0 && (MagCapacity(w) < 0 || MagCapacity(w) >= 3) && ReloadReady(w))
+    if (w && w == g_llHeld && r == 0 && g_llRounds > 0 && w != g_llWait)
     {
-        if (w != gl && s_reloadFree)
-        {
-            int cap = MagCapacity(w);
-            if (cap > 0) { MagAdd(w, cap); r = MagRounds(w); }
-            if (g_reloads < 12) Log("Lock & Load (passive): gun %u emptied: reloaded at once (%d rounds)", w, r);
-        }
-        g_reloads++;
-        if (s_reloadBuff > 0 && s_reloadSeconds > 0) g_buffUntil = g_now + s_reloadSeconds;
+        uint64_t res = ResOf(w);
+        int cap = MagCapacity(w);
+        double left = res ? ReloadLeft(res) : 0;
+        if (!res) {}
+        else if (cap >= 1 && cap < 3) {}
+        else if (left > 0) { if (g_llTold++ < 20) Log("Lock & Load (passive): gun %u emptied: this gun's next in %.0f s", w, left); }
+        else if (w == gl || !s_reloadFree) ReloadLanded(w, res, -1);
+        else if (cap < 0) { if (g_llTold++ < 20) Log("Lock & Load (passive): gun %u (%016llx) emptied: its magazine is not one the kit can fill (time not spent)", w, (unsigned long long)res); }
+        else { MagAdd(w, cap); g_llWait = w; g_llWaitUntil = g_now + 0.5; }
     }
     g_llHeld = w;
     g_llRounds = r;
@@ -1650,6 +1680,11 @@ static void Reset(const char* why)
     g_ishOn = 0;
     g_buffUntil = 0;
     g_uses = g_swaps = g_refills = g_ishHits = g_ishSprayed = g_reloads = g_buffed = 0;
+    memset(g_reloadRes, 0, sizeof g_reloadRes);   /* (Yui, played: these sat in Lock & Load's fresh-gun step, so every X wiped */
+    g_llWait = 0;                                 /*  the passive's per-gun times: a new mission's start, not a skill's) */
+    g_dropped = 0;
+    g_picked = 0;
+    g_hand = 0;
     g_buffDamage = 0;
     g_lastTarget = 0;
     g_ll = LL_IDLE;
@@ -1664,9 +1699,9 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     if (!g || !x || gameSize != 74727424u || exeSize != 60719104u) { Log("REFUSED: the game's modules are not build " BUILD "'s: her kit stays off"); return; }
     game = g;
     exe = x;
-    if (!WieldPins()) Log("Destroyer of Denouement is off (the swap's code is not the reviewed one)");
+    if (!WieldPins()) Log("The End: Destroyer is off (the swap's code is not the reviewed one)");
     HitsInstall("her hits");
-    Log("ready: Destroyer of Denouement on %s (%d rounds, %.0f rpm + %.0f%%, AP %d, %.0f s cooldown; shield %.0f every %.0f s, -%.0f/s without it), "
+    Log("ready: The End: Destroyer on %s (%d rounds, %.0f rpm + %.0f%%, AP %d, %.0f s cooldown; shield %.0f every %.0f s, -%.0f/s without it), "
         "Lock & Load on %s, Ishbosheth on %s", s_keys[0].label, s_gunRounds, (double)s_gunRpm, (double)(s_judgmentRate * 100), s_gunAp, (double)s_gunCooldown,
         (double)s_shieldMax, (double)s_shieldEvery, (double)s_shieldDecay, s_keys[1].label, s_keys[2].label);
 }
@@ -1675,7 +1710,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
 typedef struct HinaHud
 {
     uint32_t version, in_mission;
-    float cd[3], cd_max[3];            /* seconds left, full cooldowns: Destroyer of Denouement, Lock & Load, Ishbosheth */
+    float cd[3], cd_max[3];            /* seconds left, full cooldowns: The End: Destroyer, Lock & Load, Ishbosheth */
     uint32_t gun_on, rounds, rounds_max;
     float shield, shield_max;
     uint32_t ish_armed;
@@ -1751,7 +1786,7 @@ static void Tick(HfMod* mod, float dt, void* user)
             {
                 if (g_k == K_HELD) GunEnd("the key again");
                 else if (g_k == K_IDLE && g_now >= g_readyAt) { GunStart(); g_casts[0]++; }
-                else if (g_k == K_IDLE) { static unsigned told; if (told++ < 5) Log("Destroyer of Denouement: %.0f s of cooldown left", g_readyAt - g_now); }
+                else if (g_k == K_IDLE) { static unsigned told; if (told++ < 5) Log("The End: Destroyer: %.0f s of cooldown left", g_readyAt - g_now); }
             }
             else if (i == 1) LockAndLoad();
             else Ishbosheth();
@@ -1879,7 +1914,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         w.name = wn[i];
         w.own_all = 1;
         w.designation = i ? "MG-43H" : "M-1000H";
-        w.title = "Destroyer of Denouement";
+        w.title = "The End: Destroyer";
         w.description = "Sorasaki Hina's machine gun: the Gehenna Prefect's own.";
         g_gunRes[i] = api->add_entity ? api->add_entity(mod, &w) : 0;
         api->log(mod, "her gun on the %s: entity %016llx, round %u (damage %u), Ishbosheth's round %u (damage %u, x%.2f)", kBaseName[i], (unsigned long long)g_gunRes[i], g_round[i],
@@ -1890,12 +1925,12 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         bp.base = HF_ENTITY_MAXIGUN_BACKPACK;
         bp.name = "yui/hina/destroyer_backpack";
         bp.own_all = 1;
-        bp.title = "Destroyer of Denouement Ammunition";
+        bp.title = "The End: Destroyer Ammunition";
         g_bpRes = g_gunRes[0] && api->add_entity ? api->add_entity(mod, &bp) : 0;
         api->log(mod, "her gun's backpack (a copy of the Maxigun Backpack): entity %016llx", (unsigned long long)g_bpRes);
     }
     KbOptionsStart(api, mod, "hina", "Hina", VERSION, kOpRows, (int)(sizeof kOpRows / sizeof kOpRows[0]), kOpIcon, KB_OP_ICON, KB_OP_ACCENT, s_optionsKey);
-    api->log(mod, "Hina %s: keys %s / %s / %s (Destroyer of Denouement, Lock & Load, Ishbosheth)", VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label);
+    api->log(mod, "Hina %s: keys %s / %s / %s (The End: Destroyer, Lock & Load, Ishbosheth)", VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label);
     if (s_badKey) api->log(mod, "hina.ini: a key could not be read (bits %d: s1, s2, s3); its default stays", s_badKey);
     if (api->on(mod, HF_EVENT_GAME_LOADED, Loaded, NULL)) return 1;
     if (api->on(mod, HF_EVENT_PROJECTILES_READY, RowsReady, NULL)) api->log(mod, "her rounds' armour penetration can't be set: the base's");

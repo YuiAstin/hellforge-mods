@@ -1,6 +1,6 @@
 # Hina: the Gehenna Prefect's machine gun (design)
 
-Sorasaki Hina of Blue Archive (Gehenna Academy, head of the Prefect Team; her MG, Destroyer of Denouement). Her
+Sorasaki Hina of Blue Archive (Gehenna Academy, head of the Prefect Team; her MG, The End: Destroyer). Her
 identity here (Yui, 2026-11-27): put as many rounds down range as possible, as efficiently as possible. Built as
 `mods/hina` 0.1.2 on branch `hina-kit`; not played yet (its first start, 2026-11-27, logged below).
 
@@ -20,7 +20,7 @@ two actives of her own (Z, X), with the EX on C.
 
 All numbers are settings (her page on the options screen, F9, and `hina.ini`).
 
-### Z: Destroyer of Denouement
+### Z: The End: Destroyer
 
 - Her gun in her hands, the way W's King of Hearts gives the GL-21 (the Wield Probe's swap): a copy of the **M-1000
   Maxigun**, or of the **MG-43 Machine Gun** for a profile without the Maxigun's warbond (Voymastina's premium
