@@ -83,7 +83,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.10.1"
+#define VERSION "0.10.2"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
@@ -229,10 +229,27 @@ static int EscortOf(uint32_t net)
     for (int i = 0; i < ESCORTS; i++) if (g_esc[i].entity && g_esc[i].net && g_esc[i].net == net) return i;
     return -1;
 }
+/* 0.10.2: the spawn event gives the network id asked for (0x7FFF, none); a hit names the real one, so its dealer and
+ * owner are turned into entities through HellForge's entity_of_network and matched with the escorts' (played: a SEAF
+ * grenade hit her and was not seen) */
+static int EscortOfEntity(uint32_t e)
+{
+    for (int i = 0; i < ESCORTS; i++) if (e && g_esc[i].entity == e) return i;
+    return -1;
+}
+static int EscortOfNet(uint32_t net)
+{
+    if (!net || net == 0x7FFF || net == UINT32_MAX || !hf->entity_of_network) return -1;
+    int i = EscortOfEntity(hf->entity_of_network(self, net));
+    if (i >= 0 && g_esc[i].net != net) { g_esc[i].net = net; Log("escort %u: its network id is %u (from a hit)", g_esc[i].entity, net); }
+    return i;
+}
 static void OnDamagePre(HfMod* mod, HfDamagePreEvent* ev, void* user)
 {
     HfDamageEvent* d = &ev->damage;
-    int i = EscortOf(d->dealer);
+    int i = EscortOfNet(d->dealer);
+    if (i < 0) i = EscortOfNet(d->owner);
+    if (i < 0) i = EscortOf(d->dealer);
     if (i < 0) i = EscortOf(d->owner);
     if (i < 0) return;
     uint32_t me = atomic_load(&g_avatar);
@@ -637,6 +654,9 @@ static void Tick(HfMod* mod, float dt, void* user)
     WatchFrame();
 }
 /* 0.3.0: the Lua half (data/, built from hud-src/addon.lua) logs through here: its lines go into this log */
+/* 0.10.2: her Helldiver's entity, for the Flight Probe (a Lua mod: HD2Runtime 0.50.1 can't resolve it on HellForge 0.5);
+ * 0: not known yet */
+HF_MOD_EXPORT uint32_t escort_avatar_entity(void) { return atomic_load(&g_avatar); }
 HF_MOD_EXPORT int escort_lua_log(unsigned version, const char* text)
 {
     static unsigned lines;
