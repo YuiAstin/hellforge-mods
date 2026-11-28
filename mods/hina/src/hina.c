@@ -467,6 +467,7 @@ enum { K_IDLE, K_PACKAGE, K_WAITGL, K_PUTAWAY, K_TAKE, K_ASK, K_HELD, K_LETGO, K
  * taken away). Her own slots are not touched, so a weapon she picked up stays in her hands */
 #define SEAF_TROOPER UINT64_C(0x75F7E96AF7DCD303)
 static uint32_t g_hand;
+static double g_handUntil;
 static int HandPackage(void)
 {
     static uint64_t pkg;
@@ -756,14 +757,17 @@ static void GunFrame(void)
         if (g_kNew && g_dropped && HandPackage() == HF_PACKAGE_RESIDENT)
         {
             float feet[3], aim[3], at[3];
-            if (PlayerPose(feet, aim)) { at[0] = feet[0] - aim[0] * 1.2f; at[1] = feet[1] - aim[1] * 1.2f; at[2] = feet[2]; g_hand = SpawnAt(SEAF_TROOPER, at, "a trooper to drop her old weapon"); }
+            if (PlayerPose(feet, aim)) { at[0] = feet[0] + aim[0]; at[1] = feet[1] + aim[1]; at[2] = feet[2]; g_hand = SpawnAt(SEAF_TROOPER, at, "a trooper to drop her old weapon"); }
         }
         g_bpNew = g_bpOldRes ? SpawnNear(g_bpOldRes, "a new backpack of her kind") : 0;
-        if (g_kNew || g_bpNew) { g_k = K_WAITS; g_kAt = g_now + 0.75; }
+        /* with a trooper, no flat wait: it and her weapon are taken the first frame both are there (the Escort Probe
+         * 0.9.0: they read the very frame of the spawn, and the trooper was gone 51 ms later, the weapon left a pickup) */
+        if (g_kNew || g_bpNew) { g_k = K_WAITS; g_kAt = g_now + (g_hand ? 0 : 0.75); g_handUntil = g_now + 3; }
         else { FillUp(g_weapon[g_kSel]); g_k = K_IDLE; g_dropped = 0; g_picked = 0; }
         break;
     case K_WAITS:
         if (g_now < g_kAt) break;
+        if (g_dropped && g_hand && !(InventoryRecord(g_hand) && ResOf(g_hand) == SEAF_TROOPER && ResOf(g_kNew) == g_kOldRes) && g_now < g_handUntil) break;
         if (g_bpNew)
         {
             if (ResOf(g_bpNew) == g_bpOldRes) { WieldTake(me, g_bpNew, KB_SLOT_BACKPACK); Log("Destroyer of Denouement %u: her new backpack %u on her back", g_uses, g_bpNew); }
@@ -783,7 +787,7 @@ static void GunFrame(void)
             {
                 WieldTake(g_hand, g_kNew, KB_SLOT_SUPPORT);
                 g_k = K_HANDDROP;
-                g_kAt = g_now + 0.4;
+                g_kAt = g_now;
                 break;
             }
             if (g_hand) { HfFn_RemoveEntity rm = hf_fn_RemoveEntity(self); void* em2 = hf_global_EntityManager(self); if (rm && em2 && ResOf(g_hand) == SEAF_TROOPER) rm(em2, g_hand); g_hand = 0; }
@@ -806,11 +810,19 @@ static void GunFrame(void)
         break;
     case K_HANDDROP:
         if (g_now < g_kAt) break;
+        {
+            /* the drop the frame the take shows in its support slot (21 ms in the probe); WieldDrop clears the slot's entry
+             * after, or the trooper's removal takes the weapon along (Escort Probe 0.8.0) */
+            uintptr_t r = InventoryRecord(g_hand);
+            uint32_t now = 0;
+            if (r) ReadAt(r + 8, &now, 4);
+            if (now != g_kNew && g_now < g_handUntil) break;
+        }
         WieldDrop(g_hand, g_kNew, 0x8);
         Log("Destroyer of Denouement %u: her old support weapon %u dropped by a trooper where her gun fell%s", g_uses, g_kNew, g_picked ? " (the weapon she picked up stays in her hands)" : "");
         g_picked = 0;
         g_k = K_HANDGONE;
-        g_kAt = g_now + 0.6;
+        g_kAt = g_now;   /* the next frame */
         break;
     case K_HANDGONE:
         if (g_now < g_kAt) break;
