@@ -201,7 +201,8 @@ static void Gun(void)
                 for (int k = 0; k < 36 && !differs; k++)
                     if (!(k >= 16 && k <= 19) && !(k >= 30 && k <= 33) && live[k] != kHas[k]) differs = k + 1;
                 if (!differs && tries == 1)
-                    Log("HasCatalogueItem: its code has the dump's shape (its fields at +0x%02x%02x and +0x%02x%02x%02x)", live[17], live[16], live[32], live[31], live[30]);
+                    Log("HasCatalogueItem: HellForge moved its fields (+0x%02x%02x, +0x%02x%02x%02x), so it does not hand it out; the kit's own copy of it reads ownership",
+                        live[17], live[16], live[32], live[31], live[30]);
                 if (!differs) { has = (HfFn_HasCatalogueItem)(game + 0x136FB40); own = 1; }
                 else if (tries == 1 || tries == 30) Log("HasCatalogueItem: the code differs from the dump's at byte %d (%02x, the dump %02x)", differs - 1, live[differs - 1], kHas[differs - 1]);
             }
@@ -350,8 +351,10 @@ static void GunRecords(int i)
     HfLiveValue cf;
     memset(&cf, 0, sizeof cf);
     if (g_round[i] && hf->get_live(self, res, &fp, &cf) && ((uint32_t)cf.now.number == kBaseRound[i] || (uint32_t)cf.now.number == kFiredRound[i])) { HfValue v = HF_U32(g_round[i]); hf->set_live(self, res, &fp, &v, 0); }
-    Log("her gun (%s's copy, entity %016llx): fire rate %.0f in %d of 3 slots, %d rounds %s, its round %u %s (and in %d pattern slots)", kBaseName[i],
-        (unsigned long long)res, (double)rpm, rate, s_gunRounds, mag ? "set" : "REFUSED", g_round[i], proj == 2 ? "written" : proj ? "set" : "REFUSED", pat);
+    /* (Yui: "REFUSED" read as a fault: the Maxigun copy has no magazine record of its own, its rounds are its backpack's) */
+    Log("her gun (%s's copy, entity %016llx): fire rate %.0f in %d of 3 slots, %s, its round %u %s (and in %d pattern slots)", kBaseName[i],
+        (unsigned long long)res, (double)rpm, rate, mag ? "belts set" : i == 0 ? "its rounds from its backpack" : "its belts REFUSED", g_round[i],
+        proj == 2 ? "written" : proj ? "set" : "REFUSED", pat);
 }
 /* Reload and Destroy's handling on her gun's records (on: +ll_ergonomics, no recoil; off: back to its own) */
 /* 0.1.4 (Yui: HellForge 0.5's attachment work): "the game finds the package of a vanilla attachment's unit" (its SDK
@@ -539,8 +542,6 @@ static void Link(void)
         uint8_t buf[4096];
         if (ReadAt(rec, buf, stride))
         {
-            Log("her gun's linked-ammo record (%u bytes): %08x %08x %08x %08x %08x %08x %08x %08x", stride, Word(buf), Word(buf + 4), Word(buf + 8),
-                Word(buf + 12), Word(buf + 16), Word(buf + 20), Word(buf + 24), Word(buf + 28));
             for (uint32_t o = 0; o + 8 <= stride; o += 4)
                 if (Quad(buf + o) == HF_ENTITY_MAXIGUN_BACKPACK && !hf->write(rec + o, &g_bpRes, 8)) { named++; Log("  +0x%X named the Maxigun Backpack: now hers", o); }
         }
@@ -564,155 +565,8 @@ static void Link(void)
     Log("her gun's backpack (entity %016llx): the gun's record names it in %d place(s); it feeds her gun %s; %d rounds %s / %s", (unsigned long long)g_bpRes,
         named, fed ? "(set)" : "(it named no Maxigun: left)", s_gunRounds, a ? "capacity set" : "capacity REFUSED", b ? "at call-in" : "call-in REFUSED");
 }
-/* 0.1.4 (Yui: her MG-43 lacks its usual scope): the MG-43's customization and her copy's, logged once: its default
- * attachments ({slot, item}: 1 underbarrel, 2 optics, 3 paint, 4 muzzle, 5 magazine, 6 ammunition), the slots the
- * armory offers, and the optic and magazine units drawn without an attachment */
-static void CustomizationLog(void)
-{
-    static const struct { uint64_t res; const char* name; } kW[] = {{0x11c27d3babb38956ull, "the MG-43"}, {0xa3eab550f78d19a2ull, "her MG-43 copy"}};
-    for (unsigned w = 0; w < 2; w++)
-    {
-        char d[300], sl[120];
-        int n = 0, m = 0;
-        d[0] = sl[0] = 0;
-        for (int k = 0; k < 20; k += 2)
-        {
-            HfField fa = HF_FIELD_AT(WeaponCustomization, defaults, k), fb = HF_FIELD_AT(WeaponCustomization, defaults, k + 1);
-            HfLiveValue a, b;
-            memset(&a, 0, sizeof a);
-            memset(&b, 0, sizeof b);
-            if (!hf->get_live(self, kW[w].res, &fa, &a) || !hf->get_live(self, kW[w].res, &fb, &b)) break;
-            if (!a.now.number && !b.now.number) continue;
-            n += snprintf(d + n, sizeof d - n, " {%u, %08x}", (unsigned)a.now.number, (unsigned)b.now.number);
-            if (n >= (int)sizeof d - 24) break;
-        }
-        for (int k = 0; k < 10; k++)
-        {
-            HfField f = HF_FIELD_AT(WeaponCustomization, slots, k);
-            HfLiveValue v;
-            memset(&v, 0, sizeof v);
-            if (!hf->get_live(self, kW[w].res, &f, &v)) break;
-            if (v.now.number) m += snprintf(sl + m, sizeof sl - m, " %u", (unsigned)v.now.number);
-        }
-        HfField fo = HF_FIELD(WeaponCustomization, optics_unit), fm = HF_FIELD(WeaponCustomization, magazine_unit);
-        HfLiveValue o, mu;
-        memset(&o, 0, sizeof o);
-        memset(&mu, 0, sizeof mu);
-        hf->get_live(self, kW[w].res, &fo, &o);
-        hf->get_live(self, kW[w].res, &fm, &mu);
-        Log("customization of %s: defaults%s; armory slots%s; optic unit %016llx, magazine unit %016llx", kW[w].name, n ? d : " none", m ? sl : " none",
-            (unsigned long long)o.now.u64, (unsigned long long)mu.now.u64);
-    }
-}
-/* 0.1.4 (played: all three scopes drew the missing-model mark): which weapons draw which optic, to find the packages
- * that hold the optic models: each weapon's default optic attachment and its optic unit (HD2Runtime's weapon list) */
-static void OpticScan(void)
-{
-    static const struct { uint64_t res; const char* name; } kAll[] = {
-    {UINT64_C(0xA8A91EB54892B6B2), "AR-11 Arbitrator"},
-    {UINT64_C(0x84354339522C932D), "AR-2 Coyote"},
-    {UINT64_C(0x968211C0033DCE64), "AR-23 Liberator"},
-    {UINT64_C(0xA7EE1EBF58FCDF1F), "AR-23A Liberator Carbine"},
-    {UINT64_C(0xCF5F176E0E322BE1), "AR-23C Liberator Concussive"},
-    {UINT64_C(0x43CB1033961A2276), "AR-23P Liberator Penetrator"},
-    {UINT64_C(0xBC29613666DF696B), "AR-32 Pacifier"},
-    {UINT64_C(0x708EA298C82093D0), "AR-59 Suppressor"},
-    {UINT64_C(0xCE063AA33D95A812), "AR-61 Tenderizer"},
-    {UINT64_C(0xA955C4EA6F6D4203), "AR/GL-21 One-Two"},
-    {UINT64_C(0x076DD5D4F4360204), "ARC-12 Blitzer"},
-    {UINT64_C(0x5FECAB819F96A3E8), "BR-14 Adjudicator"},
-    {UINT64_C(0xF49227A0630A3F7F), "CB-9 Exploding Crossbow"},
-    {UINT64_C(0xE3B6AEDD07FCB464), "CQC-19 Stun Lance"},
-    {UINT64_C(0xFCD8A6E67EAC635A), "CQC-2 Saber"},
-    {UINT64_C(0x52CDBFBACA3CB397), "CQC-30 Stun Baton"},
-    {UINT64_C(0x792D5D2A340FD6E6), "CQC-42 Machete"},
-    {UINT64_C(0x75816077C139C850), "CQC-5 Combat Hatchet"},
-    {UINT64_C(0x7E1F76163C667E4B), "CQC-73 Entrenchment Tool"},
-    {UINT64_C(0x72170A55A1F37FF1), "DBS-2 Double Freedom"},
-    {UINT64_C(0x4FB0F8C02F55C82B), "FLAM-66 Torcher"},
-    {UINT64_C(0x006E44327BB953FE), "GL-15 Evictor"},
-    {UINT64_C(0x9EB160830321BFD6), "GP-20 Ultimatum"},
-    {UINT64_C(0x52E4334E6A128CAF), "GP-31 Grenade Pistol"},
-    {UINT64_C(0x80F1A156D9FA1E36), "JAR-5 Dominator"},
-    {UINT64_C(0xC85F576D5E086147), "LAS-12 Sai"},
-    {UINT64_C(0x3C86E871923F3970), "LAS-13 Trident"},
-    {UINT64_C(0x8645F167B3C813A2), "LAS-16 Sickle"},
-    {UINT64_C(0x295BEB26DC4F8FF1), "LAS-17 Double-Edge Sickle"},
-    {UINT64_C(0x7E3145A5BAA4B948), "LAS-22 Shear"},
-    {UINT64_C(0x27EE1ED8F6FB6356), "LAS-5 Scythe"},
-    {UINT64_C(0x416D053372C4E433), "LAS-58 Talon"},
-    {UINT64_C(0x7B06196E90154C88), "LAS-7 Dagger"},
-    {UINT64_C(0x4D58C77087B774C5), "M6C/SOCOM Pistol"},
-    {UINT64_C(0xBE70EE0D8D44028E), "M7S SMG"},
-    {UINT64_C(0x90DDC374F4E3D756), "M90A Shotgun"},
-    {UINT64_C(0x4DBD74F49C8FFC13), "MA5C Assault Rifle"},
-    {UINT64_C(0x9571CA51F0DAF35B), "MP-98 Knight"},
-    {UINT64_C(0xD6B1FB05B9109353), "P-11 Stim Pistol"},
-    {UINT64_C(0x1A437158E1B8D2A1), "P-113 Verdict"},
-    {UINT64_C(0x3575AABC5F1F9326), "P-19 Redeemer"},
-    {UINT64_C(0x05E4E5C2DB6E44A2), "P-2 Peacemaker"},
-    {UINT64_C(0x14D5D4506056C7A4), "P-33 Missile Pistol"},
-    {UINT64_C(0xE91F569C2AD8AF01), "P-34 Breacher"},
-    {UINT64_C(0x0B882808C6F498E8), "P-35 Re-Educator"},
-    {UINT64_C(0x8D3D52A3B2F19402), "P-4 Senator"},
-    {UINT64_C(0xC780BCD79547DA0F), "P-69 Veto"},
-    {UINT64_C(0x3F92BA65EF65CCA9), "P-72 Crisper"},
-    {UINT64_C(0xCF8934FF6567A42D), "P-92 Warrant"},
-    {UINT64_C(0xDBB6C961C59FADC1), "P/40-K Bolt Pistol"},
-    {UINT64_C(0xEEA5E3CEF1E12C14), "PLAS-1 Scorcher"},
-    {UINT64_C(0xFB3A19078694708A), "PLAS-101 Purifier"},
-    {UINT64_C(0xAA69A60D74A3EC54), "PLAS-15 Loyalist"},
-    {UINT64_C(0x30061F91AF477F5E), "PLAS-39 Accelerator Rifle"},
-    {UINT64_C(0x0F83639AB8C86165), "R-2 Amendment"},
-    {UINT64_C(0x7B75E5132FFD4CA6), "R-2124 Constitution"},
-    {UINT64_C(0xB6AFF2195568767F), "R-36 Eruptor"},
-    {UINT64_C(0xE5796355A8FD67E0), "R-4 Hyena"},
-    {UINT64_C(0xE6D932BE83729076), "R-6 Deadeye"},
-    {UINT64_C(0x03E67A19B07C6523), "R-63 Diligence"},
-    {UINT64_C(0x4C786785C79D44E7), "R-63CS Diligence Counter Sniper"},
-    {UINT64_C(0xF0338468DCDB6A6C), "R-72 Censor"},
-    {UINT64_C(0x1ABBFF60D26BA391), "R/40-K Hot-Shot Marksman Rifle"},
-    {UINT64_C(0x4E310B1FE4C52B52), "SG-20 Halt"},
-    {UINT64_C(0x2B28E17FFED05F7C), "SG-22 Bushwhacker"},
-    {UINT64_C(0x46183B50961D1328), "SG-225 Breaker"},
-    {UINT64_C(0xC12A34F375BD5A87), "SG-225IE Breaker Incendiary"},
-    {UINT64_C(0x5EBAEA70C0D060B9), "SG-225SP Breaker Spray&Pray"},
-    {UINT64_C(0xD323DE60855898AC), "SG-451 Cookout"},
-    {UINT64_C(0x41EAC4A03987FAA0), "SG-8 Punisher"},
-    {UINT64_C(0x05D8D8C073B9D502), "SG-8P Punisher Plasma"},
-    {UINT64_C(0x4F749E2EE26F532D), "SG-8S Slugger"},
-    {UINT64_C(0xDCD1C835407EF7BA), "SG-97 Sweeper"},
-    {UINT64_C(0x186EA95DE7306B1A), "SMG-203 Gallant"},
-    {UINT64_C(0x94BD931B5FB4EE95), "SMG-32 Reprimand"},
-    {UINT64_C(0x4E4A613EB9BF5C24), "SMG-37 Defender"},
-    {UINT64_C(0x0807AEA5217E4767), "SMG-72 Pummeler"},
-    {UINT64_C(0x8A307BD1811A5FE9), "SMG/FLAM-34 Stoker"},
-    {UINT64_C(0x4BA41B6F9F405CC2), "StA-11 SMG"},
-    {UINT64_C(0xCDF28BE026BB7D84), "StA-52 Assault Rifle"},
-    {UINT64_C(0xF992CE97577C8A7F), "VG-70 Variable"}};
-    for (unsigned w = 0; w < sizeof kAll / sizeof kAll[0]; w++)
-    {
-        uint32_t item = 0;
-        for (int k = 0; k < 20; k += 2)
-        {
-            HfField fa = HF_FIELD_AT(WeaponCustomization, defaults, k), fb = HF_FIELD_AT(WeaponCustomization, defaults, k + 1);
-            HfLiveValue a, b;
-            memset(&a, 0, sizeof a);
-            memset(&b, 0, sizeof b);
-            if (!hf->get_live(self, kAll[w].res, &fa, &a)) break;
-            if ((uint32_t)a.now.number == 2 && hf->get_live(self, kAll[w].res, &fb, &b)) { item = (uint32_t)b.now.number; break; }
-        }
-        HfField fo = HF_FIELD(WeaponCustomization, optics_unit);
-        HfLiveValue o;
-        memset(&o, 0, sizeof o);
-        hf->get_live(self, kAll[w].res, &fo, &o);
-        if (item || o.now.u64) Log("optics: %s: default optic %08x, optic unit %016llx", kAll[w].name, item, (unsigned long long)o.now.u64);
-    }
-}
 static void EntitiesReady(HfMod* mod, HfEvent event, void* user)
 {
-    OpticScan();
-    CustomizationLog();
     for (int i = 0; i < 2; i++) GunRecords(i);
     DrumHandling();
     Link();
@@ -1369,7 +1223,7 @@ static int OpticPackage(void)
     {
         int was = itemState[o];
         itemState[o] = hf->load_package(self, g_opticPkg[o]);
-        if (!itemState[o]) { Log("optics: %016llx (the item's +0x10) is not a package HellForge can load", (unsigned long long)g_opticPkg[o]); itemState[o] = -1; }
+        if (!itemState[o]) itemState[o] = -1;   /* (most scope items name no package of their own: the donors' bring the model) */
         else if (itemState[o] == HF_PACKAGE_RESIDENT && was != HF_PACKAGE_RESIDENT) Log("optics: %016llx, the scope item's package, is loaded", (unsigned long long)g_opticPkg[o]);
         if (itemState[o] == HF_PACKAGE_LOADING) st = HF_PACKAGE_LOADING;
     }
