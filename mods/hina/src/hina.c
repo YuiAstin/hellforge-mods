@@ -374,6 +374,13 @@ static void OpticItems(void)
                         memcpy(&g_opticItem[q], rec + 8, 4);
                         found++;
                         Log("optics: %s is attachment item %08x (its unit at +0x%X of the item, group %u)", kOptics[q].name, g_opticItem[q], o, g);
+                        /* its whole item, 11 words of 8: a package of its model may be named there */
+                        uint64_t w8[11];
+                        memcpy(w8, rec, sizeof w8);
+                        Log("optics:   item %08x: %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx", g_opticItem[q],
+                            (unsigned long long)w8[0], (unsigned long long)w8[1], (unsigned long long)w8[2], (unsigned long long)w8[3], (unsigned long long)w8[4],
+                            (unsigned long long)w8[5], (unsigned long long)w8[6], (unsigned long long)w8[7], (unsigned long long)w8[8], (unsigned long long)w8[9],
+                            (unsigned long long)w8[10]);
                     }
                 }
         }
