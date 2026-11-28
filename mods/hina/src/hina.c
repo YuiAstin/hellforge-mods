@@ -91,6 +91,7 @@ static float s_shieldMax = 3000, s_shieldEvery = 300, s_shieldDecay = 100;
 static float s_llCooldown = 20, s_llErgonomics = 80;
 static int s_llRecoil = 1;
 static float s_ishCooldown = 30, s_ishMult = 6.36f, s_ishCone = 30, s_ishRange = 40;
+static float s_ishAimCone = 10;   /* 0.1.4 (Yui): the fan while she aims (the right mouse button held) */
 static int s_ishTargets = 12;
 static int s_ishPerSection = 2;
 static float s_ishDuration = 10, s_ishEvery = 0.1f, s_ishTick = 0.5f, s_ishSpeed = 200;   /* 0.1.4: the barrage */
@@ -104,7 +105,7 @@ static const KbSetting kSettings[] = {
     KB_F("gun_cooldown", s_gunCooldown, 0, 600), KB_F("gun_grace", s_gunGrace, 0, 10),
     KB_F("shield_max", s_shieldMax, 0, 100000), KB_F("shield_every", s_shieldEvery, 1, 3600), KB_F("shield_decay", s_shieldDecay, 0, 100000),
     KB_F("ll_cooldown", s_llCooldown, 0, 600), KB_F("ll_ergonomics", s_llErgonomics, 0, 200), KB_I("ll_recoil", s_llRecoil, 0, 1),
-    KB_F("ish_cooldown", s_ishCooldown, 0, 600), KB_F("ish_mult", s_ishMult, 0.1, 50), KB_F("ish_cone", s_ishCone, 1, 90), KB_F("ish_range", s_ishRange, 5, 300),
+    KB_F("ish_cooldown", s_ishCooldown, 0, 600), KB_F("ish_mult", s_ishMult, 0.1, 50), KB_F("ish_cone", s_ishCone, 1, 90), KB_F("ish_aim_cone", s_ishAimCone, 1, 90), KB_F("ish_range", s_ishRange, 5, 300),
     KB_I("ish_targets", s_ishTargets, 1, 32), KB_F("ish_duration", s_ishDuration, 1, 60), KB_F("ish_every", s_ishEvery, 0.02, 2), KB_I("ish_per_section", s_ishPerSection, 1, 8),
     KB_F("ish_tick", s_ishTick, 0.1, 10), KB_F("ish_speed", s_ishSpeed, 0, 3000),
     KB_I("reload_free", s_reloadFree, 0, 1), KB_F("reload_buff", s_reloadBuff, 0, 5), KB_F("reload_seconds", s_reloadSeconds, 0, 120), KB_F("reload_cooldown", s_reloadCooldown, 0, 600),
@@ -131,12 +132,12 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Reload and Destroy: cooldown; the gun in her hands refilled; her own gun also +ll_ergonomics and no recoil (ll_recoil 1).\n"
                "ll_cooldown = %g\nll_ergonomics = %g\nll_recoil = %d\n"
                "; Ishbosheth: cooldown (from its end); readied by its key, set off by her next shot: for ish_duration s, every\n"
-               "; ish_every s a volley across ish_cone degrees each side of her aim, ish_per_section tracers in each of its three\n"
+               "; ish_every s a volley across ish_cone degrees each side of her aim (ish_aim_cone while she aims: right mouse held), ish_per_section tracers in each of its three\n"
                "; sections (two outer, one inner), at ish_speed m/s (0: the round's own; at most 80 tracers a second in all),\n"
                "; and every ish_tick s the ish_targets nearest enemies there out to ish_range m take a tracer each; every round of it\n"
                "; deals ish_mult times her gun's damage. It fires only while she holds the trigger. (ish_mult, ish_duration and\n"
                "; ish_tick take effect at the next start.)\n"
-               "ish_cooldown = %g\nish_mult = %g\nish_cone = %g\nish_range = %g\nish_targets = %d\nish_duration = %g\nish_every = %g\nish_per_section = %d\nish_tick = %g\nish_speed = %g\n"
+               "ish_cooldown = %g\nish_mult = %g\nish_cone = %g\nish_aim_cone = %g\nish_range = %g\nish_targets = %d\nish_duration = %g\nish_every = %g\nish_per_section = %d\nish_tick = %g\nish_speed = %g\n"
                "; Passives. Lock & Load: an emptied magazine reloads at once (reload_free 1; her MG-43 copy too, not the Maxigun copy) and her shots deal\n"
                "; reload_buff more for reload_seconds s; once each reload_cooldown s for each gun. Prefect Team Member\n"
                "; Judgment: her own gun fires judgment_rate faster.\n"
@@ -145,7 +146,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; The options screen's key (120: F9; 0: none).\noptions_key = %d\n",
             VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_gunBase, s_gunDrum, s_gunOptic, (double)s_drumReload, s_drumErgonomics, s_gunRounds, (double)s_gunRpm, s_gunAp, (double)s_gunCooldown,
             (double)s_gunGrace, (double)s_shieldMax, (double)s_shieldEvery, (double)s_shieldDecay, (double)s_llCooldown, (double)s_llErgonomics,
-            s_llRecoil, (double)s_ishCooldown, (double)s_ishMult, (double)s_ishCone, (double)s_ishRange, s_ishTargets, (double)s_ishDuration, (double)s_ishEvery, s_ishPerSection, (double)s_ishTick,
+            s_llRecoil, (double)s_ishCooldown, (double)s_ishMult, (double)s_ishCone, (double)s_ishAimCone, (double)s_ishRange, s_ishTargets, (double)s_ishDuration, (double)s_ishEvery, s_ishPerSection, (double)s_ishTick,
             (double)s_ishSpeed, s_reloadFree,
             (double)s_reloadBuff, (double)s_reloadSeconds, (double)s_reloadCooldown, (double)s_judgmentRate, (double)s_oaoBonus, (double)s_oaoHead, s_optionsKey);
 }
@@ -1400,6 +1401,8 @@ static void Ishbosheth(void)
  * ish_tick s the ish_targets nearest enemies in the fan take a tracer each; every round of it ish_mult times her gun's
  * (it fires only while she holds the trigger). Tracers: copies of the APW-1's round (its bright trail), slowed to
  * ish_speed m/s so the trail is seen (Koleda's round_speed). Cooldown from its end. */
+/* the fan's half-angle now: tighter while she aims down her sights (the right mouse button held; a toggled aim is not seen) */
+static float IshCone(void) { return Focused() && (GetAsyncKeyState(VK_RBUTTON) & 0x8000) ? s_ishAimCone : s_ishCone; }
 static int IshOrigin(float head[3], float fwd[3])
 {
     float cam[3], feet[3];
@@ -1411,7 +1414,7 @@ static void IshTick(const float head[3], const float fwd[3], uint32_t round)
 {
     float q[3], flat = sqrtf(fwd[0] * fwd[0] + fwd[1] * fwd[1]);
     if (!(flat > 0.05f)) return;
-    float cosMax = cosf(s_ishCone * 0.0174533f);
+    float cosMax = cosf(IshCone() * 0.0174533f);
     struct { uint32_t e; float d2, q[3]; } t[32];
     int n = 0, cap = s_ishTargets > 32 ? 32 : s_ishTargets;
     for (int k = 0; k < FOES; k++)
@@ -1485,7 +1488,7 @@ static void IshBarrage(void)
         budget += (g_now - budgetAt) * 80;
         budgetAt = g_now;
         if (budget > 80) budget = 80;
-        float cone = s_ishCone * 0.0174533f, third = cone * 2 / 3;
+        float cone = IshCone() * 0.0174533f, third = cone * 2 / 3;
         for (int sec = 0; sec < 3; sec++)
             for (int b = 0; b < s_ishPerSection && budget >= 1; b++)
             {
@@ -1825,7 +1828,7 @@ static const KbOption kOptions[] = {
     {"drum_ergonomics", NULL, &s_drumErgonomics}, {"drum_reload", &s_drumReload, NULL},
     {"shield_max", &s_shieldMax, NULL}, {"shield_every", &s_shieldEvery, NULL}, {"shield_decay", &s_shieldDecay, NULL},
     {"ll_cooldown", &s_llCooldown, NULL}, {"ll_ergonomics", &s_llErgonomics, NULL}, {"ll_recoil", NULL, &s_llRecoil},
-    {"ish_cooldown", &s_ishCooldown, NULL}, {"ish_mult", &s_ishMult, NULL}, {"ish_cone", &s_ishCone, NULL}, {"ish_range", &s_ishRange, NULL},
+    {"ish_cooldown", &s_ishCooldown, NULL}, {"ish_mult", &s_ishMult, NULL}, {"ish_cone", &s_ishCone, NULL}, {"ish_aim_cone", &s_ishAimCone, NULL}, {"ish_range", &s_ishRange, NULL},
     {"ish_targets", NULL, &s_ishTargets}, {"ish_duration", &s_ishDuration, NULL}, {"ish_every", &s_ishEvery, NULL}, {"ish_per_section", NULL, &s_ishPerSection},
     {"ish_tick", &s_ishTick, NULL}, {"ish_speed", &s_ishSpeed, NULL},
     {"reload_free", NULL, &s_reloadFree}, {"reload_buff", &s_reloadBuff, NULL}, {"reload_seconds", &s_reloadSeconds, NULL}, {"reload_cooldown", &s_reloadCooldown, NULL},

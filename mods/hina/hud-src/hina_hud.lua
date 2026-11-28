@@ -469,6 +469,7 @@ local OPTIONS = {
     {'ish_cooldown', 'slider', 'Ishbosheth: Cooldown', 0, 120, 1, 'Seconds before Ishbosheth can be readied again.', true},
     {'ish_mult', 'slider', 'Ishbosheth: Damage', 1, 20, 0.05, 'Each enemy in the fan takes a round of this times her gun\'s damage (6.36: Blue Archive\'s 636%). From the next start.'},
     {'ish_cone', 'slider', 'Ishbosheth: Fan', 5, 90, 1, 'Degrees each side of her aim the fan reaches.'},
+    {'ish_aim_cone', 'slider', 'Ishbosheth: Fan While Aiming', 1, 90, 1, 'Degrees each side of her aim the fan reaches while she aims down her sights (right mouse button held).'},
     {'ish_range', 'slider', 'Ishbosheth: Range', 5, 150, 1, 'Metres the fan reaches.'},
     {'reload_buff', 'slider', 'Passives: Lock & Load Damage', 0, 1, 0.01, 'Extra damage for a while after she empties a magazine (0.21: +21%).', true},
     {'reload_seconds', 'slider', 'Passives: Lock & Load Time', 0, 60, 1, 'Seconds the extra damage lasts.'},
