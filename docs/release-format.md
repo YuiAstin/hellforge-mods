@@ -31,6 +31,7 @@ How a kit goes out, as Vector 0.2.2 did (2026-11-21). The mechanics of packing a
 | Mod version, file version | the manifest's; "Update mod version to match this file's version" ticked |
 | Short description | at most 350 characters: whose kit, from what, and its hook in one or two sentences |
 | Full description | the layout below, typed in the editor's BBCode mode (`[size=5][b]Heading[/b][/size]`, `[list][*]...[/list]`) |
+| Tags | Gameplay and **HellForge** (Nexus added a HellForge tag in November 2026: every HellForge mod gets it; Yui, 2026-11-28) |
 | Generative AI usage | AI-Generated ticked for Mod Content and for Media (the tags AI-Generated Content and AI Media follow) |
 | Media | the thumbnail first (it becomes the page's thumbnail), then the art |
 | File | category Main; primary; mod manager download allowed; description: `<Name>'s kit for HellForge. Add the zip with HellForge's ADD MODS. The HUD needs Bingus Shared Loader and HD2Runtime.` |
