@@ -29,6 +29,12 @@ clears. Flight is that pair every frame.
 - **What clears the flag** (4 callers): the locomotion update `0xA4FFB0` at `0xA505AE`, on a ground hit or when the
   motion speed (`+0x48`) is under 0.25 m/s (the second guessed: a still hover may be dropped, so set the flag every
   frame); state / action exits `0xA51783`, `0xA64D0F`.
+- **The ground check is a ray** (Yui's guess, read at `0xA504E0..0xA505A6`): the locomotion update builds a point from
+  her position plus her velocity scaled by constants, asks the physics world for a cast through its vtable (`[game+
+  0x3326328]`'s object, slot +0x68, the hit distance written to the stack), and clears the airborne flag when the hit
+  is nearer than a threshold (a constant, capped by a value of her own record x a factor), or when her speed is under
+  0.25 m/s. So a flight only has to stay a little above the ground (or keep re-setting the flag) to stay airborne, and
+  a mod can judge "landed" itself with the kit base's raycast (`kb_world.h`).
 - **Air steering** exists only for the jump packs (`0x9B4790`, JumppackComponentData); without a pack the mod steers.
 
 ## Ways to fly, best first
