@@ -45,7 +45,7 @@ static const OpRow kOpRows[] = {
     {"drum_ergonomics", "Destroyer of Denouement", "Drum Ergonomics", OP_FIELD, 0, 200, 1,
      "Ergonomics the 50-round drum adds to her MG-43 copy.", NULL, 1, OP_LIVE},
     {"drum_reload", "Destroyer of Denouement", "Drum Reload Speed", OP_SLIDER, 0, 0.9f, 0.05f,
-     "How much faster the drum reloads (0.4: 40%); it also reloads on the move.", NULL, 1, OP_LIVE},
+     "How much faster the drum reloads (0.4: 40%; the Concussive animation is quick already, so 0 by default); it reloads on the move either way.", NULL, 1, OP_LIVE},
     {"gun_grace", "Destroyer of Denouement", "Switch Grace", OP_SLIDER, 0, 10, 0.1f,
      "Seconds on her primary or secondary before her gun goes (a stratagem or a grenade never counts).", NULL, 1, OP_LIVE},
     {"ish_targets", "Ishbosheth", "Most Enemies", OP_SLIDER, 1, 32, 1,

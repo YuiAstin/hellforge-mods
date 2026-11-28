@@ -2,7 +2,7 @@
  "_": "The options screen's Advanced section and what it leaves out (tools/optgen.py; docs/kit-base.md). advanced: [setting, group, label, tip, {step}]. hidden: in the .ini only.",
  "advanced": [
   ["drum_ergonomics", "Destroyer of Denouement", "Drum Ergonomics", "Ergonomics the 50-round drum adds to her MG-43 copy."],
-  ["drum_reload", "Destroyer of Denouement", "Drum Reload Speed", "How much faster the drum reloads (0.4: 40%); it also reloads on the move.", {"step": 0.05}],
+  ["drum_reload", "Destroyer of Denouement", "Drum Reload Speed", "How much faster the drum reloads (0.4: 40%; the Concussive animation is quick already, so 0 by default); it reloads on the move either way.", {"step": 0.05}],
   ["gun_grace", "Destroyer of Denouement", "Switch Grace", "Seconds on her primary or secondary before her gun goes (a stratagem or a grenade never counts).", {"step": 0.1}],
   ["ish_targets", "Ishbosheth", "Most Enemies", "The most enemies in the fan that take its round (the nearest first)."],
   ["ish_duration", "Ishbosheth", "Barrage Seconds", "How long its barrage lasts (Blue Archive: about 10 s; a restart applies it).", {"step": 0.5}],

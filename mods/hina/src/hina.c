@@ -72,7 +72,7 @@ KB_OPTIONS_EXPORTS(hina)
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static int s_gunBase = 1, s_gunRounds = 1200, s_gunAp = 5;   /* (Yui: as many rounds as her rate: a minute's fire) */
 static int s_gunDrum = 0, s_drumErgonomics = 30;
-static float s_drumReload = 0.4f;   /* the drum's reload this much faster (and on the move) */
+static float s_drumReload = 0;   /* the drum's reload this much faster (Yui: the Concussive's animation is quick already; 0.4 an option); on the move always */
 /* 0.1.4 (Yui): her MG-43 copy's scope: 0 the 1.5x red dot (the MG-43's own, the wiki's; the game's "Support Scope"
  * unit), 1 the 4x Combat Scope, 2 the 10x Sniper Scope (the game has no 12x). Drawn through the customization's optic
  * unit (HD2Runtime's attachment research: each optic's unit resource), its model from a weapon that carries it */
@@ -272,11 +272,17 @@ static void GunRecords(int i)
     if (!res) return;
     int rate = 0, mag = 0, pat = 0;
     float rpm = s_gunRpm * (1.0f + s_judgmentRate);
+    /* 0.1.4 (Yui): the weapon menu's three rates: the gun's own low and high, and hers in the middle, the default (the
+     * middle slot seeds the live rate at spawn); her passive's share on all three. There are only three slots */
     for (int k = 0; k < 3; k++)
     {
         HfField f = HF_FIELD_AT(ProjectileWeapon, fire_rate, k);
-        HfValue v = HF_F32(rpm);
+        HfLiveValue b;
+        memset(&b, 0, sizeof b);
+        float own = k != 1 && hf->get_live(self, res, &f, &b) && b.base.number > 0 ? (float)b.base.number * (1.0f + s_judgmentRate) : rpm;
+        HfValue v = HF_F32(own);
         rate += hf->set_live(self, res, &f, &v, 0) != 0;
+        if (k != 1 && g_entsReady == 0) Log("her gun (%s's copy): rate slot %d %.0f rpm (its own %.0f, her passive's share on it)", kBaseName[i], k, (double)own, b.base.number);
     }
     int proj = 0;
     if (g_round[i])
@@ -291,7 +297,7 @@ static void GunRecords(int i)
         /* 0.1.4: the round is not at the record's start (played: nothing was written). set_live put it just before
          * fire_rate[0] (the Maxigun's copy: projectile at ...550, fire_rate[0] at ...554): found as the base round's id
          * followed by the fire rate just set */
-        uint32_t stride = 0, w[2] = {0};
+        uint32_t stride = 0, w[3] = {0};
         uintptr_t r = proj ? 0 : hf->component_record("ProjectileWeaponComponentData", res, &stride);
         float want = rpm;
         uint32_t wantBits;
@@ -300,7 +306,7 @@ static void GunRecords(int i)
         {
             int at = -1;
             for (int o = 0; r && o + 8 <= 0x200; o += 4)
-                if (ReadAt(r + o, w, 8) && (w[0] == kBaseRound[i] || w[0] == kFiredRound[i] || w[0] == g_round[i]) && w[1] == wantBits) { at = o; break; }
+                if (ReadAt(r + o, w, 12) && (w[0] == kBaseRound[i] || w[0] == kFiredRound[i] || w[0] == g_round[i]) && w[2] == wantBits) { at = o; break; }
             if (at >= 0 && w[0] == g_round[i]) proj = 2;   /* (written before: the options screen's change) */
             else if (at >= 0&& !hf->write(r + at, &g_round[i], 4)) { proj = 2; Log("her gun (%s's copy): its round %u written into its own record (+0x%X)", kBaseName[i], g_round[i], at); }
             else
