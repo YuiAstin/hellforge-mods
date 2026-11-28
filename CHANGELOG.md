@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-28: Hina 0.1.4 (first release, for HellForge 0.5)
+
+- First release: Sorasaki Hina's kit from Blue Archive for your Helldiver, the Gehenna Prefect who puts as many rounds down range as possible. Solo or host; no character model included. It needs HellForge 0.5.
+- The End: Destroyer (Z): her own machine gun in her hands, an MG-43 copy (a copy of the M-1000 Maxigun instead, as an option, if you own it). 1200 rounds at 1200 rounds a minute, armour penetration 5, 53 damage to durable parts. A 250-round box by default, or a 50-round drum that handles better (+30 ergonomics) and reloads on the move. Scope: 1.5x red dot, 4x or 10x. The weapon menu's rates are the MG-43's own 630 and 900 around hers. A 3000 shield while she holds it, refilled every 5 minutes, draining once the gun is gone. It goes when she switches to her primary or secondary, drops it or presses Z again (a stratagem or a grenade doesn't count); her old support weapon is left where her gun fell, and a weapon she picked up stays in her hands. Cooldown 30 s.
+- Reload and Destroy (X): the gun in her hands refilled in full, whatever it is; her own gun also gets +80 ergonomics and no recoil. Cooldown 20 s.
+- Ishbosheth (C): her next shot starts a 10 s barrage that fires while she fires: volleys of tracers across a fan in front of her (her gun's damage), and every half second the 12 nearest enemies in it each take a tracer dealing 636% of her gun's round. The fan is 30 degrees each side, 10 while she aims down her sights. Cooldown 30 s.
+- Lock & Load (passive): an emptied magazine reloads at once (magazine guns, shotguns loaded by shells, her own gun's belt), once a minute for each gun, and her shots deal 21% more for 16 s.
+- Prefect Team Member Judgment (passive): her gun fires 14% faster. Out-and-Out (passive): 2.7% more damage while crouched or prone.
+- HUD: her skills beside the stratagem list with icons, keys and cooldowns. Her numbers, her keys and the character picker are on the character kits' options screen (F9). The HUD needs Bingus Shared Loader and HD2Runtime.
+
 ## 2026-11-27: W 0.9.1
 
 - D12 now destroys Illuminate spawners. A mark's blast reaches 8 m, carries a demolition force of 60 (a spawner needs 50), and on a tall target goes off at half its height instead of at its base.
