@@ -461,7 +461,18 @@ static void StanceFrame(void)
 static uint64_t g_package[2];             /* the gun's base's loadout package (~0: none) */
 static int g_pkg[2];
 
-enum { K_IDLE, K_PACKAGE, K_WAITGL, K_PUTAWAY, K_TAKE, K_ASK, K_HELD, K_LETGO, K_REMOVE, K_WAITS, K_DROPOLD, K_RETAKE };
+enum { K_IDLE, K_PACKAGE, K_WAITGL, K_PUTAWAY, K_TAKE, K_ASK, K_HELD, K_LETGO, K_REMOVE, K_WAITS, K_DROPOLD, K_RETAKE, K_HANDDROP, K_HANDGONE };
+/* 0.1.4: a SEAF trooper as a hand for the drop (the Escort Probe 0.5.0, played: a trooper has an inventory record like
+ * a Helldiver's; the inventory's take put an MG-43 in its support slot, its drop left a pickup, and the trooper was
+ * taken away). Her own slots are not touched, so a weapon she picked up stays in her hands */
+#define SEAF_TROOPER UINT64_C(0x75F7E96AF7DCD303)
+static uint32_t g_hand;
+static int HandPackage(void)
+{
+    static uint64_t pkg;
+    if (!pkg && !LoadoutPackage(SEAF_TROOPER, &pkg)) pkg = ~0ull;
+    return pkg == ~0ull ? HF_PACKAGE_RESIDENT : hf->load_package(self, pkg);
+}
 static int g_k;
 static atomic_uint g_gl;                  /* her gun (0: none) */
 static double g_kAt, g_madeAt, g_readyAt, g_awaySince, g_droppedSince;
@@ -741,6 +752,12 @@ static void GunFrame(void)
             atomic_store(&g_bp, 0);
         }
         g_kNew = g_kOldRes ? SpawnNear(g_kOldRes, "a new support weapon of her kind") : 0;
+        g_hand = 0;
+        if (g_kNew && g_dropped && HandPackage() == HF_PACKAGE_RESIDENT)
+        {
+            float feet[3], aim[3], at[3];
+            if (PlayerPose(feet, aim)) { at[0] = feet[0] - aim[0] * 1.2f; at[1] = feet[1] - aim[1] * 1.2f; at[2] = feet[2]; g_hand = SpawnAt(SEAF_TROOPER, at, "a trooper to drop her old weapon"); }
+        }
         g_bpNew = g_bpOldRes ? SpawnNear(g_bpOldRes, "a new backpack of her kind") : 0;
         if (g_kNew || g_bpNew) { g_k = K_WAITS; g_kAt = g_now + 0.75; }
         else { FillUp(g_weapon[g_kSel]); g_k = K_IDLE; g_dropped = 0; g_picked = 0; }
@@ -762,6 +779,15 @@ static void GunFrame(void)
             g_dropped = 0;
             if (ResOf(g_kNew) != g_kOldRes) { Log("Destroyer of Denouement %u: the new support weapon does not read as hers: left", g_uses); g_k = K_IDLE; break; }
             FillUp(g_kNew);
+            if (g_hand && ResOf(g_hand) == SEAF_TROOPER && InventoryRecord(g_hand))
+            {
+                WieldTake(g_hand, g_kNew, KB_SLOT_SUPPORT);
+                g_k = K_HANDDROP;
+                g_kAt = g_now + 0.4;
+                break;
+            }
+            if (g_hand) { HfFn_RemoveEntity rm = hf_fn_RemoveEntity(self); void* em2 = hf_global_EntityManager(self); if (rm && em2 && ResOf(g_hand) == SEAF_TROOPER) rm(em2, g_hand); g_hand = 0; }
+            Log("Destroyer of Denouement %u: no trooper for the drop: her own hands do it", g_uses);
             WieldTake(me, g_kNew, KB_SLOT_SUPPORT);
             g_k = K_DROPOLD;
             g_kAt = g_now + 0.3;
@@ -776,6 +802,20 @@ static void GunFrame(void)
             Log("Destroyer of Denouement %u: her new support weapon %u taken", g_uses, g_kNew);
         }
         else Log("Destroyer of Denouement %u: the new support weapon does not read as hers: left", g_uses);
+        g_k = K_IDLE;
+        break;
+    case K_HANDDROP:
+        if (g_now < g_kAt) break;
+        WieldDrop(g_hand, g_kNew, 0x8);
+        Log("Destroyer of Denouement %u: her old support weapon %u dropped by a trooper where her gun fell%s", g_uses, g_kNew, g_picked ? " (the weapon she picked up stays in her hands)" : "");
+        g_picked = 0;
+        g_k = K_HANDGONE;
+        g_kAt = g_now + 0.6;
+        break;
+    case K_HANDGONE:
+        if (g_now < g_kAt) break;
+        if (g_hand && ResOf(g_hand) == SEAF_TROOPER && remove && em) remove(em, g_hand);
+        g_hand = 0;
         g_k = K_IDLE;
         break;
     case K_DROPOLD:
@@ -885,6 +925,7 @@ static void LlFrame(void)
         g_ll = LL_IDLE;
     g_dropped = 0;
     g_picked = 0;
+    g_hand = 0;
         uint32_t sel = 0;
         if (ResOf(g_llNew) != g_llRes) { Log("Lock & Load: the fresh gun does not read as one"); break; }
         if (Held(&sel) != g_llOld)
@@ -1320,7 +1361,7 @@ static void Tick(HfMod* mod, float dt, void* user)
     /* her gun's package, asked for from the mission's start (Ishbosheth's rounds need it before any gun is out) */
     {
         static double pkgAt;
-        if (g_k == K_IDLE && g_now >= pkgAt) { pkgAt = g_now + 1; Gun(); GunPackage(); if (g_inMission) IshPackage(); }
+        if (g_k == K_IDLE && g_now >= pkgAt) { pkgAt = g_now + 1; Gun(); GunPackage(); if (g_inMission) { IshPackage(); HandPackage(); } }
     }
     GunFrame();
     if (g_inMission) LlFrame();
