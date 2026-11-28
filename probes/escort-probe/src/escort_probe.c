@@ -48,7 +48,11 @@
  *
  * 0.7.0: the trooper at your feet (1 m in front), the take the frame both are ready, the drop the frame the take shows,
  * the trooper taken away two frames after, no move; the MG-43's position logged for 2 s. Is it a pickup, and was the
- * trooper seen? */
+ * trooper seen?
+ *   Played: the trooper was seen for a moment, and the MG-43 went with it (its position no longer read after).
+ *
+ * 0.8.0: the trooper stays until its support slot lets the MG-43 go (each 50 ms logged, 3 s at most): how long the
+ * drop really takes. */
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -63,7 +67,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.7.0"
+#define VERSION "0.8.0"
 #include "kitbase/kb_core.h"
 #include "kitbase/kb_player.h"
 #include "kitbase/kb_friends.h"
@@ -422,15 +426,27 @@ static void HandPoll(void)
             HandGunAt("just after the drop");
             g_hand = H_DROPPED;
             g_handFrames = 0;
+            g_handLogAt = 0;
         }
         else if (g_now > g_handAt) { Log("Shift+Insert: the take never showed in 1.5 s"); g_hand = H_DROPPED; g_handAt = g_now; }
         return;
     }
     /* 0.7.0: no move (0.6.0: the Warp Pack's setter on the MG-43 crashed the game, game.dll+0x5A2C69: it is for
      * characters) */
-    if (g_hand == H_DROPPED && ++g_handFrames >= 2)
+    /* 0.8.0: the trooper goes the frame its support slot no longer holds the MG-43 (0.7.0: taken away two frames after
+     * the drop, it took the MG-43 with it: its position no longer read); each 50 ms until then the slot and the MG-43's
+     * position are logged, 3 s at most */
+    if (g_hand == H_DROPPED)
     {
-        HandGunAt("two frames after the drop");
+        uint32_t now = HandSupport(g_handSeaf);
+        g_handFrames++;
+        if (now == g_handGun && Ms() < 3000)
+        {
+            if (g_now >= g_handLogAt) { g_handLogAt = g_now + 0.05; Log("Shift+Insert %6.0f ms (frame %d): still in the trooper's support slot", Ms(), g_handFrames); HandGunAt("meanwhile"); }
+            return;
+        }
+        Log("Shift+Insert %6.0f ms (frame %d): the trooper's support slot now %u", Ms(), g_handFrames, now);
+        HandGunAt("then");
         Log("Shift+Insert %6.0f ms: the trooper goes (%s)", Ms(), KbRemoveEntity(g_handSeaf, SEAF) ? "taken away" : "could not be taken away");
         g_hand = H_MOVED;
         g_handMoves = 0;
@@ -439,7 +455,7 @@ static void HandPoll(void)
     }
     if (g_hand == H_MOVED && g_now >= g_handAt)
     {
-        HandGunAt("after the move");
+        HandGunAt("after");
         g_handAt = g_now + 0.25;
         if (++g_handMoves >= 8) { Log("Shift+Insert: done. Is the MG-43 in front of you, and can you pick it up?"); g_hand = H_IDLE; }
     }
