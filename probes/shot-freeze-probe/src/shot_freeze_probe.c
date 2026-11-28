@@ -39,7 +39,7 @@
 #include "hellforge_globals.h"
 
 #define BUILD "25480438"
-#define VERSION "0.4.3"
+#define VERSION "0.4.4"
 #include "kitbase/kb_core.h"
 
 static double g_now;
@@ -583,7 +583,7 @@ static volatile int g_pwMode, g_simOk;
 /* 0.4.3: mode A runs the particle world at a fraction of time instead of none. Spawning and motion share the one dt
  * inside the particle programs (mode B, simulate dt 0, stopped both: 0.4.2 as played), so a flamer only releases
  * anything during a stop if time passes for its particles at all: at a small fraction a thin stream creeps out of the
- * barrel and what is already out crawls. The stops cycle 2%, 5%, 10% (Yui picks one). */
+ * barrel and what is already out crawls. Yui's pick: 2% (0.4.4). */
 static volatile float g_pwScale;
 static volatile unsigned g_simHeld, g_simCalls;
 static uintptr_t SimDetour(uintptr_t a, uintptr_t b, uintptr_t c, uint8_t* job)
@@ -711,12 +711,10 @@ static void Stop(uintptr_t pool)
 {
     g_frozen = 1; g_frozenAt = g_now; g_reportAt = g_now + 1; g_afterAt = 0; g_spawnsLogged = 0;
     /* 0.4.3: every stop is mode A, slowed; the fraction cycles (mode B stays hooked but unused) */
-    static unsigned stops;
-    static const float scales[3] = {0.02f, 0.05f, 0.10f};
     g_pwMode = 0;
-    g_pwScale = scales[stops++ % 3];
+    g_pwScale = 0.02f;   /* 0.4.4: Yui's pick of 2%, 5% and 10% (10% too fast) */
     g_pwFreeze = g_pwOk;
-    if (g_pwOk) { Log("  particles: at %.0f%% of time (the stops cycle 2%%, 5%%, 10%%)", (double)(g_pwScale * 100)); PwReport("before the stop"); }
+    if (g_pwOk) { Log("  particles: at %.0f%% of time", (double)(g_pwScale * 100)); PwReport("before the stop"); }
     g_nshot = g_nthr = g_nfuse = g_nmis = g_nmov = 0;
     if (g_thrOk && !a_setVel && !ActorApi()) { g_thrOk = 0; Log("the engine's actor table is not readable: grenades stay off"); }
     Log("Ctrl+F11: time stopped");
@@ -826,7 +824,7 @@ static void Loaded(HfMod* mod, HfEvent event, void* user)
     ArcSetup(g);
     /* the motion map as ExplosiveUpdate reads it (0x8CB387: the manager, +0x48A8 count, +0x48A0 entries) */
     g_motionOk = hf->code_matches(g + 0x8CB390, "45 8b 8a a8 48 00 00") && hf->code_matches(g + 0x8CB3AB, "49 8b ba a0 48 00 00");
-    Log("ready: Ctrl+F11 stops time and starts it again. Parts on: shots %s, grenades %s (actor table read at the first stop), fuses %s, missiles %s, motion records %s, particles %s (slowed to 2%%, 5%%, 10%% in turn), arcs %s",
+    Log("ready: Ctrl+F11 stops time and starts it again. Parts on: shots %s, grenades %s (actor table read at the first stop), fuses %s, missiles %s, motion records %s, particles %s (slowed to 2%%), arcs %s",
         g_shotsOk ? "yes" : "NO", g_thrOk ? "yes" : "NO", g_fuseOk ? "yes" : "NO", g_misOk ? "yes" : "NO", g_motionOk ? "yes" : "NO", g_pwOk ? "yes" : "NO", g_arcOk ? "yes" : "NO");
 }
 /* The actor table is filled by the engine at start; read it once a mission runs */

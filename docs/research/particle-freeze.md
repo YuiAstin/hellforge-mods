@@ -257,3 +257,15 @@ the arc system's lifetime, at `0x13B4EB0`. Then the visuals and the gameplay sto
 - Whether HD2 simulates any particles on the GPU. That would still be driven by the update's dt. **[?]**
 - Co-op: particles are drawn locally, so each machine would need its own freeze. **[I]**
 - Where the API at `game+0x3326320` lives in the exe, and that its slot `+0x30` is the particle collision stream.
+
+## As played (2026-11-28, Shot Freeze Probe 0.4.0 to 0.4.4)
+
+- **The world freeze works:** the hook held the game's ParticleWorld (and a second real one) every frame of each stop;
+  no crash. Particles already out hang. But at dt 0 a flamer or gas emitter releases nothing; one-off bursts (ignition
+  sparks) appear and hang.
+- **Mode B fails:** giving only the per-cloud simulate jobs (exe 0x182E20) dt 0, with the world's dt kept, stopped
+  spawning as well. Emission and motion share the one dt inside the particle programs.
+- **What is kept: the world at a fraction of time.** At 2% (Yui's pick of 2, 5 and 10%; 10% too fast) a thin stream
+  creeps out of the barrel and what is out crawls; at release all runs at full speed again.
+- Arc bolts are not particles: see [arc-freeze.md](arc-freeze.md). With the arc system skipped, an arc fired during a
+  stop comes out only at the release.
