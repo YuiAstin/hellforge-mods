@@ -21,8 +21,8 @@
  *   Ishbosheth (key_s3, default C; her EX, Denouement: Ishbosheth): readied by the key, set off by her next trigger
  *     pull (any gun): a barrage of ish_duration s (Blue Archive's EX, about 10 s): every ish_every s a volley across a
  *     fan of ish_cone degrees each side of her aim, ish_per_section tracers in each of its three sections, and every ish_tick s the enemies in it out to ish_range m take
- *     a tracer each, ish_mult times her gun's round over the whole barrage (Blue Archive: 636%). Its tracers are copies
- *     of the APW-1's round (Koleda's Full Speed tracers) dealing her gun's damage, slowed to ish_speed m/s. Cooldown
+ *     a tracer each; every round of it deals ish_mult times her gun's (Blue Archive: 636%). Its tracers are copies
+ *     of the APW-1's round (Koleda's Full Speed tracers), slowed to ish_speed m/s. Cooldown
  *     ish_cooldown from its end.
  *   Lock & Load (passive, Blue Archive's Normal skill): a magazine she empties is reloaded at once (free: no spare
  *     used; not her own gun, whose rounds are its whole supply), and her shots deal reload_buff more for
@@ -133,8 +133,8 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Ishbosheth: cooldown (from its end); readied by its key, set off by her next shot: for ish_duration s, every\n"
                "; ish_every s a volley across ish_cone degrees each side of her aim, ish_per_section tracers in each of its three\n"
                "; sections (two outer, one inner), at ish_speed m/s (0: the round's own; at most 80 tracers a second in all),\n"
-               "; and every ish_tick s the ish_targets nearest enemies there out to ish_range m take a tracer each: ish_mult times\n"
-               "; her gun's damage over the whole barrage. It fires only while she holds the trigger. (ish_mult, ish_duration and\n"
+               "; and every ish_tick s the ish_targets nearest enemies there out to ish_range m take a tracer each; every round of it\n"
+               "; deals ish_mult times her gun's damage. It fires only while she holds the trigger. (ish_mult, ish_duration and\n"
                "; ish_tick take effect at the next start.)\n"
                "ish_cooldown = %g\nish_mult = %g\nish_cone = %g\nish_range = %g\nish_targets = %d\nish_duration = %g\nish_every = %g\nish_per_section = %d\nish_tick = %g\nish_speed = %g\n"
                "; Passives. Lock & Load: an emptied magazine reloads at once (reload_free 1; not her own gun) and her shots deal\n"
@@ -160,7 +160,7 @@ static const uint32_t kBaseDamage[2] = {HF_DAMAGE_M1000_MAXIGUN, HF_DAMAGE_EXO45
 static const char* const kBaseName[2] = {"M-1000 Maxigun", "MG-43 Machine Gun"};
 static uint32_t g_round[2], g_damage[2], g_ishRound[2], g_ishDamage[2];
 #define TRACER_ROUND 226u                /* the APW-1 Anti-Materiel Rifle's round: a bright trail (Koleda's tracers) */
-static uint32_t g_tracer[2][2];         /* Ishbosheth's tracers by gun copy: [0] on targets (x ish_mult), [1] the sweep */
+static uint32_t g_tracer[2][2];         /* Ishbosheth's tracers by gun copy: [0] on targets, [1] the sweep (both x ish_mult) */
 static uint64_t g_gunRes[2];
 static uint64_t g_bpRes;               /* her gun's backpack: a copy of the Maxigun Backpack, linked to the Maxigun's copy */
 static int g_rowsReady, g_entsReady;
@@ -1397,8 +1397,8 @@ static void Ishbosheth(void)
 }
 /* 0.1.4: a barrage of ish_duration s (Yui: Blue Archive's EX lasts about 10 s, its tracers coming out the whole time):
  * from her feet + 1.4 m along her aim as it is each moment, a tracer every ish_every s swinging across the fan, and every
- * ish_tick s the ish_targets nearest enemies in the fan take a tracer each dealing a share of ish_mult (ish_mult in all
- * over the barrage, if she fires the whole time: it fires only while she holds the trigger). Tracers: copies of the APW-1's round (its bright trail) dealing her gun's damage copies, slowed to
+ * ish_tick s the ish_targets nearest enemies in the fan take a tracer each; every round of it ish_mult times her gun's
+ * (it fires only while she holds the trigger). Tracers: copies of the APW-1's round (its bright trail), slowed to
  * ish_speed m/s so the trail is seen (Koleda's round_speed). Cooldown from its end. */
 static int IshOrigin(float head[3], float fwd[3])
 {
@@ -1444,7 +1444,7 @@ static void IshFire(void)
     g_ishUntil = g_now + s_ishDuration;
     g_ishNextTracer = g_ishNextTick = g_now;
     g_casts[2]++;
-    Log("Ishbosheth: on for %.0f s (a volley of 3 x %d tracers every %.2f s across %.0f degrees each side; every %.2f s the %d nearest enemies within %.0f m take a share of %.2f times "
+    Log("Ishbosheth: on for %.0f s (a volley of 3 x %d tracers every %.2f s across %.0f degrees each side; every %.2f s the %d nearest enemies within %.0f m take %.2f times "
         "her gun's round; tracers at %.0f m/s)", (double)s_ishDuration, s_ishPerSection, (double)s_ishEvery, (double)s_ishCone, (double)s_ishTick, s_ishTargets,
         (double)s_ishRange, (double)s_ishMult, (double)s_ishSpeed);
 }
@@ -1873,7 +1873,8 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         HfDamage ish = {sizeof ish};
         ish.base = kBaseDamage[i];
         ish.name = in[i];
-        ish.scale = s_ishMult * s_ishTick / s_ishDuration;   /* 0.1.4: a share each tick, ish_mult over the barrage */
+        ish.scale = s_ishMult;   /* 0.1.4 (Yui, played: a share each tick, ish_mult over the barrage, read as no multiplier: 29
+                                  * a hit to the gun's 90): every round of it ish_mult times her gun's */
         g_ishDamage[i] = api->add_damage(mod, &ish);
         if (g_damage[i])
         {
@@ -1896,7 +1897,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
         {
             static const char* const tn[2][2] = {{"yui/hina/ishbosheth_tracer_maxigun", "yui/hina/sweep_tracer_maxigun"},
                                                  {"yui/hina/ishbosheth_tracer_mg43", "yui/hina/sweep_tracer_mg43"}};
-            uint32_t dmgs[2] = {g_ishDamage[i], g_damage[i]};
+            uint32_t dmgs[2] = {g_ishDamage[i], g_ishDamage[i]};   /* (the sweep's too: every round of the barrage x ish_mult) */
             for (int t = 0; t < 2; t++)
             {
                 if (!dmgs[t]) continue;
