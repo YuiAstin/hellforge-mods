@@ -72,14 +72,18 @@ KB_OPTIONS_EXPORTS(hina)
 /* ---- settings ------------------------------------------------------------------------------------------------- */
 static int s_gunBase = 1, s_gunRounds = 1200, s_gunAp = 5;   /* (Yui: as many rounds as her rate: a minute's fire) */
 static int s_gunDrum = 0, s_drumErgonomics = 30;
+static float s_drumReload = 0.4f;   /* the drum's reload this much faster (and on the move) */
 /* 0.1.4 (Yui): her MG-43 copy's scope: 0 the 1.5x red dot (the MG-43's own, the wiki's; the game's "Support Scope"
  * unit), 1 the 4x Combat Scope, 2 the 10x Sniper Scope (the game has no 12x). Drawn through the customization's optic
  * unit (HD2Runtime's attachment research: each optic's unit resource), its model from a weapon that carries it */
 static int s_gunOptic = 0;
-static const struct { uint64_t unit, donor; const char* name; } kOptics[3] = {
-    {UINT64_C(0xF3C965127694E1CA), UINT64_C(0x11C27D3BABB38956), "1.5x red dot (Support Scope)"},
-    {UINT64_C(0x3D18C135000C36DC), UINT64_C(0x968211C0033DCE64), "4x Combat Scope (the Liberator's package)"},
-    {UINT64_C(0x19FC5C5B031A4AF2), UINT64_C(0x03E67A19B07C6523), "10x Sniper Scope (the Diligence's package)"}};   /* 0.1.4 (Yui): her MG-43's belt, a 250-round box (the MG-43's own way) or a 50-round drum, +30 ergonomics */   /* 0.1.4 (Yui): the MG-43 by default; the Maxigun an option */
+/* (played: the 4x through the Liberator's package showed a missing-model mark, as the drum through the Concussive's showed
+ * fine: a weapon's package holds its default attachments' models. Each optic's model now from weapons whose default it is,
+ * by HD2Runtime's catalogue) */
+static const struct { uint64_t unit, donor[3]; const char* name; } kOptics[3] = {
+    {UINT64_C(0x490C9E167B3AAF8C), {UINT64_C(0xCF5F176E0E322BE1), UINT64_C(0x80F1A156D9FA1E36), 0}, "1.5x Tube Red Dot (from the Liberator Concussive's and the Dominator's packages)"},
+    {UINT64_C(0x3D18C135000C36DC), {UINT64_C(0x43CB1033961A2276), UINT64_C(0x03E67A19B07C6523), UINT64_C(0xE6D932BE83729076)}, "4x Combat Scope (the Liberator Penetrator's, the Diligence's, the Deadeye's)"},
+    {UINT64_C(0x19FC5C5B031A4AF2), {UINT64_C(0x4C786785C79D44E7), UINT64_C(0xB6AFF2195568767F), 0}, "10x Sniper Scope (the Diligence Counter Sniper's, the Eruptor's)"}};   /* 0.1.4 (Yui): her MG-43's belt, a 250-round box (the MG-43's own way) or a 50-round drum, +30 ergonomics */   /* 0.1.4 (Yui): the MG-43 by default; the Maxigun an option */
 static int GunBelt(void) { return s_gunDrum ? 50 : 250; }
 static float s_gunRpm = 1200,   /* 0.1.4 (Yui): her MG42's rate (Blue Archive's Destroyer of Denouement is one) */
     s_gunCooldown = 30, s_gunGrace = 0.5f;
@@ -96,7 +100,7 @@ static float s_reloadBuff = 0.21f, s_reloadSeconds = 16, s_judgmentRate = 0.14f,
 static int s_optionsKey = 0x78;        /* options_key: the virtual key that opens the options screen (120: F9; 0: none) */
 
 static const KbSetting kSettings[] = {
-    KB_I("gun_base", s_gunBase, 0, 1), KB_I("gun_drum", s_gunDrum, 0, 1), KB_I("gun_optic", s_gunOptic, 0, 2), KB_I("drum_ergonomics", s_drumErgonomics, 0, 200), KB_I("gun_rounds", s_gunRounds, 1, 100000), KB_F("gun_rpm", s_gunRpm, 60, 12000), KB_I("gun_ap", s_gunAp, 0, 10),
+    KB_I("gun_base", s_gunBase, 0, 1), KB_I("gun_drum", s_gunDrum, 0, 1), KB_I("gun_optic", s_gunOptic, 0, 2), KB_I("drum_ergonomics", s_drumErgonomics, 0, 200), KB_F("drum_reload", s_drumReload, 0, 0.9), KB_I("gun_rounds", s_gunRounds, 1, 100000), KB_F("gun_rpm", s_gunRpm, 60, 12000), KB_I("gun_ap", s_gunAp, 0, 10),
     KB_F("gun_cooldown", s_gunCooldown, 0, 600), KB_F("gun_grace", s_gunGrace, 0, 10),
     KB_F("shield_max", s_shieldMax, 0, 100000), KB_F("shield_every", s_shieldEvery, 1, 3600), KB_F("shield_decay", s_shieldDecay, 0, 100000),
     KB_F("ll_cooldown", s_llCooldown, 0, 600), KB_F("ll_ergonomics", s_llErgonomics, 0, 200), KB_I("ll_recoil", s_llRecoil, 0, 1),
@@ -118,9 +122,9 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; and armour penetration gun_ap (5: tank). It goes when she is on her primary or secondary for gun_grace s, drops\n"
                "; it or spends it; the cooldown starts then. Takes effect at the next start. The MG-43's copy reloads from them a belt\n"
                "; at a time: gun_drum 0 a 250-round box, 1 a 50-round drum with drum_ergonomics more ergonomics (at most 31 spare\n"
-               "; belts: the game sends the count in 5 bits). gun_optic: 0 the 1.5x red dot, 1 the 4x Combat Scope, 2 the 10x Sniper\n"
-               "; Scope.\n"
-               "gun_base = %d\ngun_drum = %d\ngun_optic = %d\ndrum_ergonomics = %d\ngun_rounds = %d\ngun_rpm = %g\ngun_ap = %d\ngun_cooldown = %g\ngun_grace = %g\n"
+               "; belts: the game sends the count in 5 bits; the drum reloads on the move and drum_reload faster).\n"
+               "; gun_optic: 0 the 1.5x red dot, 1 the 4x Combat Scope, 2 the 10x Sniper Scope.\n"
+               "gun_base = %d\ngun_drum = %d\ngun_optic = %d\ndrum_reload = %g\ndrum_ergonomics = %d\ngun_rounds = %d\ngun_rpm = %g\ngun_ap = %d\ngun_cooldown = %g\ngun_grace = %g\n"
                "; Her shield while she holds it: shield_max, refilled to shield_max every shield_every s; once the gun is gone it\n"
                "; drains shield_decay a second until the next refill.\n"
                "shield_max = %g\nshield_every = %g\nshield_decay = %g\n"
@@ -139,7 +143,7 @@ static __attribute__((unused)) void DefaultIni(FILE* f)
                "; Out-and-Out: her shots deal oao_bonus more while her head is lower than oao_head m over her feet (crouched, prone).\n"
                "reload_free = %d\nreload_buff = %g\nreload_seconds = %g\nreload_cooldown = %g\njudgment_rate = %g\noao_bonus = %g\noao_head = %g\n"
                "; The options screen's key (120: F9; 0: none).\noptions_key = %d\n",
-            VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_gunBase, s_gunDrum, s_gunOptic, s_drumErgonomics, s_gunRounds, (double)s_gunRpm, s_gunAp, (double)s_gunCooldown,
+            VERSION, s_keys[0].label, s_keys[1].label, s_keys[2].label, s_gunBase, s_gunDrum, s_gunOptic, (double)s_drumReload, s_drumErgonomics, s_gunRounds, (double)s_gunRpm, s_gunAp, (double)s_gunCooldown,
             (double)s_gunGrace, (double)s_shieldMax, (double)s_shieldEvery, (double)s_shieldDecay, (double)s_llCooldown, (double)s_llErgonomics,
             s_llRecoil, (double)s_ishCooldown, (double)s_ishMult, (double)s_ishCone, (double)s_ishRange, s_ishTargets, (double)s_ishDuration, (double)s_ishEvery, s_ishPerSection, (double)s_ishTick,
             (double)s_ishSpeed, s_reloadFree,
@@ -357,8 +361,8 @@ static void GunOptic(void)
         HfLiveValue a;
         memset(&a, 0, sizeof a);
         if (!hf->get_live(self, res, &fa, &a) || (uint32_t)a.base.number != 2) continue;
-        if (o == 0) { hf->set_live(self, res, &fa, NULL, 0); hf->set_live(self, res, &fb, NULL, 0); }
-        else { HfValue z = HF_U32(0); cleared = (hf->set_live(self, res, &fa, &z, 0) != 0) + (hf->set_live(self, res, &fb, &z, 0) != 0); }
+        HfValue z = HF_U32(0);
+        cleared = (hf->set_live(self, res, &fa, &z, 0) != 0) + (hf->set_live(self, res, &fb, &z, 0) != 0);
     }
     Log("her MG-43's optic: %s, unit %016llx (%s)%s", kOptics[o].name, (unsigned long long)kOptics[o].unit, ok ? "set" : "refused",
         cleared == 2 ? "; its default optic attachment cleared" : "");
@@ -387,6 +391,13 @@ static void DrumHandling(void)
         HfValue vm = HF_U64(DRUM_UNIT);
         int ok = s_gunDrum ? hf->set_live(self, res, &fm, &vm, 0) != 0 : (hf->set_live(self, res, &fm, NULL, 0), 1);
         Log("her MG-43's magazine model: %s (%s)", s_gunDrum ? "the Liberator's drum" : "its own", ok ? "set" : "refused");
+        /* (Yui) the drum reloads on the move and 40% faster: the MG-43's 4.55 s full reload (the wiki) as 2.73 s through
+         * the reload record's duration override (0: the native time; unverified) */
+        HfField fmv = HF_FIELD(WeaponReload, allow_move), fd = HF_FIELD(WeaponReload, duration);
+        HfValue one = HF_U8(1), dur = HF_F32(4.55f * (1 - s_drumReload));
+        int a = s_gunDrum ? hf->set_live(self, res, &fmv, &one, 0) != 0 : (hf->set_live(self, res, &fmv, NULL, 0), 1);
+        int b = s_gunDrum && s_drumReload > 0 ? hf->set_live(self, res, &fd, &dur, 0) != 0 : (hf->set_live(self, res, &fd, NULL, 0), 1);
+        if (s_gunDrum) Log("her MG-43's drum reload: on the move (%s), %.2f s (%s)", a ? "set" : "refused", 4.55 * (1 - s_drumReload), b ? "set" : "refused");
     }
     if (!s_gunDrum || !s_drumErgonomics) { hf->set_live(self, res, &erg, NULL, 0); return; }
     HfLiveValue e;
@@ -1152,10 +1163,14 @@ static int Shoot(uint32_t round, const float from0[3], const float dir0[3])
 /* the chosen optic's model: the package of a weapon that carries it, asked for from the mission's start */
 static int OpticPackage(void)
 {
-    static uint64_t pkg[3];
-    int o = s_gunOptic < 0 || s_gunOptic > 2 ? 0 : s_gunOptic;
-    if (!pkg[o] && !LoadoutPackage(kOptics[o].donor, &pkg[o])) pkg[o] = ~0ull;
-    return pkg[o] == ~0ull ? HF_PACKAGE_RESIDENT : hf->load_package(self, pkg[o]);
+    static uint64_t pkg[3][3];
+    int o = s_gunOptic < 0 || s_gunOptic > 2 ? 0 : s_gunOptic, st = HF_PACKAGE_RESIDENT;
+    for (int d = 0; d < 3 && kOptics[o].donor[d]; d++)
+    {
+        if (!pkg[o][d] && !LoadoutPackage(kOptics[o].donor[d], &pkg[o][d])) pkg[o][d] = ~0ull;
+        if (pkg[o][d] != ~0ull && hf->load_package(self, pkg[o][d]) == HF_PACKAGE_LOADING) st = HF_PACKAGE_LOADING;
+    }
+    return st;
 }
 static int IshPackage(void)
 {
@@ -1561,7 +1576,7 @@ static void Tick(HfMod* mod, float dt, void* user)
 static const KbOption kOptions[] = {
     {"gun_rounds", NULL, &s_gunRounds}, {"gun_rpm", &s_gunRpm, NULL}, {"gun_ap", NULL, &s_gunAp}, {"gun_cooldown", &s_gunCooldown, NULL},
     {"gun_grace", &s_gunGrace, NULL}, {"gun_base", NULL, &s_gunBase}, {"gun_drum", NULL, &s_gunDrum}, {"gun_optic", NULL, &s_gunOptic},
-    {"drum_ergonomics", NULL, &s_drumErgonomics},
+    {"drum_ergonomics", NULL, &s_drumErgonomics}, {"drum_reload", &s_drumReload, NULL},
     {"shield_max", &s_shieldMax, NULL}, {"shield_every", &s_shieldEvery, NULL}, {"shield_decay", &s_shieldDecay, NULL},
     {"ll_cooldown", &s_llCooldown, NULL}, {"ll_ergonomics", &s_llErgonomics, NULL}, {"ll_recoil", NULL, &s_llRecoil},
     {"ish_cooldown", &s_ishCooldown, NULL}, {"ish_mult", &s_ishMult, NULL}, {"ish_cone", &s_ishCone, NULL}, {"ish_range", &s_ishRange, NULL},
@@ -1577,7 +1592,7 @@ static void OptionAfter(const char* name, int changed)
     if (!strcmp(name, "gun_rounds") || !strcmp(name, "gun_rpm") || !strcmp(name, "judgment_rate") || !strcmp(name, "gun_drum")) for (int i = 0; i < 2; i++) GunRecords(i);
     /* 0.1.4 (played: the drum chosen mid-mission did nothing; its records were set only at the game's start): her next
      * gun takes the belt and the drum's handling */
-    if (!strcmp(name, "gun_drum") || !strcmp(name, "drum_ergonomics")) DrumHandling();
+    if (!strcmp(name, "gun_drum") || !strcmp(name, "drum_ergonomics") || !strcmp(name, "drum_reload")) DrumHandling();
     if (!strcmp(name, "gun_optic")) GunOptic();
 }
 HF_MOD_EXPORT int hina_option_get(const char* name, double* out) { return OptionGet(name, out); }
